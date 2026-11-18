@@ -1726,6 +1726,14 @@ variables:
     optional: true
     description: "The API key of the key pair the calls media server signs its webhooks with: the webhook tokens' issuer, not secret. One of the eight MEMQL_CALLS_MEDIA_* values, set all or none."
 
+  # Not one of the eight: the EDGE reads this one, to build the page policy of a
+  # deployable whose calls switch is on (component/edge/csp_calls.go).
+  - name: MEMQL_CALLS_MEDIA_HOST_SUFFIX
+    component: edge
+    scope: node
+    optional: true
+    description: "The DNS name every calls media server's host is at or under (media.example.com for m1.media.example.com), which the edge admits to connect-src, over wss and https on any port, on a deployable whose calls switch is on, so its page can reach the media servers. A host name of two or more labels, with no scheme, port, path or wildcard. One value per installation. Unset or not a host name, the page policy names no media server: the calls routes still answer, a browser refuses to connect to the call, and the edge warns once at boot."
+
   # --- streaming transcription (epic memql#4988) ---
   #
   # All that survives the voice / polyphon retirement. The POLYPHON_ spelling

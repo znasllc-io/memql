@@ -5,6 +5,7 @@ package app
 import (
 	"bytes"
 	"log/slog"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -207,6 +208,50 @@ func TestEdgeIdentityTargetFromEnvUsesAConfiguredValueQuietly(t *testing.T) {
 	if buf.Len() != 0 {
 		t.Errorf("a configured value must not warn: %q", buf.String())
 	}
+}
+
+// AN UNUSABLE MEDIA HOST SUFFIX IS SAID ONCE, AT BOOT. Without it a deployable with calls on
+// is served a page policy that names no media server: its calls routes still answer, and the
+// failure shows as a browser refusing to connect to the call, which this line is the only
+// clue to. Not fatal, since an installation without media servers is legal and a refusal at
+// boot would take down every site this edge serves.
+func TestTheEdgeSaysOnceWhenTheCallsMediaHostSuffixIsUnusable(t *testing.T) {
+	for name, value := range map[string]string{
+		"unset":            "",
+		"blank":            "   ",
+		"not a host name":  "https://media.example.com",
+		"a wildcard":       "*.media.example.com",
+		"with a port":      "media.example.com:7443",
+		"a single label":   "localhost",
+		"an address":       "10.0.0.1",
+		"a directive tail": "media.example.com; default-src *",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv(edge.CallsMediaHostSuffixEnv, value)
+			if name == "unset" {
+				// t.Setenv restores whatever the process had; this run has none at all.
+				_ = os.Unsetenv(edge.CallsMediaHostSuffixEnv)
+			}
+			var buf bytes.Buffer
+			checkCallsMediaHostSuffix(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+
+			if got := strings.Count(buf.String(), "level=WARN"); got != 1 {
+				t.Fatalf("logged %d warnings, want exactly one: %q", got, buf.String())
+			}
+			if !strings.Contains(buf.String(), "MEMQL_CALLS_MEDIA_HOST_SUFFIX") {
+				t.Errorf("the warning should name the variable so an operator can find it: %q", buf.String())
+			}
+		})
+	}
+
+	t.Run("a host name is used quietly", func(t *testing.T) {
+		t.Setenv(edge.CallsMediaHostSuffixEnv, "media.example.com")
+		var buf bytes.Buffer
+		checkCallsMediaHostSuffix(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+		if buf.Len() != 0 {
+			t.Errorf("a usable suffix must not warn: %q", buf.String())
+		}
+	})
 }
 
 // sitetrafficRecorderFunc captures what the adapter hands the writer.

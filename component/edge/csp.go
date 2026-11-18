@@ -81,6 +81,11 @@ func policyForSite(r *http.Request, site *Site, env func(string) string, scriptH
 	if voice := voiceOriginForSite(site, env); voice != "" {
 		connectSrc += " " + voice + " " + wsOriginOf(voice)
 	}
+	// A calls page's media servers (csp_calls.go). "" unless the site's calls switch is
+	// on and the suffix is a host name, so every other policy is unchanged.
+	if media := callsMediaSources(site, env); media != "" {
+		connectSrc += " " + media
+	}
 	scriptSrc := "script-src 'self'"
 	if scriptHashes != "" {
 		scriptSrc += " " + scriptHashes
@@ -290,21 +295,27 @@ func validHost(host string) bool {
 // capability is opened when a first-party surface needs it, never
 // speculatively. Anything reaching for the camera should have to change this
 // line and say why, exactly as this change did.
+//
+// ONE SURFACE HAS: a deployable whose calls switch is on is served the camera
+// open to its own document as well (callsPermissionsPolicy, csp_calls.go),
+// because a video call is that surface's whole job. The decision is per SITE,
+// the escape hatch TestHostedSitesMayAskForTheMicrophoneAndNothingElse names, so
+// this line still closes the camera for every other site.
 const permissionsPolicy = "geolocation=(), microphone=(self), camera=()"
 
 // securityHeaders writes the baseline hardening set, ported from
 // component/portal/csp.go -- see permissionsPolicy for the one deliberate
-// divergence.
+// divergence, and permissionsPolicyFor for the one site-dependent header.
 //
 // HSTS on TLS only: browsers cache it per host, so emitting it once over
 // http://localhost poisons that host's STS store and forces every later
 // localhost request to https, which then fails.
-func securityHeaders(w http.ResponseWriter, r *http.Request) {
+func securityHeaders(w http.ResponseWriter, r *http.Request, site *Site) {
 	h := w.Header()
 	h.Set("X-Frame-Options", "DENY")
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
-	h.Set("Permissions-Policy", permissionsPolicy)
+	h.Set("Permissions-Policy", permissionsPolicyFor(site))
 	if r != nil && r.TLS != nil {
 		h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 	}

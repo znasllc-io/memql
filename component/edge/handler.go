@@ -110,6 +110,9 @@ type Handler struct {
 	// Built once here for the reason shopperRate is: a lazy build on a public,
 	// unauthenticated path is a data race with a public trigger.
 	accessRate *accessLimits
+	// callsRate holds the budgets in front of the calls surface (calls.go), built
+	// once here for shopperRate's reason.
+	callsRate *callsLimits
 	// viewRate is the per-(site, address) budget in front of the page-change
 	// ping (view.go), built once here for shopperRate's reason. viewNow is the
 	// clock it is read against: time.Now, which a test freezes, because the
@@ -140,6 +143,7 @@ func NewHandler(opts Options) *Handler {
 		hashCache:      newBundleCache(cspHashCacheBytes),
 		shopperRate:    newShopperBucket(shopperRatePerMinute()),
 		accessRate:     newAccessLimits(),
+		callsRate:      newCallsLimits(),
 		viewRate:       newShopperBucket(viewPingPerMinute),
 		viewNow:        time.Now,
 	}
@@ -388,6 +392,21 @@ func (h *Handler) serveResolved(w http.ResponseWriter, r *http.Request, site *Si
 		return pathClassProxy
 	}
 
+	// THE CALLS SURFACE (calls.go), beside the access surface and for its reasons: it
+	// shares the /_memql/ marker, so left to fall through it would be forwarded as an
+	// ordinary API call with no stamp, no budget and no cap, or answered 404 with apiProxy
+	// off; and it sits below the status switch and the preview substitution, so a deployable
+	// taken offline mid-call is answered before anything is forwarded.
+	//
+	// THE CONDITION IS THE TEN PAIRS, and not the switch. A pair on a deployable whose calls
+	// switch is off is still the surface's to answer -- the one 404, forwarded nowhere -- so
+	// "calls are off" never reaches the generic proxy, and anything else under
+	// /_memql/calls stays the generic proxy's exactly as before the surface existed.
+	if _, ok := callsRouteFor(r.Method, r.URL.Path); ok {
+		h.serveCallsSurface(w, r, site)
+		return pathClassProxy
+	}
+
 	if strings.HasPrefix(r.URL.Path, apiPrefix) {
 		h.serveAPI(w, r, site)
 		return pathClassProxy
@@ -409,7 +428,7 @@ func (h *Handler) serveResolved(w http.ResponseWriter, r *http.Request, site *Si
 		return pathClassUnserved
 	}
 
-	securityHeaders(w, r)
+	securityHeaders(w, r, site)
 
 	// What serveFile inserts into an HTML document, the same for both document
 	// paths below: the refresh script unless this is an extension runtime's

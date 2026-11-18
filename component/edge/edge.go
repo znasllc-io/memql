@@ -292,6 +292,7 @@ func siteFromRow(r map[string]any) *Site {
 		APIProxy:             rowBool(r, "apiProxy"),
 		ExtensionRuntimePath: rowString(r, "extensionRuntimePath"),
 		ShopperForms:         rowBool(r, "shopperForms"),
+		Calls:                rowBool(r, "calls"), // siteFull projects it; absent is off
 		OwnerUserID:          rowString(r, "ownerUserId"),
 		SystemOwned:          rowBool(r, "systemOwned"),
 		Binding:              rowObject(r, "binding"),

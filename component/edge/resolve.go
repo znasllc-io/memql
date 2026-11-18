@@ -55,7 +55,21 @@ type Site struct {
 	// and no authenticated API says exactly that, and one that wants the
 	// API and no public form says the opposite.
 	ShopperForms bool
-	SystemOwned  bool
+
+	// Calls mounts this deployable's CALLS SURFACE on its own origin (calls.go): the ten
+	// routes under /_memql/calls, and the page policy that lets its page reach the media
+	// servers and ask for the camera (csp_calls.go). Its one writer is updateSiteCalls, which
+	// an operator reaches through the callsSiteEnable builtin.
+	//
+	// OFF IS THE DEFAULT AND ABSENT READS AS OFF, ShopperForms' rule and for its reason:
+	// every row written before the field existed resolves with no calls surface. Independent
+	// of APIProxy, as ShopperForms is: a person in a call holds no MemQL cookie.
+	//
+	// THE EDGE'S COPY CAN BE OLDER THAN THE ROW, by the resolver's TTL at most once a write's
+	// invalidation is missed. That is why the bff reads the row again and checks the switch
+	// on every request it is forwarded: the edge's refusal is the cheap one, not the only one.
+	Calls       bool
+	SystemOwned bool
 
 	// StorefrontTesting is a private sibling origin serving BundleRef with PreviewStore.
 	StorefrontTesting bool
@@ -340,7 +354,9 @@ func (r *resolver) Resolve(ctx context.Context, hostname string) (*Site, error) 
 		}
 		copy := *site
 		copy.Hostname, copy.ResourceParentHost = key, parent
-		copy.APIProxy, copy.ShopperForms = false, false
+		// An isolated renderer origin serves assets and nothing else (handler.go), so it
+		// carries none of its parent's surfaces: no proxy, no shopper forms, no calls.
+		copy.APIProxy, copy.ShopperForms, copy.Calls = false, false, false
 		return &copy, nil
 	}
 

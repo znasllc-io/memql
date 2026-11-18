@@ -99,13 +99,14 @@ func (h *Handler) serveAPI(w http.ResponseWriter, r *http.Request, site *Site) {
 // newBFFProxy builds the reverse proxy to the bff, optionally applying a
 // caller's `stamp` to the outbound request AFTER the shared rewrite.
 //
-// ONE BUILDER FOR ALL THREE CALLERS (serveAPI, the shopper surface and the
-// access surface), because the rewrite is a contract with the bff -- the
-// marker swap, X-Forwarded, the site's own Host, the WebSocket subprotocols,
-// the access stamp's and the access cookie's removal -- and a second copy of a
-// contract is wrong before it drifts. `stamp` runs LAST so it can delete a header
-// the shared rewrite copied through, which is exactly what the shopper stamp
-// does, or put back what the rewrite took out, which is what the access stamp does.
+// ONE BUILDER FOR ALL FOUR CALLERS (serveAPI, the shopper surface, the access
+// surface and the calls surface), because the rewrite is a contract with the
+// bff -- the marker swap, X-Forwarded, the site's own Host, the WebSocket
+// subprotocols, the removal of both surfaces' stamps and cookies -- and a second
+// copy of a contract is wrong before it drifts. `stamp` runs LAST so it can delete
+// a header the shared rewrite copied through, which is exactly what the shopper
+// stamp does, or put back what the rewrite took out, which is what the access and
+// calls stamps do, each with its own cookie only.
 //
 // Returns nil when MEMQL_EDGE_API_TARGET is not a URL; the caller decides
 // what a person sees, because the callers owe them different answers.
@@ -148,6 +149,11 @@ func (h *Handler) newBFFProxy(site *Site, stamp func(*httputil.ProxyRequest)) *h
 			// THE ACCESS COOKIE GOES NO FURTHER THAN THE FIVE ROUTES, and the access
 			// surface puts it back in its own stamp. See accessStripCookie.
 			accessStripCookie(pr.Out.Header)
+			// THE CALLS STAMP AND THE CALLS COOKIE, by the same rule and in the same
+			// place, ahead of `stamp`: the calls surface writes its own stamp and puts
+			// its cookie back in callsStamp, and nothing else this builder serves
+			// carries either. See callsStripRequest.
+			callsStripRequest(pr.Out.Header)
 			if stamp != nil {
 				stamp(pr)
 			}

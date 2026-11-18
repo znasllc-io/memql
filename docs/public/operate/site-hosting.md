@@ -609,9 +609,11 @@ site whose bundle calls back into MemQL -- which, per
 [the contract](#the-contract-a-build-is-a-directory-of-static-files) above,
 is essentially every site hosting more than pure marketing copy.
 
-(Four exact method and path pairs under `/_memql/access` are *not* this proxy's
-and answer with it off: see [Part of a site, for visitors holding a
-code](#part-of-a-site-for-visitors-holding-a-code).)
+(Five exact method and path pairs under `/_memql/access`, and on a deployable
+whose calls switch is on ten under `/_memql/calls`, are *not* this proxy's and
+answer with it off: see [Part of a site, for visitors holding a
+code](#part-of-a-site-for-visitors-holding-a-code) and [Calls on a
+deployable](#calls-on-a-deployable).)
 
 What it removes is worth stating alongside what it adds: the bff's own
 auth cookie is `SameSite=Lax`, which browsers do not send cross-site at
@@ -778,7 +780,7 @@ page then calls the queries and mutations the deployable's own DSL has marked
 for that code's gate (`@accessGate`). The operator adds, replaces, re-times and
 removes codes from the deployable's page in MemQL OS.
 
-The edge adds four method and path pairs on the site's own origin for this
+The edge adds five method and path pairs on the site's own origin for this
 (`component/edge/access.go`), answered ahead of both the bundle and the generic
 `/_memql/*` proxy:
 
@@ -788,10 +790,11 @@ The edge adds four method and path pairs on the site's own origin for this
 | `GET /_memql/access` | says whether the session still stands |
 | `POST /_memql/access/leave` | ends the session |
 | `POST /_memql/access/call` | runs a construct the session's gate reaches |
+| `POST /_memql/access/guest` | opens a guest's session, where the operator turned guest access on |
 
 - **They work whatever the site's `apiProxy` says.** The visitor holds a code and
   no MemQL cookie, so this is not the proxy above and does not need it on. It
-  does need `MEMQL_EDGE_API_TARGET`: unset, every one of the four answers a `404`,
+  does need `MEMQL_EDGE_API_TARGET`: unset, every one of the five answers a `404`,
   as the proxy refuses, and the edge's one warning at boot is the only line about
   it. Any other method or path under `/_memql/access` is the generic proxy's,
   exactly as it was.
@@ -801,7 +804,7 @@ The edge adds four method and path pairs on the site's own origin for this
   database for every request that presents a credential, and nothing in the
   decision is cached.
 - **The session cookie stops here.** It is a `__Host-` cookie, so a browser sends
-  it with every request to the site. These four routes forward it and no other
+  it with every request to the site. These five routes forward it and no other
   credential, and everything else the edge forwards, the proxy above and the
   identity endpoints included, has it taken out and the rest of the header left
   alone.
@@ -820,6 +823,71 @@ the answer to a gated call.
 
 The wire, what the page has to do so the browser leaves on time, the limits and
 how to declare a gate are in [Access codes](site-access-codes.md).
+
+---
+
+## Calls on a deployable
+
+A deployable can hold video calls: a person with a key starts or books a call
+and shares its link, and the people who open the link join it, with no sign-in
+and no MemQL account. The media travels between each browser and a media server
+and never through MemQL. An operator turns a deployable's calls switch on with
+the `callsSiteEnable` builtin (it is off by default), and that switch decides
+everything in this section.
+
+On a deployable whose calls switch is on, the edge answers ten method and path
+pairs on the site's own origin (`component/edge/calls.go`), ahead of both the
+bundle and the generic `/_memql/*` proxy, and forwards each to the bff:
+
+| On the site's origin | Does |
+|---|---|
+| `POST /_memql/calls/unlock` | trades a key for a host's session |
+| `GET /_memql/calls/session` | says what the session holds; a host's also lists who is in the call and who waits |
+| `POST /_memql/calls/start` | opens a call on a key's session, with its holder as host |
+| `POST /_memql/calls/schedule` | books a call for later |
+| `POST /_memql/calls/reschedule` | moves a booked call |
+| `POST /_memql/calls/cancel` | cancels a booked call |
+| `POST /_memql/calls/join` | seats a person by a call's link, or in the call their session is in |
+| `GET /_memql/calls/queue` | a waiting person's poll |
+| `POST /_memql/calls/host` | one host control |
+| `POST /_memql/calls/leave` | the hang-up |
+
+- **The switch is the edge's first answer.** With it off, every one of the ten
+  answers `404` and nothing is forwarded, whatever the site's `apiProxy` says.
+  The bff checks the switch again on the row it reads before it acts on a
+  request, so a switch turned off counts from the next request even on an edge
+  whose cached copy of the site is older. Any other method or path under `/_memql/calls` is
+  the generic proxy's, exactly as it was.
+- **They work whatever the site's `apiProxy` says,** for the access routes'
+  reason: a person in a call holds no MemQL cookie. They need
+  `MEMQL_EDGE_API_TARGET`: unset, every one answers a `404`.
+- **The edge decides nothing about a call.** It checks the shape of a POST (JSON,
+  the same `Origin`), caps the body (1 KiB, and 4 KiB for `schedule` and
+  `reschedule`, which carry a title), rate-limits per replica, and writes the
+  site and owner stamp over any copy the client sent. The budgets bound load, not
+  guessing: `unlock` takes 10 a minute per address and 60 per site, `join` 30
+  per address and 600 per site, and the other eight routes share 600 a minute
+  per address. A refusal speaks the bff's words (`not_found`, `not_json`,
+  `too_large`, `limited` with `retryAfterMs` and `Retry-After`), and a request
+  from another origin is `403` `forbidden` with the reason `foreign_origin`.
+- **The session cookie stops here.** `__Host-memql_calls` reaches every path of
+  the site, as the access cookie does. The ten routes forward it and no other
+  credential, and everything else the edge forwards, the access routes and the
+  identity endpoints included, has it taken out.
+- **A site that is not live does not serve them,** as for the access routes, and
+  a system-owned site, which has no owner for a call's rows to belong to,
+  answers `404`.
+
+**The page policy opens two things on a calls deployable, and only there.** Its
+`connect-src` admits the media servers, `wss://` and `https://` on any port, at
+the host `MEMQL_CALLS_MEDIA_HOST_SUFFIX` names and every host under it
+(`component/edge/csp_calls.go`); and its `Permissions-Policy` lets the page ask
+for the camera (`camera=(self)`), which every other site is refused before the
+browser can prompt. Set `MEMQL_CALLS_MEDIA_HOST_SUFFIX` on the edge to the DNS
+name the installation's media servers are under, for example `media.example.com`
+for `m1.media.example.com`. Unset, or not a host name, the policy names no media
+server: the routes answer and passes are minted, but the browser refuses to
+connect to the call, and the edge's one warning at boot is the clue.
 
 ---
 
@@ -982,6 +1050,9 @@ The hashes are computed at serve time from the document itself and cached
 per bundle version, so there is nothing to configure and nothing to
 regenerate on deploy. A bundle with no inline scripts gets exactly the
 policy it always got.
+
+On a deployable whose calls switch is on, `connect-src` also names its media
+servers (see [Calls on a deployable](#calls-on-a-deployable)).
 
 ### When a page is too big to name
 
@@ -1255,7 +1326,8 @@ rather than trusting this paragraph's age.
   `dsl/platform/seeds.memql`.
 - Serving path: `component/edge/handler.go`, `resolve.go`, `csp.go`,
   `runtimeconfig.go`, `proxy.go`, `bundle.go`, `blob.go`; the access-code
-  routes are `access.go` ([Access codes](site-access-codes.md)), and the
+  routes are `access.go` ([Access codes](site-access-codes.md)), the calls
+  routes are `calls.go` and a calls page's policy is `csp_calls.go`, and the
   page-change ping and its script are `view.go`.
 - Publish path: `component/edge/publish.go`,
   `component/server/site_bundle_handler.go`, `app/transport_sites.go`.

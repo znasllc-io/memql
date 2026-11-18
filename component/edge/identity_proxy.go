@@ -103,6 +103,9 @@ func (h *Handler) serveIdentityXHR(w http.ResponseWriter, r *http.Request, site 
 			// A visitor's access session is nothing to identity, and it reaches this
 			// path only because a __Host- cookie reaches every path. See accessStripCookie.
 			accessStripCookie(pr.Out.Header)
+			// Nor is a calls seat's session, for the same reason, or a calls stamp a
+			// client wrote. See callsStripRequest.
+			callsStripRequest(pr.Out.Header)
 			// Keep the path identity mounted: /oauth/token stays /oauth/token.
 			pr.Out.Host = target.Host
 			if isIdentityUIRequest(pr.In) || isIdentityPasskeyRequest(pr.In) {

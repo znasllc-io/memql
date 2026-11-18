@@ -40,7 +40,7 @@ func assetPrefixFor(site *Site) string {
 // candidates without their preview grant. A stale URL therefore returns 404
 // rather than serving a different version or reaching historical storage.
 func (h *Handler) serveVersionedAsset(w http.ResponseWriter, r *http.Request, site *Site) string {
-	securityHeaders(w, r)
+	securityHeaders(w, r, site)
 	h.setContentSecurityPolicy(w, r, site, nil, "", "", false)
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		noCache(w)

@@ -5,6 +5,7 @@ package app
 import (
 	"context"
 	"log/slog"
+	"os"
 	"strings"
 	"time"
 
@@ -140,6 +141,7 @@ func (a *App) mountEdgeEndpoints() {
 	})
 
 	a.handleRoute("/", handler)
+	checkCallsMediaHostSuffix(a.Logger)
 
 	a.Dependencies = append(a.Dependencies, edge.NewSiteInvalidationSubscriber(a.Logger, a.eventBus, resolver))
 }
@@ -171,6 +173,34 @@ func edgeAPITargetFromEnv(logger *slog.Logger) string {
 		return ""
 	}
 	return target
+}
+
+// checkCallsMediaHostSuffix reads MEMQL_CALLS_MEDIA_HOST_SUFFIX once at boot and says, once,
+// when the page policy cannot use it (component/edge csp_calls.go). Registered in
+// scripts/secrets/manifest.yaml (component: edge).
+//
+// THE POLICY READS THE SAME VARIABLE ITSELF, per response, through the same validation
+// (edge.ParseCallsMediaHostSuffix), as csp_voice.go reads MEMQL_LIVEKIT_PUBLIC_URL: so this
+// check returns nothing, and the warning and the policy cannot disagree about whether the
+// value is usable.
+//
+// UNSET IS NOT QUIET, for edgeAPITargetFromEnv's reason: a deployable whose calls switch is
+// on is served a page policy that names no media server, its calls routes answer, its passes
+// are minted, and the browser then refuses to connect to the call with nothing in the site's
+// own logs to say why. NOT FATAL, because an installation without media servers is legal and
+// refusing to boot over it would take down every site this edge serves. The value is
+// configuration, never a secret, so a malformed one is named in the line.
+func checkCallsMediaHostSuffix(logger *slog.Logger) {
+	raw := os.Getenv(edge.CallsMediaHostSuffixEnv)
+	if strings.TrimSpace(raw) == "" {
+		logger.Warn("edge: "+edge.CallsMediaHostSuffixEnv+" is unset; a deployable with calls on is served a page policy that names no media server, so its calls routes answer but a browser refuses to connect to the call",
+			"component", "edge")
+		return
+	}
+	if _, ok := edge.ParseCallsMediaHostSuffix(raw); !ok {
+		logger.Warn("edge: "+edge.CallsMediaHostSuffixEnv+" is not a DNS host name of two or more labels (no scheme, port, path or wildcard), so the page policy names no media server and a browser refuses to connect to a call",
+			"component", "edge", "value", raw)
+	}
 }
 
 // edgeIdentityTargetFromEnv resolves MEMQL_IDENTITY_VERIFIER_BASE_URL --

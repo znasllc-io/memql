@@ -88,6 +88,22 @@
 // so these five routes forward it and no other credential, and every other way out
 // of this package removes it.
 //
+// # The calls surface
+//
+// Ten method and path pairs under /_memql/calls on a deployable whose calls switch
+// is on (site.Calls), answered ahead of the bundle and of the generic /_memql/*
+// proxy whatever the site's apiProxy says, and each forwarded to the bff's /calls/
+// family under the same name (calls.go): unlock, session, start, schedule,
+// reschedule, cancel, join, queue, host and leave. With the switch off the ten
+// answer the one 404 and nothing is forwarded; anything else under the prefix
+// reaches the generic proxy as it always did. People in a call hold a key, a link
+// or a session and no MemQL identity, so this is an owner-approved HTTP exception
+// (2026-11-17). The edge routes, owns the switch, checks the shape of a POST, caps,
+// rate-limits and stamps the site and owner it resolved, with the calls surface's
+// own stamp, cookie and budgets; the bff decides everything about a call and checks
+// the switch again on the row it reads. A calls page's policy also admits the media
+// servers and lets the page ask for the camera (csp_calls.go).
+//
 // # The page-change ping
 //
 // Two exact paths on a deployable's own origin are answered by the edge itself,
