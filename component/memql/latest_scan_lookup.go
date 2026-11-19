@@ -81,7 +81,10 @@ func payloadLookupTermOf(n *ComparisonExpression) (payloadLookupTerm, bool) {
 // again at its latest -- so a stale version can never match.
 //
 // WHAT CANNOT NARROW THE LOOKUP:
-//   - a term under OR or NOT, or inside any other wrapper: it is not required;
+//   - a term under OR or NOT, or inside any other wrapper: it is not required.
+//     The one wrapper that is looked inside is a spec or trait applied at a
+//     top-level AND position, whose body's top-level conjuncts are required as
+//     the read's own are (latestScanTerms);
 //   - != and exclusion: a lookup finds versions carrying an accepted value;
 //   - an UNSET value ("" or nil): every version written before a field was set
 //     lacks it, so the ids "lacking" a value are the concept's history -- after

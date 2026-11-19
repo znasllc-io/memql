@@ -668,6 +668,13 @@ func (s *Store) loadOn(ctx context.Context, server MediaServer) (serverLoad, err
 // openRoomsOn is the open rooms placed on a media server, whichever deployable each is
 // for, as the cluster acting, ordered by id: the first of loadOn's reads, and the calls
 // reconciliation walks (reconcile.go).
+//
+// WHAT IT COSTS (ruling final I3): the read requires an open room (isOpen), so it starts
+// from the lookup index of the versions written while a room was open (migration
+// 20261119120000), and v1:calls:room keeps only its newest version past a day
+// (@retention), so an ended room leaves that index a day after it ended. It enumerates
+// the server's open rooms and the rooms open on it within the last day, never every room
+// the server ever carried, under the server's gate every admission on the server waits for.
 func (s *Store) openRoomsOn(ctx context.Context, server MediaServer) ([]roomRow, error) {
 	cluster, err := clusterRowsAs(ctx)
 	if err != nil {

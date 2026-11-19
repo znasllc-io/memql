@@ -75,7 +75,17 @@ var payloadLookups = []payloadLookup{
 	{index: "memory_nodes_calls_room_lookup_idx", field: "roomId", concepts: []string{"v1:calls:seat", "v1:calls:queueEntry"}},
 	{index: "memory_nodes_calls_key_lookup_idx", field: "keyId", concepts: []string{"v1:calls:room", "v1:calls:scheduledCall"}},
 	// The capacity read every join, start and queue poll makes: the open rooms of one
-	// media server, whose seats every call on it shares.
+	// media server, whose seats every call on it shares. It requires an open room, so
+	// it is served by the index of the versions written while a room was open (ruling
+	// final I3), listed first so payloadLookupFor finds it before the index of every
+	// version below: with v1:calls:room keeping only its newest version past a day, an
+	// ended room leaves this one, and the read costs the server's open rooms and the
+	// rooms open on it within the last day rather than its whole history.
+	{index: "memory_nodes_calls_open_room_lookup_idx", field: "mediaServerId", concepts: []string{"v1:calls:room"},
+		partial: []payloadEquality{{"status", "open"}}},
+	// Every version of every room placed on a media server (migration 20261118120000),
+	// kept because a migration on main is never edited. A read of a server's rooms that
+	// does not require them open starts here.
 	{index: "memory_nodes_calls_media_server_lookup_idx", field: "mediaServerId", concepts: []string{"v1:calls:room"}},
 	// The datasync retry pass (inboundRequestsDueForRetry, every minute) and
 	// the given-up list read the FAILED deliveries; partial on that status, so

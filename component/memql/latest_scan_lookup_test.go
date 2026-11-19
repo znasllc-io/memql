@@ -93,6 +93,42 @@ func TestLatestScanKeysLookUpOnlyMandatorySetTermsOnALookupField(t *testing.T) {
 	require.Empty(t, latestScanKeysSQL(t, digest, nil), "without a mandatory concept there is nothing to enumerate")
 }
 
+// A TRAIT AT A TOP-LEVEL AND POSITION REQUIRES WHAT ITS BODY REQUIRES. The DSL
+// spells `status == "open"` as the trait isOpen(row) (TestNoInlineTraitablePredicates),
+// so the reference is expanded for the enumeration: its body's terms count as the
+// read's own, and a partial lookup index whose equality the trait supplies serves
+// the read (the calls capacity read, ruling final I3). A reference under OR or NOT
+// is not required, and an unknown one adds nothing.
+func TestLatestScanKeysReadTheTermsATopLevelTraitRequires(t *testing.T) {
+	specs := newSpecRegistry()
+	require.NoError(t, specs.add(&Spec{Name: "isOpen", Kind: SpecKindRow, Expr: irPayloadCmp("status", OpEq, "open")}))
+	e := &MemQLEngine{db: bun.NewDB(sql.OpenDB(pgdriver.NewConnector()), pgdialect.New()), specs: specs}
+	keysOf := func(expr ExpressionNode) string {
+		t.Helper()
+		keys := e.latestScanKeys(expr, nil)
+		require.NotNil(t, keys, "a concept-bound read still enumerates its latest keys")
+		return keys.String()
+	}
+	room := irConceptEq("v1:calls:room")
+	server := irPayloadCmp("mediaServerId", OpEq, "v1:calls:mediaServer:m1")
+	open := &SpecReferenceExpression{Name: "isOpen"}
+	and := func(l, r ExpressionNode) ExpressionNode { return &LogicalExpression{Op: LogicalAnd, Left: l, Right: r} }
+	or := func(l, r ExpressionNode) ExpressionNode { return &LogicalExpression{Op: LogicalOr, Left: l, Right: r} }
+	partial := `(payload->>'status') = 'open'`
+
+	require.Contains(t, keysOf(and(and(room, server), open)), partial,
+		"a trait at a top-level AND position did not supply the partial index's equality")
+	require.NotContains(t, keysOf(and(and(room, server), or(open, irPayloadCmp("locked", OpEq, true)))), partial,
+		"a trait under a disjunction was taken as required")
+	require.NotContains(t, keysOf(and(and(room, server), irNot(open))), partial, "a trait under a negation was taken as required")
+	require.NotContains(t, keysOf(and(and(room, server), &SpecReferenceExpression{Name: "isNothing"})), partial,
+		"an unknown spec added a term")
+	// Without the trait the read is served by the index of every version, as before.
+	unexpanded := keysOf(and(room, server))
+	require.Contains(t, unexpanded, `(payload->>'mediaServerId') = 'v1:calls:mediaServer:m1'`)
+	require.NotContains(t, unexpanded, partial)
+}
+
 // The lookup answers asOf the way the concept-wide collapse did: the ids
 // carrying the value at or before asOf, each at its latest version at or
 // before asOf.

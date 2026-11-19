@@ -209,7 +209,7 @@ deployable's rows belong to the deployable's owner.
 |---|---|
 | `v1:calls:key` | key: its digest, kind and status |
 | `v1:calls:session` | session: its token's digest; deleted 30 days after it is written |
-| `v1:calls:room` | call: its media server, lock, host-left time and how it ended |
+| `v1:calls:room` | call: its media server, lock, host-left time and how it ended; its superseded versions are deleted a day after they are written, and its newest stays |
 | `v1:calls:seat` | participant in a call: kind, status, confirmations, when last seen and when a pass found it missing |
 | `v1:calls:queueEntry` | place in a media server's line; deleted after 30 days |
 | `v1:calls:scheduledCall` | booked call: its links' digests and its status |
@@ -752,6 +752,17 @@ reaches it.
 - What runs on a real Hetzner server (the first boot, the certificates, TURN through
   Caddy) is the layout LiveKit documents, with configuration both programs load, and is
   first exercised in full by an installation's first call.
+- Every join, poll and leave of the calls on one media server is decided under that
+  server's one lock, whichever replica takes it, so the server admits as fast as one lock
+  serves; no ceiling has been measured. In each process calls decisions hold at most two
+  of its four write-gate connections and the rest wait in the process, so a burst cannot
+  take the connections the process's other features need, and a decision that waits more
+  than six seconds answers `502` `failed`.
+- The capacity count reads a media server's open rooms and the rooms open on it within
+  the last day (a room's superseded versions are deleted after a day). A key's own reads,
+  its open rooms when it starts a call and its bookings when it books or moves one, still
+  read every room and booking the key ever had; part 1's operator-minted keys keep them
+  small.
 
 ## Checking it end to end
 

@@ -115,7 +115,7 @@ query room callsOpenRoomsForKey {
   shape   callsRoomFull
 }
 
-/// The open rooms placed on one media server, whichever deployable each is for: a server's seats are shared by every call on it, so its free seats are counted across all of them (integrations/calls rooms.go). Read as the cluster acting. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+/// The open rooms placed on one media server, whichever deployable each is for: a server's seats are shared by every call on it, so its free seats are counted across all of them (integrations/calls rooms.go). Read as the cluster acting. It requires an open room, so it starts from the lookup index of the versions written while a room was open, and an ended room leaves that index once its superseded versions expire, a day after it ended (v1:calls:room @retention): it reads the server's open rooms and the rooms open on it within the last day. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
 @serverOnly
 @unbounded("open rooms of one media server -- bounded by how many calls the server's seats can carry")
 @actor

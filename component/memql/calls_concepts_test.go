@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
@@ -108,5 +109,37 @@ func TestCallsHotReadsHaveLookupIndexes(t *testing.T) {
 		if _, ok := payloadLookupFor(c.concept, term, []payloadLookupTerm{term}); !ok {
 			t.Errorf("no payloadLookups entry serves %s.%s", c.concept, c.field)
 		}
+	}
+	// THE CAPACITY READ REQUIRES AN OPEN ROOM, and the index that serves it holds only the
+	// versions written while a room was open (ruling final I3).
+	server := payloadLookupTerm{field: "mediaServerId", values: []string{"v1:calls:mediaServer:m1"}}
+	open := payloadLookupTerm{field: "status", values: []string{"open"}}
+	lookup, ok := payloadLookupFor("v1:calls:room", server, []payloadLookupTerm{server, open})
+	if !ok || len(lookup.partial) != 1 || lookup.partial[0] != (payloadEquality{"status", "open"}) {
+		t.Errorf("the open rooms of a media server are served by %+v (found %v), want the lookup partial on status open", lookup, ok)
+	}
+}
+
+// TestCallsRoomKeepsOnlyItsNewestVersionPastADay pins the declaration the capacity read's
+// bound rests on (ruling final I3): a room's superseded versions expire a day after they
+// are written, unarchived, and its newest version stays for good. The open-room lookup
+// holds only the versions written while a room was open, so an ended room, once its
+// superseded versions have expired, leaves it, and the read a media server's every join
+// makes costs its open rooms and the rooms open on it within the last day rather than
+// every room it ever carried. keepLatest=false would expire a quiet call that is still
+// open; archive="required" would copy bookkeeping (join counts, the lock) into object
+// storage. A superseded room version is nobody's evidence: every read takes the newest
+// version of a room, and the row-version fences compare only the newest.
+func TestCallsRoomKeepsOnlyItsNewestVersionPastADay(t *testing.T) {
+	if _, err := LoadUnifiedConcepts(nil); err != nil {
+		t.Fatalf("LoadUnifiedConcepts: %v", err)
+	}
+	c := memorynodes.All()["v1:calls:room"]
+	if c == nil {
+		t.Fatal("v1:calls:room is not loaded")
+	}
+	want := memorynodes.RetentionPolicy{TTL: 24 * time.Hour, KeepLatest: true, Archive: "none"}
+	if c.Retention == nil || *c.Retention != want {
+		t.Fatalf("v1:calls:room retention = %+v, want %+v", c.Retention, want)
 	}
 }

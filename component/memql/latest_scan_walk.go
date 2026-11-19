@@ -96,7 +96,7 @@ func (e *MemQLEngine) latestScanWalk(ctx context.Context, expr ExpressionNode, t
 	if !newestFirst(sorter) {
 		return nil
 	}
-	concept, terms, ids := latestScanTerms(expr)
+	concept, terms, ids := latestScanTerms(expr, e.specBody)
 	if concept == "" || len(ids) > 0 || memorynodes.HasLiveness(concept) {
 		return nil
 	}

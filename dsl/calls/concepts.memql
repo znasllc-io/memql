@@ -68,8 +68,20 @@ concept session {
 /// it took over; `endReason` says which.
 /// `shareSeatId` and `shareStartedAt` record the newest screen share the media server reported, so a share
 /// event delivered late cannot take over from a newer one. Server-written and client-unreadable.
+///
+/// ONLY THE NEWEST VERSION OF A ROOM OUTLIVES A DAY: @retention(ttl="1d", keepLatest=true, archive="none").
+/// Every join attempt, lock and host change writes the room again, and the capacity count every join, start
+/// and poll makes reads the open rooms of its media server through a lookup index that holds only the
+/// versions written while a room was open (memory_nodes_calls_open_room_lookup_idx): an ended room leaves
+/// that index once its superseded versions expire, so the read costs the server's open rooms and the rooms
+/// open on it within the last day, never every room it ever carried (ruling final I3). The newest version,
+/// which holds when the call opened, how it ended and when, stays for good, and a quiet call still open
+/// keeps its newest version however old. A superseded version is nobody's evidence: every read takes the
+/// newest version of a room, and the row-version fences compare only the newest. Seats keep every version
+/// until part 2 settles what records minutes (the T7 churn carry).
 @serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner)
+@retention(ttl="1d", keepLatest=true, archive="none")
 @displayCard(primary="mediaRoom", secondary="siteId", status="status")
 @belongsTo(account, via="siteId")
 concept room {

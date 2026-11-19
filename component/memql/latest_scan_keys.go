@@ -26,7 +26,7 @@ import (
 // row.createdAt lower bound narrows it to the versions written since
 // (latestScanLowerBounds).
 func (e *MemQLEngine) latestScanKeys(expr ExpressionNode, timestamp *time.Time) *bun.SelectQuery {
-	concept, terms, ids := latestScanTerms(expr)
+	concept, terms, ids := latestScanTerms(expr, e.specBody)
 	if concept == "" {
 		return nil
 	}
@@ -170,14 +170,36 @@ func latestScanLowerBounds(expr ExpressionNode) []compiledExpression {
 // latestScanTerms reads the mandatory conjuncts a latest-key enumeration may
 // narrow on: the concept equality, the payload lookup terms and the id
 // comparisons. Only top-level AND conjuncts count (see latestScanKeys).
-func latestScanTerms(expr ExpressionNode) (concept string, terms []payloadLookupTerm, ids []*ComparisonExpression) {
-	var visit func(ExpressionNode)
-	visit = func(expr ExpressionNode) {
+//
+// A SPEC OR TRAIT APPLIED AT A TOP-LEVEL AND POSITION IS ITSELF A MANDATORY
+// CONJUNCT, and so is every top-level conjunct of its body: a read filtered
+// `row.mediaServerId == X && isOpen(row)` requires status == "open" exactly as
+// one that spells the comparison out does, and the trait is the spelling the
+// DSL requires (test/dslconformance TestNoInlineTraitablePredicates). So a
+// reference is expanded through specBody and its body's payload lookup terms
+// count, which is what lets a partial lookup index serve the read (the calls
+// capacity read's open rooms, ruling final I3; payloadLookupFor requires every
+// equality of a partial index). Only terms are taken from a body, never the
+// concept or an id comparison, which the read itself names; a reference under
+// OR or NOT is not required and is not expanded, and a body is read at most
+// maxSpecExpansion references deep. Returning the same rows is unchanged:
+// latestLookupKeys enumerates ids and the whole filter, the reference
+// included, still decides each one at its latest version.
+func latestScanTerms(expr ExpressionNode, specBody func(name string) ExpressionNode) (concept string, terms []payloadLookupTerm, ids []*ComparisonExpression) {
+	var visit func(expr ExpressionNode, inSpec int)
+	visit = func(expr ExpressionNode, inSpec int) {
 		switch n := expr.(type) {
 		case *LogicalExpression:
 			if n != nil && n.Op == LogicalAnd {
-				visit(n.Left)
-				visit(n.Right)
+				visit(n.Left, inSpec)
+				visit(n.Right, inSpec)
+			}
+		case *SpecReferenceExpression:
+			if n == nil || specBody == nil || inSpec >= maxSpecExpansion {
+				return
+			}
+			if body := specBody(n.Name); body != nil {
+				visit(body, inSpec+1)
 			}
 		case *ComparisonExpression:
 			if n == nil {
@@ -187,7 +209,7 @@ func latestScanTerms(expr ExpressionNode) (concept string, terms []payloadLookup
 				terms = append(terms, term)
 				return
 			}
-			if len(n.Field.Parts) != 1 {
+			if inSpec > 0 || len(n.Field.Parts) != 1 {
 				return
 			}
 			field, ok := resolveIntrinsicField(n.Field.Parts[0])
@@ -205,6 +227,26 @@ func latestScanTerms(expr ExpressionNode) (concept string, terms []payloadLookup
 			}
 		}
 	}
-	visit(expr)
+	visit(expr, 0)
 	return concept, terms, ids
+}
+
+// maxSpecExpansion bounds how many spec references deep latestScanTerms reads a
+// body. Specs reference specs rarely and never in a cycle (the loader refuses
+// one), so the bound only keeps a malformed registry from recursing for good.
+const maxSpecExpansion = 4
+
+// specBody is a named spec's or trait's predicate, or nil when the engine holds
+// none by that name: what a reference to it contributes to the latest-key
+// enumeration (latestScanTerms). The same lookup the filter's compilation makes
+// (executor_filter.go), so the two read one body.
+func (e *MemQLEngine) specBody(name string) ExpressionNode {
+	if e == nil || e.specs == nil {
+		return nil
+	}
+	spec, err := e.specs.Get(name)
+	if err != nil || spec == nil {
+		return nil
+	}
+	return spec.Expr
 }
