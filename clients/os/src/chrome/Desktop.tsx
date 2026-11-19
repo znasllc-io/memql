@@ -865,7 +865,7 @@ function useDeskSlide(
     const from = last.current;
     last.current = { index: activeIndex, deskId: activeDeskId };
     if (from.deskId === activeDeskId) return;
-    const ms = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--os-duration-med")) || 0;
+    const ms = cssTimeMs(getComputedStyle(document.documentElement).getPropertyValue("--os-duration-med"));
     const width = desktopRef.current?.clientWidth ?? 0;
     if (ms <= 0 || from.index === activeIndex) {
       setSlide(null);
@@ -876,4 +876,13 @@ function useDeskSlide(
     return () => clearTimeout(timer);
   }, [activeIndex, activeDeskId, desktopRef]);
   return slide;
+}
+
+/** A CSS time token in milliseconds. Themes write it either way (Graphite's
+ * ".26s", the base tokens' "260ms"); a bare parseFloat read ".26s" as 0.26ms,
+ * so the windows' slide ended at once while the plates slid (Jesús, Nov 2026). */
+function cssTimeMs(value: string): number {
+  const n = parseFloat(value);
+  if (!Number.isFinite(n)) return 0;
+  return value.trim().endsWith("ms") ? n : n * 1000;
 }
