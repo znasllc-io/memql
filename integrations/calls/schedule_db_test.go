@@ -614,9 +614,8 @@ func TestHostLinkGrantsHostAndCreatorNeedNotAttend(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, callrules.OutcomeWait, second.Outcome)
 	cw.bookingRoom(sc.ID)
-	// The host was the only person in the call, so their pass was preceded by opening
-	// the media room again (host.go, the first pass into an empty room); every room
-	// opened is still this one.
+	// The host's pass was preceded by opening the media room again, as every pass is
+	// (service.go ensureMediaRoom); every room opened is still this one.
 	for _, opened := range cw.media.rooms() {
 		require.Equal(t, roomID, opened.Name, "a later join opened a second media room")
 	}

@@ -103,8 +103,8 @@ import (
 // leaving people connected to a call the rows say is over (a connected participant keeps
 // their media session for as long as they stay). A decision that changes between the
 // deletion and the gated write -- a host back in that instant -- leaves an open call with
-// no media room, which its next pass into the empty room opens again (service.go
-// reopenMediaRoom). A call that ends empty has nobody in it by the rows' account, so its
+// no media room, which the next pass anybody in it asks for opens again (service.go
+// ensureMediaRoom). A call that ends empty has nobody in it by the rows' account, so its
 // rows are written under the gates where that was decided, and its media room is deleted
 // after them, best effort: a media server closes an empty room on its own.
 //
@@ -646,7 +646,7 @@ func (s *Service) endsEmpty(ctx context.Context, v roomView, now time.Time) (boo
 // empty reports whether nobody is in the call and nobody waits to come in. It decides
 // nothing alone: a call ends empty on endsEmpty.
 func (v roomView) empty(now time.Time) bool {
-	if occupants(v.seats, v.room.ID, "") > 0 {
+	if occupants(v.seats, v.room.ID) > 0 {
 		return false
 	}
 	for _, seat := range v.seats {

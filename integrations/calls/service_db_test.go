@@ -57,12 +57,16 @@ func (c *testClock) Advance(d time.Duration) {
 }
 
 // fakeMedia stands in for every media server's control API and records, per server,
-// what each was asked. present is who each media room shows connected, by room name,
-// as a test sets it (setPresent): deleting a room disconnects everybody in it and
-// removing a participant disconnects them, as a media server does.
+// what each was asked. held is the rooms each server holds now, as livekit-server v1.13.7
+// keeps them: opening a room it holds returns that room unchanged, its limits the ones it
+// was opened with, deleting one forgets it, and a restart forgets them all (restart).
+// present is who each media room shows connected, by room name, as a test sets it
+// (setPresent): deleting a room disconnects everybody in it and removing a participant
+// disconnects them, as a media server does.
 type fakeMedia struct {
 	mu         sync.Mutex
 	created    []fakeMediaRoom
+	held       map[fakeMediaRef]fakeMediaRoom
 	removed    []fakeMediaRemoval
 	deleted    []fakeMediaRef
 	muted      []fakeMediaMute
@@ -102,6 +106,22 @@ func (f *fakeMedia) deletions() []fakeMediaRef {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return slices.Clone(f.deleted)
+}
+
+// restart is every media server restarting: each forgets the rooms it held and everybody
+// connected to them, and opens none again until it is asked.
+func (f *fakeMedia) restart() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.held, f.present = nil, nil
+}
+
+// holding is the room a media server holds by that name now, and whether it holds one.
+func (f *fakeMedia) holding(server, name string) (fakeMediaRoom, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	room, ok := f.held[fakeMediaRef{Server: server, Room: name}]
+	return room, ok
 }
 
 func (f *fakeMedia) mutes() []fakeMediaMute {
@@ -146,7 +166,14 @@ func (b *fakeMediaServer) CreateRoom(_ context.Context, name string, max uint32)
 	if b.media.failCreate != nil {
 		return b.media.failCreate
 	}
-	b.media.created = append(b.media.created, fakeMediaRoom{Server: b.server, Name: name, Max: max})
+	room := fakeMediaRoom{Server: b.server, Name: name, Max: max}
+	b.media.created = append(b.media.created, room)
+	if b.media.held == nil {
+		b.media.held = map[fakeMediaRef]fakeMediaRoom{}
+	}
+	if _, open := b.media.held[fakeMediaRef{Server: b.server, Room: name}]; !open {
+		b.media.held[fakeMediaRef{Server: b.server, Room: name}] = room
+	}
 	return nil
 }
 
@@ -157,6 +184,7 @@ func (b *fakeMediaServer) DeleteRoom(_ context.Context, name string) error {
 		return b.media.failDelete
 	}
 	b.media.deleted = append(b.media.deleted, fakeMediaRef{Server: b.server, Room: name})
+	delete(b.media.held, fakeMediaRef{Server: b.server, Room: name})
 	delete(b.media.present, name)
 	return nil
 }

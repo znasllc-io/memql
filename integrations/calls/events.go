@@ -90,7 +90,7 @@ import (
 //     when the empty-room rule would (host.go endsEmpty: nobody admitted, in the call,
 //     waiting or in line, and a booked call only after its booked end), and ends it empty.
 //     Otherwise it is ignored, and the next pass into the call opens its media room again
-//     (service.go reopenMediaRoom).
+//     (service.go ensureMediaRoom, which runs before every pass).
 //
 // Anything else the server sends -- room_started, track_unpublished, egress events,
 // participant_connection_aborted (a connection that never completed, which the pass

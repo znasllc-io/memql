@@ -60,8 +60,8 @@ room:
   # The engine creates every room, with its participant limit (integrations/calls
   # media.go CreateRoom). A pass for a room that does not exist must be refused, not
   # open a room without that limit. How long an empty room lives is v1.13.7's default
-  # (300 s, then 20 s after the last departure); the engine re-creates a room before the
-  # first pass into one with nobody in it.
+  # (300 s, then 20 s after the last departure); the engine creates a call's room again
+  # before every pass into it, so a room closed or lost in a restart is back first.
   auto_create: false
   # This list REPLACES v1.13.7's default one, and the server registers only what it
   # names (pkg/rtc/mediaengine.go), so each entry is a decision:

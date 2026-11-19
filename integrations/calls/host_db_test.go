@@ -829,52 +829,66 @@ func TestAKeyThatOpenedAndEndedManyBookedCallsStillBooks(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// the media room before the first pass
+// the media room before every pass
 // ---------------------------------------------------------------------------
 
-// TestTheFirstPassIntoAnEmptyRoomOpensItsMediaRoomAgain: a media server closes a room
-// nobody has been in for a while, and a participant who then connects would find it
-// gone, or opened again without the call's limits. So before a pass is handed to the
-// only person in a call, the media room is opened again with its limits (a media server
-// answers that for a room it has, so nothing changes when it is open). A pass for
-// somebody joining people already in the call opens nothing.
-func TestTheFirstPassIntoAnEmptyRoomOpensItsMediaRoomAgain(t *testing.T) {
+// passOpened checks that a pass was handed out only once its call's media room was opened:
+// the media server was asked to open exactly one room since `opened` asks had been made,
+// and it is the room the pass names, on the bootstrap server, with the call's limits.
+func (cw *callWorld) passOpened(res callrules.JoinResult, opened int, who string) {
+	cw.t.Helper()
+	require.Equal(cw.t, callrules.OutcomeAdmit, res.Outcome, "%s was not let in: %+v", who, res)
+	grants, _ := verifyPass(cw.t, res.Pass, testMediaConfig().APIKey, testAPISecret)
+	limit := uint32(callrules.DefaultPolicy().MaxPeople + callrules.DefaultPolicy().MaxAgents + 1)
+	rooms := cw.media.rooms()
+	require.Len(cw.t, rooms, opened+1, "%s was handed a pass without its media room being opened first", who)
+	require.Equal(cw.t, fakeMediaRoom{Server: BootstrapMediaServerID, Name: grants.Video.Room, Max: limit}, rooms[opened], who)
+}
+
+// TestEveryPassOpensItsMediaRoomFirst: a media server opens no room a connection names
+// (room.auto_create false), and a room it opened can be gone by the time somebody
+// connects -- closed for having had nobody in it, or forgotten in a restart. So before ANY
+// pass is handed out, its call's media room is opened with the call's limits, and a media
+// server answers that for a room it still holds with the room unchanged: the host's pass at
+// Start, a guest's joining people already in the call, a waiter's on the poll that lets it
+// in, and a rejoin's. A media server that cannot open the room hands out no pass.
+func TestEveryPassOpensItsMediaRoomFirst(t *testing.T) {
 	cw := newCallWorld(t, "reopen", 2)
 	if cw == nil {
 		return
 	}
 	ctx := context.Background()
-	limit := uint32(callrules.DefaultPolicy().MaxPeople + callrules.DefaultPolicy().MaxAgents + 1)
 	hostA, a := cw.started("Host A") // seat 1 of 2
-	_, guestA, err := cw.join(a.Call.GuestToken, "Guest A")
-	require.NoError(t, err) // seat 2: joining people already in, it opened nothing
-	require.Len(t, cw.media.rooms(), 1)
+	cw.passOpened(a.Join, 0, "the host at Start")
+	opened := len(cw.media.rooms())
+	in, guestA, err := cw.join(a.Call.GuestToken, "Guest A") // seat 2
+	require.NoError(t, err)
+	cw.passOpened(in, opened, "a guest joining people already in the call")
 
+	// A full server queues B's host: Start opens B's media room and hands out no pass.
 	bHost := cw.host()
 	b, err := cw.svc.Start(ctx, bHost, callrules.StartBody{Name: "Host B", Confirm: confirmed})
 	require.NoError(t, err)
 	require.Equal(t, callrules.OutcomeQueue, b.Join.Outcome)
+	require.Empty(t, b.Join.Pass)
 	bHost, err = cw.svc.Session(ctx, cw.ref, bHost.Token)
 	require.NoError(t, err)
-	require.Len(t, cw.media.rooms(), 2, "Start did not open the call's media room")
 
 	// B's media room has had nobody in it since its start. A seat frees and B's host is
-	// let in: the room is opened again before the pass.
+	// let in on its poll: the room is opened again before the pass.
 	require.NoError(t, cw.svc.Leave(ctx, guestA))
-	in, err := cw.svc.Queue(ctx, bHost)
+	opened = len(cw.media.rooms())
+	polled, err := cw.svc.Queue(ctx, bHost)
 	require.NoError(t, err)
-	require.Equal(t, callrules.OutcomeAdmit, in.Outcome)
-	rooms := cw.media.rooms()
-	require.Len(t, rooms, 3, "the first pass into an empty room did not open its media room")
-	require.Equal(t, fakeMediaRoom{Server: BootstrapMediaServerID, Name: b.Call.ID, Max: limit}, rooms[2])
+	cw.passOpened(polled, opened, "a waiter let in on its poll")
+	require.Equal(t, b.Call.ID, cw.media.rooms()[opened].Name)
 
-	// A host alone in their call who asks again is the call's only person too.
+	// A rejoin is the same seat with a fresh pass, and its room is opened first too.
+	opened = len(cw.media.rooms())
 	again, _, err := cw.svc.Join(ctx, cw.ref, &hostA, callrules.JoinBody{Name: "Host A", Confirm: confirmed})
 	require.NoError(t, err)
-	require.Equal(t, callrules.OutcomeAdmit, again.Outcome)
-	rooms = cw.media.rooms()
-	require.Len(t, rooms, 4)
-	require.Equal(t, fakeMediaRoom{Server: BootstrapMediaServerID, Name: a.Call.ID, Max: limit}, rooms[3])
+	cw.passOpened(again, opened, "a rejoin")
+	require.Equal(t, a.Call.ID, cw.media.rooms()[opened].Name)
 
 	// A media server that cannot open the room hands out no pass, and the seat keeps its
 	// place for a later ask.
@@ -888,6 +902,49 @@ func TestTheFirstPassIntoAnEmptyRoomOpensItsMediaRoomAgain(t *testing.T) {
 	cw.media.failCreate = nil
 	cw.media.mu.Unlock()
 	require.Equal(t, "admitted", cw.row(seatConcept, bHost.SeatID)["status"])
+}
+
+// TestSeatsBackAfterAMediaServerRestartGetARoomThatExists: a media server that restarts
+// during a call forgets its rooms, and everybody in the call reconnects at once, each
+// asking for a fresh pass -- here one by its page's poll and one by a rejoin, the two ways
+// a page comes back. The server opens no room a connection names (room.auto_create false),
+// so a pass for a room it no longer holds is a connection it refuses, for every seat in
+// the call. Each of the two is handed a pass only once the room is open again with the
+// call's limits, although neither is alone in the call; and the room is forgotten again
+// between them, so the second pass cannot lean on the first one's opening.
+func TestSeatsBackAfterAMediaServerRestartGetARoomThatExists(t *testing.T) {
+	cw := newCallWorld(t, "restart", 50)
+	if cw == nil {
+		return
+	}
+	ctx := context.Background()
+	limit := uint32(callrules.DefaultPolicy().MaxPeople + callrules.DefaultPolicy().MaxAgents + 1)
+	hostSess, started := cw.started("Host")
+	in, guest, err := cw.join(started.Call.GuestToken, "Guest")
+	require.NoError(t, err)
+	require.Equal(t, callrules.OutcomeAdmit, in.Outcome)
+
+	// heldFor checks that the room a pass names is one the media server holds now, as the
+	// call opens it.
+	heldFor := func(res callrules.JoinResult, who string) {
+		t.Helper()
+		require.Equal(t, callrules.OutcomeAdmit, res.Outcome, "%s was not let back in: %+v", who, res)
+		grants, _ := verifyPass(t, res.Pass, testMediaConfig().APIKey, testAPISecret)
+		require.Equal(t, started.Call.ID, grants.Video.Room, "%s was handed a pass for another room", who)
+		room, held := cw.media.holding(BootstrapMediaServerID, grants.Video.Room)
+		require.True(t, held, "%s was handed a pass for a room the media server does not hold", who)
+		require.Equal(t, limit, room.Max, "%s's room was opened without the call's limits", who)
+	}
+
+	cw.media.restart()
+	polled, err := cw.svc.Queue(ctx, hostSess)
+	require.NoError(t, err)
+	heldFor(polled, "the host, back by a poll")
+
+	cw.media.restart()
+	rejoined, _, err := cw.svc.Join(ctx, cw.ref, &guest, callrules.JoinBody{Name: "Guest", Confirm: confirmed})
+	require.NoError(t, err)
+	heldFor(rejoined, "the guest, back by a rejoin")
 }
 
 // ---------------------------------------------------------------------------

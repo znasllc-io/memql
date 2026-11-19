@@ -728,18 +728,11 @@ func (l serverLoad) classFor(room roomRow) callrules.QueueClass {
 	return callrules.ClassNewCall
 }
 
-// othersIn is how many seats of a room hold a media server's seat now, the named one
-// aside: zero means the named seat is the only one in the call (host.go, the first pass
-// into an empty room).
-func (l serverLoad) othersIn(roomID, seatID string) int {
-	return occupants(l.seats, roomID, seatID)
-}
-
-// occupants counts the seats of a room holding a media server's seat, one seat aside.
-func occupants(seats []seatRow, roomID, aside string) int {
+// occupants counts the seats of a room holding a media server's seat.
+func occupants(seats []seatRow, roomID string) int {
 	n := 0
 	for _, seat := range seats {
-		if seat.RoomID == roomID && seat.ID != aside && seat.occupying() {
+		if seat.RoomID == roomID && seat.occupying() {
 			n++
 		}
 	}
