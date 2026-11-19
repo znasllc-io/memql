@@ -1212,9 +1212,11 @@ func TestJoinSetsTheSeatCookieAndUnlockSetsTheHostCookie(t *testing.T) {
 // the roster a host polls
 // ---------------------------------------------------------------------------
 
-// callsRosterReply is a session reply's roster as a client reads it.
+// callsRosterReplyBody is a session reply's roster as a client reads it. Locked is a pointer
+// so a roster that leaves it out reads as missing, not as unlocked.
 type callsRosterReplyBody struct {
 	Roster *struct {
+		Locked *bool `json:"locked"`
 		InCall []struct {
 			Seat, DisplayName, Kind, Status, Identity string
 			Host                                      bool
@@ -1307,7 +1309,7 @@ func TestAHostsSessionCarriesTheCallsRoster(t *testing.T) {
 		rec := rig.get("/calls/session", rig.secrets.hostSession)
 		assertCallsReply(t, rec, http.StatusOK,
 			`{"kind":"host","keyId":"key1","seatId":"seat1","roomId":"room1","expiresAt":"2026-11-19T12:00:00Z","expiresInMs":86400000,`+
-				`"roster":{"inCall":[`+
+				`"roster":{"locked":false,"inCall":[`+
 				`{"seat":"seat1","displayName":"Ada","kind":"person","host":true,"status":"in_call","identity":"identity1"},`+
 				`{"seat":"seat2","displayName":"Grace","kind":"person","host":false,"status":"admitted","identity":"identity2"}],`+
 				`"waiting":[]}}`)
@@ -1316,6 +1318,20 @@ func TestAHostsSessionCarriesTheCallsRoster(t *testing.T) {
 		rec = rig.get("/calls/session", rig.secrets.hostSession)
 		if !strings.Contains(rec.Body.String(), `"waiting":[{"seat":"seat3","displayName":"Lin","kind":"person","since":"2026-11-18T11:59:30Z"}]`) {
 			t.Fatalf("body = %s", rec.Body.String())
+		}
+	})
+
+	// A HOST IS OFFERED LOCK OR UNLOCK, NOT BOTH: the roster says which the call is, as the
+	// service read it, and says it in every roster, unlocked included, so a page never
+	// guesses from a missing field.
+	t.Run("it says whether the call is locked", func(t *testing.T) {
+		rig := newCallsRig(t)
+		for _, locked := range []bool{true, false} {
+			rig.svc.rosters[rig.secrets.hostSession] = &calls.Roster{Locked: locked, InCall: []calls.RosterSeat{hostSeat}, Waiting: []calls.RosterWaiter{waiter}}
+			roster := callsRosterFrom(t, rig.get("/calls/session", rig.secrets.hostSession)).Roster
+			if roster == nil || roster.Locked == nil || *roster.Locked != locked {
+				t.Fatalf("roster = %+v, want locked %v", roster, locked)
+			}
 		}
 	})
 

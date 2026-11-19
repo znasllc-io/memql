@@ -1023,6 +1023,28 @@ func TestTheRosterNamesTheSeatsAHostActsOn(t *testing.T) {
 		require.Nil(t, cw.roster(hostSess), "an ended call's host read its roster")
 	})
 
+	// A HOST IS OFFERED THE ONE LOCK CONTROL THAT CHANGES THE CALL, so the roster says whether
+	// the call is locked, read fresh with the rest of it: a lock another host made shows on
+	// this host's next poll, and so does the unlock.
+	t.Run("it says whether the call is locked, whichever host locked it", func(t *testing.T) {
+		cw := newCallWorld(t, "rosterlock", 50)
+		if cw == nil {
+			return
+		}
+		hostSess, started := cw.started("Host")
+		require.False(t, cw.roster(hostSess).Locked, "a call nobody locked reads as locked")
+
+		in, cohost, err := cw.joinBy(callrules.JoinBody{HostToken: started.Call.HostToken, Name: "Co-host"})
+		require.NoError(t, err)
+		require.Equal(t, callrules.OutcomeAdmit, in.Outcome)
+		require.NoError(t, cw.act(cohost, callrules.HostLock, ""))
+		require.True(t, cw.roster(hostSess).Locked, "a call another host locked reads as unlocked")
+		require.True(t, cw.roster(cohost).Locked, "a call this host locked reads as unlocked")
+
+		require.NoError(t, cw.act(hostSess, callrules.HostUnlock, ""))
+		require.False(t, cw.roster(cohost).Locked, "a call another host unlocked reads as locked")
+	})
+
 	// LINE ORDER: a seat with a place in the media server's line keeps it when the lock lifts,
 	// while one held behind the lock from the start has none and asks at the back. So the one
 	// in line comes first, although the other began waiting earlier.

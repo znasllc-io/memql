@@ -64,10 +64,11 @@ import (
 //
 // A HOST'S PAGE POLLS GET /session, about every three seconds, to see who is knocking. To a
 // host seat in an open call the session answers the call's roster as well (integrations/calls
-// host.go): the seats in the call, each with its media identity so a page can match the media
-// server's participants to seats, and the seats waiting to come in, in line order. Its seat
-// ids are the ones POST /host takes; nothing else tells a page whom a waiter is, since a
-// waiter is not in the media room. Every other session's answer carries no roster.
+// host.go): whether the call is locked, so the page offers Lock or Unlock and not both; the
+// seats in the call, each with its media identity so a page can match the media server's
+// participants to seats; and the seats waiting to come in, in line order. Its seat ids are
+// the ones POST /host takes; nothing else tells a page whom a waiter is, since a waiter is
+// not in the media room. Every other session's answer carries no roster.
 //
 // # Every answer in one place
 //
@@ -465,9 +466,9 @@ func (h *callsHandler) serveUnlock(w http.ResponseWriter, r *http.Request, c cal
 }
 
 // serveSession says what the cookie holds, and to a host seat in an open call, who is in
-// the call and who is knocking (the roster). A HOST'S PAGE POLLS THIS, about every three
-// seconds, the queue's own pace, to see who waits to be let in: nothing else tells it, since
-// a waiter is not in the media room.
+// the call, who is knocking and whether it is locked (the roster). A HOST'S PAGE POLLS
+// THIS, about every three seconds, the queue's own pace, to see who waits to be let in:
+// nothing else tells it, since a waiter is not in the media room.
 //
 // THE SERVICE DECIDES WHO IS A HOST, from the seat, so the roster is asked of every seated
 // session: a session's kind does not say, because a guest's session can hold a host seat by
@@ -836,11 +837,14 @@ type callsSessionReply struct {
 	Roster *callsRosterReply `json:"roster,omitempty"`
 }
 
-// callsRosterReply is a host's roster on the wire: the seat ids POST /host takes, bare, and
-// an in-call seat's media identity, so a page matches the media server's participants to
-// seats. NO SECRET IS IN IT: no token, no digest and no key id, whose presence would tell a
-// page which seats could take the call over. Two lists, each a list when empty.
+// callsRosterReply is a host's roster on the wire: whether the call is locked, the seat ids
+// POST /host takes, bare, and an in-call seat's media identity, so a page matches the media
+// server's participants to seats. `locked` is in every roster, false included, so a host's
+// page offers lock or unlock from what the service read rather than from a missing field.
+// NO SECRET IS IN IT: no token, no digest and no key id, whose presence would tell a page
+// which seats could take the call over. Two lists, each a list when empty.
 type callsRosterReply struct {
+	Locked  bool                     `json:"locked"`
 	InCall  []callsRosterSeatReply   `json:"inCall"`
 	Waiting []callsRosterWaiterReply `json:"waiting"`
 }
@@ -877,7 +881,7 @@ func rosterReply(roster *calls.Roster) *callsRosterReply {
 	if roster == nil {
 		return nil
 	}
-	out := &callsRosterReply{InCall: []callsRosterSeatReply{}, Waiting: []callsRosterWaiterReply{}}
+	out := &callsRosterReply{Locked: roster.Locked, InCall: []callsRosterSeatReply{}, Waiting: []callsRosterWaiterReply{}}
 	for _, seat := range roster.InCall {
 		out.InCall = append(out.InCall, callsRosterSeatReply{
 			Seat: memql.BareShortId(seat.Seat), DisplayName: seat.DisplayName, Kind: seat.Kind,

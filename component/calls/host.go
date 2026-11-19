@@ -18,13 +18,15 @@ type HostActionRequest struct {
 	Seat   string
 }
 
-// Roster is a call as a host seat in it sees it: what the host controls name. InCall is the
-// call's admitted and in-call seats, in the order they were let in; Waiting is its waiting
-// seats in line order, those held behind the lock included. Each seat is named by its own
-// id, the one HostActionRequest.Seat takes, and an in-call seat by its media identity as
-// well, so a client matches the media server's participants to seats. It holds no secret:
-// no token, no digest and no key.
+// Roster is a call as a host seat in it sees it: what the host controls name. Locked is
+// whether the call is locked now, so a host is offered the one of HostLock and HostUnlock
+// that changes it. InCall is the call's admitted and in-call seats, in the order they were
+// let in; Waiting is its waiting seats in line order, those held behind the lock included.
+// Each seat is named by its own id, the one HostActionRequest.Seat takes, and an in-call
+// seat by its media identity as well, so a client matches the media server's participants
+// to seats. It holds no secret: no token, no digest and no key.
 type Roster struct {
+	Locked  bool
 	InCall  []RosterSeat
 	Waiting []RosterWaiter
 }
