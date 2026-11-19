@@ -21,9 +21,11 @@ import {
   focusWindow as focusWindowFn,
   gcAutoDesks,
   initialShell,
+  makeBorderless as makeBorderlessFn,
   nextId,
   nextIdAvoiding,
   openApp as openAppFn,
+  pairWindows as pairWindowsFn,
   setWindowMode,
   setWindowSection,
   swapSides as swapSidesFn,
@@ -117,6 +119,10 @@ export interface OsActions {
   focusWindow: (id: WindowId) => void;
   navigateSection: (id: WindowId, sectionId: string, origin?: "peer" | "content" | "back") => void;
   swapSides: (deskId: DeskId) => void;
+  /** A lone window fills the borderless area; a pair stays split. */
+  makeBorderless: (id: WindowId) => void;
+  /** Bring `bringId` beside the lone `keepId`, which takes `side`. */
+  pairWindows: (keepId: WindowId, side: 0 | 1, bringId: WindowId) => void;
   throwToDesk: (id: WindowId, target: DeskId | "new") => ShellEffect;
   switchDesk: (deskId: DeskId) => void;
   switchDeskBy: (delta: 1 | -1) => void;
@@ -618,6 +624,8 @@ export function OsProvider({
       focusWindow: (id) => set((s) => ({ ...s, shell: focusWindowFn(s.shell, id) })),
       navigateSection: (id, sectionId, origin) => set((s) => ({ ...s, shell: setWindowSection(s.shell, id, sectionId, origin) })),
       swapSides: (deskId) => set((s) => ({ ...s, shell: swapSidesFn(s.shell, deskId) })),
+      makeBorderless: (id) => set((s) => ({ ...s, shell: makeBorderlessFn(s.shell, id) })),
+      pairWindows: (keepId, side, bringId) => set((s) => ({ ...s, shell: pairWindowsFn(s.shell, keepId, side, bringId) })),
       throwToDesk: (id, target) => {
         lastEffect = { kind: "none" };
         set((s) => {

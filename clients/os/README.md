@@ -114,10 +114,11 @@ new verification of the original hosted email. No competing claim can replace a
 reserved owner. The setup table is private authentication state, never graph data
 or client-visible session authority.
 
-- **Desks** hold at most two auto-placed windows (solo centered, two-up
-  split, swap/throw by drag); a third app spills onto a new desk. Windows
-  minimize to the dock, full-screen, close; apps navigate sections inside
-  their one window.
+- **Desks** hold at most two auto-placed windows (solo centered or
+  borderless, two-up split of the borderless area, swap/throw/snap by drag);
+  a third app spills onto a new desk. Windows minimize to the dock,
+  full-screen, close; apps navigate sections inside their one window. The
+  rules are in DESIGN.md, "Windows on a desk".
 - **Desktop items**: files are Library artifact shortcuts with the
   provenance dot (green = reachable, amber = not). Every icon behaves like
   a desktop icon (epic memql#4842): single click SELECTS, double-click or

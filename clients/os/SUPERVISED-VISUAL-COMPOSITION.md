@@ -91,11 +91,13 @@ The owner approved the complete Fleet redesign and shared window chrome on
 The current shared header uses the real app registry selector and groups controls
 as Ask/Search, Settings/Logs, and Minimize/Maximize/Close. Search finds the current
 app's destinations; app switching focuses existing windows and preserves drafts.
-The maximize button cycles through three sizes: maximize the same window on a
-dedicated MemQL desktop with the dock visible, fill the entire viewport with the
-dock and desktop pager hidden, then restore to the previous slot when available.
-If that desktop filled, it restores in place. Minimizing and reopening preserves
-the chosen size; changing sizes preserves the app's contents and navigation.
+The size button follows the window rules in [DESIGN.md](DESIGN.md) (Windows on
+a desk, Nov 2026): an app alone on its desk cycles window, borderless (dock
+visible) and full screen (dock and desktop pager hidden) on that desk; an app
+sharing its desk goes full screen on a desk of its own, then back to its half
+when that desk has room, else to a window in place. Minimizing and reopening
+preserves the chosen size; changing sizes preserves the app's contents and
+navigation.
 
 Back follows navigation origin: explicit tabs select clean peer destinations;
 content links retain a contextual return path, including cross-tab links. Retained

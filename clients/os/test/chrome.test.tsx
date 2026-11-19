@@ -157,23 +157,54 @@ describe("windows and desks (spec K bullets 2-3)", () => {
     expect(document.querySelector("[data-os-window='files']")).not.toBeNull();
   });
 
-  it("cycles through maximized and fullscreen, then restores the original window and split", () => {
+  it("cycles a lone app through borderless and full screen on its own desk, then back to a window", () => {
+    renderShell();
+    openFromLauncher("Files");
+    const original = screen.getByRole("dialog", { name: "Files" });
+    const originalStyle = original.getAttribute("style");
+    const desk = original.getAttribute("data-os-window-desk");
+    fireEvent.click(screen.getByRole("button", { name: "Make Files borderless" }));
+    expect(original.hasAttribute("data-maximized")).toBe(true);
+    expect(original.getAttribute("data-os-window-desk")).toBe(desk);
+    expect(screen.getByRole("button", { name: "Launcher" })).toBeTruthy();
+    expect(screen.getByRole("navigation", { name: "Desks" })).toBeTruthy();
+    const maximizedHeight = parseFloat(original.style.height);
+    fireEvent.click(screen.getByRole("button", { name: "Make Files full screen" }));
+    expect(original.hasAttribute("data-fullscreen")).toBe(true);
+    expect(parseFloat(original.style.height)).toBeGreaterThan(maximizedHeight);
+    expect(original.getAttribute("data-os-window-desk")).toBe(desk);
+    expect(screen.queryByRole("button", { name: "Launcher" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Restore Files to a window" }));
+    expect(original.getAttribute("style")).toBe(originalStyle);
+    expect(original.getAttribute("data-os-window-desk")).toBe(desk);
+    expect(screen.getByText("Desk 1 of 1")).toBeTruthy();
+  });
+
+  it("splits two apps edge to edge, and a second app joins a lone borderless one", () => {
+    renderShell();
+    openFromLauncher("Files");
+    fireEvent.click(screen.getByRole("button", { name: "Make Files borderless" }));
+    openFromLauncher("Fleet");
+    expect(screen.getByText("Desk 1 of 1")).toBeTruthy();
+    const files = screen.getByRole("dialog", { name: "Files" });
+    const fleet = screen.getByRole("dialog", { name: "Fleet" });
+    const half = `${window.innerWidth / 2}px`;
+    expect([files.style.left, files.style.width]).toEqual(["0px", half]);
+    expect([fleet.style.left, fleet.style.width]).toEqual([half, half]);
+    expect(fleet.style.height).toBe(files.style.height);
+    expect(files.hasAttribute("data-split") && fleet.hasAttribute("data-split")).toBe(true);
+  });
+
+  it("sends a shared app full screen on its own desk, then restores the original window and split", () => {
     renderShell();
     openFromLauncher("Files");
     openFromLauncher("Fleet");
     const original = screen.getByRole("dialog", { name: "Files" });
     const originalStyle = original.getAttribute("style");
     const origin = original.getAttribute("data-os-window-desk");
-    fireEvent.click(screen.getByRole("button", { name: "Maximize Files on its own desktop" }));
-    expect(original.hasAttribute("data-maximized")).toBe(true);
-    expect(screen.getByRole("button", { name: "Launcher" })).toBeTruthy();
-    expect(screen.getByRole("navigation", { name: "Desks" })).toBeTruthy();
-    const maximizedHeight = parseFloat(original.style.height);
-    const dedicated = original.getAttribute("data-os-window-desk");
-    fireEvent.click(screen.getByRole("button", { name: "Make Files full screen" }));
+    fireEvent.click(screen.getByRole("button", { name: "Make Files full screen on its own desktop" }));
     expect(original.hasAttribute("data-fullscreen")).toBe(true);
-    expect(parseFloat(original.style.height)).toBeGreaterThan(maximizedHeight);
-    expect(original.getAttribute("data-os-window-desk")).toBe(dedicated);
+    expect(original.getAttribute("data-os-window-desk")).not.toBe(origin);
     expect(screen.queryByRole("button", { name: "Launcher" })).toBeNull();
     expect(screen.queryByRole("navigation", { name: "Desks" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Restore Files to previous desktop" }));
@@ -188,8 +219,8 @@ describe("windows and desks (spec K bullets 2-3)", () => {
   it("shows the dock on other desks and after minimizing or closing a fullscreen window", () => {
     renderShell();
     openFromLauncher("Files");
-    fireEvent.click(screen.getByRole("button", { name: "Maximize Files on its own desktop" }));
-    fireEvent.click(screen.getByRole("button", { name: "Make Files full screen" }));
+    openFromLauncher("Fleet");
+    fireEvent.click(screen.getByRole("button", { name: "Make Files full screen on its own desktop" }));
     const original = screen.getByRole("dialog", { name: "Files" });
     fireEvent.keyDown(window, { key: "ArrowLeft", ctrlKey: true, shiftKey: true });
     expect(screen.getByRole("button", { name: "Launcher" })).toBeTruthy();
@@ -312,6 +343,79 @@ describe("the empty-desk limit (owner, Nov 2026)", () => {
     fireEvent.click(within(pager).getByRole("button", { name: "New desk" }));
     expect(screen.getByText("Desk 4 of 4")).toBeTruthy();
     expect(within(pager).getByRole("button", { name: "New desk" }).getAttribute("aria-disabled")).toBe("true");
+  });
+});
+
+// Drag a window by its grip with a real pointer gesture (dnd-kit's pointer
+// sensor listens on the document); `during` runs with the pointer at `to`.
+// dnd-kit swallows every click for 50ms after a drop, so this waits it out.
+async function dragWindow(name: string, to: { x: number; y: number }, during?: () => void) {
+  const grip = screen.getByRole("button", { name: `Move ${name} -- drag or press Shift+F10 for desktop choices` });
+  fireEvent.pointerDown(grip, { clientX: 400, clientY: 300, button: 0, isPrimary: true });
+  fireEvent.pointerMove(document, { clientX: 420, clientY: 300 });
+  fireEvent.pointerMove(document, { clientX: to.x, clientY: to.y });
+  during?.();
+  fireEvent.pointerUp(document, { clientX: to.x, clientY: to.y });
+  await act(() => new Promise((resolve) => setTimeout(resolve, 60)));
+}
+
+describe("dragging a window to an edge (Jesús, Nov 2026)", () => {
+  const PICKER = "Choose an app for the other half";
+
+  it("lights the half, then offers the apps on other desks and brings the pick into the empty half", async () => {
+    renderShell();
+    openFromLauncher("Files");
+    openFromLauncher("Fleet");
+    openFromLauncher("Deployables"); // alone on desk 2
+    const lone = screen.getByRole("dialog", { name: "Deployables" });
+    await dragWindow("Deployables", { x: 5, y: 300 }, () => {
+      expect(document.querySelector("[data-os-snap-zone='left']")).not.toBeNull();
+    });
+    expect(document.querySelector("[data-os-snap-zone]")).toBeNull();
+    const picker = screen.getByRole("group", { name: PICKER });
+    expect(within(picker).getAllByRole("button").map(b => b.getAttribute("aria-label"))).toEqual(["Files", "Fleet"]);
+    const half = `${window.innerWidth / 2}px`;
+    expect([lone.style.left, lone.style.width]).toEqual(["0px", half]);
+    fireEvent.click(within(picker).getByRole("button", { name: "Fleet" }));
+    expect(screen.queryByRole("group", { name: PICKER })).toBeNull();
+    const fleet = screen.getByRole("dialog", { name: "Fleet" });
+    expect(fleet.getAttribute("data-os-window-desk")).toBe(lone.getAttribute("data-os-window-desk"));
+    expect([fleet.style.left, fleet.style.width]).toEqual([half, half]);
+    expect([lone.style.left, lone.style.width]).toEqual(["0px", half]);
+    expect(screen.getByText("Desk 2 of 2")).toBeTruthy();
+  });
+
+  it.each([
+    ["Escape", () => fireEvent.keyDown(window, { key: "Escape" })],
+    ["a click elsewhere", () => fireEvent.pointerDown(document.body)],
+  ] as const)("%s dismisses the picker and the lone app goes borderless", async (_, dismiss) => {
+    renderShell();
+    openFromLauncher("Files");
+    openFromLauncher("Fleet");
+    openFromLauncher("Deployables");
+    await dragWindow("Deployables", { x: window.innerWidth - 5, y: 300 });
+    expect(screen.getByRole("group", { name: PICKER })).toBeTruthy();
+    dismiss();
+    expect(screen.queryByRole("group", { name: PICKER })).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Deployables" }).hasAttribute("data-maximized")).toBe(true);
+  });
+
+  it("with no other app open, a side drop goes straight to borderless", async () => {
+    renderShell();
+    openFromLauncher("Files");
+    await dragWindow("Files", { x: 5, y: 300 });
+    expect(screen.queryByRole("group", { name: PICKER })).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Files" }).hasAttribute("data-maximized")).toBe(true);
+  });
+
+  it("a top drop lights the whole area and makes a lone app borderless on its desk", async () => {
+    renderShell();
+    openFromLauncher("Files");
+    await dragWindow("Files", { x: 500, y: 5 }, () => {
+      expect(document.querySelector("[data-os-snap-zone='top']")).not.toBeNull();
+    });
+    expect(screen.getByRole("dialog", { name: "Files" }).hasAttribute("data-maximized")).toBe(true);
+    expect(screen.getByText("Desk 1 of 1")).toBeTruthy();
   });
 });
 
@@ -567,14 +671,16 @@ it("switches through registry apps without remounting the prior window or losing
   openFromLauncher("Fleet");
   fireEvent.click(screen.getByRole("button", { name: "Model library" }));
   const original = document.querySelector("[data-os-window='fleet']");
-  fireEvent.click(screen.getByRole("button", { name: "Maximize Fleet on its own desktop" }));
+  // Full screen keeps the desk to itself, so Files opens on a desk of its own.
+  fireEvent.click(screen.getByRole("button", { name: "Make Fleet borderless" }));
+  fireEvent.click(screen.getByRole("button", { name: "Make Fleet full screen" }));
   expect(document.querySelector("[data-os-window='fleet']")).toBe(original);
   chooseOption(screen.getByRole("combobox", { name: "Switch app from Fleet" }), "Files");
   expect(original?.hasAttribute("hidden")).toBe(true);
   chooseOption(screen.getByRole("combobox", { name: "Switch app from Files" }), "Fleet");
   expect(document.querySelector("[data-os-window='fleet']")).toBe(original);
   expect(original?.hasAttribute("hidden")).toBe(false);
-  expect(original?.hasAttribute("data-maximized")).toBe(true);
+  expect(original?.hasAttribute("data-fullscreen")).toBe(true);
   expect(within(original as HTMLElement).getByRole("button", { name: "Model library" }).getAttribute("aria-current")).toBe("page");
 });
 

@@ -775,6 +775,36 @@ draft configuration proposal, observe its reviewed merge, prepare the exact
 installation plan, then apply it. No successful check or published candidate
 silently changes the selected installation release.
 
+### Windows on a desk: window, borderless, full screen
+
+Owner-set (Jesús, Nov 18-19 2026). A desk holds at most two apps, and
+placement is computed, never dragged freehand or resized (`system/placement.ts`,
+`system/desks.ts`).
+
+- **Window mode exists only for an app alone on its desk.** A newly opened app
+  that is alone opens as a centred window.
+- **Borderless** (`maximized`) fills the area above the dock; the dock's band
+  stays, and so does the title bar. **Full screen** covers the viewport and
+  hides the dock and desk dots, and it keeps its desk to itself: no second app
+  joins a desk holding a full-screen window, minimized or not.
+- **Two apps on one desk always split the borderless area**: each takes
+  exactly half, edge to edge, no gap and no rounded corners, whatever mode each
+  was in. A second app opened next to a lone borderless one joins that desk.
+- **The size button** (one icon in the title bar). Alone: window → borderless
+  → full screen → window, all on the same desk. Sharing a desk: straight to
+  full screen on a new desk of its own, and pressed again back to its half if
+  that desk still has room. Its label always says what the next press does.
+- **Drag to a side** (pointer within 24px of the left or right edge) lights
+  that half. Dropped there, a window with a partner takes that side; a lone
+  window takes that half while the other half darkens and offers, as app
+  icons, the apps open on other desks. A pick moves that app into the empty
+  half (out of full screen first); Escape or a click elsewhere leaves the lone
+  app borderless. With nothing else open there is no picker: it goes borderless.
+- **Drag to the top** (within 24px) lights the whole area and makes a lone
+  window borderless on its desk. A pair is already borderless and stays as it is.
+- Snap highlights and the picker are static fills: no animation, so reduced
+  motion adds none. The phone layout has no desks or windows.
+
 ### One trail row, and the window draws it
 
 Every window carries exactly one trail row (`kit` `TrailRow`), drawn by the
