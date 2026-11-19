@@ -102,7 +102,8 @@
 // rate-limits and stamps the site and owner it resolved, with the calls surface's
 // own stamp, cookie and budgets; the bff decides everything about a call and checks
 // the switch again on the row it reads. A calls page's policy also admits the media
-// servers and lets the page ask for the camera (csp_calls.go).
+// servers, lets the page ask for the camera and lets it compile WebAssembly, never
+// eval JavaScript (csp_calls.go).
 //
 // # The page-change ping
 //

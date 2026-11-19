@@ -878,13 +878,18 @@ bundle and the generic `/_memql/*` proxy, and forwards each to the bff:
   a system-owned site, which has no owner for a call's rows to belong to,
   answers `404`.
 
-**The page policy opens two things on a calls deployable, and only there.** Its
+**The page policy opens three things on a calls deployable, and only there.** Its
 `connect-src` admits the media servers, `wss://` and `https://` on any port, at
 the host `MEMQL_CALLS_MEDIA_HOST_SUFFIX` names and every host under it
-(`component/edge/csp_calls.go`); and its `Permissions-Policy` lets the page ask
+(`component/edge/csp_calls.go`); its `Permissions-Policy` lets the page ask
 for the camera (`camera=(self)`), which every other site is refused before the
-browser can prompt. `MEMQL_CALLS_MEDIA_HOST_SUFFIX` is the DNS name the
-installation's media servers are under. The edge derives it as `media.<domain>`
+browser can prompt; and its `script-src` adds `'wasm-unsafe-eval'`, so the page
+can compile the WebAssembly a call's background blur runs in. That source allows
+compiling WebAssembly and nothing else: JavaScript `eval` stays refused, and
+every other site keeps `script-src 'self'`.
+
+`MEMQL_CALLS_MEDIA_HOST_SUFFIX` is the DNS name the installation's media servers
+are under. The edge derives it as `media.<domain>`
 (for example `media.example.com` for `m1.media.example.com`), and an installation
 overrides it only when its servers live under another name
 ([Production media server](calls.md#production-media-server)). Unset, or not a

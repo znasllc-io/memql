@@ -87,6 +87,11 @@ func policyForSite(r *http.Request, site *Site, env func(string) string, scriptH
 		connectSrc += " " + media
 	}
 	scriptSrc := "script-src 'self'"
+	// A calls page may compile WebAssembly, and nothing more (csp_calls.go). "" for every
+	// other site, so its script-src is unchanged.
+	if wasm := callsScriptSources(site); wasm != "" {
+		scriptSrc += " " + wasm
+	}
 	if scriptHashes != "" {
 		scriptSrc += " " + scriptHashes
 	}

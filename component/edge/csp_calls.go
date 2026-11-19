@@ -9,11 +9,13 @@ import "strings"
 // https when signalling fails. Every hosted page is served connect-src naming its own origin
 // and the cluster's identity, so without this a calls page's first connection is refused by
 // its own policy before it reaches the network -- the routes answer, the pass is minted, and
-// the call never connects. And the page has to be allowed to ask for the camera.
+// the call never connects. The page has to be allowed to ask for the camera. And it has to
+// be allowed to compile WebAssembly, which a call's background blur runs its segmentation
+// model in (callsScriptSources).
 //
-// BOTH ARE THE SWITCH'S, so a deployable without calls is served exactly the policy it was
-// served before this file existed (TestCallsPagePolicyAdmitsOnlyTheMediaSuffix pins it byte
-// for byte).
+// ALL THREE ARE THE SWITCH'S, so a deployable without calls is served exactly the policy it
+// was served before this file existed (TestCallsPagePolicyAdmitsOnlyTheMediaSuffix pins it
+// byte for byte, TestOnlyACallsPageMayCompileWebAssembly its script-src).
 //
 // # Which hosts
 //
@@ -91,6 +93,27 @@ func callsMediaSources(site *Site, env func(string) string) string {
 		return ""
 	}
 	return "wss://" + suffix + ":* wss://*." + suffix + ":* https://" + suffix + ":* https://*." + suffix + ":*"
+}
+
+// callsScriptSources is what a calls page's script-src gains after 'self': 'wasm-unsafe-eval',
+// and "" for every other site, whose script-src stays 'self' and its inline hashes.
+//
+// WEBASSEMBLY, NOT EVAL. A call's background blur runs a segmentation model compiled to
+// WebAssembly, and under script-src 'self' alone a browser refuses to compile any module
+// (WebAssembly.compile, instantiate and their streaming forms), so the blur could not
+// start. 'wasm-unsafe-eval' allows compiling and instantiating WebAssembly and nothing
+// else: JavaScript eval, new Function and string timers stay refused, since 'unsafe-eval'
+// is never added, and it names no script source, so the scripts that run are still only
+// the page's own ('self') and its document's inline hashes. A module reaches the page only
+// through the functions those scripts hand it. The extension runtime makes the same
+// exception for its own pages (extension_runtime.go), the precedent this follows. The
+// switch's whether or not a media host can be named, like the camera, because blurring a
+// camera's picture needs no media server.
+func callsScriptSources(site *Site) string {
+	if site == nil || !site.Calls {
+		return ""
+	}
+	return "'wasm-unsafe-eval'"
 }
 
 // permissionsPolicyFor is the Permissions-Policy a site's responses carry: the camera open to

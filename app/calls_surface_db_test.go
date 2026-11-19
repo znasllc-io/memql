@@ -220,11 +220,14 @@ func TestACallThroughTheRealEdge(t *testing.T) {
 	key, _ := operator("callsTestKeyCreate", map[string]any{"siteId": site, "label": "Through the edge"})["key"].(string)
 	require.NotEmpty(t, key)
 
-	// THE PAGE: its policy names the media servers and lets it ask for the camera.
+	// THE PAGE: its policy names the media servers, lets it compile the WebAssembly a
+	// background blur runs in (and eval nothing) and lets it ask for the camera.
 	res = send(http.MethodGet, "/", "", "")
 	require.Equal(t, http.StatusOK, res.StatusCode, read(res))
 	policy := res.Header.Get("Content-Security-Policy")
 	require.Contains(t, policy, " wss://*.media.example.test:* ")
+	require.Contains(t, policy, "; script-src 'self' 'wasm-unsafe-eval'")
+	require.NotContains(t, policy, "'unsafe-eval'")
 	require.Equal(t, "geolocation=(), microphone=(self), camera=(self)", res.Header.Get("Permissions-Policy"))
 
 	// A STRANGER COSTS THE DATABASE NOTHING: no session, nothing read, nothing set.

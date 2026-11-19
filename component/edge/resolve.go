@@ -58,8 +58,8 @@ type Site struct {
 
 	// Calls mounts this deployable's CALLS SURFACE on its own origin (calls.go): the ten
 	// routes under /_memql/calls, and the page policy that lets its page reach the media
-	// servers and ask for the camera (csp_calls.go). Its one writer is updateSiteCalls, which
-	// an operator reaches through the callsSiteEnable builtin.
+	// servers, ask for the camera and compile WebAssembly (csp_calls.go). Its one writer is
+	// updateSiteCalls, which an operator reaches through the callsSiteEnable builtin.
 	//
 	// OFF IS THE DEFAULT AND ABSENT READS AS OFF, ShopperForms' rule and for its reason:
 	// every row written before the field existed resolves with no calls surface. Independent
