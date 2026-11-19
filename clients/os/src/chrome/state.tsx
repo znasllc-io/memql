@@ -590,7 +590,9 @@ export function OsProvider({
 
   const actionsRef = useRef<OsActions | null>(null);
   if (!actionsRef.current) {
-    const set = (updater: (s: OsState) => OsState) => setState((s) => pruneSurfaces(updater(s)));
+    // Every action ends with the empty-desk sweep, with the surfaces in view
+    // (gcState), so a desk left empty goes however it was left.
+    const set = (updater: (s: OsState) => OsState) => setState((s) => pruneSurfaces(gcState(updater(s))));
     let lastEffect: ShellEffect = { kind: "none" };
 
     actionsRef.current = {
@@ -887,9 +889,10 @@ function defaultSection(registry: OsRegistry, appId: AppId): string {
   return sectionsFor(app)[0]?.id ?? "";
 }
 
-/** GC pass exposed for tests: prune desks then surfaces coherently. */
+/** Drop desks left empty, then their surfaces; unchanged state when none. */
 export function gcState(state: OsState): OsState {
   const shell = gcAutoDesks(state.shell, (deskId) => surfaceHasContent(state.surfaces[deskId]));
+  if (shell === state.shell) return state;
   const deskIds = new Set(shell.desks.map((d) => d.id));
   const surfaces = Object.fromEntries(Object.entries(state.surfaces).filter(([id]) => deskIds.has(id)));
   return { ...state, shell, surfaces };

@@ -320,7 +320,7 @@ describe("desk switch motion (owner, Nov 2026)", () => {
       renderShell();
       openFromLauncher("Files");
       openFromLauncher("Fleet");
-      fireEvent.click(screen.getByRole("button", { name: "New desk" }));
+      openFromLauncher("Deployables"); // desk 2: an empty one would delete itself
       fireEvent.click(screen.getByRole("button", { name: "New desk" }));
       expect(screen.getByRole("button", { name: /^Desk 3, current/ })).toBeTruthy();
       vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
@@ -357,24 +357,37 @@ describe("desk switch motion (owner, Nov 2026)", () => {
   });
 });
 
-describe("the empty-desk limit (owner, Nov 2026)", () => {
-  it("greys New desk out while two desks are empty and lights it again once one is used", () => {
-    // The first desk holds the seeded Ask widget, so it is in use: a second
-    // and a third desk may be added, then no more until one gets something.
+describe("empty desks (José and the owner, Nov 2026)", () => {
+  it("an unused new desk deletes itself once left, and New desk waits while you are on an empty one", () => {
+    // The first desk holds the seeded Ask widget, so it is in use.
+    renderShell();
+    const pager = screen.getByRole("navigation", { name: "Desks" });
+    const plus = () => within(pager).getByRole("button", { name: "New desk" });
+    fireEvent.click(plus());
+    expect(screen.getByText("Desk 2 of 2")).toBeTruthy();
+    expect(plus().getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(plus());
+    expect(screen.getByText("Desk 2 of 2")).toBeTruthy();
+    fireEvent.click(within(pager).getByRole("button", { name: "Desk 1" }));
+    expect(screen.getByText("Desk 1 of 1")).toBeTruthy();
+    fireEvent.click(plus());
+    openFromLauncher("Files");
+    expect(plus().hasAttribute("aria-disabled")).toBe(false);
+    fireEvent.click(plus());
+    expect(screen.getByText("Desk 3 of 3")).toBeTruthy();
+    fireEvent.click(within(pager).getByRole("button", { name: "Desk 2" }));
+    expect(screen.getByText("Desk 2 of 2")).toBeTruthy();
+  });
+
+  it("closing a desk's last app keeps you there; leaving then deletes it", () => {
     renderShell();
     const pager = screen.getByRole("navigation", { name: "Desks" });
     fireEvent.click(within(pager).getByRole("button", { name: "New desk" }));
-    fireEvent.click(within(pager).getByRole("button", { name: "New desk" }));
-    expect(screen.getByText("Desk 3 of 3")).toBeTruthy();
-    const plus = within(pager).getByRole("button", { name: "New desk" });
-    expect(plus.getAttribute("aria-disabled")).toBe("true");
-    fireEvent.click(plus);
-    expect(screen.getByText("Desk 3 of 3")).toBeTruthy();
     openFromLauncher("Files");
-    expect(within(pager).getByRole("button", { name: "New desk" }).hasAttribute("aria-disabled")).toBe(false);
-    fireEvent.click(within(pager).getByRole("button", { name: "New desk" }));
-    expect(screen.getByText("Desk 4 of 4")).toBeTruthy();
-    expect(within(pager).getByRole("button", { name: "New desk" }).getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Close Files" }));
+    expect(screen.getByText("Desk 2 of 2")).toBeTruthy();
+    fireEvent.click(within(pager).getByRole("button", { name: "Desk 1" }));
+    expect(screen.getByText("Desk 1 of 1")).toBeTruthy();
   });
 });
 

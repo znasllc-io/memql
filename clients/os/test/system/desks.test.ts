@@ -11,6 +11,7 @@ import {
   consumeIntent,
   DESK_CAP,
   deskById,
+  gcAutoDesks,
   initialShell,
   makeBorderless,
   openApp,
@@ -160,10 +161,24 @@ describe("desk lifecycle", () => {
     expect(s.desks.map((d) => d.id)).toContain(autoDeskId);
   });
 
-  it("never collects user-created desks, and always keeps at least one", () => {
-    let s = addDesk(initialShell());
+  it("keeps an empty desk made with + while its surface cannot be checked", () => {
+    let s = addDesk(openApp(initialShell(), "a").state);
     s = switchDesk(s, s.desks[0]!.id);
     expect(s.desks).toHaveLength(2);
+  });
+
+  it("deletes an empty desk made with + once left, unless its surface shows something", () => {
+    const s = addDesk(openApp(initialShell(), "a").state);
+    const added = s.activeDeskId;
+    const back = s.desks[0]!.id;
+    expect(switchDesk(s, back, { deskHasSurfaceContent: id => id === added }).desks).toHaveLength(2);
+    expect(switchDesk(s, back, { deskHasSurfaceContent: () => false }).desks.map(d => d.id)).toEqual([back]);
+  });
+
+  it("never deletes the desk you are on, so one desk always remains", () => {
+    let s = openApp(initialShell(), "a").state;
+    s = closeWindow(s, windowForApp(s, "a")!.id).state;
+    expect(gcAutoDesks(s, () => false).desks).toHaveLength(1);
   });
 
   it("switchDeskBy walks the desk strip and stops at the ends", () => {
@@ -176,23 +191,21 @@ describe("desk lifecycle", () => {
 });
 
 describe("the empty-desk limit (owner, Nov 2026)", () => {
-  it("allows the desks in use plus two empty ones, and refuses a third empty desk", () => {
-    expect(MAX_EMPTY_DESKS).toBe(2);
-    let s = addDesk(initialShell());
-    expect(s.desks).toHaveLength(2);
+  it("allows the desks in use plus one empty one, and refuses a second empty desk", () => {
+    expect(MAX_EMPTY_DESKS).toBe(1);
+    const s = initialShell();
     expect(canAddDesk(s)).toBe(false);
     expect(addDesk(s)).toBe(s);
   });
 
-  it("allows another desk once an empty one gets a window or surface content", () => {
-    let s = addDesk(initialShell());
-    s = openApp(s, "a").state;
+  it("allows another desk once the empty one gets a window or surface content", () => {
+    let s = openApp(initialShell(), "a").state;
     expect(canAddDesk(s)).toBe(true);
     s = addDesk(s);
-    expect(s.desks).toHaveLength(3);
+    expect(s.desks).toHaveLength(2);
     expect(canAddDesk(s)).toBe(false);
-    const third = s.desks[2]!.id;
-    expect(canAddDesk(s, (id) => id === third)).toBe(true);
+    const second = s.desks[1]!.id;
+    expect(canAddDesk(s, (id) => id === second)).toBe(true);
   });
 });
 

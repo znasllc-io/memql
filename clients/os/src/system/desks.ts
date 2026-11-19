@@ -19,16 +19,19 @@ export const DESK_CAP = 2;
 
 /**
  * At most this many empty desks at once (the owner and José, Nov 2026): the
- * desks in use plus two. You can always open a desk to work on, but "+"
- * cannot pile up desks with nothing on them; once one gets an app, a file or
- * a widget, another can be added. Absent, never disabled: the pager hides "+"
- * while the limit is reached.
+ * desks in use plus one. An empty desk deletes itself once you leave it
+ * (gcAutoDesks), so the only empty desk is the one you are on, and "+" waits,
+ * greyed, until it gets an app, a file or a widget.
  */
-export const MAX_EMPTY_DESKS = 2;
+export const MAX_EMPTY_DESKS = 1;
 
 export interface Desk {
   id: DeskId;
-  /** "user" desks never garbage-collect; "auto" desks do when left empty. */
+  /**
+   * Who made it: "+" or a move ("user"), or the shell ("auto"). Both are
+   * collected once left empty; a "user" desk only when its surface can be
+   * checked (gcAutoDesks).
+   */
   createdBy: "user" | "auto";
   /** Ordered window ids; index 0 renders left (or solo/centered). */
   windows: WindowId[];
@@ -449,8 +452,11 @@ export function canAddDesk(
 }
 
 /**
- * Drop auto-created desks that are inactive and completely empty. The desk
- * you are on is never collected under you; user-created desks never are.
+ * Empty desks delete themselves once left (José, Nov 17 2026): drop every
+ * inactive desk with nothing on it. The desk you are on is never collected
+ * under you, so one always remains. A desk made with "+" or a move goes only
+ * when `deskHasSurfaceContent` is given: without it a file or widget on its
+ * surface could not be seen, and the desk would take them with it.
  */
 export function gcAutoDesks(
   state: ShellState,
@@ -459,7 +465,7 @@ export function gcAutoDesks(
   const keep = state.desks.filter(
     (d) =>
       d.id === state.activeDeskId ||
-      d.createdBy === "user" ||
+      (d.createdBy === "user" && !deskHasSurfaceContent) ||
       !isEmptyDesk(state, d, deskHasSurfaceContent),
   );
   if (keep.length === state.desks.length) return state;
