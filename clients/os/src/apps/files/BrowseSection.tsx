@@ -2,7 +2,7 @@ import { LoadMore } from "../../kit/LoadMore";
 import type { LibraryArtifactsFeed } from "./useLibrary";
 import { usePageScroll } from "../../kit/pageNavigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Download, FilePlus, FileText, FolderInput, FolderPlus, Layers, Monitor, RotateCcw, SquareArrowOutUpRight, Trash2, Upload } from "lucide-react";
+import { Download, FilePlus, FileText, FolderInput, FolderPlus, Import, Layers, Monitor, RotateCcw, SquareArrowOutUpRight, Trash2, Upload } from "lucide-react";
 import { IconButton } from "../../kit/IconButton";
 import { Mark } from "../../chrome/Mark";
 import {
@@ -31,7 +31,9 @@ import { AddButton } from "../../kit/AddButton";
 import { InPlaceAsk } from "../../kit/pressHold";
 import { FileFolders } from "./FileFolders";
 import { FilesRail } from "./Rail";
-import { SharingWith, useFileShares } from "./sharing";
+import { ShareFoot } from "./sharing";
+import { noticeFromRow, useCanShareFiles, useFileShares, useShareDirectory, useSharedWithMe, type SharedNotice } from "./useSharing";
+import { useLiveView } from "../../live/liveView";
 import { FileTile } from "./Tiles";
 import {
   Button,
@@ -57,6 +59,7 @@ import { binItemFromArtifact } from "../bin/rows";
 import { planRestore, runRestore } from "../bin/restore";
 import {
   artifactFingerprint,
+  artifactFromRow,
   artifactName,
   fileStory,
   type ArtifactRow,
@@ -96,6 +99,7 @@ const PLACE_TITLE: Record<FilesPlace, string> = {
   desktop: "Desktop",
   bin: "Bin",
   materializer: "Materializer",
+  shared: "Shared with me",
 };
 
 export function BrowseSection({
@@ -165,7 +169,7 @@ export function BrowseSection({
 }) {
   const { presence } = useMachinePresence();
   const { actions, registry } = useOs();
-  const { config } = useSession();
+  const { config, access } = useSession();
   const authSource = useAuthSource();
   const connection = useOsConnection();
   const patch = (p: Partial<FilesFilter>) => setFilter({ ...filter, ...p });
@@ -427,7 +431,7 @@ export function BrowseSection({
   // being looked at, so the root takes them -- and the Bin is nowhere to
   // upload TO, so it hands them to the Library root.
   const destinationFolderId =
-    filter.search.trim() !== "" || filter.place === "bin" || filter.place === "materializer"
+    filter.search.trim() !== "" || filter.place === "bin" || filter.place === "materializer" || filter.place === "shared"
       ? ""
       : (filter.folderId ?? "");
 
@@ -510,10 +514,10 @@ export function BrowseSection({
         ...ask,
       ];
     }
-    // The owner's order: Open and Download first, Delete last. Rename and
-    // Share with, which he also asked for, are absent until the engine can do
-    // them (rule 12: absent, never disabled) -- there is no file rename and no
-    // sharing in the Library yet.
+    // The owner's order: Open and Download first, Delete last. Rename,
+    // which he also asked for, is absent until the engine can do it (rule 12:
+    // absent, never disabled). Share with is not a menu entry: one click on a
+    // file opens it at the foot of the rail (sharing.tsx), as he chose.
     return [
       ...(!isZipArtifact(row) ? [{ id: "open", label: "Open", onSelect: () => openVsCodeFor(row) }] : []),
       download,
@@ -551,14 +555,95 @@ export function BrowseSection({
     openInVsCode(config.domain, row.id, () => setVsNoAnswer(true), undefined, editorFilename(row));
   };
 
+  // A file shared WITH the caller offers exactly two acts: take a copy home,
+  // or keep one of your own. It is somebody else's file, so nothing here
+  // opens, moves, archives or re-shares it.
+  const downloadNotice = async (notice: SharedNotice) => {
+    setRowNote(null);
+    try {
+      await downloadArtifact({
+        artifactId: notice.artifactId,
+        name: notice.title,
+        // The sharer's file row is not the recipient's to read; the notice
+        // carries the size the download plan needs, so it answers the read.
+        fileId: notice.artifactId,
+        readFile: async () => ({ sizeBytes: notice.size, name: notice.title }),
+        bearer: () => authSource.bearer(),
+      });
+    } catch (err: unknown) {
+      refuse("The download did not land.", "Nothing was saved.", err);
+    }
+  };
+
+  const saveNotice = async (notice: SharedNotice) => {
+    const query = connection?.query ?? null;
+    if (query === null) {
+      refuse("The copy was not saved.", "Nothing was added to your Library.", "Not connected to the cluster.");
+      return;
+    }
+    setRowNote(null);
+    try {
+      await query.librarySaveSharedCopy({ artifactId: notice.artifactId });
+      setRailNote(`Saved "${notice.title}" to your Library.`);
+      setTimeout(() => setRailNote(""), 5000);
+    } catch (err: unknown) {
+      refuse("The copy was not saved.", "Nothing was added to your Library.", err);
+    }
+  };
+
+  const noticeMenuEntries = (notice: SharedNotice): MenuEntry[] => [
+    { id: "download", label: "Download", onSelect: () => void downloadNotice(notice) },
+    { id: "save", label: "Save to my Library", disabled: connection === null, onSelect: () => void saveNotice(notice) },
+  ];
+  const [noticeMenu, setNoticeMenu] = useState<{ x: number; y: number; notice: SharedNotice } | null>(null);
+
+  // The Share panel's acts. ShareFoot renders a thrown sentence in place, and
+  // the share rows arrive on their own events, so nothing is patched here.
+  // Renew is the same call: sharing again with someone who holds an active
+  // share restarts it for the days it was given.
+  const shareFile = async (artifactId: string, recipientUserId: string, days: number) => {
+    const query = connection?.query ?? null;
+    if (query === null) throw new Error("Not connected to the cluster, so nothing was shared.");
+    await query.libraryShareFile({ artifactId, recipientUserId, days });
+  };
+  const stopShare = async (shareId: string) => {
+    const query = connection?.query ?? null;
+    if (query === null) throw new Error("Not connected to the cluster, so the share was not stopped.");
+    await query.libraryShareStop({ shareId });
+  };
+
   const selected = content.find((r) => r.id === selectedId)
     ?? (explicitSelection?.id === selectedId ? explicitSelection : null);
   // The picked file, for the Head's icons. Absent once it leaves the list --
   // deleted, moved away, or filtered out -- so the icons never act on a file
   // nobody can see.
   const pickedRow = picked === "" ? null : content.find((r) => r.id === picked) ?? null;
-  const shares = useFileShares();
-  const sharingWith = pickedRow === null ? [] : shares.get(pickedRow.id) ?? [];
+
+  // SHARING (the engine's library sharing, Nov 2026). The Share panel sits at
+  // the foot of the rail for a picked file the caller owns and still has --
+  // never in the Bin, never for a file shared WITH them, never without the
+  // part -- and is absent otherwise (rule 12). Shared with me is a place of its
+  // own, fed by the caller's share notices rather than their Library.
+  const shared = filter.place === "shared";
+  const canShare = useCanShareFiles();
+  const sharing =
+    canShare && selected === null && filter.place !== "bin" && !shared &&
+    pickedRow !== null && !pickedRow.archived && access !== null && pickedRow.ownerUserId === access.userId
+      ? pickedRow
+      : null;
+  const directory = useShareDirectory(sharing !== null);
+  const fileShares = useFileShares(sharing?.id ?? "");
+  const notices = useSharedWithMe(shared);
+  const noticeList = useLiveView<Row, SharedNotice>(notices.source, `files:shared:${filter.sortAscending ? "asc" : "desc"}`, (rows) => {
+    const direction = filter.sortAscending ? 1 : -1;
+    return rows.map(noticeFromRow).filter((n) => n.id !== "")
+      .sort((a, b) => direction * (a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)));
+  });
+  const pickedNotice = shared && picked !== "" ? noticeList?.snapshot.rows.find((n) => n.id === picked) ?? null : null;
+  const pickedActs = selected !== null ? null
+    : pickedNotice !== null ? { name: pickedNotice.title, entries: noticeMenuEntries(pickedNotice) }
+    : pickedRow !== null ? { name: artifactName(pickedRow), entries: rowMenuEntries(pickedRow) }
+    : null;
   const archivedFolderIdSet = new Set(archivedFolders.map((f) => f.id));
   const searching = filter.search.trim() !== "";
   const accountOptions = useAccountOptions();
@@ -577,18 +662,21 @@ export function BrowseSection({
 
   // Empty and filtered-to-empty are DIFFERENT answers: one is about the
   // place, the other about the question just asked of it.
-  const narrowed =
+  const narrowed = !shared && (
     searching ||
     filter.kind !== "all" ||
     filter.source !== "all" ||
     filter.accountId !== ACCOUNT_ANY ||
     filter.label !== LABEL_ANY ||
-    filter.folderId !== "";
+    filter.folderId !== "");
   // The Head's meta is what the LIST is showing right now -- scoped folder,
   // facets and search included -- never a different population's number
   // beside the scope's name.
-  const listedCount = list?.snapshot.rows.length ?? 0;
-  const emptyText = narrowed
+  const listedSnapshot = shared ? noticeList?.snapshot : list?.snapshot;
+  const listedCount = listedSnapshot?.rows.length ?? 0;
+  const emptyText = shared
+    ? "Nothing has been shared with you."
+    : narrowed
     ? "Nothing matches. Clear the search or filters to see your files."
     : filter.place === "desktop"
       ? "Nothing on your desks. Send a file to the desk from the Library, or drop one onto the desk."
@@ -664,6 +752,7 @@ export function BrowseSection({
     : filter.place === "library" ? tree.roots.map(node => node.folder)
     : filter.place === "desktop" ? deskFolders.flatMap(shortcut => { const node = tree.byId.get(shortcut.folderId); return node ? [node.folder] : []; })
     : filter.place === "bin" ? archivedFolders
+    : shared ? []
     : materializedRail.folders.map(entry => entry.folder);
   const pageRoot = usePageScroll(`${filter.place}:${filter.folderId ?? ""}:${selectedId}`);
 
@@ -698,9 +787,19 @@ export function BrowseSection({
         onFolder={(folderId) => { onSelect(""); setPicked(""); patch({ place: "library", folderId, search: "" }); }}
         onFolderMenu={(x, y, node) => setFolderMenu({ x, y, node })}
       />
-      {sharingWith.length > 0 ? <SharingWith names={sharingWith} /> : null}
+      {sharing !== null && directory.people !== null ? (
+        <ShareFoot
+          key={sharing.id}
+          people={directory.people}
+          peopleError={directory.error}
+          shares={fileShares}
+          onShare={(recipientUserId, days) => shareFile(sharing.id, recipientUserId, days)}
+          onRenew={(share) => shareFile(sharing.id, share.recipientUserId, share.days)}
+          onStop={(share) => stopShare(share.shareId)}
+        />
+      ) : null}
       <div className="os-files-main">
-      <Head navigationKey={`browse:${filter.place}:${filter.folderId ?? ""}`} title={headTitle} breadcrumbs={headTrail} navigation={selected === null} back={filter.folderId ? {label: PLACE_TITLE[filter.place], onSelect: () => patch({folderId: tree.byId.get(filter.folderId!)?.folder.parentFolderId ?? ""})} : undefined} meta={listCount(list?.snapshot, listedCount) === undefined ? undefined : `${listedCount}${artifacts.hasMore ? "+" : ""}`}>
+      <Head navigationKey={`browse:${filter.place}:${filter.folderId ?? ""}`} title={headTitle} breadcrumbs={headTrail} navigation={selected === null} back={filter.folderId ? {label: PLACE_TITLE[filter.place], onSelect: () => patch({folderId: tree.byId.get(filter.folderId!)?.folder.parentFolderId ?? ""})} : undefined} meta={listCount(listedSnapshot, listedCount) === undefined ? undefined : `${listedCount}${!shared && artifacts.hasMore ? "+" : ""}`}>
         {/* ONE WAY TO ADD SOMETHING (DESIGN.md rule 1: at most one primary
             action). Uploading a file and making a folder are the same
             question -- "put something here" -- and they were answered in two
@@ -715,9 +814,9 @@ export function BrowseSection({
             right-click menu, so the two can never disagree; an entry the menu
             would show disabled is absent here (rule 12). A hairline keeps
             them apart from Sort, Refine and Add, which are about the folder. */}
-        {pickedRow !== null && selected === null ? (
-          <span className="os-files-picked-acts" role="group" aria-label={`Selected: ${artifactName(pickedRow)}`}>
-            {rowMenuEntries(pickedRow).filter((entry) => !entry.disabled).map((entry) => (
+        {pickedActs !== null ? (
+          <span className="os-files-picked-acts" role="group" aria-label={`Selected: ${pickedActs.name}`}>
+            {pickedActs.entries.filter((entry) => !entry.disabled).map((entry) => (
               <IconButton key={entry.id} label={entry.label} onClick={entry.onSelect}>
                 {PICKED_ICON[entry.id]}
               </IconButton>
@@ -728,7 +827,9 @@ export function BrowseSection({
           ascending={filter.sortAscending}
           onToggle={() => patch({ sortAscending: !filter.sortAscending })}
         />
-        <Refine
+        {/* Refine asks about the caller's own Library; Shared with me is a
+            short list of other people's files it cannot narrow. */}
+        {shared ? null : <Refine
           search={filter.search}
           onSearch={(search) => patch({ search })}
           chips={refineChips}
@@ -806,7 +907,7 @@ export function BrowseSection({
               ))}
             </Select>
           )}
-        </Refine>
+        </Refine>}
         <AddMenu
           disabled={connection === null}
           destinationName={destinationFolderId === "" ? "Library" : folderNameOf(destinationFolderId)}
@@ -921,6 +1022,31 @@ export function BrowseSection({
             <UploadPlaceholder key={task.id} task={task} />
           ))}
           <div className="os-files-files">
+          {shared ? (
+            <LiveList<SharedNotice>
+              key={`shared|${filter.sortAscending ? "asc" : "desc"}`}
+              source={noticeList}
+              rowId={(n) => n.id}
+              // A renewal moves expiresAt: the file is shared with you for longer.
+              fingerprint={(n) => `${n.title}|${n.expiresAt}`}
+              label={headTitle}
+              emptyText={emptyText}
+              renderRow={(notice, tick) => (
+                <FileTile
+                  row={noticeTile(notice)}
+                  caption={`from ${notice.sharerDisplayName || "someone"}`}
+                  fixed
+                  picked={picked === notice.id}
+                  dim={false}
+                  hint={`Shared with you until ${new Date(notice.expiresAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`}
+                  tick={tick}
+                  onPick={() => setPicked(notice.id)}
+                  onOpen={() => void downloadNotice(notice)}
+                  onMenu={(x, y) => setNoticeMenu({ x, y, notice })}
+                />
+              )}
+            />
+          ) : (
           <LiveList<ArtifactRow>
             key={`${filter.place}|${filter.folderId ?? "~"}|${filter.kind}|${filter.source}|${filter.accountId}|${filter.label}|${filter.search}`}
             source={list}
@@ -956,8 +1082,9 @@ export function BrowseSection({
               );
             }}
           />
+          )}
           </div>
-          <LoadMore feed={artifacts} />
+          {shared ? null : <LoadMore feed={artifacts} />}
           {facetsError ? <Caption>Folder counts and label options could not be updated. {facetsError}</Caption> : null}
           {/* THE EMPTY STATE OFFERS THE WAY OUT (DESIGN.md rule 4's shape:
               an empty list that does not explain itself is the failure).
@@ -1003,6 +1130,15 @@ export function BrowseSection({
           label="File"
           entries={rowMenuEntries(rowMenu.row)}
           onClose={() => setRowMenu(null)}
+        />
+      ) : null}
+      {noticeMenu !== null ? (
+        <ContextMenu
+          x={noticeMenu.x}
+          y={noticeMenu.y}
+          label="Shared file"
+          entries={noticeMenuEntries(noticeMenu.notice)}
+          onClose={() => setNoticeMenu(null)}
         />
       ) : null}
       {archivedFolderMenu !== null ? (
@@ -1295,4 +1431,10 @@ const PICKED_ICON: Record<string, ReactNode> = {
   ask: <Mark size={16} aria-hidden />,
   archive: <Trash2 size={16} aria-hidden />,
   restore: <RotateCcw size={16} aria-hidden />,
+  save: <Import size={16} aria-hidden />,
 };
+
+/** What a file tile needs of a shared file: its name and its type. */
+function noticeTile(notice: SharedNotice): ArtifactRow {
+  return artifactFromRow({ id: notice.id, kind: "file", title: notice.title, format: notice.format, mimeType: notice.mimeType });
+}

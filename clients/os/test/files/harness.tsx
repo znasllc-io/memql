@@ -15,7 +15,6 @@ import type { FilesSettings } from "../../src/apps/files/settings";
 import { DEFAULT_FILES_SETTINGS } from "../../src/apps/files/settings";
 import type { UploadProvider } from "../../src/items/upload";
 import type { DesktopItem } from "../../src/system/desktop";
-import { FileSharesContext, type FileShares } from "../../src/apps/files/sharing";
 
 // The Files app's test harness.
 //
@@ -103,6 +102,13 @@ export interface FakeSeed {
   byId?: Record<string, Row>;
   /** The account choices -- what `clientAccountsAll` answers. */
   accounts?: Row[];
+  /** File sharing (useSharing.ts): the people a file can go to
+   *  (libraryShareDirectory), the caller's shares (librarySharesForArtifact
+   *  answers the active ones of the file it names), and the notices of files
+   *  shared with the caller (librarySharedWithMe). */
+  shareDirectory?: Row[];
+  shares?: Row[];
+  sharedWithMe?: Row[];
   /** Refusal sentences, keyed by construct name (e.g. archiveArtifact). */
   refuse?: Record<string, string>;
 }
@@ -156,6 +162,12 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         return rowsResult([{ folders: [...folders].map(([folderId, count]) => ({ folderId, count })), labelGroups: rows.map(row => row.labels ?? []) }]);
       }
       if (name === "clientAccountsAll") return rowsResult(seed.accounts ?? []);
+      if (name === "libraryShareDirectory") return rowsResult(seed.shareDirectory ?? []);
+      if (name === "librarySharesForArtifact") return rowsResult((seed.shares ?? []).filter(row => row.artifactId === args.artifactId && !row.revokedAt));
+      if (name === "librarySharedWithMe") return rowsResult(seed.sharedWithMe ?? []);
+      if (name === "libraryShareFile") return rowsResult([{ shareId: "share-new", days: args.days, expiresAt: "2026-12-01T00:00:00Z" }]);
+      if (name === "libraryShareStop") return rowsResult([{ shareId: args.shareId, stopped: true }]);
+      if (name === "librarySaveSharedCopy") return rowsResult([{ artifactId: "copy-1", fileId: "copy-1-file" }]);
       if (name === "libraryFilesByIds") return rowsResult((seed.files ?? []).filter(row => (args.fileIds as string[] ?? []).includes(String(row.id))));
       if (name === "compositionOutputIndex") return rowsResult((seed.compositions ?? []).filter(row => args.fileIds == null || (args.fileIds as string[]).includes(String(row.outputFileId))).map(row => ({ id: row.id, ownerUserId: row.ownerUserId, name: row.name, status: row.status, outputFileId: row.outputFileId, format: row.format, archived: row.archived })));
       if (name === "libraryArtifactsInFolders") return page([...(seed.artifacts ?? []), ...(seed.archived ?? [])].filter(row => (args.folderIds as string[] ?? []).includes(String(row.folderId))), 50);
@@ -292,8 +304,6 @@ export async function renderFiles(opts: {
    * app is not there, and present when it is). Defaults to the real one.
    */
   registry?: OsRegistry;
-  /** Who files are shared with (sharing.tsx); nothing in a real cluster provides it yet. */
-  shares?: FileShares;
 } = {}) {
   const frame = (intent: typeof opts.intent) => (
     withSession(
@@ -304,7 +314,6 @@ export async function renderFiles(opts: {
         {...(opts.desk ? { store: deskDocumentWith(opts.desk) } : {})}
       >
         <MachinesProvider>
-          <FileSharesContext.Provider value={opts.shares ?? new Map()}>
           <FilesApp
             sectionId={opts.section ?? "browse"}
             navigate={() => {}}
@@ -315,7 +324,6 @@ export async function renderFiles(opts: {
             store={memSettingsStore(opts.settings ?? {})}
             uploads={opts.uploads ?? NO_UPLOADS}
           />
-          </FileSharesContext.Provider>
         </MachinesProvider>
       </OsProvider>,
     )
@@ -424,6 +432,37 @@ export function watchedFolderRow(over: Partial<Row> & { id: string }): Row {
     createdAt: "2026-08-30T12:00:00Z",
     ...over,
   } as Row;
+}
+
+/** One active v1:library:share of the caller's (the sharer's) file. */
+export function shareRow(over: Partial<Row> & { id: string; artifactId: string; recipientUserId: string }): Row {
+  return {
+    ownerUserId: "u-me",
+    recipientDisplayName: over.recipientUserId,
+    days: 7,
+    expiresAt: "2099-01-08T00:00:00Z",
+    revokedAt: "",
+    createdAt: "2026-11-18T12:00:00Z",
+    ...over,
+  };
+}
+
+/** One v1:library:shareNotice: a file somebody shared with the caller. */
+export function noticeRow(over: Partial<Row> & { id: string; artifactId: string }): Row {
+  return {
+    ownerUserId: "u-me",
+    shareId: `share-${over.id}`,
+    sharerUserId: "u-sharer",
+    sharerDisplayName: "Someone",
+    title: `${over.artifactId}.pdf`,
+    mimeType: "application/pdf",
+    format: "pdf",
+    size: 2048,
+    expiresAt: "2099-01-08T00:00:00Z",
+    endedAt: "",
+    createdAt: "2026-11-18T12:00:00Z",
+    ...over,
+  };
 }
 
 export function folderRow(over: Partial<Row> & { id: string }): Row {

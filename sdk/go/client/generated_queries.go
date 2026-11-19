@@ -6371,6 +6371,74 @@ func LibraryItemsForAccountBuild(args LibraryItemsForAccountArgs) string {
 	return b.String()
 }
 
+// LibraryShareById -- One of the caller's own shares by id, stopped or not -- what libraryShareStop checks ownership with and what an access reads, under the sharer, to decide. The caller compares revokedAt and expiresAt itself, against its own clock.
+//
+// Bound concept: v1:library:share (machine-readable: BoundConcepts["libraryShareById"] in generated_concepts.go).
+type LibraryShareByIdArgs struct {
+	ShareId string
+}
+
+// LibraryShareById calls the engine query libraryShareById.
+func (qc *QueryClient) LibraryShareById(ctx context.Context, args LibraryShareByIdArgs) (*Result, error) {
+	call := LibraryShareByIdBuild(args)
+	return qc.executeNamed(ctx, "libraryShareById", call)
+}
+
+func LibraryShareByIdBuild(args LibraryShareByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query libraryShareById(")
+	b.WriteString("shareId: ")
+	b.WriteString(quoteMemQL(args.ShareId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibrarySharedWithMe -- Files shared WITH the caller that have not ended or expired: the "Shared with me" list, live through the notice rows' graph events. artifactId narrows it to one file, which is how the download route and librarySaveSharedCopy find the share behind a file. A notice grants nothing: every access re-reads the share it names.
+//
+// Bound concept: v1:library:shareNotice (machine-readable: BoundConcepts["librarySharedWithMe"] in generated_concepts.go).
+type LibrarySharedWithMeArgs struct {
+	ArtifactId string
+}
+
+// LibrarySharedWithMe calls the engine query librarySharedWithMe.
+func (qc *QueryClient) LibrarySharedWithMe(ctx context.Context, args LibrarySharedWithMeArgs) (*Result, error) {
+	call := LibrarySharedWithMeBuild(args)
+	return qc.executeNamed(ctx, "librarySharedWithMe", call)
+}
+
+func LibrarySharedWithMeBuild(args LibrarySharedWithMeArgs) string {
+	var b strings.Builder
+	b.WriteString("query librarySharedWithMe(")
+	if args.ArtifactId != "" {
+		b.WriteString("artifactId: ")
+		b.WriteString(quoteMemQL(args.ArtifactId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibrarySharesForArtifact -- The caller's ACTIVE shares of one of their files -- who has it now, and until when. Backs the Share panel: `id` is the shareId libraryShareStop takes, `days` is what Renew sends back to libraryShareFile. Stopped and expired shares are not listed.
+//
+// Bound concept: v1:library:share (machine-readable: BoundConcepts["librarySharesForArtifact"] in generated_concepts.go).
+type LibrarySharesForArtifactArgs struct {
+	ArtifactId string
+}
+
+// LibrarySharesForArtifact calls the engine query librarySharesForArtifact.
+func (qc *QueryClient) LibrarySharesForArtifact(ctx context.Context, args LibrarySharesForArtifactArgs) (*Result, error) {
+	call := LibrarySharesForArtifactBuild(args)
+	return qc.executeNamed(ctx, "librarySharesForArtifact", call)
+}
+
+func LibrarySharesForArtifactBuild(args LibrarySharesForArtifactArgs) string {
+	var b strings.Builder
+	b.WriteString("query librarySharesForArtifact(")
+	b.WriteString("artifactId: ")
+	b.WriteString(quoteMemQL(args.ArtifactId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // LibraryWatchedFolders -- The caller's watched folders, live (epic memql#4783, the cockpit half memql#4841).
 // ONE READ SERVES BOTH CONSUMERS, and that is deliberate. The Files app wants every watch the person has; a cockpit wants the watches for the one machine it is. Those are the same question with a guard on it, and a second query would be a second place for the owner filter and the soft-delete spelling to drift -- the `row.archived != true` / `== true` asymmetry two constructs up is exactly the kind of drift a duplicate read acquires.
 // `workerId` is GUARDED, so an absent argument is the whole list rather than a match on the empty string. There is no half-supplied-key hazard here the way there is on libraryFileByUploadedFrom, because there is only one part to supply.

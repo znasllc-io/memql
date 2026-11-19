@@ -43,7 +43,9 @@ export function useLibraryFeeds(filter: FilesFilter, desk: DeskMembership, enabl
   const sourceRefs = outputIds.flatMap(id => [id, `v1:library:file:${id}`]).sort();
   const args = libraryBrowseArgs(effectiveFilter, desk, sourceRefs);
   const argsKey = JSON.stringify(args);
-  const ready = enabled && (filter.place !== "materializer" || outputs.snapshot.state !== "seeding");
+  // Shared with me lists other people's files from their notices
+  // (useSharing.ts); the caller's own Library is not read for it at all.
+  const ready = enabled && filter.place !== "shared" && (filter.place !== "materializer" || outputs.snapshot.state !== "seeding");
   const artifacts = usePagedCollection<Row>(ready ? `files:browse:${filter.sortAscending}:${argsKey}` : null, connection => ({
     concept: ARTIFACT_CONCEPT,
     comparePageRows: (a, b) => {

@@ -4510,7 +4510,22 @@ a.os-button {
 .os-files-sharing { grid-column: 1; grid-row: 1; align-self: end; position: sticky; bottom: 0; margin-right: 10px; padding: 12px 0 8px; border-top: 1px solid var(--os-line); background: var(--os-glass-solid); }
 .os-files-sharing-head { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; font-size: var(--os-text-sm); font-weight: 500; color: var(--os-muted); }
 .os-files-sharing-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
-.os-files-sharing-list li { display: flex; align-items: center; gap: 10px; min-height: var(--os-control-h); color: var(--os-ink); }
+.os-files-sharing-list { max-height: 40vh; overflow-y: auto; }
+.os-files-sharing-list button { appearance: none; display: flex; align-items: center; gap: 10px; width: 100%; min-height: var(--os-control-h); padding: 0 8px; border: 0; border-radius: var(--os-selection-radius); background: transparent; color: var(--os-ink); font: inherit; text-align: left; cursor: pointer; }
+.os-files-sharing-list button:hover { background: var(--os-hover); }
+.os-files-sharing-list button[aria-pressed="true"] { background: color-mix(in srgb, var(--os-accent) 12%, transparent); box-shadow: inset 2px 0 0 var(--os-accent); }
+.os-files-sharing-list button:focus-visible { outline: 2px solid var(--os-accent); outline-offset: -2px; }
+.os-files-sharing-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.os-files-sharing-tag { margin-left: auto; font-size: var(--os-text-sm); color: var(--os-muted); }
+/* The panel a chosen person opens, ABOVE the names (Jesus, Nov 18 2026). */
+.os-files-share-ask { display: grid; gap: 8px; margin: 0 0 8px; padding: 0 0 10px; border-bottom: 1px solid var(--os-line); }
+.os-files-share-days { display: flex; align-items: center; gap: 8px; font-size: var(--os-text-sm); color: var(--os-muted); }
+.os-files-share-days .os-choice-row { flex: 1; gap: 4px; margin: 0; }
+.os-files-share-days .os-choice { flex: 1; justify-content: center; padding: 0; }
+.os-files-share-acts { display: flex; gap: 8px; }
+.os-files-share-acts > * { flex: 1; justify-content: center; }
+.os-files-share-state, .os-files-share-empty { margin: 0; font-size: var(--os-text-sm); color: var(--os-muted); }
+.os-files-share-error { margin: 0; font-size: var(--os-text-sm); color: var(--os-error); }
 .os-files-sharing-ava { display: inline-grid; place-items: center; flex: none; width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--os-line); font-size: 10.5px; color: var(--os-muted); }
 @container os-files (max-width: 560px) {
   .os-files-browse > .os-files-main { grid-column: 1; grid-row: 2; }
@@ -4610,6 +4625,8 @@ a.os-button {
   font-size: var(--os-text-xs);
   color: var(--os-muted);
 }
+/* Who shared a file with you: a name, so the text face, not the data face. */
+.os-files-tile-from { font-family: inherit; }
 
 .os-files-rename { display: flex; gap: 8px; padding: 12px 4px; }
 .os-files-rename input { flex: 1; min-width: 0; }

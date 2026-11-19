@@ -1475,6 +1475,17 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// provenance; actor.userId cannot attest either on a client's own row.
 		{Path: "library/mutations.memql", Name: "recordPreparedLibraryImage"}: true,
 
+		// File sharing (2026-11-18). Both concepts are @serverWritten. A
+		// share is the caller's own row, but actor.userId cannot hold the
+		// three bounds libraryShareFile does (one of four lifetimes, a
+		// recipient the directory offers, a file the caller owns); a notice is
+		// owned by the RECIPIENT, who must not be able to write one. Reached
+		// only through integrations/library/sharestore, behind share.go.
+		{Path: "library/mutations.memql", Name: "putLibraryShare"}:       true,
+		{Path: "library/mutations.memql", Name: "endLibraryShare"}:       true,
+		{Path: "library/mutations.memql", Name: "putLibraryShareNotice"}: true,
+		{Path: "library/mutations.memql", Name: "endLibraryShareNotice"}: true,
+
 		// Document history is authored only after a shared write lock, a fresh
 		// owned-row read and a revision comparison. Even the document's owner
 		// must not bypass those checks to forge version numbers or timestamps.

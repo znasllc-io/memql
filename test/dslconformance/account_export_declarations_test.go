@@ -27,6 +27,8 @@ var stayingKinds = map[string]string{
 	"v1:calls:session":              "signin",
 	"v1:calls:queueEntry":           "transit",
 	"v1:platform:sitePreviewGrant":  "signin",
+	"v1:library:share":              "signin",
+	"v1:library:shareNotice":        "signin",
 	"v1:identity:invitation":        "signin",
 	"v1:library:uploadSession":      "transit",
 	"v1:platform:outboxEntry":       "transit",

@@ -55,6 +55,8 @@ func TestNoSHA256InIntegrations(t *testing.T) {
 		"knowledge/seeddata/manifest.go":         "verifies standard SHA-256 of checked-in source and provenance bytes independently against manifest.sha256; row identities remain on core/id, whose composition is not the manifest byte checksum",
 		"library/revision_images_db_test.go":     "independently computes the immutable image's standard SHA-256 file receipt to test byte pins across replicas; core/id is not the storage checksum",
 		"library/upload_read_file_db_test.go":    "independently verifies uploaded bytes against v1:library:file.sha256 across engines; core/id is not the storage protocol's standard SHA-256 checksum",
+		"library/share.go":                       "streams the standard SHA-256 checksum verified storage requires for a shared file's copy and v1:library:file.sha256; share ids use core/id separately",
+		"library/share_db_test.go":               "independently computes the standard SHA-256 receipt of shared and copied file bytes across replicas; core/id is not the storage checksum",
 		"library/review_applied.go":              "verifies an existing immutable storage receipt against app/library_revision_files.go's raw SHA-256 operation path; core/id uses a different composition and cannot identify already-written blobs",
 		"library/review_applied_test.go":         "independently constructs the existing immutable blob receipt protocol for operation and byte-integrity verification",
 		"library/review_attachments.go":          "pins exact reference-file bytes in persisted approval receipts using standard SHA-256; core/id is order-independent/idempotent composition, not an interoperable byte-integrity checksum",

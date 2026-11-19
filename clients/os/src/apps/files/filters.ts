@@ -14,8 +14,8 @@ import { artifactName, isContentKind, type ArtifactRow } from "./rows";
 // ===========================================================================
 // PLACES, NOT A CHECKBOX (epic memql#4842, #4846)
 // ===========================================================================
-// The rail offers four places and the fold answers for the one being looked
-// at. Library is what you have; Desktop is the subset sitting on your desks;
+// The rail offers five places and the fold answers for the one being looked
+// at (Shared with me answers with nothing: see FILES_PLACES). Library is what you have; Desktop is the subset sitting on your desks;
 // the Bin is what you archived; the Materializer is what was composed from
 // the memory graph (epic memql#4981, #4983). The old `showArchived` toggle is
 // gone -- archived rows have a place now, not a filter.
@@ -43,7 +43,10 @@ export const ACCOUNT_NONE = "none";
 export type KindFilter = "all" | (typeof CONTENT_KINDS)[number];
 export type SourceFilter = "all" | (typeof SOURCE_VALUES)[number];
 
-export const FILES_PLACES = ["library", "desktop", "materializer", "bin"] as const;
+// `shared` is what other people shared WITH the caller (Nov 2026). Its tiles are
+// share notices, read on their own feed (useSharing.ts): none of the caller's
+// own artifacts belongs to it, so the fold below keeps nothing there.
+export const FILES_PLACES = ["library", "desktop", "materializer", "shared", "bin"] as const;
 export type FilesPlace = (typeof FILES_PLACES)[number];
 
 export function isFilesPlace(value: unknown): value is FilesPlace {
@@ -64,7 +67,7 @@ export const EMPTY_DESK: DeskMembership = {
 };
 
 export interface FilesFilter {
-  /** Which of the rail's three places is being looked at. */
+  /** Which of the rail's places is being looked at. */
   place: FilesPlace;
   /**
    * The folder scope: "" = the place's own root, an id = that folder, null =
@@ -189,6 +192,8 @@ export function applyFilters(
       } else if (row.folderId !== filter.folderId) {
         return false;
       }
+    } else if (filter.place === "shared") {
+      return false;
     } else if (filter.place === "materializer") {
       // ARCHIVED OUTPUTS ARE THE BIN'S, not this place's. One file offering
       // Restore from two places is the ambiguity the Bin rename removed, and
