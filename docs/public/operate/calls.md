@@ -158,10 +158,12 @@ eight, the provider `hetzner`, the control API at the public host over TLS, secr
 same template the local target uses (`deploy/media/livekit.yaml.tmpl`, with the
 server's public IPv4 from Hetzner's metadata, the webhook URL
 `https://api.<domain>/inbound/livekit`, and its TURN server on), renders Caddy's for the
-two names, starts the server, and waits until LiveKit answers through Caddy. If it
-reports no answer, the server is started but Caddy has no certificate yet: check the
-records from step 2 and that ports 80 and 443 reach the server, then run the same
-command again, which changes nothing already in place and checks again.
+two names, starts the server, and waits until both names answer through Caddy: LiveKit
+at the public host, and a TLS handshake with a certificate for the TURN name (what
+answers behind that name is TURN, so the handshake is the whole check). If it reports
+either missing, the server is started but Caddy has no certificate for that name yet:
+check the records from step 2 and that ports 80 and 443 reach the server, then run the
+same command again, which changes nothing already in place and checks again.
 
 Then put the same file in the instance's `memql-calls-media` Secret, the way the
 instance keeps its Secrets: an entry in its secret store that its ExternalSecret reads,
@@ -240,16 +242,31 @@ until the bff restarts too a pass it mints is signed with the old key. So:
    at boot it seals the new credentials over the old ones.
 5. Switch calls back on.
 
+### Replacing a server
+
+A server keeps what its first boot wrote and pulled: the LiveKit template, the compose
+file, `memql-media` itself and the pinned images. `memql-media configure` renders from
+those files, never from the repository, so a later change under `deploy/media`, a
+LiveKit upgrade included, reaches production only on a server made from the new
+revision. Until then the local target, which renders from the checkout, can run what no
+production server runs. To move the installation from `m1` to `m2`:
+
+1. Drain `m1`.
+2. Create `m2` from the new revision: steps 1 to 3 under its own name, with its own DNS
+   records and a `media.env` of its own, with new key pairs.
+3. Put `m2`'s values in the `memql-calls-media` Secret and restart the bff (step 5): the
+   media server MemQL records takes `m2`'s addresses and keys.
+4. Check that a call works, then switch calls back on.
+5. Remove `m1`, below.
+
 ### Removing a server
 
 Drain it first. MemQL repairs a call's seats from what its media server reports, and a
 server that is gone reports nothing, so a call still open on a removed server is never
 repaired: its seats stay in the call.
 
-- **To replace it**, create the new server (steps 1 to 3 under its own name, `m2`), put
-  its values in the Secret, restart the bff (the media server MemQL records takes the new
-  addresses), check that a call works, and switch calls back on. Then delete the old
-  server.
+- **To replace it**, follow [Replacing a server](#replacing-a-server), which removes the
+  old server last.
 - **To leave the installation without one**, keep calls off. With the eight values gone
   from the Secret the bff records nothing new, but it keeps the media server it recorded
   last and places calls on it, so switching calls on again would place them on a server
@@ -268,15 +285,20 @@ delete it with the last one.
 | `caddy` | `livekit/caddyl4:v2.11.3`, pinned by digest | port 443, routed by TLS server name: the public host to LiveKit's port 7880 over HTTP/1.1, the TURN name to its TURN server with the client's address in a PROXY header; the certificates for both |
 
 All three run on the host's network, as LiveKit's own self-hosting layout runs them, from
-`/etc/memql-media/compose.yaml`, and Docker restarts them after a reboot. LiveKit and
-Redis run the versions the local target runs: an upgrade of LiveKit is reviewed first,
-for both. The Caddy build is LiveKit's own, Caddy with the layer-4 and YAML modules.
+`/etc/memql-media/compose.yaml`, and Docker restarts them after a reboot. Docker runs
+with `live-restore`, so a restart of Docker itself, which Ubuntu's unattended security
+updates make when they update it, leaves the containers and their calls running. A
+server is made with the LiveKit and Redis versions the local target runs, and keeps them
+until it is replaced ([Replacing a server](#replacing-a-server)): an upgrade of LiveKit
+is reviewed first, for both targets. The Caddy build is LiveKit's own, Caddy with the
+layer-4 and YAML modules.
 
-The server's configuration matches the local target's wherever the two can agree: rooms
-exist only once MemQL creates them, the codecs are Opus with redundancy, VP8 and H.264
-with retransmission, a participant receives at most 10 video tracks at once, and the
-webhook sends only the four events MemQL applies. Unlike the local target, it runs its
-own TURN server, so a participant whose network lets out only HTTPS still reaches it.
+A server made from a revision matches that revision's local target wherever the two can
+agree: rooms exist only once MemQL creates them, the codecs are Opus with redundancy,
+VP8 and H.264 with retransmission, a participant receives at most 10 video tracks at
+once, and the webhook sends only the four events MemQL applies. Unlike the local target,
+it runs its own TURN server, so a participant whose network lets out only HTTPS still
+reaches it.
 
 ### Known limits
 

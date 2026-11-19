@@ -53,13 +53,27 @@ done
 exit 2
 `
 
+// fakeServerOpenSSL is the TLS handshake with the TURN name through Caddy: it succeeds,
+// the certificate verified for the name, when FAKE_TURN_TLS is set, and fails as a
+// handshake with no certificate for the name does otherwise.
+const fakeServerOpenSSL = `#!/usr/bin/env bash
+printf 'openssl %s\n' "$*" >> "$FAKE_SERVER_LOG"
+[ "$1" = "s_client" ] || exit 2
+cat >/dev/null
+[ -n "$FAKE_TURN_TLS" ] || { printf 'verify error:num=62:hostname mismatch\n' >&2; exit 1; }
+exit 0
+`
+
 // serverFixture is one media server after its first boot: the command, the template and
 // the compose file where cloud-init wrote them, under a directory of this test's.
 type serverFixture struct {
 	dir, etc, data, bin, log, command string
 	values                            map[string]string
 	running, rooms, publicIPv4        string
-	answers, upFails                  bool
+	answers, upFails, turnTLS         bool
+	// openssl is the command memql-media checks the TURN name's TLS with: the fake's name,
+	// or one that is not installed.
+	openssl string
 }
 
 func newServerFixture(t *testing.T) *serverFixture {
@@ -75,6 +89,8 @@ func newServerFixture(t *testing.T) *serverFixture {
 		command:    filepath.Join(dir, "memql-media"),
 		publicIPv4: "203.0.113.7",
 		answers:    true,
+		turnTLS:    true,
+		openssl:    "openssl",
 		values: map[string]string{
 			"MEMQL_CALLS_MEDIA_PROVIDER":       "hetzner",
 			"MEMQL_CALLS_MEDIA_API_URL":        "https://m1.media.example.com",
@@ -92,8 +108,9 @@ func newServerFixture(t *testing.T) *serverFixture {
 		}
 	}
 	files := map[string]string{
-		filepath.Join(s.bin, "docker"): fakeServerDocker,
-		filepath.Join(s.bin, "curl"):   fakeServerCurl,
+		filepath.Join(s.bin, "docker"):  fakeServerDocker,
+		filepath.Join(s.bin, "curl"):    fakeServerCurl,
+		filepath.Join(s.bin, "openssl"): fakeServerOpenSSL,
 	}
 	for _, w := range []struct{ from, to string }{
 		{"/usr/local/sbin/memql-media", s.command},
@@ -162,6 +179,8 @@ func (s *serverFixture) run(t *testing.T, stdin string, args ...string) (string,
 		"FAKE_PUBLIC_IPV4="+s.publicIPv4,
 		"FAKE_ANSWERS="+flag(s.answers),
 		"FAKE_UP_FAILS="+flag(s.upFails),
+		"FAKE_TURN_TLS="+flag(s.turnTLS),
+		"MEMQL_MEDIA_OPENSSL="+s.openssl,
 	)
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
@@ -516,6 +535,87 @@ func TestConfigureSaysWhenTheServerDoesNotAnswerThroughTLS(t *testing.T) {
 	}
 	if ups := s.upCalls(t); len(ups) != 1 {
 		t.Errorf("the server was not started before the wait: %v", ups)
+	}
+}
+
+// openSSLCalls is every handshake memql-media asked openssl for, as its argv.
+func (s *serverFixture) openSSLCalls(t *testing.T) []string {
+	t.Helper()
+	b, err := os.ReadFile(s.log)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, line := range strings.Split(string(b), "\n") {
+		if strings.HasPrefix(line, "openssl ") {
+			out = append(out, strings.TrimPrefix(line, "openssl "))
+		}
+	}
+	return out
+}
+
+// TURN over TLS is Caddy's too, on port 443 under the TURN name, and a browser whose
+// network lets out only HTTPS relays through nothing else. What answers behind that route
+// is TURN, not HTTP, so the TURN name's check is the TLS handshake alone -- through Caddy
+// on this host, the certificate verified for that name -- and configure is done only when
+// both names pass. A TURN name with no certificate yet is named in the failure, the server
+// having been started, so running the command again only checks again.
+func TestConfigureChecksTheTURNNamesTLSThroughCaddy(t *testing.T) {
+	t.Run("both names answer", func(t *testing.T) {
+		s := newServerFixture(t)
+		if _, _, code := s.configure(t); code != 0 {
+			t.Fatalf("configure exited %d", code)
+		}
+		handshakes := s.openSSLCalls(t)
+		if len(handshakes) == 0 {
+			t.Fatal("the TURN name's TLS was never checked")
+		}
+		for _, want := range []string{"s_client ", "-connect 127.0.0.1:443", "-servername turn.m1.media.example.com",
+			"-verify_hostname turn.m1.media.example.com", "-verify_return_error"} {
+			if !strings.Contains(handshakes[0], want) {
+				t.Errorf("the TURN handshake %q does not carry %q", handshakes[0], want)
+			}
+		}
+	})
+
+	t.Run("the TURN name has no certificate yet", func(t *testing.T) {
+		s := newServerFixture(t)
+		s.turnTLS = false
+		_, stderr, code := s.configure(t, "--wait-seconds=1")
+		if code != 5 {
+			t.Fatalf("exited %d, want a code-5 failure: a server whose TURN name has no certificate is not done", code)
+		}
+		for _, want := range []string{"turn.m1.media.example.com", "LiveKit answers", "80", "443"} {
+			if !strings.Contains(stderr, want) {
+				t.Errorf("the failure does not name %q:\n%s", want, stderr)
+			}
+		}
+		if ups := s.upCalls(t); len(ups) != 1 {
+			t.Errorf("the server was not started before the wait: %v", ups)
+		}
+	})
+}
+
+// A server without openssl cannot make the TURN name's check, and says so plainly rather
+// than passing it in silence: the public host is still checked, and the warning says how
+// to check the TURN name by hand.
+func TestConfigureWarnsWhenItCannotCheckTheTURNName(t *testing.T) {
+	s := newServerFixture(t)
+	s.openssl = "no-openssl-here"
+	_, stderr, code := s.configure(t)
+	if code != 0 {
+		t.Fatalf("configure exited %d", code)
+	}
+	for _, want := range []string{"WARN", "turn.m1.media.example.com", "not checked", "openssl s_client"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("no plain warning that the TURN name was not checked (missing %q):\n%s", want, stderr)
+		}
+	}
+	if calls := s.openSSLCalls(t); len(calls) != 0 {
+		t.Errorf("an openssl that is not the one named was run: %v", calls)
 	}
 }
 

@@ -13,8 +13,10 @@
 # none, which is what lets it travel in a server's user data.
 #
 # ONE FILE FOR EVERY TARGET, so what a call is -- the rooms, the codecs, the video
-# subscription cap, the webhook and its four events -- cannot differ between the server
-# a change is tried on and the one people call through. Only where the server is varies:
+# subscription cap, the webhook and its four events -- is the same on the server a change
+# is tried on and on a rented server made from the same revision. A rented server keeps
+# the copy its first boot wrote: a change here reaches it only when it is replaced
+# (calls.md, "Replacing a server"). Only where the server is varies:
 # where its HTTP port listens, where its Redis is, the address its ICE candidates name,
 # and whether it runs a TURN server of its own. Those are the scalar placeholders below,
 # each explained where it is used.

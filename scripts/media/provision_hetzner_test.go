@@ -591,6 +591,27 @@ func TestTheCloudInitInstallsTheMediaServer(t *testing.T) {
 	}
 }
 
+// TestTheServerKeepsItsCallsThroughADockerRestart: Ubuntu installs security updates by
+// itself, and an update of docker.io restarts the Docker daemon, which stops every
+// container it runs -- every call on the server, with nobody there to drain it. The first
+// boot writes the daemon's configuration with live-restore on, so a restart of the daemon
+// leaves the containers running. write_files runs at the start of the first boot, before
+// the packages are installed, so the daemon has the setting from its first start.
+func TestTheServerKeepsItsCallsThroughADockerRestart(t *testing.T) {
+	c := parseCloudInit(t, renderedCloudInit(t))
+	daemon, perm := writtenFile(t, c, "/etc/docker/daemon.json")
+	var cfg map[string]any
+	if err := json.Unmarshal([]byte(daemon), &cfg); err != nil {
+		t.Fatalf("/etc/docker/daemon.json is not JSON, so the Docker daemon would not start: %v\n%s", err, daemon)
+	}
+	if cfg["live-restore"] != true {
+		t.Errorf("/etc/docker/daemon.json sets live-restore to %v, want true: a restart of the daemon would end every call", cfg["live-restore"])
+	}
+	if perm != "0644" {
+		t.Errorf("/etc/docker/daemon.json is %s, want 0644", perm)
+	}
+}
+
 // productionCompose is the slice of the server's compose file these tests read.
 type productionCompose struct {
 	Name     string `yaml:"name"`
@@ -857,36 +878,49 @@ func TestProvisionHetznerCreatesTheFirewallAndTheServer(t *testing.T) {
 	}
 }
 
+// serverLocations is the two places Hetzner's API documents a server's location: a
+// location object of its own, and, in the older form, the location of its datacenter.
+var serverLocations = map[string]func(location string) string{
+	"its location":              func(l string) string { return `"location":{"name":"` + l + `"}` },
+	"its datacenter's location": func(l string) string { return `"datacenter":{"name":"` + l + `-dc1","location":{"name":"` + l + `"}}` },
+}
+
 // A second run finds the server it made and answers it, creating nothing: the
-// capability is idempotent, and a server is never made twice.
+// capability is idempotent, and a server is never made twice. Hetzner may say where the
+// server is in either of the forms its API documents, and a server in the place asked for
+// is answered from either.
 func TestProvisionHetznerAnswersTheServerItAlreadyMade(t *testing.T) {
-	f := newHetznerFixture(t)
-	f.respond(t, "GET", "/servers?name=m1", 200, `{"servers":[{"id":1001,"name":"m1","status":"running",
-		"labels":{"memql-media":"m1"},"location":{"name":"ash"},"server_type":{"name":"cpx31"},
-		"public_net":{"ipv4":{"ip":"203.0.113.7"},"ipv6":{"ip":"2001:db8:4f8:1::/64"},"firewalls":[{"id":42,"status":"applied"}]}}],"meta":{}}`)
-	f.respond(t, "GET", "/firewalls?name=memql-media", 200, `{"firewalls":[{"id":42,"name":"memql-media","labels":{"memql-media":""},
-		"rules":[],"applied_to":[{"type":"label_selector","label_selector":{"selector":"memql-media"}}]}],"meta":{}}`)
-	env, _, code := f.run(t, m1Args("--confirm=provision-m1")...)
-	if code != 0 || !env.OK {
-		t.Fatalf("run failed: exit %d, %+v", code, env.Error)
-	}
-	if env.Changed {
-		t.Error("finding the server already made reported a change")
-	}
-	if env.Result["serverId"] != float64(1001) || env.Result["ipv4"] != "203.0.113.7" || env.Result["ipv6"] != "2001:db8:4f8:1::1" {
-		t.Errorf("answered %v / %v / %v", env.Result["serverId"], env.Result["ipv4"], env.Result["ipv6"])
-	}
-	if env.Result["created"] != false {
-		t.Errorf("created = %v, want false", env.Result["created"])
-	}
-	if env.Result["firewallId"] != float64(42) || env.Result["firewallApplied"] != true {
-		t.Errorf("firewallId = %v, firewallApplied = %v; want memql-media (42), applied to the server",
-			env.Result["firewallId"], env.Result["firewallApplied"])
-	}
-	for _, call := range f.calls(t) {
-		if strings.HasPrefix(call, "POST") {
-			t.Errorf("a second run wrote to the project: %s", call)
-		}
+	for form, location := range serverLocations {
+		t.Run("a server answered with "+form, func(t *testing.T) {
+			f := newHetznerFixture(t)
+			f.respond(t, "GET", "/servers?name=m1", 200, `{"servers":[{"id":1001,"name":"m1","status":"running",
+				"labels":{"memql-media":"m1"},`+location("ash")+`,"server_type":{"name":"cpx31"},
+				"public_net":{"ipv4":{"ip":"203.0.113.7"},"ipv6":{"ip":"2001:db8:4f8:1::/64"},"firewalls":[{"id":42,"status":"applied"}]}}],"meta":{}}`)
+			f.respond(t, "GET", "/firewalls?name=memql-media", 200, `{"firewalls":[{"id":42,"name":"memql-media","labels":{"memql-media":""},
+				"rules":[],"applied_to":[{"type":"label_selector","label_selector":{"selector":"memql-media"}}]}],"meta":{}}`)
+			env, _, code := f.run(t, m1Args("--confirm=provision-m1")...)
+			if code != 0 || !env.OK {
+				t.Fatalf("run failed: exit %d, %+v", code, env.Error)
+			}
+			if env.Changed {
+				t.Error("finding the server already made reported a change")
+			}
+			if env.Result["serverId"] != float64(1001) || env.Result["ipv4"] != "203.0.113.7" || env.Result["ipv6"] != "2001:db8:4f8:1::1" {
+				t.Errorf("answered %v / %v / %v", env.Result["serverId"], env.Result["ipv4"], env.Result["ipv6"])
+			}
+			if env.Result["created"] != false {
+				t.Errorf("created = %v, want false", env.Result["created"])
+			}
+			if env.Result["firewallId"] != float64(42) || env.Result["firewallApplied"] != true {
+				t.Errorf("firewallId = %v, firewallApplied = %v; want memql-media (42), applied to the server",
+					env.Result["firewallId"], env.Result["firewallApplied"])
+			}
+			for _, call := range f.calls(t) {
+				if strings.HasPrefix(call, "POST") {
+					t.Errorf("a second run wrote to the project: %s", call)
+				}
+			}
+		})
 	}
 }
 
@@ -900,15 +934,20 @@ func TestProvisionHetznerRefusesWhatItDidNotMake(t *testing.T) {
 			t.Fatalf("exited %d with %+v, want a code-3 refusal", code, env.Error)
 		}
 	})
-	t.Run("its server, somewhere else", func(t *testing.T) {
-		f := newHetznerFixture(t)
-		f.respond(t, "GET", "/servers?name=m1", 200, `{"servers":[{"id":1001,"name":"m1","labels":{"memql-media":"m1"},
-			"location":{"name":"hil"},"server_type":{"name":"cpx31"},"public_net":{"ipv4":{"ip":"203.0.113.7"},"ipv6":null}}],"meta":{}}`)
-		env, _, code := f.run(t, m1Args("--confirm=provision-m1")...)
-		if code != 3 || env.Error == nil || env.Error.Code != 3 {
-			t.Fatalf("exited %d with %+v, want a code-3 refusal: an existing server is never changed to match", code, env.Error)
-		}
-	})
+	for form, location := range serverLocations {
+		t.Run("its server, somewhere else, answered with "+form, func(t *testing.T) {
+			f := newHetznerFixture(t)
+			f.respond(t, "GET", "/servers?name=m1", 200, `{"servers":[{"id":1001,"name":"m1","labels":{"memql-media":"m1"},
+				`+location("hil")+`,"server_type":{"name":"cpx31"},"public_net":{"ipv4":{"ip":"203.0.113.7"},"ipv6":null}}],"meta":{}}`)
+			env, _, code := f.run(t, m1Args("--confirm=provision-m1")...)
+			if code != 3 || env.Error == nil || env.Error.Code != 3 {
+				t.Fatalf("exited %d with %+v, want a code-3 refusal: an existing server is never changed to match", code, env.Error)
+			}
+			if !strings.Contains(env.Error.Message, "already exists in hil") {
+				t.Errorf("the refusal does not say where the server is: %q", env.Error.Message)
+			}
+		})
+	}
 	t.Run("a firewall of that name it did not make", func(t *testing.T) {
 		f := newHetznerFixture(t)
 		f.emptyProject(t)

@@ -340,7 +340,10 @@ function record_addresses() {
 }
 
 # find_server -- an existing server of the requested name: answered when this script
-# made it for this request, refused otherwise (see the file note).
+# made it for this request, refused otherwise (see the file note). Hetzner's API documents
+# a server's place in two forms, a location of its own and, in the older form, its
+# datacenter's location, so both are read: answering only the first would refuse, as a
+# server somewhere else, a confirmed re-run against a server this script made.
 function find_server() {
     hcloud_ok GET "/servers?name=${NAME}" 200
     [[ "$(hc_field '.servers | length')" -gt 0 ]] || return 1
@@ -348,7 +351,7 @@ function find_server() {
     label="$(hc_field ".servers[0].labels[\"${MEDIA_LABEL}\"] // empty")"
     [[ "$label" == "$NAME" ]] \
         || cap_fail 3 "the project already has a server named ${NAME} that this script did not make (it has no ${MEDIA_LABEL}=${NAME} label); choose another --name"
-    location="$(hc_field '.servers[0].location.name // empty')"
+    location="$(hc_field '.servers[0].location.name // .servers[0].datacenter.location.name // empty')"
     type="$(hc_field '.servers[0].server_type.name // empty')"
     if [[ "$location" != "$LOCATION" || "$type" != "$SERVER_TYPE" ]]; then
         cap_fail 3 "the media server ${NAME} already exists in ${location} as a ${type}, not in ${LOCATION} as a ${SERVER_TYPE}; an existing server is not changed. Ask for what it is, or remove it first (docs/public/operate/calls.md)"

@@ -23,7 +23,15 @@
 # THE SAME FOR EVERY MEDIA SERVER. Nothing here names a server, an installation or a
 # domain, so one rendering serves m1 and m2 alike. The one placeholder is the LiveKit
 # template, which the provision script embeds from deploy/media/livekit.yaml.tmpl, the
-# file the local target renders too, so what a call is cannot differ between targets.
+# file the local target renders too, so a server made from this revision runs the call
+# the local target runs.
+#
+# A SERVER KEEPS ITS FIRST BOOT. cloud-init runs this once, so a running server keeps the
+# files it wrote and the images it pulled, and memql-media configure renders from those
+# files, not from the repository. A later change under deploy/media -- a LiveKit or Caddy
+# bump included -- reaches production only when the server is replaced by one made from
+# the new revision (docs/public/operate/calls.md, "Replacing a server"); until then the
+# local target can run what no production server does.
 #
 # COMMENTS AT THE START OF A LINE, like this one, are the repository's and are not sent:
 # the provision script drops them (Hetzner takes at most 32 KiB of user data). Comments
@@ -60,6 +68,16 @@ packages:
 ssh_pwauth: false
 
 write_files:
+# Ubuntu installs security updates by itself (unattended-upgrades), and an update of
+# docker.io restarts the Docker daemon, which stops every container it runs: every call on
+# the server would end, with nobody there to drain it first. With live-restore the
+# containers keep running while the daemon restarts. write_files runs at the start of the
+# first boot, before the packages are installed, so the daemon starts with it.
+  - path: /etc/docker/daemon.json
+    permissions: "0644"
+    content: |
+      {"live-restore": true}
+
 # LiveKit asks for 16 MiB UDP socket buffers and warns that anything under 5 MB is too
 # small for a production server (mediatransportutil rtcconfig, at the version v1.13.7
 # pins); Ubuntu's default ceiling is about 208 KiB. Host networking means the
@@ -129,6 +147,14 @@ write_files:
 # container, which ends every call on the server: the runbook drains a server first.
 # When no answer comes through TLS, it fails having started the server, so running it
 # again only checks again.
+#
+# BOTH NAMES' TLS IS CHECKED through Caddy on this host. The public host answers LiveKit's
+# OK, which proves its certificate, the route and the server together. Behind the TURN
+# name answers TURN, not HTTP, so its check is the TLS handshake alone, with the
+# certificate verified for that name: it is what a browser whose network lets out only
+# HTTPS meets before it can relay, and without it such a browser reaches no call. The
+# handshake is openssl's, which Ubuntu installs with ca-certificates; a server without it
+# warns that the TURN name was not checked, and how to check it, rather than pass it.
   - path: /usr/local/sbin/memql-media
     permissions: "0755"
     content: |
@@ -144,8 +170,9 @@ write_files:
       # configure reads the eight MEMQL_CALLS_MEDIA_* values on stdin (NAME=value lines: the
       # file the installation's memql-calls-media Secret is made from), renders LiveKit's and
       # Caddy's configuration, (re)starts the server, and waits until LiveKit answers through
-      # Caddy. Run again, it changes nothing already in place. rooms prints how many rooms
-      # LiveKit holds; a drain waits for 0. MEMQL_MEDIA_* exist for its tests only.
+      # Caddy and the TURN name's TLS verifies there. Run again, it changes nothing already
+      # in place. rooms prints how many rooms LiveKit holds; a drain waits for 0.
+      # MEMQL_MEDIA_* exist for its tests only.
       #
       # Exit codes: 0 ok | 2 bad argument | 3 refused (the values cannot configure this server)
       #             | 4 prerequisite missing | 5 failed
@@ -155,6 +182,7 @@ write_files:
       MEDIA_DIR="${MEMQL_MEDIA_DIR:-/etc/memql-media}"
       DATA_DIR="${MEMQL_MEDIA_DATA_DIR:-/var/lib/memql-media}"
       CLOUD_INIT="${MEMQL_MEDIA_CLOUD_INIT:-cloud-init}"
+      OPENSSL="${MEMQL_MEDIA_OPENSSL:-openssl}"
       METADATA_URL="${MEMQL_MEDIA_METADATA_URL:-http://169.254.169.254/hetzner/v1/metadata}"
       PROJECT="memql-media"
       COMPOSE_FILE="${MEDIA_DIR}/compose.yaml"
@@ -384,22 +412,46 @@ write_files:
 
       # LiveKit answers OK at its root: through Caddy, that proves the certificate, the route
       # and the server together. --resolve pins the name to this host, so DNS is not checked.
+      function public_host_answers() {
+          local body
+          body="$(curl --silent --max-time 5 --resolve "${PUBLIC_HOST}:443:127.0.0.1" "https://${PUBLIC_HOST}/" 2>/dev/null)" || body=""
+          [[ "$body" == "OK" ]]
+      }
+
+      # TURN answers behind its name, so only the TLS handshake through Caddy is checked,
+      # with the certificate verified for that name.
+      function turn_name_answers() {
+          "$OPENSSL" s_client -connect 127.0.0.1:443 -servername "$TURN_HOST" \
+              -verify_hostname "$TURN_HOST" -verify_return_error </dev/null >/dev/null 2>&1
+      }
+
       function wait_for_answer() {
-          local url="https://${PUBLIC_HOST}/" deadline body
+          local url="https://${PUBLIC_HOST}/" deadline public="" turn=""
           if [[ "$WAIT_SECONDS" -eq 0 ]]; then
               return 0
           fi
+          if ! command -v "$OPENSSL" >/dev/null 2>&1; then
+              warn "openssl is not installed, so TLS for ${TURN_HOST} was not checked. Check it from your machine: openssl s_client -connect <this server's IPv4>:443 -servername ${TURN_HOST} -verify_hostname ${TURN_HOST} -verify_return_error < /dev/null"
+              turn=unchecked
+          fi
           deadline=$((SECONDS + WAIT_SECONDS))
           while :; do
-              body="$(curl --silent --max-time 5 --resolve "${PUBLIC_HOST}:443:127.0.0.1" "$url" 2>/dev/null)" || body=""
-              if [[ "$body" == "OK" ]]; then
+              if [[ -z "$public" ]] && public_host_answers; then
                   info "LiveKit answers at ${url}"
+                  public=1
+              fi
+              if [[ -z "$turn" ]] && turn_name_answers; then
+                  info "${TURN_HOST} answers TLS with a certificate for its name"
+                  turn=1
+              fi
+              if [[ -n "$public" && -n "$turn" ]]; then
                   return 0
               fi
               [[ "$SECONDS" -lt "$deadline" ]] || break
               sleep 3
           done
-          fail 5 "the server is started, but LiveKit did not answer at ${url} within ${WAIT_SECONDS}s. Caddy needs certificates for ${PUBLIC_HOST} and ${TURN_HOST} first: check that their A and AAAA records point here and that ports 80 and 443 reach this server, then run this command again. Caddy's log: docker logs ${PROJECT}-caddy-1"
+          [[ -n "$public" ]] || fail 5 "the server is started, but LiveKit did not answer at ${url} within ${WAIT_SECONDS}s. Caddy needs certificates for ${PUBLIC_HOST} and ${TURN_HOST} first: check that their A and AAAA records point here and that ports 80 and 443 reach this server, then run this command again. Caddy's log: docker logs ${PROJECT}-caddy-1"
+          fail 5 "the server is started and LiveKit answers at ${url}, but ${TURN_HOST} did not complete TLS with a certificate for its name within ${WAIT_SECONDS}s, so a browser that can reach only HTTPS cannot relay through this server. Caddy needs a certificate for ${TURN_HOST}: check that its A and AAAA records point here and that ports 80 and 443 reach this server, then run this command again. Caddy's log: docker logs ${PROJECT}-caddy-1"
       }
 
       function configure() {

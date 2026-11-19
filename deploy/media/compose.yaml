@@ -20,9 +20,12 @@
 # against and the one deploy/k8s/components/ask-voice runs: an upgrade is reviewed for
 # CreateJobToken first, which on LiveKit's development branch lets a running agent job
 # ask a self-hosted server for new passes. scripts/media/local_up_test.go pins all three.
-# A rented server (deploy/media/cloud-init.yaml.tmpl) runs the same LiveKit and Redis
-# tags, pinned by digest as well, and scripts/media/provision_hetzner_test.go fails when
-# the two disagree: a bump here is a bump there.
+# A rented server (deploy/media/cloud-init.yaml.tmpl) is made with the same LiveKit and
+# Redis tags, pinned by digest as well, and scripts/media/provision_hetzner_test.go fails
+# when the two disagree: a bump here is a bump there. But a running server keeps the
+# images and files of its first boot, so a bump reaches production only when the server
+# is replaced by one made from the new revision (docs/public/operate/calls.md, "Replacing
+# a server").
 
 name: memql-media
 
