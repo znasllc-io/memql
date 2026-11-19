@@ -21,6 +21,10 @@ import (
 const bringupFakeMediaUp = `#!/usr/bin/env bash
 printf 'media-up %s\n' "$*" >> "$BRINGUP_STEPS"
 printf 'INFO:  fake media server log line\n' >&2
+if [ -n "$FAKE_MEDIA_UP_QUOTES" ]; then
+  printf '%s\n' '{"ok":false,"capability":"media.localUp","changed":false,"result":{},"error":{"code":5,"message":"compose said \"no such project\" at C:\\media"}}'
+  exit 5
+fi
 if [ -n "$FAKE_MEDIA_UP_FAILS" ]; then
   printf '{"ok":false,"capability":"media.localUp","changed":false,"result":{},"error":{"code":4,"message":"Docker is required but not found"}}\n'
   exit 4
@@ -44,10 +48,12 @@ type envelopeOf struct {
 	} `json:"error"`
 }
 
-// mediaOpts is how the fake media-up behaves: it fails, or it is not there at all (a tree
-// without scripts/media, as the editor's installer stages bringup.sh).
+// mediaOpts is how the fake media-up behaves: it fails, it fails with a reason holding
+// escaped quotes and a backslash, or it is not there at all (a tree without
+// scripts/media, as the editor's installer stages bringup.sh). noJQ puts a jq that fails
+// first on PATH, so bring-up reads the failure's envelope without it.
 type mediaOpts struct {
-	fails, absent bool
+	fails, quotes, absent, noJQ bool
 }
 
 func runBringupMain(t *testing.T, opts mediaOpts, args ...string) bringupRun {
@@ -85,12 +91,26 @@ func runBringupMain(t *testing.T, opts mediaOpts, args ...string) bringupRun {
 	cmd := exec.Command("bash", append([]string{harness}, args...)...)
 	cmd.Dir = root
 	cmd.Stdin = nil
-	failFlag := ""
+	failFlag, quotesFlag := "", ""
 	if opts.fails {
 		failFlag = "1"
 	}
+	if opts.quotes {
+		quotesFlag = "1"
+	}
+	path := os.Getenv("PATH")
+	if opts.noJQ {
+		bin := filepath.Join(tmp, "bin")
+		if err := os.MkdirAll(bin, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(bin, "jq"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		path = bin + string(os.PathListSeparator) + path
+	}
 	cmd.Env = append(os.Environ(), "BRINGUP_STEPS="+steps, "FAKE_MEDIA_UP_FAILS="+failFlag,
-		"CLUSTER=", "NAMESPACE=", "MEDIA=")
+		"FAKE_MEDIA_UP_QUOTES="+quotesFlag, "PATH="+path, "CLUSTER=", "NAMESPACE=", "MEDIA=")
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -168,6 +188,24 @@ func TestBringupFailsWhenTheMediaServerDoesNotStart(t *testing.T) {
 	}
 	if run.env.Result["mediaServer"] != "failed" || run.env.Result["healthy"] != true {
 		t.Errorf("mediaServer=%v healthy=%v, want failed and true", run.env.Result["mediaServer"], run.env.Result["healthy"])
+	}
+}
+
+// The reason in media-up's envelope reaches the bring-up's answer whole, escaped quotes and
+// backslash included, on a machine without jq too (capability.sh's
+// cap_envelope_error_message reads it; the pattern it replaced stopped at the first
+// escaped quote).
+func TestBringupReportsTheMediaServersWholeReason(t *testing.T) {
+	const reason = `compose said "no such project" at C:\media`
+	for _, noJQ := range []bool{false, true} {
+		run := runBringupMain(t, mediaOpts{quotes: true, noJQ: noJQ})
+		if run.code != 5 || run.env.Error == nil {
+			t.Fatalf("jq absent=%v: exited %d with %+v, want a code-5 failure", noJQ, run.code, run.env.Error)
+		}
+		if run.env.Result["mediaServerDetail"] != reason || !strings.Contains(run.env.Error.Message, reason) {
+			t.Errorf("jq absent=%v: mediaServerDetail = %q and the failure says %q; want the reason %q whole",
+				noJQ, run.env.Result["mediaServerDetail"], run.env.Error.Message, reason)
+		}
 	}
 }
 

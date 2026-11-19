@@ -84,3 +84,50 @@ func TestDownFailsAfterTheClusterWhenTheMediaServerWillNotStop(t *testing.T) {
 		t.Errorf("mediaServer = %q, message %q; want failed, naming make media-down", env.Result.MediaServer, env.Error.Message)
 	}
 }
+
+// A fake make media-down that fails with a reason holding escaped quotes and a backslash.
+const downFakeMediaDown = `#!/usr/bin/env bash
+printf '%s\n' '{"ok":false,"capability":"media.localDown","changed":false,"result":{},"error":{"code":5,"message":"compose said \"no such project\" at C:\\media"}}'
+exit 5
+`
+
+// The reason in make media-down's envelope reaches make down's answer whole, escaped quotes
+// and backslash included, on a machine without jq too (capability.sh's
+// cap_envelope_error_message reads it; the pattern it replaced stopped at the first
+// escaped quote). down.sh runs from a copy of its tree, beside a fake local-down.sh.
+func TestDownReportsTheMediaServersWholeReason(t *testing.T) {
+	const reason = `compose said "no such project" at C:\media`
+	tree := t.TempDir()
+	for rel, body := range map[string]string{
+		"scripts/k3d/down.sh":         readRepoFile(t, "scripts/k3d/down.sh"),
+		"scripts/lib/capability.sh":   readRepoFile(t, "scripts/lib/capability.sh"),
+		"scripts/media/local-down.sh": downFakeMediaDown,
+	} {
+		path := filepath.Join(tree, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, noJQ := range []bool{false, true} {
+		code, env, calls := downRunScript(t, filepath.Join(tree, "scripts", "k3d", "down.sh"), t.TempDir(), noJQ, nil)
+		if code != 5 || env.Error == nil {
+			t.Fatalf("jq absent=%v: exit %d, envelope %+v; want a code-5 failure\ncalls:\n%s", noJQ, code, env, calls)
+		}
+		if env.Result.MediaServerDetail != reason || !strings.Contains(env.Error.Message, reason) {
+			t.Errorf("jq absent=%v: mediaServerDetail = %q and the failure says %q; want the reason %q whole",
+				noJQ, env.Result.MediaServerDetail, env.Error.Message, reason)
+		}
+	}
+}
+
+func readRepoFile(t *testing.T, rel string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(repoRoot(t), filepath.FromSlash(rel)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}

@@ -286,6 +286,7 @@ Key helpers (full reference in the file header):
 | `cap_changed`                   | mark that this run mutated state                          |
 | `cap_ok [rawjson]`              | emit the success envelope + exit 0                        |
 | `cap_fail <code> <message>`     | emit the failure envelope + exit `<code>`                 |
+| `cap_envelope_error_message <envelope> <fallback>` | the `error.message` of an envelope another capability printed, whole (jq, or the library's own decoding without it), else `<fallback>` |
 
 The library installs an `EXIT` trap so that **even an uncaught `set -e` abort
 emits a failure envelope** — there is no silent death. Success paths must call

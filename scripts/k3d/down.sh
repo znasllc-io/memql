@@ -114,29 +114,15 @@ function stop_media_server() {
             ;;
         4)
             MEDIA_STATE="unavailable"
-            MEDIA_DETAIL="$(media_failure_message "$out")"
+            MEDIA_DETAIL="$(cap_envelope_error_message "$out" "make media-down gave no reason")"
             cap_info "No local calls media server can be running: ${MEDIA_DETAIL}"
             ;;
         *)
             MEDIA_STATE="failed"
-            MEDIA_DETAIL="$(media_failure_message "$out")"
+            MEDIA_DETAIL="$(cap_envelope_error_message "$out" "make media-down gave no reason")"
             cap_error "the local calls media server did not stop (exit ${rc}): ${MEDIA_DETAIL}"
             ;;
     esac
-}
-
-# media_failure_message <envelope> -- the error.message of local-down.sh's
-# envelope, read with jq where it is installed and with a pattern where it is
-# not (bringup.sh reads local-up.sh's the same way).
-function media_failure_message() {
-    local message=""
-    if command -v jq >/dev/null 2>&1; then
-        message="$(printf '%s' "$1" | jq -r '.error.message // empty' 2>/dev/null || true)"
-    fi
-    if [[ -z "$message" ]]; then
-        message="$(printf '%s' "$1" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p' | head -n 1)"
-    fi
-    printf '%s' "${message:-make media-down gave no reason}"
 }
 
 function remove_kubeconfig() {

@@ -77,17 +77,29 @@ func downRun(t *testing.T, env []string, args ...string) (int, downEnvelope, str
 // server's rendered configuration for down.sh to remove.
 func downRunWithHome(t *testing.T, home string, env []string, args ...string) (int, downEnvelope, string) {
 	t.Helper()
+	script, err := filepath.Abs("down.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return downRunScript(t, script, home, false, env, args...)
+}
+
+// downRunScript runs the down.sh at script (the repository's, or a copy beside a fake
+// scripts/media/local-down.sh). noJQ puts a jq that fails first on PATH, so down.sh reads
+// local-down.sh's envelope without it.
+func downRunScript(t *testing.T, script, home string, noJQ bool, env []string, args ...string) (int, downEnvelope, string) {
+	t.Helper()
 	dir := t.TempDir()
-	for name, body := range map[string]string{"k3d": downStubK3d, "kubectl": downStubKubectl, "docker": downStubDocker} {
+	stubs := map[string]string{"k3d": downStubK3d, "kubectl": downStubKubectl, "docker": downStubDocker}
+	if noJQ {
+		stubs["jq"] = "#!/bin/sh\nexit 1\n"
+	}
+	for name, body := range stubs {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o755); err != nil {
 			t.Fatalf("write stub %s: %v", name, err)
 		}
 	}
 	calls := filepath.Join(dir, "calls.log")
-	script, err := filepath.Abs("down.sh")
-	if err != nil {
-		t.Fatal(err)
-	}
 	cmd := exec.Command("bash", append([]string{script, "--cluster=memql"}, args...)...)
 	cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "DOWN_CALLS="+calls, "PURGE=",
 		"HOME="+home, "DOWN_DOCKER_DOWN=", "DOWN_MEDIA_RUNNING=", "DOWN_MEDIA_DOWN_FAILS=")

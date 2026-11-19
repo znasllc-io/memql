@@ -180,6 +180,70 @@ function cap_json_escape() {
     printf '%s' "$s"
 }
 
+# cap_envelope_error_message <envelope> <fallback> -- the error.message of an envelope
+# ANOTHER capability printed (a script that runs one captures its stdout), unescaped,
+# or <fallback> when there is none to read: a success envelope, no output, or a line
+# that is not a whole envelope. It never answers a fragment.
+#
+# One reader for every caller (scripts/k3d/bringup.sh reads make media-up's envelope,
+# scripts/k3d/down.sh make media-down's), so a fix reaches them all. jq reads it where it
+# is installed. Without jq, the envelope's own error message is decoded here, escape by
+# escape: the copies this replaced fell back to a sed pattern that stopped at the first
+# '"', so an escaped quote in a message cut it short (capability_envelope_test.go).
+function cap_envelope_error_message() {
+    local envelope="${1:-}" fallback="${2:-}" message=""
+    if command -v jq >/dev/null 2>&1; then
+        message="$(printf '%s' "$envelope" | jq -r '.error.message // empty' 2>/dev/null || true)"
+    fi
+    if [[ -z "$message" ]]; then
+        message="$(_cap_envelope_error_message_without_jq "$envelope" || true)"
+    fi
+    printf '%s' "${message:-$fallback}"
+}
+
+# _cap_envelope_error_message_without_jq <envelope> -- the message string of the
+# envelope's own error object, decoded. _cap_emit writes that object as the envelope's
+# last member, and a quote inside any JSON string is escaped, so the last raw "error":{
+# is the envelope's and not a result field's; its "message":" opens the string.
+function _cap_envelope_error_message_without_jq() {
+    local error_key='"error":{' message_key='"message":"' rest
+    [[ "$1" == *"$error_key"* ]] || return 1
+    rest="${1##*"$error_key"}"
+    [[ "$rest" == *"$message_key"* ]] || return 1
+    rest="${rest#*"$message_key"}"
+    _cap_json_string_body "$rest"
+}
+
+# _cap_json_string_body <text> -- the JSON string <text> starts inside of (just past its
+# opening quote), decoded up to its closing quote: cap_json_escape's escapes (\\ \" \n
+# \r \t) and any other escaped character as itself. Status 1 when the string never
+# closes, so a cut-off line answers nothing rather than a fragment.
+function _cap_json_string_body() {
+    local s="$1" out="" c i=0 n=${#1}
+    while [[ "$i" -lt "$n" ]]; do
+        c="${s:i:1}"
+        case "$c" in
+            '"')
+                printf '%s' "$out"
+                return 0
+                ;;
+            '\')
+                i=$((i + 1))
+                c="${s:i:1}"
+                case "$c" in
+                    n) out+=$'\n' ;;
+                    r) out+=$'\r' ;;
+                    t) out+=$'\t' ;;
+                    *) out+="$c" ;;
+                esac
+                ;;
+            *) out+="$c" ;;
+        esac
+        i=$((i + 1))
+    done
+    return 1
+}
+
 # cap_result_set <key> <string-value>   -- adds "key":"<escaped string>"
 function cap_result_set() {
     local k="$1" v
