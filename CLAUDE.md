@@ -58,7 +58,7 @@ and [work context and recovery](docs/public/ai/work-context-and-recovery.md).
 
 ## Quick Start
 
-**Prerequisites:** docker, k3d, kubectl (`brew install k3d kubectl`), python3.
+**Prerequisites:** docker (with Docker Compose v2), k3d, kubectl (`brew install k3d kubectl`), python3, and openssl (the local calls media server).
 `make install-deps` checks them and installs protoc, its Go plugins and PyYAML
 for the `python3` first on PATH; for Homebrew's externally managed Python it
 waits for the owner's PEP 668 opt-in (`PIP_BREAK_SYSTEM_PACKAGES=1`) or an
