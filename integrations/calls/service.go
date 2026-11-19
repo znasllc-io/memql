@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -75,6 +76,11 @@ import (
 // call in that order, which rules out two callers each holding a lock the other waits
 // for. A room's server never changes after placement, so it is read before the gates are
 // taken and the room is read again inside them.
+//
+// THE GATES TAKE A BOUNDED SHARE OF THE PROCESS'S GATE POOL (gates, ruling final I4): at
+// most callsGateShare calls decisions hold a write-gate connection at once in one process,
+// and the rest wait in the process for a slot, so a burst of decisions behind one server's
+// lock never holds the connections every other feature's write gates in the process need.
 //
 // # Capacity and the queue
 //
@@ -1501,13 +1507,88 @@ func (s *Service) movedSession(err error) error {
 }
 
 // gates takes the write gates of one decision, in the order given, which every caller
-// keeps as key, booking, room, server (see the file note).
+// keeps as key, booking, room, server (see the file note), within the calls share of the
+// process's gate pool.
+//
+// A BOUNDED SHARE OF THE POOL (ruling final I4). The gate pool is the process's, every
+// write gate of every feature takes its connection there (component/database gate_pool.go:
+// four per process), and a gate holds its connection from the moment it asks for its
+// locks, waiting included. Calls decisions serialize on a few locks -- every join, poll and
+// leave of one media server's calls on calls.server.<id>, across both replicas -- so a
+// burst of them waiting behind one lock would hold the whole pool, and every other
+// feature's write gate in the process (an artifact upload, a campaign link) would wait
+// out its six seconds and answer busy. So at most callsGateShare calls decisions hold a
+// gate connection at once, and the rest wait HERE, in the process, for a slot, rather
+// than in the pool.
+//
+// THE WAIT IS THE GATE'S OWN, SHARED. A decision waits callsGateWait in all, a slot first
+// and then its locks with what is left, so it waits no longer than a gate alone would; one
+// that finds no slot in time answers memql.ErrWriteGateBusy, exactly as a gate that could
+// not be taken answers: nothing attempted, try again. The slot is given back with the
+// gates. COST: under a burst, calls decisions queue a little longer in the process; the
+// share is per pool and never more than half of it (gateSlotsFor).
 func (s *Service) gates(ctx context.Context, keys ...string) (func(), error) {
 	pool, err := memql.ResolveWriteGatePool(s.gateDB, "calls: a call's admission", "the calls plug-in takes it from PluginContext.GateDB")
 	if err != nil {
 		return nil, err
 	}
-	return memql.AcquireWriteGates(ctx, pool, keys...)
+	deadline := time.Now().Add(callsGateWait)
+	if callerDeadline, ok := ctx.Deadline(); ok && callerDeadline.Before(deadline) {
+		deadline = callerDeadline
+	}
+	wait, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+	slots := gateSlotsFor(pool)
+	select {
+	case slots <- struct{}{}:
+	case <-wait.Done():
+		return nil, fmt.Errorf("%w: calls decisions hold their share of this process's write gates (%d), and none was given back in time: %w",
+			memql.ErrWriteGateBusy, cap(slots), wait.Err())
+	}
+	left := time.Until(deadline)
+	if left <= 0 {
+		<-slots
+		return nil, fmt.Errorf("%w: the wait for a calls write gate ran out: %w", memql.ErrWriteGateBusy, context.DeadlineExceeded)
+	}
+	release, err := memql.AcquireWriteGatesWithin(ctx, pool, left, keys...)
+	if err != nil {
+		<-slots
+		return nil, err
+	}
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			release()
+			<-slots
+		})
+	}, nil
+}
+
+// callsGateShare is how many of one process's write-gate connections calls decisions may
+// hold at once: two of the bff's four (database.DefaultGatePoolSize).
+const callsGateShare = 2
+
+// callsGateWait is how long a calls decision waits, in all, for a slot of the share and
+// then for its gates: the six seconds a write gate waits by default (component/memql
+// write_gate.go writeGateWait).
+const callsGateWait = 6 * time.Second
+
+// callsGateSlots is each gate pool's calls share: one counting channel per pool.
+var callsGateSlots sync.Map // *sql.DB -> chan struct{}
+
+// gateSlotsFor is the calls share of one gate pool, made the first time the pool is seen:
+// callsGateShare slots, and never more than half the pool, so a pool configured smaller
+// than the bff's keeps a connection for everything else.
+func gateSlotsFor(pool *sql.DB) chan struct{} {
+	if slots, ok := callsGateSlots.Load(pool); ok {
+		return slots.(chan struct{})
+	}
+	share := callsGateShare
+	if size := pool.Stats().MaxOpenConnections; size > 0 {
+		share = max(1, min(share, size/2))
+	}
+	slots, _ := callsGateSlots.LoadOrStore(pool, make(chan struct{}, share))
+	return slots.(chan struct{})
 }
 
 func keyGate(keyID string) string       { return "calls.key." + memql.BareShortId(keyID) }
