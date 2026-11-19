@@ -159,9 +159,10 @@ func liveClusterEngine(t *testing.T) (*memql.MemQLEngine, *bun.DB) {
 	t.Helper()
 	dsn := strings.TrimSpace(os.Getenv(liveCallsDatabaseEnv))
 	if dsn == "" {
+		// The example DSN is in the file header, not here: a string literal naming the
+		// shared credentials is what scripts/cidb's fifteenth-copy gate refuses.
 		t.Skipf("%s is unset: this leg writes its deployable's row into the database the cluster runs on, so it needs that "+
-			"database named explicitly (kubectl port-forward -n memql svc/memql-db-rw 55433:5432, then "+
-			"postgres://memql:memql_dev@127.0.0.1:55433/memql?sslmode=disable)", liveCallsDatabaseEnv)
+			"database named explicitly, through a port-forward to svc/memql-db-rw (this file's header has the commands)", liveCallsDatabaseEnv)
 	}
 	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn))), pgdialect.New())
 	ping, cancel := context.WithTimeout(context.Background(), 5*time.Second)
