@@ -561,3 +561,55 @@ builtin libraryTrainingLessonsPage {
  search string
  cursor string
 }
+
+// ---- file sharing (2026-11-18) ----
+//
+// One file, one person, 1, 7, 10 or 30 days. Every rank may share (the part is
+// seeded on all five roles), and the people a sharer may pick are their own
+// organization's -- or everyone, for a holder of `read principal`. The
+// recipient views, downloads and saves a copy; nothing else. Every access
+// re-reads the share, under its sharer, fresh. integrations/library/share.go.
+
+/// Who you may share a Library file with.
+@sdk
+@executor("libraryShareDirectory")
+@requiresCapability("execute", "app:files/share")
+@description("Who you may share a Library file with: one row per person, {userId, displayName}, by display name only and never an email. Everyone active on the cluster when you may already read every person (`read` on `principal`: owner, developer and admin by default); otherwise the active people of your own organization -- those with an active membership in an active group of kind account that you are also an active member of. Never you.")
+builtin libraryShareDirectory { }
+
+/// Share one of your Library files with one person, for 1, 7, 10 or 30 days -- or renew a share.
+@sdk
+@executor("integration.library.shareFile")
+@requiresCapability("execute", "app:files/share")
+@description("Share one of YOUR Library files with one person on this cluster for 1, 7, 10 or 30 days. They see it under Shared with me, and may view it, download it and save a copy of their own; they cannot rename, move, delete or share it. Calling this again while that person's share of the file is active RENEWS it: the same share gets a new expiry, now plus days, and the given days -- there is never a second active share. After a stop or an expiry it makes a fresh share; the ended one stays as the record. Refused for a file that is not yours, an archived file, anything but a file, yourself, someone libraryShareDirectory does not offer you (with one sentence for 'does not exist' and 'not yours to pick') and any other number of days. Returns {shareId, expiresAt, days}.")
+builtin libraryShareFile {
+  artifactId       string!  @description("The v1:library:artifact (a file) to share. Must be yours.")
+  recipientUserId  string!  @description("The person to share it with, as libraryShareDirectory names them.")
+  days             int!     @description("How long the share lasts: 1, 7, 10 or 30.")
+}
+
+/// Stop sharing a file with one person, at once.
+@sdk
+@executor("integration.library.stopShare")
+@description("Stop one of YOUR shares at once: the next view, download or copy by its recipient is refused, on every replica, and the file leaves their Shared with me list. The share stays as the record that it existed. Stopping a share that already ended answers as success. Returns {shareId, stopped}.")
+builtin libraryShareStop {
+  shareId  string!  @description("The share to stop -- the `id` librarySharesForArtifact lists.")
+}
+
+/// Save a copy of a file shared with you into your own Library.
+@sdk
+@executor("integration.library.saveSharedCopy")
+@description("Save a copy of a file someone shared with you into YOUR Library, while the share is active. The copy is yours: it keeps its own bytes and stays after the share ends, the sharer cannot see or change it, and it counts against your storage. Refused when the share has been stopped, has expired or its file was archived, and for anyone the file was not shared with. Returns {artifactId, fileId}.")
+builtin librarySaveSharedCopy {
+  artifactId  string!  @description("The shared file's artifact id, as librarySharedWithMe names it.")
+}
+
+/// End every share of a file its owner archived. The engine's endSharesOnArtifactArchive
+/// automation's act, and nobody else's: its handler refuses every other caller before it reads
+/// anything, so it is not @sdk.
+@executor("integration.library.endSharesForArtifact")
+@description("End every active share of an archived Library file, and its recipients' notices. Run by the engine's endSharesOnArtifactArchive automation and refused for every other caller. Access to an archived file is refused on every path anyway; this is what takes it off each recipient's list at once.")
+builtin libraryEndSharesForArtifact {
+  artifactId   string!  @description("The archived artifact.")
+  ownerUserId  string!  @description("Its owner, from the archived row; checked by reading the artifact under that owner.")
+}

@@ -5618,6 +5618,27 @@ func LibraryRequestDocumentRevisionBuild(args LibraryRequestDocumentRevisionArgs
 	return b.String()
 }
 
+// LibrarySaveSharedCopy -- Save a copy of a file shared with you into your own Library.
+type LibrarySaveSharedCopyArgs struct {
+	// The shared file's artifact id, as librarySharedWithMe names it.
+	ArtifactId string
+}
+
+// LibrarySaveSharedCopy calls the engine builtin librarySaveSharedCopy.
+func (qc *QueryClient) LibrarySaveSharedCopy(ctx context.Context, args LibrarySaveSharedCopyArgs) (*Result, error) {
+	call := LibrarySaveSharedCopyBuild(args)
+	return qc.executeNamed(ctx, "librarySaveSharedCopy", call)
+}
+
+func LibrarySaveSharedCopyBuild(args LibrarySaveSharedCopyArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin librarySaveSharedCopy(")
+	b.WriteString("artifactId: ")
+	b.WriteString(quoteMemQL(args.ArtifactId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // LibrarySaveTrainingLesson -- One manual, version-guarded lesson event. Never invoked by automatic mining.
 type LibrarySaveTrainingLessonArgs struct {
 	RequestId string
@@ -5697,6 +5718,77 @@ func LibrarySaveTrainingLessonBuild(args LibrarySaveTrainingLessonArgs) string {
 		b.WriteString("reason: ")
 		b.WriteString(quoteMemQL(args.Reason))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryShareDirectory -- Who you may share a Library file with.
+type LibraryShareDirectoryArgs struct {
+}
+
+// LibraryShareDirectory calls the engine builtin libraryShareDirectory.
+func (qc *QueryClient) LibraryShareDirectory(ctx context.Context, args LibraryShareDirectoryArgs) (*Result, error) {
+	call := LibraryShareDirectoryBuild(args)
+	return qc.executeNamed(ctx, "libraryShareDirectory", call)
+}
+
+func LibraryShareDirectoryBuild(args LibraryShareDirectoryArgs) string {
+	_ = args
+	return "builtin libraryShareDirectory()"
+}
+
+// LibraryShareFile -- Share one of your Library files with one person, for 1, 7, 10 or 30 days -- or renew a share.
+type LibraryShareFileArgs struct {
+	// The v1:library:artifact (a file) to share. Must be yours.
+	ArtifactId string
+	// The person to share it with, as libraryShareDirectory names them.
+	RecipientUserId string
+	// How long the share lasts: 1, 7, 10 or 30.
+	Days int
+}
+
+// LibraryShareFile calls the engine builtin libraryShareFile.
+func (qc *QueryClient) LibraryShareFile(ctx context.Context, args LibraryShareFileArgs) (*Result, error) {
+	call := LibraryShareFileBuild(args)
+	return qc.executeNamed(ctx, "libraryShareFile", call)
+}
+
+func LibraryShareFileBuild(args LibraryShareFileArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryShareFile(")
+	b.WriteString("artifactId: ")
+	b.WriteString(quoteMemQL(args.ArtifactId))
+	if b.Len() > 25 {
+		b.WriteString(", ")
+	}
+	b.WriteString("recipientUserId: ")
+	b.WriteString(quoteMemQL(args.RecipientUserId))
+	if b.Len() > 25 {
+		b.WriteString(", ")
+	}
+	b.WriteString("days: ")
+	b.WriteString(fmt.Sprintf("%v", args.Days))
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryShareStop -- Stop sharing a file with one person, at once.
+type LibraryShareStopArgs struct {
+	// The share to stop -- the `id` librarySharesForArtifact lists.
+	ShareId string
+}
+
+// LibraryShareStop calls the engine builtin libraryShareStop.
+func (qc *QueryClient) LibraryShareStop(ctx context.Context, args LibraryShareStopArgs) (*Result, error) {
+	call := LibraryShareStopBuild(args)
+	return qc.executeNamed(ctx, "libraryShareStop", call)
+}
+
+func LibraryShareStopBuild(args LibraryShareStopArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryShareStop(")
+	b.WriteString("shareId: ")
+	b.WriteString(quoteMemQL(args.ShareId))
 	b.WriteString(")")
 	return b.String()
 }

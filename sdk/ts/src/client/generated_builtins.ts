@@ -4257,6 +4257,28 @@ QueryClient.prototype.libraryRequestDocumentRevision = function (this: QueryClie
   return this.executeNamed("libraryRequestDocumentRevision", buildLibraryRequestDocumentRevision(args), opts);
 };
 
+/** Save a copy of a file shared with you into your own Library. */
+export interface LibrarySaveSharedCopyArgs {
+  /** The shared file's artifact id, as librarySharedWithMe names it. */
+  artifactId: string;
+}
+
+export function buildLibrarySaveSharedCopy(args: LibrarySaveSharedCopyArgs): string {
+  const parts: string[] = [];
+  parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  return "builtin librarySaveSharedCopy(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    librarySaveSharedCopy(args: LibrarySaveSharedCopyArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.librarySaveSharedCopy = function (this: QueryClient, args: LibrarySaveSharedCopyArgs = {} as LibrarySaveSharedCopyArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("librarySaveSharedCopy", buildLibrarySaveSharedCopy(args), opts);
+};
+
 /** One manual, version-guarded lesson event. Never invoked by automatic mining. */
 export interface LibrarySaveTrainingLessonArgs {
   requestId: string;
@@ -4293,6 +4315,75 @@ declare module "./query.js" {
 
 QueryClient.prototype.librarySaveTrainingLesson = function (this: QueryClient, args: LibrarySaveTrainingLessonArgs = {} as LibrarySaveTrainingLessonArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("librarySaveTrainingLesson", buildLibrarySaveTrainingLesson(args), opts);
+};
+
+/** Who you may share a Library file with. */
+export interface LibraryShareDirectoryArgs {
+}
+
+export function buildLibraryShareDirectory(args: LibraryShareDirectoryArgs): string {
+  void args;
+  return "builtin libraryShareDirectory()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryShareDirectory(args?: LibraryShareDirectoryArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryShareDirectory = function (this: QueryClient, args: LibraryShareDirectoryArgs = {} as LibraryShareDirectoryArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryShareDirectory", buildLibraryShareDirectory(args), opts);
+};
+
+/** Share one of your Library files with one person, for 1, 7, 10 or 30 days -- or renew a share. */
+export interface LibraryShareFileArgs {
+  /** The v1:library:artifact (a file) to share. Must be yours. */
+  artifactId: string;
+  /** The person to share it with, as libraryShareDirectory names them. */
+  recipientUserId: string;
+  /** How long the share lasts: 1, 7, 10 or 30. */
+  days: number;
+}
+
+export function buildLibraryShareFile(args: LibraryShareFileArgs): string {
+  const parts: string[] = [];
+  parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  parts.push("recipientUserId: " + renderMemQLValue(args.recipientUserId));
+  parts.push("days: " + renderMemQLValue(args.days));
+  return "builtin libraryShareFile(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryShareFile(args: LibraryShareFileArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryShareFile = function (this: QueryClient, args: LibraryShareFileArgs = {} as LibraryShareFileArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryShareFile", buildLibraryShareFile(args), opts);
+};
+
+/** Stop sharing a file with one person, at once. */
+export interface LibraryShareStopArgs {
+  /** The share to stop -- the `id` librarySharesForArtifact lists. */
+  shareId: string;
+}
+
+export function buildLibraryShareStop(args: LibraryShareStopArgs): string {
+  const parts: string[] = [];
+  parts.push("shareId: " + renderMemQLValue(args.shareId));
+  return "builtin libraryShareStop(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryShareStop(args: LibraryShareStopArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryShareStop = function (this: QueryClient, args: LibraryShareStopArgs = {} as LibraryShareStopArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryShareStop", buildLibraryShareStop(args), opts);
 };
 
 /** Search the caller's Library by meaning and get whole artifacts back, best match first. */
