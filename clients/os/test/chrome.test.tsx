@@ -231,6 +231,32 @@ describe("desk switch motion (owner, Nov 2026)", () => {
     }
   });
 
+  it("keeps one speed: a switch across two desks slides for twice as long", () => {
+    document.documentElement.style.setProperty("--os-duration-med", "260ms");
+    try {
+      renderShell();
+      openFromLauncher("Files");
+      openFromLauncher("Fleet");
+      fireEvent.click(screen.getByRole("button", { name: "New desk" }));
+      fireEvent.click(screen.getByRole("button", { name: "New desk" }));
+      expect(screen.getByRole("button", { name: /^Desk 3, current/ })).toBeTruthy();
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      fireEvent.click(screen.getByRole("button", { name: /^Desk 1/ }));
+      const arriving = document.querySelector("[data-os-window='files']") as HTMLElement;
+      const desktop = document.querySelector("[data-os-desktop]") as HTMLElement;
+      expect(arriving.getAttribute("data-slide")).toBe("in");
+      expect(desktop.style.getPropertyValue("--os-slide-travel")).toBe("2");
+      act(() => { vi.advanceTimersByTime(510); });
+      expect(arriving.getAttribute("data-slide")).toBe("in");
+      act(() => { vi.advanceTimersByTime(10); });
+      expect(arriving.hasAttribute("data-slide")).toBe(false);
+      expect(desktop.style.getPropertyValue("--os-slide-travel")).toBe("1");
+    } finally {
+      vi.useRealTimers();
+      document.documentElement.style.removeProperty("--os-duration-med");
+    }
+  });
+
   it("does not slide under reduced motion, where the duration token is 0ms", () => {
     document.documentElement.style.setProperty("--os-duration-med", "0ms");
     try {
