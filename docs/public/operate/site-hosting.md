@@ -842,7 +842,7 @@ bundle and the generic `/_memql/*` proxy, and forwards each to the bff:
 | On the site's origin | Does |
 |---|---|
 | `POST /_memql/calls/unlock` | trades a key for a host's session |
-| `GET /_memql/calls/session` | says what the session holds; a host's also lists who is in the call and who waits |
+| `GET /_memql/calls/session` | says what the session holds; a host's also lists who is in the call and who waits, and says whether it is locked |
 | `POST /_memql/calls/start` | opens a call on a key's session, with its holder as host |
 | `POST /_memql/calls/schedule` | books a call for later |
 | `POST /_memql/calls/reschedule` | moves a booked call |

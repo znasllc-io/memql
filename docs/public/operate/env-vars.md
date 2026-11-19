@@ -487,6 +487,7 @@ them.
 | `MEMQL_IDENTITY_VERIFIER_BASE_URL`   | non-identity binaries, prod auth          | URL the per-node verifier fetches JWKS from. Empty -> dev no-auth identity (`local-dev@memql.local`).                                                  |
 | `MEMQL_WORKER_PEERS`           | cluster mode, first boot of any dialing node | Comma-separated `type=host:port` seed list (e.g. `agent=agent:50055,planner=planner:50056,workbench=workbench:50057`). Dialable types: `agent`, `identity`, `planner`, `workbench`; anything else is ignored with a boot-time WARN naming the entry (memql#3450). DB-based discovery via `v1:cluster:node` takes over once peers register. Without it the BFF can't find workers on first boot. |
 | `MEMQL_PARENT_ADDRESS`         | cluster mode, every non-BFF node         | `bff:50058` -- so the worker's outbound stream reaches BFF for event forwarding.                                                                   |
+| `MEMQL_CALLS_MEDIA_PROVIDER`, `_API_URL`, `_PUBLIC_URL`, `_SEATS`, `_API_KEY`, `_API_SECRET`, `_WEBHOOK_KEY`, `_WEBHOOK_SECRET` | the bff, when the installation has a calls media server; ALL EIGHT OR NONE | The media server (LiveKit) every call is placed on ([Calls](calls.md#environment)). None set is a cluster without calls, where a join answers `no_media_server`; a partial set refuses the bff's boot, naming what is missing. `_PROVIDER` is `docker-local` or `hetzner`, recorded on the media server and never branched on; `_API_URL` is the control API (http, https, ws or wss); `_PUBLIC_URL` is where browsers connect (wss or https); `_SEATS` a positive whole number. `_API_KEY` and `_API_SECRET` sign rooms and passes, `_WEBHOOK_KEY` and `_WEBHOOK_SECRET` the server's webhooks: two different keys, each secret 32 characters or more. Delivered as the `memql-calls-media` Secret, which the bff reads optionally (`deploy/k8s/components/calls-media`); `make secrets` seeds it locally, and a cloud installation creates it beside its other Secrets. At boot the bff seals the two pairs into the `calls.media.bootstrap` and `calls.media.webhook` global secrets ([below](#default-global-secrets-manifest)). |
 | `MEMQL_GITHUB_APP_ID`, `_SLUG`, `_CLIENT_ID`, `_CLIENT_SECRET`, `_PRIVATE_KEY_B64`, `_WEBHOOK_SECRET` | GitHub Connect, ALL SIX OR NONE | The GitHub App a person connects once so they pick a repository from a list instead of pasting a token (memql#4912). A PARTIAL set refuses boot on the identity node naming both halves -- which you have and which you lack -- the [Anthropic federation](auth/anthropic-federation.md) precedent, because a Connect button that fails per person is worse than no button. None of six is not an error: a cluster owner can register the app from the product instead, which stores these same six names as rows -- three `v1:platform:globalVariable`, three sealed `v1:platform:globalSecret` -- and until somebody does, the surfaces say the cluster is not linked to GitHub and offer the token path. The environment outranks those rows WHOLE: set any one of the six here and the stored rows are not read, not even to fill a gap. The callback URL to register is derived from `MEMQL_IDENTITY_BASE_URL` and never typed into a manifest. `_WEBHOOK_SECRET` is ALSO the value `MEMQL_INBOUND_SOURCE_GITHUB_SECRET` takes -- the app signs with it and the inbound receiver verifies with it. Runbook: [github-connect.md](github-connect.md). |
 
 ### Optional with sensible defaults
@@ -712,6 +713,15 @@ and [Statistics and health](deployables.md#statistics-and-health).
 | `MEMQL_EDGE_REQUEST_LOG_ENABLED`        | `true`  | Whether this edge replica records one row per served request -- the source of a deployable's request counts and, through the five-minute rollup, of its website statistics. `false` switches it off HERE: every figure then misses what this replica served, and a period nothing recorded reads as unmeasured rather than as zero. System-owned sites are never recorded whatever this says. |
 | `MEMQL_EDGE_REQUEST_LOG_RETENTION_DAYS` | `30`    | How long the request log and its per-minute and per-hour request counts are kept, applied to their TimescaleDB retention policies by each edge replica when its log starts. Clamped to 1..365. The statistics rollup reads it too, on whichever node holds the cron lead: set the same value on every node; see [Statistics and health](deployables.md#statistics-and-health). The statistics tables keep their own retention: hourly rows 30 days, daily rows and top lists 400 days, an open day's rollup state until the day is final. |
 
+#### Calls: the edge's media host
+
+Registered `component: edge`. The eight `MEMQL_CALLS_MEDIA_*` values the bff reads are
+[above](#required-when-the-matching-feature-is-enabled); runbook: [Calls](calls.md#environment).
+
+| Variable                          | Default                                   | Purpose |
+|-----------------------------------|-------------------------------------------|---------|
+| `MEMQL_CALLS_MEDIA_HOST_SUFFIX`   | `media.$(MEMQL_DOMAIN)` in every overlay   | The DNS name every calls media server's host is at or under (`media.example.com` for `m1.media.example.com`). The edge admits it and every host under it to `connect-src`, over wss and https on any port, on a deployable whose calls switch is on, so its page can reach the media servers. A host name of two or more labels, with no scheme, port, path or wildcard. Unset, or not a host name, the policy names no media server: the calls routes still answer, the browser refuses to connect to the call, and the edge warns once at boot. Override it only when the media servers live under another name. |
+
 #### Streaming transcription (only if the STT path is used)
 
 | Variable                       | Default          | Purpose                                                                          |
@@ -810,6 +820,13 @@ Stored in `v1:platform:globalSecret`, sealed under `MEMQL_MASTER_KEY`.
 | `MEMQL_IDENTITY_KEY_ENCRYPTION_KEY` | `integration`    | Master secret (>=16 bytes) wrapping the identity service's on-disk Ed25519 signing keypair. Required in production.                       |
 | `MEMQL_EMAIL_AZURE_CLIENT_SECRET`   | `oauth_secret`   | Microsoft Graph client secret used by the **email integration**'s GraphSender. Legacy name `AZURE_CLIENT_SECRET` still accepted (fallback). |
 | `NPM_PACKAGES_READ_TOKEN` | `integration` | Optional GitHub Packages read credential for owner-authorized native CI steps. No default, boot requirement or automatic provisioning; see [Pipeline package-read credential](#pipeline-package-read-credential). |
+
+The calls capability seals three more itself, and no seeder writes them
+([Calls](calls.md#environment)): `calls.media.bootstrap` and `calls.media.webhook`, the
+media server's two key pairs, sealed by the bff at boot from the `MEMQL_CALLS_MEDIA_*`
+values and sealed again when those change; and `calls.key-pepper`, 32 random bytes every
+calls key is digested under, generated by the first boot that finds none and never
+replaced, since every key's digest depends on it.
 
 ### Default global variables (manifest)
 

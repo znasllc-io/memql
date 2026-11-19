@@ -5,22 +5,371 @@ status: stable
 area: operate
 sinceVersion: 0.31.40
 owner: znas
-description: Running the media servers calls take place on, from creating a server to rotating its keys and removing it.
+description: Video calls on a deployable -- how a call works, turning calls on, the routes a page calls, the media servers calls take place on, and what to check when a call fails.
 ---
 
 # Calls
 
-A deployable with its calls switch on holds video calls (see
-[Calls on a deployable](site-hosting.md#calls-on-a-deployable)). A call's video and
-sound travel between each participant's browser and a media server, never through
-MemQL: MemQL decides who may take a seat, hands each participant a short-lived pass,
-drives the server through its control API, and hears what happens on it through the
-server's webhooks (the `livekit` source of [inbound delivery](inbound-delivery.md)).
+A deployable can hold video calls. A person with a key starts a call or books one and
+shares its link, and whoever opens the link joins it, with no sign-in and no MemQL
+account. A call's video and sound travel between each participant's browser and a media
+server (LiveKit), never through MemQL: MemQL decides who may take a seat, hands each
+participant a short-lived pass, drives the server through its control API, and hears
+what happens on it through the server's webhooks (the `livekit` source of
+[inbound delivery](inbound-delivery.md)).
 
-The media servers are outside the cluster in every installation. Locally that is three
-containers beside k3d (`make media-up`, in
-[Reproduce the cloud locally](reproduce-the-cloud-locally.md#the-calls-media-server)).
-For a cloud installation it is a rented server, described below.
+Calls are off on every deployable until an operator turns them on
+([Turning calls on for a deployable](#turning-calls-on-for-a-deployable)). The media
+servers are outside the cluster in every installation: locally three containers beside
+k3d ([The local media server](#the-local-media-server)), and for a cloud installation a
+rented server ([Production media server](#production-media-server)). How the edge serves
+a calls deployable -- its ten routes, their budgets, the session cookie and the page
+policy -- is in [Calls on a deployable](site-hosting.md#calls-on-a-deployable).
+
+## How a call works
+
+### Keys, sessions, links and passes
+
+- **A key** opens calls on one deployable: `ck_` and 28 symbols of Crockford base32 (no
+  `i`, `l`, `o` or `u`, and case does not matter), the last two a checksum that catches
+  any one mistyped symbol and any two swapped neighbours. MemQL stores only a keyed
+  digest of it (HMAC-SHA256 under the cluster's key pepper), so a key is shown once, when
+  it is minted, and a lost key is replaced, never recovered. A key belongs to the
+  deployable's owner, whoever minted it, and is `active`, `frozen` (it opens no new call)
+  or `banned`.
+- **A session** is what a browser holds: a key's, opened by unlocking the key, or a
+  seat's, opened by a first join through a call's link. It rides the
+  `__Host-memql_calls` cookie (`HttpOnly`, `Secure`, `SameSite=Strict`, `Path=/`), lasts
+  a day, and opens nothing on any other deployable. A session is not a MemQL identity: it
+  carries no JWT, opens no stream and reaches no other route. Leaving a call does not end
+  it: a key holder starts the next call on it, and a guest who hung up comes back on the
+  same seat.
+- **A call's two links** are handed out once, when the call is started or booked: the
+  guest link `https://<host>/#j=<guest token>`, and the host link, which adds
+  `&h=<host token>`. `<host>` is the deployable's live custom domain when it has one, and
+  its own hostname otherwise. The tokens are in the fragment, so no server log and no
+  `Referer` carries them, and a page joins with one of them: the host token alone for a
+  host link.
+- **A pass** is what a participant connects to the media server with: a LiveKit token
+  for one seat in one room, signed with the server's key pair and good for `passTtl`
+  (120 seconds) to connect with. A person's pass grants the microphone, the camera, the
+  screen share and its sound, and data messages, and never the right to rename itself. A
+  pass cannot be revoked once it is handed out, so the seat it was for is what decides:
+  the media server's participants are held to the seats (below).
+
+### Seats, the lock and the line
+
+Every participant takes a seat in the call's room. A join is decided against the room and
+its media server, in this order:
+
+1. A call that has ended refuses it (`call_ended`).
+2. A host passes the lock: the key holder who started the call, anyone who joins with its
+   host link, and a seat a host admitted.
+3. A room holds `maxPeople` people (8) and `maxAgents` agents (2); past that a join is
+   refused (`room_full`, `agent_seats_full`).
+4. In a locked call anybody else waits (`wait`, reason `locked`) until a host admits them
+   or unlocks the call.
+5. A media server carries the seats `MEMQL_CALLS_MEDIA_SEATS` gives it, across every call
+   on it. With none free, a join takes a place in the server's line (`queue`, reason
+   `capacity`). The line drains by class -- people joining a call already running, then
+   booked calls that are due, then new calls -- and by arrival within a class. A waiter
+   polls (`GET /queue`) every `queuePoll` (3 seconds), keeps its place for
+   `queueEntryTtl` (10 minutes) after its last poll, and is let in on its own poll, the
+   only answer that can carry its pass. A waiter whose call is locked while it holds a
+   place keeps its arrival, and the place comes back when the lock lifts; one that waited
+   behind the lock from the start joins the back of the line then.
+
+A room counts every join attempt, a refused one and a rejoin included, and takes
+`roomJoinsPerMinute` (30) a minute (`rate`, answered `429`). A session already seated in
+the call rejoins on the same seat with a fresh pass, counted against no limit; one seated
+in another open call is refused (`in_another_call`). One key holds one call at a time: a
+start is refused while a call of the key is open (`key_in_call`).
+
+**Every join confirms three things**, and the seat records them: the person is 18 or
+older, nobody under 18 will appear on their camera or screen, and which version of the
+terms they accept. A join without all three is refused.
+
+**Every pass is handed out once its call's media room is open.** The media server opens no
+room a connection names (`room.auto_create` is off), and it can lose a room a call still
+holds: it closes one that has stayed empty, and forgets them all when it restarts. So
+MemQL opens the call's media room again, with the call's limits (`maxPeople` +
+`maxAgents` + 1 connections), before it hands out each pass, and everybody who reconnects
+after a restart gets a room that exists. A media server that cannot open the room hands
+out no pass, and the seat keeps its place for the next ask.
+
+### Hosts
+
+A host control is made by a host seat in the call now: the key holder who started it,
+anyone who joined with its host link, or a key holder the call was handed to. A call can
+have several hosts, and any of them acts. The controls are `POST /host` with an `action`
+and, for one done to a seat, the `seat`:
+
+| Action | Does |
+|---|---|
+| `mute` | mutes the seat's microphone; only its holder unmutes it |
+| `camera_off` | turns the seat's camera off |
+| `stop_share` | stops the seat's screen share and its sound |
+| `remove` | takes the seat out of the call for the rest of it |
+| `lock`, `unlock` | a locked call makes every newcomer wait for a host |
+| `admit` | lets one waiting seat in past the lock |
+| `end` | ends the call for everyone in it |
+
+**The roster** is how a host sees whom the controls name. `GET /session` answers it to a
+host seat in an open call: whether the call is locked (so the host is offered Lock or
+Unlock, not both), the seats in the call, each with its media identity, which is the
+media server's participant identity, and the seats waiting to come in, in line order. A
+host's page polls it about every 3 seconds; nothing else tells a page who is knocking,
+since a waiter is not in the media room. Any other session's answer carries no roster.
+
+One screen share at a time: a new one stops every other participant's share in the call.
+
+### How a call ends
+
+A call ends in one of three ways, and its room records which (`endReason`):
+
+- **`ended`**: a host ended it.
+- **`host_left`**: nobody hosting it has been in it for `hostLeftGrace` (5 minutes). A key
+  holder still in the call takes it over at once instead, and a host who comes back
+  within the grace stops the countdown. A host who never got in, because they waited in
+  line from the start, never left, so nothing counts down for them.
+- **`empty`**: the last person in it left with nobody waiting to come in.
+
+**A booked call never ends before its start.** Its countdown runs from its booked start
+at the earliest, so a host who opens it early to check it and leaves does not end it.
+**It ends empty only after its booked end**: before that, a booked call that empties
+stays open for the people still to come, and the countdown ends it if nobody does. A call
+that runs past its booked end is never cut off.
+
+**A media disconnect is not a leave.** A browser disconnects from the media server the
+same way when its page is refreshed, its tab is closed or its call is hung up, so the
+media server's report of a disconnect only records the seat's last sign of life. Only
+the leave route, `POST /leave`, the hang-up, closes a seat at once. A seat whose
+participant stays gone is closed by the reconcile pass one pass lifetime (`passTtl`)
+after it was last seen, at that time: a host seat closed so starts the countdown, and the
+empty rule applies then. So a refresh, which reconnects within seconds, does not end a
+call.
+
+### Booked calls
+
+A key's session books a call (`POST /schedule`): a start, a length in minutes (at most
+`maxScheduledMinutes`, 480) and an optional title of up to 80 characters, at most
+`scheduleHorizon` (30 days) ahead, at most `maxUpcomingScheduled` (20) upcoming per key,
+and not overlapping another booking of the key. The answer carries the call's two links,
+once, and a calendar file (`ics`) with the guest link.
+
+Until 10 minutes before the start, a link answers `not_yet` with the time until it
+opens. From then, the first join opens the call's room, locked: guests wait for a host,
+and the host link passes the lock. Moving a booking (`POST /reschedule`) replaces both
+links, so the old ones open nothing, and hands out a calendar file with the first one's
+UID. A booking can be cancelled (`POST /cancel`) only before its
+room opens; its links then answer `cancelled`, and those of a booking whose end passed
+unopened answer `call_ended`.
+
+### What the media server reports, and the reconcile pass
+
+The media server sends four events to `https://api.<domain>/inbound/livekit`. Each is
+verified with the webhook key pair, applied by the `applyMediaEvent` automation, and
+applied only when it is newer than what the rows record:
+
+- `participant_joined` puts the seat in the call (`in_call`) and records it as seen.
+- `participant_left` records when the seat was last seen, and nothing else (above).
+- `track_published` of a screen share stops every other share in the call.
+- `room_finished` ends a call only when the empty rule would; otherwise the next pass
+  opens the room again.
+
+The media server's own list of participants is the truth, and the events only follow it.
+So every 30 seconds one bff replica, the holder of the cluster lease `calls-reconcile`,
+repairs every open call against that list: it closes the seats whose participant is gone,
+disconnects every participant that holds no seat of the call (a pass cannot be revoked,
+so this is what keeps a removed person out), expires the places in line nobody polls,
+applies the countdown and ends the calls nobody is in. It hands out no pass.
+
+### What is stored
+
+Every calls row is server-written and unreadable by any client: the routes and the
+builtins below are the only ways in, and a secret is stored only as its digest. A
+deployable's rows belong to the deployable's owner.
+
+| Concept | One row per |
+|---|---|
+| `v1:calls:key` | key: its digest, kind and status |
+| `v1:calls:session` | session: its token's digest; deleted 30 days after it is written |
+| `v1:calls:room` | call: its media server, lock, host-left time and how it ended |
+| `v1:calls:seat` | participant in a call: kind, status, confirmations, when last seen |
+| `v1:calls:queueEntry` | place in a media server's line; deleted after 30 days |
+| `v1:calls:scheduledCall` | booked call: its links' digests and its status |
+| `v1:calls:mediaServer` | media server: the cluster's, and no deployable's |
+| `v1:calls:policy` | deployable's limits, where they differ from the defaults |
+
+The key pepper and the media server's two key pairs are sealed global secrets
+(`calls.key-pepper`, `calls.media.bootstrap`, `calls.media.webhook`).
+
+## Turning calls on for a deployable
+
+Four builtins. The three that name a deployable are a person's acts, as Deployables makes
+them: they refuse the operator credential, a connector and any call made inside a run,
+and they need `execute app:deployables/calls` (the owner and developer roles hold it, and
+an organization's group can be granted it), judged in that deployable's organization, on
+a deployable the caller can read. The fourth, the media server list, is a cluster owner's
+read.
+
+```
+builtin callsSiteEnable(siteId: "<deployable>", on: true)
+builtin callsTestKeyCreate(siteId: "<deployable>", label: "Reviewers")
+builtin callsPolicySet(siteId: "<deployable>", maxPeople: 4)
+builtin callsMediaServers()
+```
+
+- **`callsSiteEnable`** switches a deployable's calls on or off. Turning them on needs a
+  deployable with an owner, since every calls row belongs to the owner; a system-owned
+  deployable holds no calls. Switched off, every calls route answers `404`: the edge drops
+  its copy of the deployable through the change feed, and the bff checks the switch again
+  on every request it is forwarded. People already in a call keep their media connections
+  until they leave, and nobody joins or starts another.
+- **`callsTestKeyCreate`** mints a test key and answers `{keyId, key}`, the key shown this
+  once. A test key spends no balance; nothing mints any other kind yet. It needs a media
+  server configured on the cluster, because the key pepper exists only once one has
+  been. The label is the operator's name for the key and is never sent to a caller.
+- **`callsPolicySet`** sets any of a deployable's limits. A limit not named keeps its
+  value, and one never set is the default. Counts are whole numbers and durations whole
+  seconds, each held to the cluster's bounds, so no deployable claims more than the
+  cluster allows. A media room keeps the participant cap it was opened with, so a call
+  already open keeps its old cap on the media server.
+- **`callsMediaServers`** lists the active media servers,
+  `{id, provider, publicUrl, region, seats, state, createdAt}`: never a credential and
+  never the control address.
+
+| Limit | Default | Bounds |
+|---|---|---|
+| `maxPeople` | 8 | 1 to 1000 |
+| `maxAgents` | 2 | 0 to 100 |
+| `roomJoinsPerMinute` | 30 | 1 to 10000 |
+| `maxUpcomingScheduled` | 20 | 0 to 1000 |
+| `maxScheduledMinutes` | 480 | 1 to 1440 |
+| `hostLeftGrace` | 300 s | 0 to 86400 s |
+| `passTtl` | 120 s | 10 to 900 s |
+| `scheduleHorizon` | 2592000 s (30 days) | 0 to 31622400 s |
+| `queueEntryTtl` | 600 s | 10 to 86400 s, and longer than `queuePoll` |
+| `queuePoll` | 3 s | 1 to 60 s |
+
+To try a deployable, mint a test key, switch its calls on, open the deployable and unlock
+with the key, start a call, and open its guest link in a second browser.
+
+## The routes
+
+A page calls ten routes on its own deployable's origin, under `/_memql/calls/`. Every
+POST sends a JSON object (`Content-Type: application/json`) from the deployable's own
+origin, holding no field the route does not take, and every answer is JSON and
+`Cache-Control: no-store`.
+
+| Route | Sends | Answers |
+|---|---|---|
+| `POST /unlock` | `{"key"}` | the key's session, and sets the cookie |
+| `GET /session` | nothing | what the cookie holds; to a host seat in an open call, the roster too |
+| `POST /start` | `{"name", "confirm"}` | `{"call": {"id", "guestToken", "hostToken"}, "join"}` |
+| `POST /schedule` | `{"start", "minutes", "title"}` | the booking: `id`, `start`, `end`, `title`, `guestToken`, `hostToken`, `guestLink`, `hostLink`, `ics` |
+| `POST /reschedule` | `{"id", "start", "minutes", "title"}` | the booking, with new links |
+| `POST /cancel` | `{"id"}` | `204` |
+| `POST /join` | `{"token"}` or `{"hostToken"}`, with `"name"` and `"confirm"`; neither token, to rejoin on the session | a join, and the cookie of a new session |
+| `GET /queue` | nothing | a join: a waiter's poll, or a fresh pass for a seat already in |
+| `POST /host` | `{"action", "seat"}` | `204` |
+| `POST /leave` | `{}` | `204`: the hang-up |
+
+`confirm` is `{"adult": true, "noMinors": true, "terms": "<version>"}`, and `start` an RFC
+3339 time. A session's answer is `{kind, keyId, seatId, roomId, expiresAt, expiresInMs}`,
+its ids bare, and never its token. A join's answer is
+`{outcome, url, pass, identity, host, expiresInMs, retryAfterMs, position, reason}`:
+`admit` with the media server's address, the pass and the seat's media identity, or
+`wait` (behind the lock) or `queue` (with the place, counted from one), each with when to
+ask again, in `Retry-After` too. A host's roster:
+
+```json
+"roster": {
+  "locked": false,
+  "inCall": [{"seat": "<seat id>", "displayName": "Ada", "kind": "person", "host": true, "status": "in_call", "identity": "<media identity>"}],
+  "waiting": [{"seat": "<seat id>", "displayName": "Lin", "kind": "person", "since": "2026-11-19T12:00:00Z"}]
+}
+```
+
+A refusal is `{"error", "reason", "retryAfterMs"}`, its reason stable for a page to
+switch on:
+
+| Status | `error` | When |
+|---|---|---|
+| 400 | `invalid` | a body that cannot be read, a missing confirmation, and `in_past`, `beyond_horizon`, `too_long`, `title_too_long`, `minutes_invalid` |
+| 401 | `no_session` | no session, or one that ended or expired; the cookie is taken back |
+| 401 | `invalid_key` | an unlock whose key opens nothing |
+| 403 | `forbidden` | `removed`, `key_not_active`, `not_host`, a session that may not do this, and the edge's `foreign_origin` |
+| 404 | `not_found` | nothing here: calls off, a link or a booking that opens nothing; every miss is the same 404 |
+| 409 | `conflict` | `room_full`, `agent_seats_full`, `in_another_call`, `key_in_call`, `no_media_server`, `overlaps`, `too_many_upcoming`, `started`, `not_waiting`, and `not_yet` with when the call opens |
+| 410 | `ended` | `call_ended`, `cancelled` |
+| 413, 415 | `too_large`, `not_json` | a body over the route's cap, a POST that is not JSON |
+| 429 | `limited` | the room's join attempts for this minute, or one of the edge's budgets, with when to ask again |
+| 502 | `failed` | anything else, which the bff logs with the route and the deployable |
+
+The bff serves the routes at `/calls/*` and answers only what the edge forwards: the edge
+stamps the deployable and its owner, and the bff reads the deployable again under that
+owner and requires its calls switch to be on before it reads anything else. Nothing is
+read until a key, a link or a cookie of a shape MemQL issues is presented.
+
+## Environment
+
+| Variable | Read by | Is |
+|---|---|---|
+| `MEMQL_CALLS_MEDIA_PROVIDER` | bff | `docker-local` or `hetzner`, recorded on the media server and decided on by nothing |
+| `MEMQL_CALLS_MEDIA_API_URL` | bff | the control API: http, https, ws or wss |
+| `MEMQL_CALLS_MEDIA_PUBLIC_URL` | bff | where browsers connect: wss or https |
+| `MEMQL_CALLS_MEDIA_SEATS` | bff | how many participants the server carries at once |
+| `MEMQL_CALLS_MEDIA_API_KEY`, `MEMQL_CALLS_MEDIA_API_SECRET` | bff | the key pair rooms and passes are signed with; the secret 32 characters or more |
+| `MEMQL_CALLS_MEDIA_WEBHOOK_KEY`, `MEMQL_CALLS_MEDIA_WEBHOOK_SECRET` | bff | the key pair the server signs its webhooks with: another key, the secret 32 characters or more |
+| `MEMQL_CALLS_MEDIA_HOST_SUFFIX` | edge | the DNS name every media server's host is at or under, which a calls page's policy admits |
+
+**All eight or none.** With none set the cluster has no calls media server, and a call
+can be neither started nor opened (`no_media_server`). A partial set refuses the bff's
+boot, naming what is missing. The eight come from the `memql-calls-media` Secret, which
+the bff reads optionally (`deploy/k8s/components/calls-media`), so an installation
+without it starts unchanged. At boot the bff records the server the values name and
+seals its key pairs into the `calls.media.bootstrap` and `calls.media.webhook` global
+secrets, and the first boot that finds no key pepper generates `calls.key-pepper`. The
+pepper is never replaced: every key's digest depends on it. A pod reads its environment
+when it starts, so a Secret created or changed afterwards reaches the bff when it
+restarts.
+
+**The suffix** is derived as `media.<domain>` in every overlay, so set it only when the
+media servers live under another name. Unset, or not a host name, a calls page's policy
+names no media server: the routes answer and passes are minted, but the browser refuses
+to connect to the call, and the edge's one warning at boot is the clue.
+[Environment variables](env-vars.md) lists all nine.
+
+### The local media server
+
+Locally the media server is three containers beside k3d, from `deploy/media/compose.yaml`:
+LiveKit, its Redis, and Caddy terminating TLS with the front door's mkcert pair at
+`wss://media.<domain>:7443`.
+
+```bash
+make media-up     # start it; make up runs this last
+make media-down   # stop it and remove its rendered configuration; make down runs this first
+make up MEDIA=0   # bring the cluster up without it
+```
+
+`make secrets` seeds the `memql-calls-media` Secret whether or not the media server runs,
+so with `MEDIA=0` or after `make media-down` the bff still places calls on a server that is
+not running, and a join fails when the call's room is opened; `make media-up` starts it
+again and nothing needs restarting.
+[Reproduce the cloud locally](reproduce-the-cloud-locally.md#the-calls-media-server) has the
+rest.
+
+## A deployable on its own domain
+
+A calls deployable can answer on a domain of its own (a custom domain binding), and the
+links its calls hand out then name that domain. When the domain sits behind a fronting
+proxy such as Azure Front Door, the binding declares the front in `frontedBy`, so that its
+pointing check accepts the CNAME chain through the front's endpoint:
+[Behind Azure Front Door](front-door.md#behind-azure-front-door). The edge's same-origin
+check compares a POST's `Origin` with the request's `Host`, so the front must forward the
+`Host` header unchanged, as that section configures it. The media server is never behind
+the front: browsers connect to it directly.
 
 ## Production media server
 
@@ -300,9 +649,79 @@ once, and the webhook sends only the four events MemQL applies. Unlike the local
 it runs its own TURN server, so a participant whose network lets out only HTTPS still
 reaches it.
 
-### Known limits
+## Troubleshooting
+
+- **Every calls route answers `404` `not_found`.** The deployable's calls switch is off,
+  the deployable is not live or is system-owned, or the edge has no
+  `MEMQL_EDGE_API_TARGET`. When the edge forwarded a request and the bff answered `404`,
+  the bff logs `calls surface: a request was answered 404, see reason`, with the reason:
+  the stamped owner reads no row of the deployable, the read answered another deployable,
+  the stamped owner is not the deployable's owner, or its calls switch is off.
+- **A start or a join answers `409` `no_media_server`.** The cluster has no active media
+  server: the `memql-calls-media` Secret is missing, or the bff started before it existed
+  and needs a restart. `callsMediaServers` lists what the cluster places calls on.
+- **A start or a join answers `502` `failed`, and the bff logs
+  `calls surface: a request failed` with an error about opening the call's media room.**
+  MemQL could not reach the media server's control API. Locally, run `make media-up`; in
+  production, check the server, its Caddy and `MEMQL_CALLS_MEDIA_API_URL`.
+- **A page is handed a pass, and the browser never connects.** The page's policy does not
+  admit the media server: its public host must be under `MEMQL_CALLS_MEDIA_HOST_SUFFIX`,
+  and the edge warns at boot when the suffix is unset or not a host name. Or the browser
+  does not trust the server's certificate, or, in production, the participant's network
+  lets out only HTTPS and the TURN name has no certificate: `memql-media configure`
+  checks both names and says which one does not answer.
+- **Seats stay `admitted` and never read `in_call`, and a participant who left stays
+  listed until a pass closes the seat.** The media server's webhooks are not arriving. The
+  reconcile pass still repairs every call every 30 seconds, so calls work, with that lag.
+  Check that the server reaches `https://api.<domain>/inbound/livekit` (locally, the
+  LiveKit container trusts the mkcert root and maps `api.<domain>` to the host), and that
+  the bff answers there: one with no media server configured answers `404`.
+- **The bff's boot is refused, naming `MEMQL_CALLS_MEDIA_*` values.** A partial set of
+  the eight: set them all, or none.
+- **A join answers `429` `limited`.** The room has taken its `roomJoinsPerMinute` join
+  attempts for this minute, or one of the edge's budgets ran out; the answer says when to
+  ask again.
+- **A call ended.** Its room's `endReason` says why: a host ended it (`ended`), the
+  host-left countdown ran out (`host_left`), or the last person left with nobody waiting
+  (`empty`). A booked call ends neither of the last two ways before its start.
+- **Everybody's connection dropped at once.** The media server restarted, or the call's
+  media room was closed. Each page asks for a fresh pass (a poll or a rejoin), and each
+  pass opens the call's media room again first, so everybody comes back into a room that
+  exists. On a production server Docker runs with `live-restore`, so a restart of Docker
+  alone, which an unattended security update can make, leaves calls running; a restart
+  of LiveKit ends them.
+- **A person a host removed is back.** A pass cannot be revoked, so the reconcile pass
+  disconnects their identity again within 30 seconds whenever the media server shows it.
+  A person who cleared their session and came back through the link has a seat of their
+  own ([Known limits](#known-limits)).
+- **A page's background blur does not start.** A calls page's policy allows compiling
+  WebAssembly (`'wasm-unsafe-eval'` in `script-src`) and nothing more, so the policy lets
+  it run; the page has to load the model the blur runs from its own origin.
+
+## Known limits
 
 - One media server per installation, and calls are not moved between servers.
+- No operation drains or removes a media server. A media server's row has a state
+  (`active`, `draining`, `removed`), but only the boot that records the server writes it,
+  as `active`, so a server leaves service by being [drained](#draining-a-server) by hand. A
+  call still open on a server that is gone is never repaired.
+- One webhook credential. Every media server's webhooks are verified with the one
+  `calls.media.webhook` key pair, so a second server with webhook keys of its own needs
+  the engine to find the credential by the webhook's issuer first.
+- A removed person who clears their session and comes back through the call's link takes
+  a new seat: nothing identifies a person across sessions yet.
+- A waiter held behind the lock keeps no record of its polls, so one who closed the page
+  stays in the host's roster until the call ends or a host removes them, and a waiter
+  whose place ran out is listed in its old place until the place is marked expired.
+- A waiter a host has just admitted holds no place in line until its next poll, so a call
+  whose last person leaves in that moment ends with that waiter still asking.
+- A screen share's event that is worked after a newer share began, but before the newer
+  one's own event arrives, stops both shares, and the newer sharer starts again.
+- Events are ordered by the media server's clock against the engine's, so a skew between
+  the two moves which events count as newer; the reconcile pass repairs what that misses.
+- A participant's traffic is capped only as far as LiveKit's configuration (at most 10
+  video tracks received at once) and the page's own publish settings go: there is no
+  per-participant bitrate limit.
 - Media over UDP uses one port. LiveKit can spread it over a range of ports sized to the
   server's cores; the load test decides whether that is needed.
 - The provision script creates and answers servers; it does not delete them or change
@@ -310,3 +729,27 @@ reaches it.
 - What runs on a real Hetzner server (the first boot, the certificates, TURN through
   Caddy) is the layout LiveKit documents, with configuration both programs load, and is
   first exercised in full by an installation's first call.
+
+## Checking it end to end
+
+`TestTwoPeopleHoldACallThroughTheFrontDoor` (`test/clustere2e/calls_live_test.go`) holds a
+call on the local two-replica cluster and its media server. It writes a deployable, mints a
+test key, switches calls on and checks that every edge replica has the switch within 10
+seconds, unlocks and starts through the front door, joins a guest by the call's link,
+connects both to the media server, checks that each receives the other's microphone within
+10 seconds and that both seats read `in_call` on every bff replica, and ends the call. It
+runs only with its build tag, never in `make test`, and skips, naming what to start, without
+the cluster, the media server, a cluster owner's token or the cluster's database:
+
+```bash
+make up SERVERS=2 && make scale N=2       # make up starts the media server last
+kubectl port-forward -n memql svc/bff 50051:50051 &
+kubectl port-forward -n memql svc/memql-db-rw 55433:5432 &
+MEMQL_E2E_TOKEN=<a cluster owner's JWT> \
+MEMQL_E2E_DATABASE_DSN='postgres://memql:memql_dev@127.0.0.1:55433/memql?sslmode=disable' \
+  go test -tags clustere2e -count=1 -timeout=600s ./test/clustere2e/ \
+  -run TestTwoPeopleHoldACallThroughTheFrontDoor -v
+```
+
+The machine it runs on has to trust the mkcert root (`mkcert -install`), since the media
+server's client trusts the system's roots alone.
