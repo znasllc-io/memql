@@ -19,6 +19,7 @@ import {
   SurfaceUnconfigured,
 } from "../kit/ReadinessStates";
 import { MODULE_DESCRIPTIONS } from "../system/modules";
+import { deskHasVacancy } from "../system/desks";
 import type { Rect } from "../system/placement";
 import {
   allRequirementsFor,
@@ -50,6 +51,7 @@ export function WindowFrame({
   focused,
   actorRole,
   hidden = false,
+  split = false,
   deskId,
 }: {
   win: OsWindow;
@@ -58,6 +60,8 @@ export function WindowFrame({
   focused: boolean;
   actorRole: string;
   hidden?: boolean;
+  /** On one half of the borderless area: square corners, edge to edge. */
+  split?: boolean;
   deskId?: string;
 }) {
   const { actions, state, registry } = useOs();
@@ -143,11 +147,20 @@ export function WindowFrame({
   const contextTag = `app:${manifest.id}${current ? ` section:${current.id}` : ""}`;
   // What the app noted rides on this window's Ask button; noting never opens.
   const windowAsk = useWindowAsk(contextTag);
+  // What the size button does next (desks.ts cycleWindowMode): alone, window
+  // -> borderless -> full screen -> window on this desk; shared, full screen
+  // on a desk of its own, and back to its half while that desk has room.
+  const shared = (ownDesk?.windows.length ?? 0) > 1;
+  const returnDesk = win.expandedReturn && state.shell.desks.find(d => d.id === win.expandedReturn!.deskId);
   const sizeAction = win.mode === "fullscreen"
-    ? `Restore ${manifest.name} to previous desktop`
-    : win.mode === "maximized"
-      ? `Make ${manifest.name} full screen`
-      : `Maximize ${manifest.name} on its own desktop`;
+    ? returnDesk && deskHasVacancy(returnDesk, state.shell)
+      ? `Restore ${manifest.name} to previous desktop`
+      : `Restore ${manifest.name} to a window`
+    : shared
+      ? `Make ${manifest.name} full screen on its own desktop`
+      : win.mode === "maximized"
+        ? `Make ${manifest.name} full screen`
+        : `Make ${manifest.name} borderless`;
 
   const style: React.CSSProperties = {
     left: rect.x,
@@ -168,6 +181,7 @@ export function WindowFrame({
       data-focused={focused || undefined}
       data-maximized={win.mode === "maximized" || undefined}
       data-fullscreen={win.mode === "fullscreen" || undefined}
+      data-split={split || undefined}
       data-dragging={isDragging || undefined}
       style={style}
       role="dialog"
@@ -254,7 +268,7 @@ export function WindowFrame({
             title={sizeAction}
             onClick={() => actions.cycleWindowMode(win.id)}
           >
-            {win.mode === "fullscreen" ? <Minimize2 size={14} aria-hidden /> : win.mode === "maximized" ? <Maximize size={14} aria-hidden /> : <Maximize2 size={14} aria-hidden />}
+            {win.mode === "fullscreen" ? <Minimize2 size={14} aria-hidden /> : shared || win.mode === "maximized" ? <Maximize size={14} aria-hidden /> : <Maximize2 size={14} aria-hidden />}
           </button>
           <button type="button" className="os-icon-button os-window-close" aria-label={`Close ${manifest.name}`} title={`Close ${manifest.name}`} onClick={() => actions.closeWindow(win.id)}><X size={14} aria-hidden /></button>
           </div>
@@ -365,7 +379,7 @@ export function WindowFrame({
       </div>
       {menu ? <ContextMenu x={menu.x} y={menu.y} label={`${manifest.name} window actions`} onClose={() => setMenu(null)} entries={[
         ...(ownDesk && ownDesk.windows.length > 1 ? [{ id: "swap", label: "Swap sides", onSelect: () => actions.swapSides(ownDesk.id) }] : []),
-        ...state.shell.desks.filter(d => d.id !== ownDesk?.id).map((d) => ({ id: `move:${d.id}`, label: `Move to Desk ${state.shell.desks.indexOf(d) + 1}`, disabled: d.windows.length >= 2 || d.windows.some(id => !!state.shell.windows[id]?.expandedReturn), onSelect: () => { actions.throwToDesk(win.id, d.id); } })),
+        ...state.shell.desks.filter(d => d.id !== ownDesk?.id).map((d) => ({ id: `move:${d.id}`, label: `Move to Desk ${state.shell.desks.indexOf(d) + 1}`, disabled: !deskHasVacancy(d, state.shell), onSelect: () => { actions.throwToDesk(win.id, d.id); } })),
         { id: "new-desk", label: "Move to a new desktop", onSelect: () => { actions.throwToDesk(win.id, "new"); } },
         ...(logs ? [{ id: "logs", label: "Logs", onSelect: () => actions.navigateSection(win.id, logs.id) }] : []),
       ]} /> : null}

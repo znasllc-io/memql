@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useDraggable, useDroppable, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useDndMonitor, useDraggable, useDroppable, type DragEndEvent, type DragMoveEvent, type DragStartEvent } from "@dnd-kit/core";
 
 import { newShortId, rowNumber, rowString } from "@znasllc-io/memql-sdk-core/client";
 
@@ -14,7 +14,7 @@ import { FileIcon } from "../items/FileIcon";
 import { FolderIcon } from "../items/FolderIcon";
 import type { UploadProvider } from "../items/upload";
 import { accessAdmits, widgetById, widgetsFor } from "../system/registry";
-import { placeWindows, type PlacementTokens } from "../system/placement";
+import { borderlessArea, halvesOf, placeWindows, type PlacementTokens, type Rect } from "../system/placement";
 import type { DeskSurface, DesktopItem, GridPos } from "../system/desktop";
 import type { Desk } from "../system/desks";
 import { DeskNumeral, FoldWallpaper } from "../wallpaper/FoldWallpaper";
@@ -44,6 +44,11 @@ import { WindowFrame } from "./WindowFrame";
 // Stable by construction -- it is a dependency of the desk's registration
 // effect, and an array rebuilt each render would re-register on every one.
 const DESK_DRAG_PREFIXES = ["window:", "item:"] as const;
+
+// How close to an edge of the desktop the pointer must be for a window drop
+// to snap (Jesús, Nov 2026): a side takes that half, the top the whole area.
+const SNAP_EDGE = 24;
+type SnapZone = "left" | "right" | "top";
 
 export const CELL_W = 96;
 export const CELL_H = 104;
@@ -85,6 +90,11 @@ export function Desktop({
   const [renamingItemId, setRenamingItemId] = useState<string | null>(null);
   const selectedId = state.selectedItemId;
   const [draggingWindow, setDraggingWindow] = useState(false);
+  const [snapZone, setSnapZone] = useState<SnapZone | null>(null);
+  // A lone window dropped on a side waits on that half while the other half
+  // offers the apps open on other desks.
+  const [picker, setPicker] = useState<{ windowId: string; side: 0 | 1 } | null>(null);
+  const pickerRef = useRef<HTMLDivElement>(null);
   const [noAnswerFor, setNoAnswerFor] = useState<string | null>(null);
   // The desk's own error line (create/rename/move refusals): in-surface, at
   // the bottom of the desk, self-clearing -- the menu that caused it is gone
@@ -363,12 +373,22 @@ export function Desktop({
   // see the other's drops.
   useShellDragClaim(DESK_DRAG_PREFIXES, { onDragStart, onDragEnd });
 
+  // The edge a window drag is over, lit while it is there.
+  const snapMonitor = useMemo(() => ({
+    onDragMove: (event: DragMoveEvent) => {
+      if (String(event.active.id).startsWith("window:")) setSnapZone(snapZoneOf(event, desktopRef.current, viewport.w));
+    },
+    onDragCancel: () => setSnapZone(null),
+  }), [viewport.w]);
+  useDndMonitor(snapMonitor);
+
   function onDragStart(event: DragStartEvent) {
     setDraggingWindow(String(event.active.id).startsWith("window:"));
   }
 
   function onDragEnd(event: DragEndEvent) {
     setDraggingWindow(false);
+    setSnapZone(null);
     const id = String(event.active.id);
     const overId = event.over ? String(event.over.id) : null;
 
@@ -379,8 +399,19 @@ export function Desktop({
         actions.throwToDesk(windowId, target === "new" ? "new" : target);
         return;
       }
-      // Two windows on the desk: dropping past the center line swaps.
       const desk = desks.find((d) => d.windows.includes(windowId));
+      const zone = snapZoneOf(event, desktopRef.current, viewport.w);
+      if (zone === "top") {
+        actions.makeBorderless(windowId);
+        return;
+      }
+      if (desk && desk.windows.length === 1 && zone) {
+        // Alone: take that half and offer the other; nothing to offer, fill.
+        if (Object.keys(state.shell.windows).length > 1) setPicker({ windowId, side: zone === "left" ? 0 : 1 });
+        else actions.makeBorderless(windowId);
+        return;
+      }
+      // Two windows on the desk: dropping past the center line swaps.
       if (desk && desk.windows.length === 2) {
         const pointerX = pointerXOf(event);
         if (pointerX !== null) {
@@ -422,6 +453,32 @@ export function Desktop({
       actions.moveSurfaceItem(itemId, target);
     }
   }
+
+  // ---- the half picker ----
+  // Live only while its window is still alone on the desk in view.
+  const pickerDesk = picker ? desks.find((d) => d.windows.includes(picker.windowId)) : undefined;
+  const pickerLive = !!picker && pickerDesk?.id === state.shell.activeDeskId && pickerDesk.windows.length === 1;
+  useEffect(() => {
+    if (picker && !pickerLive) setPicker(null);
+  }, [picker, pickerLive]);
+  useEffect(() => {
+    if (!picker || !pickerLive) return;
+    // Dismissed, the lone window fills the borderless area.
+    const dismiss = () => {
+      setPicker(null);
+      actions.makeBorderless(picker.windowId);
+    };
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") dismiss(); };
+    const onDown = (event: PointerEvent) => { if (!pickerRef.current?.contains(event.target as Node)) dismiss(); };
+    pickerRef.current?.querySelector("button")?.focus();
+    window.addEventListener("keydown", onKey);
+    document.addEventListener("pointerdown", onDown, true);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onDown, true);
+    };
+  }, [picker, pickerLive, actions]);
+  const halves = halvesOf(viewport, placement);
 
   // ---- context menus ----
   function deskMenuEntries(cell: GridPos): MenuEntry[] {
@@ -539,12 +596,34 @@ export function Desktop({
           const manifest = registry.apps.find(a => a.id === win.appId);
           if (!desk || !manifest) return null;
           const peers = desk.windows.flatMap(id => state.shell.windows[id] ? [state.shell.windows[id]!] : []);
-          const rect = placeWindows(peers, viewport, placement)[win.id]
+          const waiting = pickerLive && picker.windowId === win.id;
+          const rect = waiting ? halves[picker.side] : placeWindows(peers, viewport, placement)[win.id]
             ?? placeWindows([{ ...win, mode: "normal" }], viewport, placement)[win.id]!;
-          return <WindowFrame key={win.id} win={win} manifest={manifest} rect={rect}
+          const split = waiting || peers.filter((w) => w.mode !== "minimized").length === 2;
+          return <WindowFrame key={win.id} win={win} manifest={manifest} rect={rect} split={split}
             hidden={desk.id !== state.shell.activeDeskId || win.mode === "minimized"}
             deskId={desk.id} focused={state.shell.focusedWindowId === win.id} actorRole={actorRole} />;
         })}
+        {snapZone ? (
+          <div className="os-snap-zone" data-os-snap-zone={snapZone} aria-hidden="true"
+            style={rectStyle(snapZone === "top" ? borderlessArea(viewport, placement) : halves[snapZone === "left" ? 0 : 1])} />
+        ) : null}
+        {pickerLive ? (
+          <div ref={pickerRef} className="os-snap-picker" role="group" aria-label="Choose an app for the other half"
+            style={rectStyle(halves[picker.side === 0 ? 1 : 0])}>
+            {desks.flatMap((d) => (d.id === pickerDesk.id ? [] : d.windows)).map((otherId) => {
+              const other = registry.apps.find((a) => a.id === state.shell.windows[otherId]?.appId);
+              if (!other) return null;
+              const Icon = other.icon;
+              return (
+                <button key={otherId} type="button" className="os-snap-pick" aria-label={other.name} title={other.name}
+                  onClick={() => { setPicker(null); actions.pairWindows(picker.windowId, picker.side, otherId); }}>
+                  <Icon size={22} aria-hidden />
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
         <p className="os-sr-only" aria-live="polite">
           Desk {activeIndex + 1} of {desks.length}
         </p>
@@ -566,6 +645,23 @@ export function Desktop({
       </div>
     </>
   );
+}
+
+/** Which snapping edge the pointer is at, relative to the desktop's own box. */
+function snapZoneOf(event: DragMoveEvent | DragEndEvent, desktop: HTMLElement | null, width: number): SnapZone | null {
+  const activator = event.activatorEvent as PointerEvent | undefined;
+  if (!activator || typeof activator.clientX !== "number") return null;
+  const box = desktop?.getBoundingClientRect();
+  const x = activator.clientX + event.delta.x - (box?.left ?? 0);
+  const y = activator.clientY + event.delta.y - (box?.top ?? 0);
+  if (x <= SNAP_EDGE) return "left";
+  if (x >= width - SNAP_EDGE) return "right";
+  if (y <= SNAP_EDGE) return "top";
+  return null;
+}
+
+function rectStyle(rect: Rect): React.CSSProperties {
+  return { left: rect.x, top: rect.y, width: rect.w, height: rect.h };
 }
 
 function pointerXOf(event: DragEndEvent): number | null {

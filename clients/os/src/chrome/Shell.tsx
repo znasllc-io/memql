@@ -401,7 +401,7 @@ function DesktopChrome({
 
   const [storageWarningHeight, setStorageWarningHeight] = useState(0);
   const placement = useMemo<PlacementTokens>(
-    () => ({ margin: 28, gutter: 16, dockReserve: 118 + storageWarningHeight, maxSoloWidth: 1280 }),
+    () => ({ margin: 28, dockReserve: 118 + storageWarningHeight, maxSoloWidth: 1280 }),
     [storageWarningHeight],
   );
 

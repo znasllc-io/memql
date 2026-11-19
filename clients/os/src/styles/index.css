@@ -386,6 +386,46 @@ button:not(:disabled):active {
   transition: none;
   z-index: 50;
 }
+/* Two windows split the borderless area edge to edge (Jesús, Nov 2026). */
+.os-window[data-split] {
+  border-radius: 0;
+}
+
+/* Window snapping: the edge a dragged window would take, and the picker on
+ * the other half. Under the dragged window, over every other; no motion. */
+.os-snap-zone {
+  position: absolute;
+  z-index: 40;
+  background: var(--os-accent-soft);
+  border: 2px solid var(--os-accent);
+  pointer-events: none;
+}
+.os-snap-picker {
+  position: absolute;
+  z-index: 40;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.45);
+}
+.os-snap-pick {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  background: var(--os-glass-solid);
+  color: var(--os-ink);
+  cursor: pointer;
+}
+.os-snap-pick:hover,
+.os-snap-pick:focus-visible {
+  border-color: var(--os-accent);
+}
 
 .os-window-bar {
   display: flex;
