@@ -128,7 +128,7 @@ export function Desktop({
   // The desktop is a strip of plates that only the pager moves. Anything that
   // scrolls it (a focus call, a reveal) is undone at once.
   const desktopRef = useRef<HTMLDivElement>(null);
-  const slide = useDeskSlide(activeIndex, state.shell.activeDeskId, desktopRef);
+  const { slide, travel } = useDeskSlide(activeIndex, state.shell.activeDeskId, desktopRef);
   useEffect(() => {
     const el = desktopRef.current;
     if (!el) return;
@@ -497,7 +497,8 @@ export function Desktop({
 
   return (
     <>
-      <div ref={desktopRef} className="os-desktop" data-os-desktop data-dragging-window={draggingWindow || undefined}>
+      <div ref={desktopRef} className="os-desktop" data-os-desktop data-dragging-window={draggingWindow || undefined}
+        style={{ "--os-slide-travel": travel } as React.CSSProperties}>
         <FoldWallpaper />
         <div
           className="os-plates"
@@ -858,9 +859,15 @@ function useDeskSlide(
   activeIndex: number,
   activeDeskId: string,
   desktopRef: React.RefObject<HTMLDivElement | null>,
-): { fromDeskId: string; dx: number } | null {
-  const [slide, setSlide] = useState<{ fromDeskId: string; dx: number } | null>(null);
+): { slide: { fromDeskId: string; dx: number; travel: number } | null; travel: number } {
+  const [slide, setSlide] = useState<{ fromDeskId: string; dx: number; travel: number } | null>(null);
   const last = useRef({ index: activeIndex, deskId: activeDeskId });
+  // CONSTANT SPEED (Jesús, Nov 2026): a switch takes one --os-duration-med per
+  // desk it crosses, so desk 1 to 4 moves at the same speed as 1 to 2. Read in
+  // render, before the plates' transform changes, because a running CSS
+  // transition keeps the duration it started with; the windows' slide carries
+  // the same number in its state.
+  const travel = slide?.travel ?? Math.max(1, Math.abs(activeIndex - last.current.index));
   useLayoutEffect(() => {
     const from = last.current;
     last.current = { index: activeIndex, deskId: activeDeskId };
@@ -871,11 +878,12 @@ function useDeskSlide(
       setSlide(null);
       return;
     }
-    setSlide({ fromDeskId: from.deskId, dx: (activeIndex - from.index) * width });
-    const timer = setTimeout(() => setSlide(null), ms);
+    const crossed = Math.abs(activeIndex - from.index);
+    setSlide({ fromDeskId: from.deskId, dx: (activeIndex - from.index) * width, travel: crossed });
+    const timer = setTimeout(() => setSlide(null), ms * crossed);
     return () => clearTimeout(timer);
   }, [activeIndex, activeDeskId, desktopRef]);
-  return slide;
+  return { slide, travel };
 }
 
 /** A CSS time token in milliseconds. Themes write it either way (Graphite's
