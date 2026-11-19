@@ -340,6 +340,29 @@ describe("desk switch motion (owner, Nov 2026)", () => {
     }
   });
 
+  it("still slides when the empty desk you leave deletes itself and the desks after it move up", () => {
+    document.documentElement.style.setProperty("--os-duration-med", "260ms");
+    try {
+      renderShell();
+      openFromLauncher("Files");
+      openFromLauncher("Fleet");
+      openFromLauncher("Deployables"); // desk 2
+      fireEvent.click(screen.getByRole("button", { name: "New desk" }));
+      openFromLauncher("Settings"); // desk 3
+      fireEvent.click(screen.getByRole("button", { name: /^Desk 2/ }));
+      fireEvent.click(screen.getByRole("button", { name: "Close Deployables" }));
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      fireEvent.click(screen.getByRole("button", { name: /^Desk 3/ }));
+      expect(screen.getByText("Desk 2 of 2")).toBeTruthy();
+      const arriving = document.querySelector("[data-os-window='settings']") as HTMLElement;
+      expect(arriving.getAttribute("data-slide")).toBe("in");
+      expect(document.querySelector("[data-os-desktop]")?.getAttribute("style")).toContain("--os-slide-travel: 1");
+    } finally {
+      vi.useRealTimers();
+      document.documentElement.style.removeProperty("--os-duration-med");
+    }
+  });
+
   it("does not slide under reduced motion, where the duration token is 0ms", () => {
     document.documentElement.style.setProperty("--os-duration-med", "0ms");
     try {

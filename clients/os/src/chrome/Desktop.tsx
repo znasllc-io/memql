@@ -146,7 +146,7 @@ export function Desktop({
   // The desktop is a strip of plates that only the pager moves. Anything that
   // scrolls it (a focus call, a reveal) is undone at once.
   const desktopRef = useRef<HTMLDivElement>(null);
-  const { slide, travel } = useDeskSlide(activeIndex, state.shell.activeDeskId, desktopRef);
+  const { slide, travel } = useDeskSlide(activeIndex, state.shell.activeDeskId, state.shell.desks, desktopRef);
   useEffect(() => {
     const el = desktopRef.current;
     if (!el) return;
@@ -963,31 +963,46 @@ function SurfaceItem({
 function useDeskSlide(
   activeIndex: number,
   activeDeskId: string,
+  desks: readonly { id: string }[],
   desktopRef: React.RefObject<HTMLDivElement | null>,
 ): { slide: { fromDeskId: string; dx: number; travel: number } | null; travel: number } {
   const [slide, setSlide] = useState<{ fromDeskId: string; dx: number; travel: number } | null>(null);
-  const last = useRef({ index: activeIndex, deskId: activeDeskId });
+  const last = useRef({ index: activeIndex, deskId: activeDeskId, desks });
+  // An empty desk deletes itself as you leave it (desks.ts gcAutoDesks), and
+  // every desk after it moves up one place in the same update. Measure the
+  // switch on the strip as it stood, or leaving it rightward crosses 0 desks
+  // and jumps. The plates move by the new index, so there they stay put
+  // while the arriving windows slide in.
+  const targetOf = (from: typeof last.current) => {
+    const was = from.desks.findIndex(d => d.id === activeDeskId);
+    return was < 0 ? activeIndex : was;
+  };
   // CONSTANT SPEED (Jesús, Nov 2026): a switch takes one --os-duration-med per
   // desk it crosses, so desk 1 to 4 moves at the same speed as 1 to 2. Read in
   // render, before the plates' transform changes, because a running CSS
   // transition keeps the duration it started with; the windows' slide carries
   // the same number in its state.
-  const travel = slide?.travel ?? Math.max(1, Math.abs(activeIndex - last.current.index));
+  const travel = slide?.travel ?? Math.max(1, Math.abs(targetOf(last.current) - last.current.index));
   useLayoutEffect(() => {
     const from = last.current;
-    last.current = { index: activeIndex, deskId: activeDeskId };
+    last.current = { index: activeIndex, deskId: activeDeskId, desks };
     if (from.deskId === activeDeskId) return;
+    const to = targetOf(from);
     const ms = cssTimeMs(getComputedStyle(document.documentElement).getPropertyValue("--os-duration-med"));
     const width = desktopRef.current?.clientWidth ?? 0;
-    if (ms <= 0 || from.index === activeIndex) {
+    if (ms <= 0 || from.index === to) {
       setSlide(null);
       return;
     }
-    const crossed = Math.abs(activeIndex - from.index);
-    setSlide({ fromDeskId: from.deskId, dx: (activeIndex - from.index) * width, travel: crossed });
+    const crossed = Math.abs(to - from.index);
+    setSlide({ fromDeskId: from.deskId, dx: (to - from.index) * width, travel: crossed });
     const timer = setTimeout(() => setSlide(null), ms * crossed);
     return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeIndex, activeDeskId, desktopRef]);
+  // Desks added or moved without a switch (a window sent to a new desk) count
+  // at the next one: keep the strip current after every commit.
+  useLayoutEffect(() => { last.current.desks = desks; });
   return { slide, travel };
 }
 
