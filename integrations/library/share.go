@@ -161,7 +161,7 @@ func (i *Integration) handleShareFile(ctx context.Context, args map[string]any, 
 	}
 	sharerName := "Unnamed person"
 	if me, err := i.revisionRow(ctx, "userDisplayById", map[string]any{"userId": sharer}); err == nil && me != nil {
-		if name := strings.TrimSpace(stringField(me, "displayName")); name != "" {
+		if name := memql.NameWithoutEmail(stringField(me, "displayName")); name != "" {
 			sharerName = name
 		}
 	}
