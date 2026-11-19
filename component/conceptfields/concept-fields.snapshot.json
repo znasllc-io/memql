@@ -916,6 +916,12 @@
         "siteId"
       ],
       "enums": {
+        "kind": [
+          "agent",
+          "avatar",
+          "person",
+          "sampler"
+        ],
         "status": [
           "admitted",
           "in_call",

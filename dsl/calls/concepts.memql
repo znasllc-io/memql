@@ -104,11 +104,12 @@ concept room {
 }
 
 /// A CALLS SEAT: one participant's place in one room. `kind` is the rules module's SeatKind (person, agent,
-/// avatar, sampler). The three confirmations record what the participant attested to before the seat was
-/// admitted. `keyId` is the key the seat's holder unlocked, when a key opened their session: a key holder in
-/// the call, who takes over as host when the host leaves. `lastSeenAt` is reconciliation's record of the
-/// media server showing the seat's identity, and `letInAt` a host's admission past the call's lock.
-/// Server-written and client-unreadable.
+/// avatar, sampler). The three confirmations are what the participant confirmed at the seat's latest join
+/// (every join confirms again): 18 or older, no one under 18 on their camera or screen, and the terms
+/// version. `keyId` is the key the seat's holder unlocked, when a key opened their session: a key holder in
+/// the call, who takes over as host when the host leaves. `lastSeenAt` is the seat's last sign of life on
+/// the media server, and `letInAt` a host's admission past the call's lock. Server-written and
+/// client-unreadable.
 @serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @displayCard(primary="displayName", secondary="roomId", status="status")
@@ -118,13 +119,13 @@ concept seat {
   ownerUserId  string!  @description("The v1:identity:user who owns the site -- the row-authz key. STAMPED from the actor the write runs as and never an argument: the calls integration writes as the site's owner (borrowed authority), so this is the site's owner and never a visitor.")
   roomId  string!  @description("The v1:calls:room this seat is in.")
   identity  string  @description("The participant's identity on the media server.")
-  kind  string  @description("person, agent, avatar or sampler (calls.SeatKind).")
+  kind  enum("person", "agent", "avatar", "sampler")  @description("What occupies the seat (calls.SeatKind): people count against maxPeople and agents against maxAgents, and the kind decides the grant its pass carries.")
   displayName  string  @description("The name other participants see.")
   host  bool  @description("True for the room's host seat.")
   status  enum("waiting", "admitted", "in_call", "left", "removed")  @description("Where the seat is on its walk.")
-  confirmAdult  bool  @description("The participant attested to being an adult.")
-  confirmNoMinors  bool  @description("The participant attested to there being no minors on their side.")
-  termsVersion  string  @description("The version of the terms the participant accepted.")
+  confirmAdult  bool  @description("The participant confirmed, at the seat's latest join, that they are 18 or older.")
+  confirmNoMinors  bool  @description("The participant confirmed, at the seat's latest join, that no one under 18 will appear on their camera or screen.")
+  termsVersion  string  @description("The version of the terms the participant accepted at the seat's latest join.")
   joinedAt  datetime  @description("When the seat was taken.")
   leftAt  datetime  @description("When the participant left, or empty.")
   keyId  string  @description("The v1:calls:key the seat's holder unlocked, when a key opened the session that took the seat, or empty. Written from the session when the seat is taken, never from a request. A seat in the call that names one is a key holder who can take over as host when the host leaves (design 8).")
