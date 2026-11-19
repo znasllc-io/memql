@@ -298,7 +298,16 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // 207 -> 208: storeStatisticsCheckSweep, the hourly check of every store's
 // statistics facts against its mirrored rows (2026-11-12). One added, none
 // removed; measured by the strict loader.
-const shippedAutomationCount = 208
+// 208 -> 209: reconcileCalls, the thirty-second pass that repairs every open
+// call against its media server (the calls capability, 2026-11-18). One added,
+// none removed; measured by the strict loader.
+// 209 -> 210: applyMediaEvent, which applies each of the calls media server's
+// webhooks, staged on the inbound seam, to the call it names (the calls
+// capability, 2026-11-18). One added, none removed; measured by the strict
+// loader.
+// 210 -> 211: endSharesOnArtifactArchive, which ends every share of a Library
+// file its owner archived (file sharing, 2026-11-18). One added, none removed.
+const shippedAutomationCount = 211
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

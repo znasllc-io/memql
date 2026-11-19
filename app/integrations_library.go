@@ -26,4 +26,9 @@ func (a *App) wireLibraryIntegration(uploader server.FileUploader, bucket string
 	if reader, ok := uploader.(library.BlobFetcher); ok {
 		integ.SetBlobFetcher(reader)
 	}
+	// A recipient's copy of a shared file is written as a new, verified object
+	// in their own library/{owner}/ prefix (file sharing, 2026-11-18).
+	if writer, ok := uploader.(library.ShareCopyStore); ok {
+		integ.SetShareCopyStorage(writer, bucket)
+	}
 }

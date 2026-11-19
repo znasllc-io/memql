@@ -284,6 +284,12 @@ var appPartGrants = map[string][]Role{
 	// visitor into part of a site the public cannot see, and ends them, and a
 	// person may be trusted to deploy without being trusted to do that.
 	"app:deployables/access": {RoleOwner, RoleDeveloper},
+	// Turning a deployable's calls capability on and minting its calls keys,
+	// setting its calls limits and reading the media servers (the generic calls
+	// namespace, dsl/calls). Owner and developer, a part of its own for
+	// `access`'s reason: a calls deployable admits strangers to rooms on the
+	// cluster's media capacity, a different consequence from publishing a build.
+	"app:deployables/calls": {RoleOwner, RoleDeveloper},
 	// A deployable's Health figures on its Statistics page (owner's direction,
 	// 2026-11-10): for the people who run the site, not for a client reading
 	// their storefront's visitors. component/sitetraffic blanks the figures for
@@ -334,6 +340,12 @@ var appPartGrants = map[string][]Role{
 	// the Storefront token references a binding can expose are ones an owner
 	// or Connect chose.
 	"app:deployables/store": {RoleOwner, RoleDeveloper},
+	// Sharing one of your own Library files with one person for a bounded
+	// time (file sharing, owner's decision 2026-11-18). EVERY role, viewers
+	// included: it is a personal act on a person's own file. Enforced by
+	// libraryShareFile and libraryShareDirectory (dsl/library/builtins.memql);
+	// who may be picked is the directory's question, not this part's.
+	"app:files/share": {RoleOwner, RoleDeveloper, RoleAdmin, RoleWriter, RoleReader},
 	// Saving the installation-wide switches of Pipelines > Settings: the two
 	// AI switches and the weekly security scans. A part of its own, on the two
 	// roles the app is for, because the switches are configuration variables

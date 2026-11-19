@@ -19,12 +19,14 @@ require (
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
 	github.com/stretchr/testify v1.12.1
+	github.com/twitchtv/twirp v8.1.3+incompatible
 	github.com/uptrace/bun v1.3.0
 	github.com/uptrace/bun/dialect/pgdialect v1.3.0
 	github.com/uptrace/bun/driver/pgdriver v1.3.0
 	github.com/yuin/goldmark v1.8.6
 	github.com/znasllc-io/memql/component/auth v0.0.0
 	github.com/znasllc-io/memql/component/automations v0.0.0
+	github.com/znasllc-io/memql/component/calls v0.0.0
 	github.com/znasllc-io/memql/component/compose v0.0.0
 	github.com/znasllc-io/memql/component/database v0.0.0
 	github.com/znasllc-io/memql/component/deploycontrol v0.0.0
@@ -161,7 +163,6 @@ require (
 	github.com/tidwall/sjson v1.2.5 // indirect
 	github.com/tinylib/msgp v1.6.4 // indirect
 	github.com/tmthrgd/go-hex v0.0.0-20190904060850-447a3041c3bc // indirect
-	github.com/twitchtv/twirp v8.1.3+incompatible // indirect
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
@@ -210,6 +211,8 @@ replace github.com/znasllc-io/memql/component/automations => ../component/automa
 replace github.com/znasllc-io/memql/component/bus => ../component/bus
 
 replace github.com/znasllc-io/memql/component/bus/gen => ../component/bus/gen
+
+replace github.com/znasllc-io/memql/component/calls => ../component/calls
 
 replace github.com/znasllc-io/memql/component/compose => ../component/compose
 

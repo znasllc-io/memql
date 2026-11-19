@@ -121,7 +121,13 @@ func (e *MemQLEngine) actorSeesEveryone(ctx context.Context) bool {
 }
 
 // shareDirectoryFor builds the caller's directory.
-func (e *MemQLEngine) shareDirectoryFor(ctx context.Context) (shareDirectory, error) {
+//
+// accountGroupsOnly narrows the co-member half to groups of kind `account` --
+// the caller's ORGANIZATION -- which is the Library's rule for sharing a file
+// (library_share_directory.go). Fleet lends a machine to anybody the owner
+// shares any active group with, custom groups included, and passes false. The
+// `everyone` half is the same for both: `read principal` already sees everyone.
+func (e *MemQLEngine) shareDirectoryFor(ctx context.Context, accountGroupsOnly bool) (shareDirectory, error) {
 	dir := shareDirectory{
 		everyone:      e.actorSeesEveryone(ctx),
 		offeredPeople: map[string]struct{}{},
@@ -172,7 +178,8 @@ func (e *MemQLEngine) shareDirectoryFor(ctx context.Context) (shareDirectory, er
 				entry.Name = "Unnamed group"
 			}
 			dir.knownGroups[id] = entry
-			if strings.TrimSpace(stringFromAny(payload["status"])) == "active" {
+			if strings.TrimSpace(stringFromAny(payload["status"])) == "active" &&
+				(!accountGroupsOnly || strings.TrimSpace(stringFromAny(payload["kind"])) == "account") {
 				activeGroups[id] = entry
 			}
 		case conceptIdentityGroupMembership:
@@ -331,7 +338,7 @@ func (e *MemQLEngine) evaluateFleetShareDirectoryExpression(ctx context.Context,
 		return nil, err
 	}
 	machine = machine.forSharingResource(resource)
-	dir, err := e.shareDirectoryFor(ctx)
+	dir, err := e.shareDirectoryFor(ctx, false)
 	if err != nil {
 		return nil, err
 	}

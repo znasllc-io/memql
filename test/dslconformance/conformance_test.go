@@ -563,7 +563,11 @@ var idBearingFieldExemptions = map[string]string{
 	// step's receipt -- so a runner handing over a malformed file id would
 	// leave the step with no receipt, re-sent at the same attempt on resume,
 	// rather than with a wrong link a person can see.
-	"work/step.logFileId": "plain-fk-by-design (@description declares plain string FK): copied from an external runner's receipt, where canonicalize-on-write would turn a malformed id into a failed receipt (epic memql#5477)",
+	// A scheduled call's room: the ROOM declares the relationship to its call (room.scheduledCallId),
+	// and adding the reverse on the call was refused by memqllint as a direction conflict
+	// (type "references" to the room conflicts with direction "outgoing" declared in the room).
+	"calls/scheduledCall.roomId": "reverse of room.scheduledCallId, refused as a relationship direction conflict (the room side declares it)",
+	"work/step.logFileId":        "plain-fk-by-design (@description declares plain string FK): copied from an external runner's receipt, where canonicalize-on-write would turn a malformed id into a failed receipt (epic memql#5477)",
 }
 
 // idBearingReferencesConcept detects the id-bearing-FK heuristic: a `v1:ns:concept`

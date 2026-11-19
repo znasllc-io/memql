@@ -4171,6 +4171,39 @@ releases should flag findings, not fail on them.
   `TestNPMAuditRejectsFindingsAndIncompleteReports` covers `--report-only`
   (findings pass, an unreadable report fails). Not verified here: a live release
   run with a finding.
+
+## An npm advisory with no fixed release can be waived until a date (2026-11-17)
+
+GHSA-fc5q-39xc-vjpf (picomatch ReDoS, high) was widened on 2026-11-17 to every
+picomatch release up to 4.0.7, the latest, so no upgrade or `overrides` entry
+could clear it. The scheduled scan failed `npm-vulnerabilities` on
+`clients/os`, `editors/browser` and `editors/vscode`, and a failed stage skips
+the stages behind it, so every run on `main` would have stopped before its
+tests. picomatch reached only build and test tools there (vite, vitest,
+`@vscode/test-web`): every install path was `"dev": true` in the lockfiles. The
+owner chose an expiring exception.
+
+- **Chosen path** (`scripts/ci/npm-audit.py`,
+  `scripts/ci/npm-audit-exceptions.json`). An entry names the advisory id, the
+  package, an `expires` date, the reason and who decided. A finding is waived
+  only while all three hold: an entry names that advisory and that package;
+  the date has not arrived (on it the finding fails again); and every install
+  path npm reports for the package is `"dev": true` in the lockfile
+  (`devOptional` does not count). A waiver is printed as a WARNING and recorded
+  under `waived` in the step's `summary.json`.
+- **Invariant.** A waiver never covers code that ships and never outlives its
+  date. A malformed exceptions file makes the audit incomplete, which fails, as
+  an unreadable report does. A finding no entry names fails as before.
+- **Rejected.** An `overrides` entry (no fixed version exists); `--omit=dev` for
+  the whole audit (it would hide every development advisory, not this one);
+  skipping the scan.
+- **Stop condition.** Remove the entry once a fixed picomatch is adopted. The
+  date forces the decision by 2026-12-01 if none is published.
+- **Tests.** `TestNPMAuditWaivesOnlyListedUnexpiredDevelopmentAdvisories`
+  (waived; expired on the date; reaching a shipped dependency; an unlisted
+  second advisory; a malformed file) and `TestNPMAuditExceptionsFileIsWellFormed`.
+  Not verified here: a live pipeline run with the waiver.
+
 ## Pipeline capacity selection and spending holds
 
 Only an explicit manifest `placement: pool` asks for shared capacity preference.

@@ -269,6 +269,10 @@ type LibraryArtifactRow struct {
 	Format           string
 	MimeType         string
 	Summary          string
+	// OwnerUserId and Archived are what a SHARED read holds the row to
+	// (SharedFile): still the sharer's, and not in their Bin.
+	OwnerUserId string
+	Archived    bool
 }
 
 // LibraryFileRow is the v1:library:file projection the download path needs --
@@ -386,6 +390,12 @@ type LibraryStore interface {
 	// File reads one v1:library:file row under the caller's actor, by the
 	// canonical ref the artifact carries. Returns nil when absent or denied.
 	File(ctx context.Context, fileRef string) (*LibraryFileRow, error)
+	// SharedFile resolves a file somebody SHARED WITH the caller (file
+	// sharing, 2026-11-18): the artifact and its file, read under the
+	// SHARER, only while an active share names the caller. Nil, nil for
+	// anything else -- the content route cannot tell "not shared" from "not
+	// there", and must not.
+	SharedFile(ctx context.Context, artifactId string) (*LibraryArtifactRow, *LibraryFileRow, error)
 	// FileByUploadedFrom resolves the LIVE file a machine pushed from a given
 	// path -- the (machine, path) key the watched-folder backup versions on
 	// (epic memql#4783). Nil when nothing matches, which is the ordinary
@@ -1350,7 +1360,7 @@ func (h *ArtifactHandler) handleContent(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if artifact == nil {
-		http.Error(w, "not found", http.StatusNotFound)
+		h.serveSharedFile(w, r, artifactId)
 		return
 	}
 
@@ -1389,6 +1399,28 @@ func requestedVersion(r *http.Request) (int, bool, string) {
 			libraryVersionQueryKey, raw)
 	}
 	return n, true, ""
+}
+
+// serveSharedFile is the route's answer for an artifact the caller cannot read
+// as their own: a file somebody shared WITH them (file sharing, 2026-11-18),
+// resolved by SharedFile under the sharer while the share is open, or the same
+// 404 as every other refusal here.
+//
+// THE CURRENT VERSION ONLY. A share is of the file as it stands, so an older
+// version is not offered: ?version= is refused with the same 404, rather than
+// opening the version read to a second kind of caller.
+func (h *ArtifactHandler) serveSharedFile(w http.ResponseWriter, r *http.Request, artifactId string) {
+	artifact, row, err := h.store.SharedFile(r.Context(), artifactId)
+	if err != nil {
+		h.logger.Error("library shared file lookup failed", "error", err, "artifactId", artifactId)
+		http.Error(w, "lookup failed", http.StatusInternalServerError)
+		return
+	}
+	if artifact == nil || row == nil || strings.TrimSpace(r.URL.Query().Get(libraryVersionQueryKey)) != "" {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	h.serveFileRow(w, r, artifact, row, row.OwnerUserId)
 }
 
 // serveFileBytes streams a file artifact's stored bytes. No redirect: the
@@ -1457,6 +1489,13 @@ func (h *ArtifactHandler) serveFileBytes(w http.ResponseWriter, r *http.Request,
 			Status:   libraryStatusReady,
 		}
 	}
+	h.serveFileRow(w, r, artifact, row, owner)
+}
+
+// serveFileRow streams one resolved file row -- the caller's own, one of its
+// versions, or a file shared with them -- once its key is held to its owner.
+func (h *ArtifactHandler) serveFileRow(w http.ResponseWriter, r *http.Request, artifact *LibraryArtifactRow, row *LibraryFileRow, owner string) {
+	ctx := r.Context()
 	// THE KEY HAS TO BE THE OWNER'S, judged before a byte is read. Row
 	// admission has already said the caller may see this row; it says
 	// nothing about which object the node's storage credential opens next.
@@ -2064,7 +2103,85 @@ func (s *EngineLibraryStore) Artifact(ctx context.Context, artifactId string) (*
 		Format:           rowString(r, "format"),
 		MimeType:         rowString(r, "mimeType"),
 		Summary:          rowString(r, "summary"),
+		OwnerUserId:      rowString(r, "ownerUserId"),
+		Archived:         rowBool(r, "archived"),
 	}, nil
+}
+
+// SharedFile resolves a file shared WITH the caller (file sharing,
+// 2026-11-18). The one resolver behind both shared reads -- this route's
+// download and librarySaveSharedCopy (integrations/library/share.go) -- so the
+// two cannot disagree about whether a share is open.
+//
+// THE SHARE DECIDES, READ FRESH, UNDER ITS SHARER. The caller's own notice
+// (librarySharedWithMe, owned by them) only says which share to read; it
+// grants nothing, because it is a display row. The share itself is owned by
+// the sharer, so it is read under the sharer's BORROWED authority -- never
+// internal origin, which would open every @serverOnly construct to whoever
+// holds a share -- and every read carries ContextWithFreshRead, so a stop on
+// a sibling replica is seen before that replica's cache eviction lands. The
+// share must name this caller and this artifact, be unrevoked, and expire
+// after now on this node's clock: compared here rather than trusted to the
+// query's own `expiresAt > now`, which a cached answer could have outlived.
+//
+// THEN THE FILE, UNDER THE SAME SHARER. The artifact must still be the
+// sharer's, a file and not archived, and its backing file the same. The
+// blob-key check stays with the caller of this function, against the file's
+// owner, exactly as for an owner's own read.
+func (s *EngineLibraryStore) SharedFile(ctx context.Context, artifactId string) (*LibraryArtifactRow, *LibraryFileRow, error) {
+	artifactId = strings.TrimSpace(artifactId)
+	access, _ := auth.AccessFromContext(ctx)
+	if artifactId == "" || access == nil || strings.TrimSpace(access.UserId) == "" {
+		return nil, nil, nil
+	}
+	caller := memql.BareShortId(access.UserId)
+	ctx = memql.ContextWithFreshRead(ctx)
+	res, err := s.exec(ctx, "librarySharedWithMe", map[string]any{"artifactId": artifactId})
+	if err != nil {
+		return nil, nil, err
+	}
+	now := time.Now().UTC()
+	for _, notice := range memql.MaterializeRows(res) {
+		sharer := memql.BareShortId(rowString(notice, "sharerUserId"))
+		shareId := rowString(notice, "shareId")
+		if sharer == "" || shareId == "" || sharer == caller {
+			continue
+		}
+		asSharer := auth.ContextWithUserActor(ctx, sharer)
+		res, err := s.exec(asSharer, "libraryShareById", map[string]any{"shareId": shareId})
+		if err != nil {
+			return nil, nil, err
+		}
+		shares := memql.MaterializeRows(res)
+		if len(shares) != 1 {
+			continue
+		}
+		share := shares[0]
+		expires, perr := time.Parse(time.RFC3339Nano, rowString(share, "expiresAt"))
+		if perr != nil || !expires.After(now) || rowString(share, "revokedAt") != "" ||
+			memql.BareShortId(rowString(share, "ownerUserId")) != sharer ||
+			memql.BareShortId(rowString(share, "recipientUserId")) != caller ||
+			memql.BareShortId(rowString(share, "artifactId")) != memql.BareShortId(artifactId) {
+			continue
+		}
+		artifact, err := s.Artifact(asSharer, artifactId)
+		if err != nil {
+			return nil, nil, err
+		}
+		if artifact == nil || artifact.Archived || artifact.Kind != libraryKindFile ||
+			memql.BareShortId(artifact.OwnerUserId) != sharer {
+			continue
+		}
+		file, err := s.File(asSharer, artifact.SourceConceptRef)
+		if err != nil {
+			return nil, nil, err
+		}
+		if file == nil || file.Archived || memql.BareShortId(file.OwnerUserId) != sharer {
+			continue
+		}
+		return artifact, file, nil
+	}
+	return nil, nil, nil
 }
 
 // File reads one v1:library:file row through libraryFileById.

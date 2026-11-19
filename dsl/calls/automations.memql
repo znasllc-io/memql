@@ -1,0 +1,54 @@
+// automations.memql
+//
+// The calls capability's two automations, backed by integrations/calls: the media server's
+// webhooks applied as they arrive (events.go), and reconciliation (reconcile.go), which
+// repairs whatever a webhook missed or reported out of order. An automation loads only from
+// its domain's automations.memql (dsl/construct_placement.go), which is why this file exists.
+
+/// Repair every open call against what its media server shows, every thirty seconds.
+///
+/// WHY A PASS AT ALL. A media server's own list of who is connected is the truth about a call, and the
+/// rows only follow it: a participant who drops without a word leaves a seat holding one of the server's
+/// seats; a removed participant can come back on a pass a self-hosted server cannot revoke; a waiter who
+/// closed their tab leaves a place in line; and a host who left leaves a countdown that only a later
+/// request would otherwise notice. The pass reads each call's participant list and repairs the call's rows
+/// to it, call by call, under each call's own locks (callsReconcile). It mints no pass: a waiter whose turn
+/// has come is let in on its own next poll.
+///
+/// PLACED on one bff replica at a time, behind the cluster lease `calls-reconcile`: the pass is the
+/// cluster's work, not a replica's, and two replicas running it at once would only repeat each other.
+/// Every call is still decided under its own locks, so a lease that changes hands mid-pass costs a repeat
+/// and nothing else. single: a pass that outlasts thirty seconds is not overlapped by the next one in this
+/// process.
+@trigger(schedule="*/30 * * * * *", node="bff", lease="calls-reconcile")
+@mode(single)
+automation reconcileCalls {
+  builtin callsReconcile()
+}
+
+/// Apply each of the media server's webhooks to the call it names, as it arrives.
+///
+/// WHY. A webhook is the media server saying, within a moment, who connected, who disconnected, whose screen
+/// share is new and which room it closed: the timely half of keeping a call's rows true. Reconciliation is
+/// the other half, every thirty seconds, and the truth when the two disagree, because a webhook can be late,
+/// reordered or lost; so each event is applied only when it is newer than what the rows already record, and
+/// a disconnect only records the seat's last sign of life, leaving the seat's closing to the pass (a page
+/// refresh disconnects exactly as a hang-up does).
+///
+/// THE ROW, NOT THE EVENT. The receiver at /inbound/livekit verified the delivery with the calls media
+/// credential and staged it; this hands the builtin the staged row's id and nothing else, and the builtin
+/// reads the source, the body and the verdict from the row itself.
+///
+/// FILTERED ON `received`, like every automation on a staged delivery (dsl/platform/automations.memql
+/// says why): the builtin stamps the row it worked, every write publishes node.created, and a trigger
+/// admitting the stamp would fire this again. It runs on the node that staged the delivery, which a
+/// delivery never leaves (component/node routing.go), so either bff replica works a webhook it received.
+@trigger(event="node.created", concept="v1:platform:inboundRequest")
+@filter(row => row.source == "livekit" && row.status == "received")
+@journalOnWrite
+automation applyMediaEvent {
+  args {
+    id  any
+  }
+  apply := builtin callsApplyMediaEvent(requestId: args.id)
+}

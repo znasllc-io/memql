@@ -945,3 +945,61 @@ query folder libraryFolderDirectory {
   paginate 500
   shape libraryFolderFull
 }
+
+// ---- file sharing (2026-11-18) ----
+//
+// NONE OF THESE IS CACHED. The two lists compare against the clock, and the
+// result cache's key does not include it, so a cached answer would go on listing
+// a share for up to its TTL after it expired. The by-id read is the one an
+// access decides on, and an access must see a stop the moment it is written --
+// its callers also pass memql.ContextWithFreshRead, for a sibling replica whose
+// eviction is still on its way.
+//
+// EVERY ONE IS OWNED: the sharer reads their own shares, the recipient their own
+// notices. Nobody reads the other half; the access path reads a share under the
+// sharer's borrowed authority (component/server EngineLibraryStore.SharedFile).
+
+/// The caller's ACTIVE shares of one of their files -- who has it now, and until when. Backs the
+/// Share panel: `id` is the shareId libraryShareStop takes, `days` is what Renew sends back to
+/// libraryShareFile. Stopped and expired shares are not listed.
+@unbounded("one file's active shares -- at most one per person the sharer may pick")
+@cache(0)
+@actor
+query share librarySharesForArtifact {
+  args {
+    artifactId  string!
+  }
+  filter row => row.ownerUserId == actor.userId && row.artifactId == args.artifactId
+    && row.revokedAt == nil && row.expiresAt > now
+  shape libraryShareFull
+}
+
+/// One of the caller's own shares by id, stopped or not -- what libraryShareStop checks ownership
+/// with and what an access reads, under the sharer, to decide. The caller compares revokedAt and
+/// expiresAt itself, against its own clock.
+@unbounded("one share by its own id -- bounded to a single row")
+@cache(0)
+@actor
+query share libraryShareById {
+  args {
+    shareId  string!
+  }
+  filter row => row.ownerUserId == actor.userId && row.id == args.shareId
+  shape libraryShareFull
+}
+
+/// Files shared WITH the caller that have not ended or expired: the "Shared with me" list, live
+/// through the notice rows' graph events. artifactId narrows it to one file, which is how the
+/// download route and librarySaveSharedCopy find the share behind a file. A notice grants
+/// nothing: every access re-reads the share it names.
+@unbounded("the caller's live shared-with-me notices -- every one ends within thirty days of its share")
+@cache(0)
+@actor
+query shareNotice librarySharedWithMe {
+  args {
+    artifactId  string
+  }
+  filter row => row.ownerUserId == actor.userId && row.endedAt == nil && row.expiresAt > now
+    && (args.artifactId == nil || row.artifactId == args.artifactId)
+  shape libraryShareNoticeFull
+}

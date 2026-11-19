@@ -64,6 +64,19 @@ var payloadLookups = []payloadLookup{
 	{index: "memory_nodes_access_tokenhash_lookup_idx", field: "tokenHash", concepts: []string{"v1:platform:siteAccessSession"}},
 	{index: "memory_nodes_access_codeid_lookup_idx", field: "codeId", concepts: []string{"v1:platform:siteAccessSession"}},
 	{index: "memory_nodes_access_codehash_lookup_idx", field: "codeHash", concepts: []string{"v1:platform:siteAccessCode"}},
+	// The calls capability's digest lookups (a key, a pass, a host or guest link).
+	// A secret's digest names one row, so each is one range read.
+	{index: "memory_nodes_calls_key_digest_lookup_idx", field: "digest", concepts: []string{"v1:calls:key"}},
+	{index: "memory_nodes_calls_session_digest_lookup_idx", field: "tokenDigest", concepts: []string{"v1:calls:session"}},
+	{index: "memory_nodes_calls_guest_digest_lookup_idx", field: "guestDigest", concepts: []string{"v1:calls:room", "v1:calls:scheduledCall"}},
+	{index: "memory_nodes_calls_host_digest_lookup_idx", field: "hostDigest", concepts: []string{"v1:calls:room", "v1:calls:scheduledCall"}},
+	// The join and queue paths' per-parent reads, every request: the seats and queue entries of
+	// one room, and the rooms and scheduled calls of one key.
+	{index: "memory_nodes_calls_room_lookup_idx", field: "roomId", concepts: []string{"v1:calls:seat", "v1:calls:queueEntry"}},
+	{index: "memory_nodes_calls_key_lookup_idx", field: "keyId", concepts: []string{"v1:calls:room", "v1:calls:scheduledCall"}},
+	// The capacity read every join, start and queue poll makes: the open rooms of one
+	// media server, whose seats every call on it shares.
+	{index: "memory_nodes_calls_media_server_lookup_idx", field: "mediaServerId", concepts: []string{"v1:calls:room"}},
 	// The datasync retry pass (inboundRequestsDueForRetry, every minute) and
 	// the given-up list read the FAILED deliveries; partial on that status, so
 	// the range is the deliveries that ever failed and never the inbox, whose

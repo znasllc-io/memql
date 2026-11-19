@@ -830,6 +830,29 @@ mutation site updateSiteShopperForms {
   }
 }
 
+/// Turn the CALLS capability on or off for this deployable (the generic calls capability,
+/// dsl/calls): whether its own origin serves the calls routes, rooms people join with a key and no
+/// MemQL account.
+///
+/// THE ONE WRITER OF `calls`, and the write callsSiteEnable makes AS THE PERSON ASKING. It carries the
+/// part itself, and organizationCapabilityTarget names its target, so it is judged in the
+/// deployable's organization whether a person calls it directly or through the builtin; the site's
+/// row tier decides who may write the row, and validateOrganizationSensitiveChanges asks the
+/// organization's calls part for the change itself. `calls boolean!` rather than an optional with
+/// `?? false`, for updateSiteShopperForms' reason: off is a deliberate act that must be expressible
+/// as a write.
+@requiresCapability("execute", "app:deployables/calls")
+mutation site updateSiteCalls {
+  args {
+    siteId  string!
+    calls   boolean!
+  }
+  update {
+    id:     args.siteId
+    calls:  args.calls
+  }
+}
+
 /// Choose what the edge answers for a path that matches no file in this deployable's bundle
 /// (memql#5535) -- the LAST rung of the resolution order, and nothing above it.
 ///

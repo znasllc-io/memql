@@ -639,9 +639,16 @@ func dedupeKeyFor(src SourceConfig, header http.Header, body []byte) (string, er
 // For an unverified source (scheme "none") there is no signed material and no
 // signature to replay, so the body digest stands in: identity is content, which
 // is the strongest statement available when nothing is authenticated.
+//
+// A jwt-hs256-body-sha256 source's identity is the body's digest too. Its token
+// carries the sender's times and its claims sign the body, so what identifies the
+// delivery is the body; a timestamp header beside the token was never signed. The
+// scheme is left out of the condition below by name rather than trusting that no
+// such header is configured: loadSource refuses one for an environment source, and
+// a registered or connector policy is built in code, where nothing would.
 func identityKeyFor(src SourceConfig, header http.Header, body []byte) string {
 	signed := body
-	if src.Scheme != SchemeNone && src.TimestampHeader != "" {
+	if src.TimestampHeader != "" && (src.Scheme == SchemeHMACSHA256Hex || src.Scheme == SchemeHMACSHA256Base64) {
 		// Mirrors verify(): "<timestamp>.<body>" is what the HMAC covered, so
 		// it is what identity must be taken over.
 		ts := strings.TrimSpace(header.Get(src.TimestampHeader))

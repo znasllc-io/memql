@@ -1,0 +1,141 @@
+// builtins.memql
+//
+// The calls capability's operator acts, backed by integrations/calls (operator.go). Every
+// client-callable act on the calls rows is one of these four: the concepts are @serverWritten and
+// client-unreadable, and every query and mutation beneath them is @serverOnly. The last two builtins,
+// callsReconcile and callsApplyMediaEvent, are the cluster's own: each handler refuses every caller but
+// its own engine automation, reconcileCalls and applyMediaEvent (integrations/calls reconcile.go and
+// events.go), so no person reaches either.
+//
+// WHO MAY CALL. Each declares execute on app:deployables/calls, seeded on owner and developer
+// (dsl/rbac/seeds.memql), and the engine refuses every other caller before the executor runs. The part
+// can also be GRANTED through an organization's group, so the three acts that name a deployable (a
+// test key, the site switch, the site's limits) are judged against THAT deployable's organization
+// (organizationCapabilityTarget, component/memql): the part held in one organization acts on no
+// other's deployable. Each of the three also reads the deployable under the caller, so a person who
+// cannot see it is refused by name before anything is written. The media servers are the cluster's,
+// so their list admits a cluster owner and nobody else, a check its handler makes: holding the part,
+// by role or by grant, is not enough.
+//
+// A PERSON'S ACTS. Minting a key, switching calls and changing limits refuse a caller who is not a
+// person (the operator credential, the cluster acting) and any call inside a run: a run's journal
+// would keep a key, and what a deployable allows is an operator's decision.
+//
+// @sdk, so the OS and tooling call a typed method rather than hand-building a call string.
+
+/// Mint a TEST key for a deployable's calls (calls, plan Task 4).
+///
+/// THE KEY COMES BACK ONCE. It is in this reply and, if the operator copies it, wherever they put it;
+/// the row holds only the HMAC-SHA256 digest of the key's sixteen raw bytes under the cluster's key
+/// pepper, so nothing can read it back. A lost key is replaced, never recovered. The key belongs to
+/// the deployable's owner, whoever asked, and is a test key: it spends no balance.
+///
+/// Refused for a deployable the caller cannot read, one with no owner, the cluster's own surfaces, a
+/// name over 80 characters, a cluster with no media server (no pepper exists until one is
+/// configured), a caller who is not a person, and any call inside a run. Returns {keyId, key}.
+@sdk
+@executor("integration.calls.testKeyCreate")
+@requiresCapability("execute", "app:deployables/calls")
+@description("Mint a test calls key for a deployable. Stores only the digest of the key and returns the key once, here and nowhere else; the key belongs to the deployable's owner and spends no balance. Refused for a deployable the caller cannot read, one with no owner, a name over 80 characters, a cluster with no media server, a caller who is not a person and any call inside a run. Returns {keyId, key}.")
+builtin callsTestKeyCreate {
+  siteId  string!  @description("The deployable the key is for.")
+  label   string   @description("The operator's name for the key, at most 80 characters. Never sent to a caller.")
+}
+
+/// Turn the calls capability on or off for a deployable (calls, plan Task 4).
+///
+/// A WRITE OF THE SITE'S `calls` FIELD AS THE PERSON ASKING, through updateSiteCalls, so the engine
+/// judges it as any write of theirs: the part, the deployable's organization (whose calls part the
+/// change asks, validateOrganizationSensitiveChanges) and the site's own row tier. Turning calls on
+/// needs a deployable with an owner, because every call's rows belong to the owner; turning them off
+/// does not. Returns {siteId, calls}.
+@sdk
+@executor("integration.calls.siteEnable")
+@requiresCapability("execute", "app:deployables/calls")
+@description("Turn the calls capability on or off for a deployable, as the person asking: the write is judged like any write of theirs, the part, the deployable's organization and the site's row tier. Turning calls on needs a deployable with an owner. Refused for a caller who is not a person and any call inside a run. Returns {siteId, calls}.")
+builtin callsSiteEnable {
+  siteId  string!   @description("The deployable to switch calls on or off for.")
+  on      boolean!  @description("True to turn calls on, false to turn them off.")
+}
+
+/// Set any of a deployable's calls limits (v1:calls:policy, calls, plan Task 4).
+///
+/// PER SITE: the limits are the site's, on a row its owner owns, because a package deployable's name
+/// is unique only together with its package. ONLY WHAT IS NAMED CHANGES: a limit left out keeps the
+/// value it had, and one nobody ever set is the shipped default (calls.DefaultPolicy). Counts are
+/// whole numbers and DURATIONS ARE WHOLE SECONDS. Every value is held to the CLUSTER'S bounds (a room
+/// of 1 to 1000 people, a pass of 10 to 900 seconds, a waiter that polls at least once a minute and
+/// whose place outlives a poll), so no site claims more than the cluster allows; what a deployable
+/// allows inside those bounds is its operator's to choose. Judged in the site's organization, and
+/// refused for a deployable the caller cannot read, one with no owner, a caller who is not a person
+/// and any call inside a run. Returns the effective limits: {policyId, siteId} and one field per
+/// limit.
+@sdk
+@executor("integration.calls.policySet")
+@requiresCapability("execute", "app:deployables/calls")
+@description("Set any of a deployable's calls limits, which are per site; a limit not named keeps its value and one never set is the shipped default. Counts are whole numbers and durations are whole seconds, each held to the cluster's bounds so no site claims more than the cluster allows. Judged in the deployable's organization; refused for a deployable the caller cannot read, one with no owner, a caller who is not a person and any call inside a run. Returns the effective limits: {policyId, siteId, maxPeople, maxAgents, roomJoinsPerMinute, maxUpcomingScheduled, maxScheduledMinutes, hostLeftGrace, passTtl, scheduleHorizon, queueEntryTtl, queuePoll}.")
+builtin callsPolicySet {
+  siteId                string!  @description("The deployable the limits are for.")
+  maxPeople             int      @description("People allowed in one room, 1 to 1000.")
+  maxAgents             int      @description("Agents allowed in one room, 0 to 100.")
+  roomJoinsPerMinute    int      @description("Join attempts allowed per room per minute, 1 to 10000.")
+  maxUpcomingScheduled  int      @description("Upcoming scheduled calls allowed per key, 0 to 1000.")
+  maxScheduledMinutes   int      @description("The longest a scheduled call may be, in minutes, 1 to 1440.")
+  hostLeftGrace         int      @description("How long a room outlives its host, in seconds, 0 to 86400.")
+  passTtl               int      @description("How long a pass lives, in seconds, 10 to 900.")
+  scheduleHorizon       int      @description("How far ahead a call may be booked, in seconds, 0 to 31622400.")
+  queueEntryTtl         int      @description("How long a queue entry may go unpolled, in seconds, 10 to 86400, and longer than queuePoll.")
+  queuePoll             int      @description("How often a waiter polls, in seconds, 1 to 60.")
+}
+
+/// The media servers rooms are placed on (calls, plan Task 4).
+///
+/// THE CLUSTER OWNER'S. The servers are the cluster's, so the list admits a cluster owner and nobody
+/// else, a check the handler makes: the calls part, held by role or granted through an organization,
+/// is not enough. EVERY ACTIVE SERVER, one row each: {id, provider, publicUrl, region, seats, state,
+/// createdAt}. NEVER A CREDENTIAL, never the name of the secret holding one, and never the control
+/// address, which only the engine uses. `provider` is the value the environment recorded
+/// (docker-local or hetzner); nothing decides by it.
+@sdk
+@executor("integration.calls.mediaServers")
+@requiresCapability("execute", "app:deployables/calls")
+@description("List the active media servers rooms are placed on, one row each: {id, provider, publicUrl, region, seats, state, createdAt}. A cluster owner's read: refused for anyone else, whatever part they hold. Never a credential, the name of the secret holding one, or the control address.")
+builtin callsMediaServers { }
+
+/// Repair every open call against what its media server shows: the reconcileCalls automation's act.
+///
+/// THE CLUSTER'S OWN, NOT @sdk. Its handler refuses every caller but the engine's own reconcileCalls
+/// automation at internal origin -- a person, the cluster's operator, the cluster acting outside that
+/// automation, any other automation -- before it reads anything (integrations/calls reconcile.go). It
+/// declares no capability for that reason: no part a person holds would make the call theirs to make.
+///
+/// Call by call, under each call's locks, in this order: a seat in the call whose identity the media
+/// server no longer shows is closed at its last seen time; an identity no seat in the call holds -- a
+/// stranger, a removed seat back on a pass it still holds -- is disconnected; the queue's expired entries
+/// are marked; the host-left countdown is applied, handing the call to a key holder in it or ending it;
+/// and a call nobody is in or waiting for is ended. The queue comes before the countdown so the decision
+/// to end a call and its end are made from the same rows. It mints no pass. Returns nothing.
+@executor("integration.calls.reconcile")
+@description("Repair every open call against what its media server shows: close the seats whose identity is gone, disconnect identities no seat holds, mark expired queue entries, apply the host-left countdown and end calls nobody is in. Refused to every caller but the engine's own reconcileCalls automation; it mints no pass and returns nothing.")
+builtin callsReconcile { }
+
+/// Apply one of the media server's webhooks to the call it names: the applyMediaEvent automation's act.
+///
+/// THE CLUSTER'S OWN, NOT @sdk, for callsReconcile's reason: its handler refuses every caller but the
+/// engine's own applyMediaEvent automation at internal origin before it reads anything (integrations/calls
+/// events.go), and it declares no capability.
+///
+/// IT READS THE DELIVERY ITSELF. It is handed the staged v1:platform:inboundRequest row's id and nothing
+/// else, and works only a delivery of the media server's source that the receiver verified with the calls
+/// media credential (signatureVerified, verifiedBy "registered"); any other is stamped failed and changes
+/// nothing. Each event is applied only when it is newer, to the second, than what the rows already record:
+/// participant_joined puts an admitted seat in the call, participant_left records the disconnect as the
+/// seat's last sign of life and leaves its closing to reconciliation (a disconnect is not a hang-up),
+/// track_published of a screen share stops every other participant's share, and room_finished ends a call
+/// only when nobody is in it or waiting for it. A connection that holds no seat in the call is disconnected
+/// again. It stamps the delivery processed. Returns {requestId, event, outcome}.
+@executor("integration.calls.applyMediaEvent")
+@description("Apply one of the media server's webhooks, staged as a v1:platform:inboundRequest, to the call it names: a seat in the call, a disconnect recorded, a new screen share taking over, an empty call ended, a connection without a seat disconnected. Refused to every caller but the engine's own applyMediaEvent automation; it works only a delivery the calls media credential verified. Returns {requestId, event, outcome}.")
+builtin callsApplyMediaEvent {
+  requestId  string!  @description("The staged delivery's row id, as the automation's trigger hands it.")
+}

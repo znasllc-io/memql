@@ -18,6 +18,14 @@ import (
 	_ "github.com/znasllc-io/memql/integrations/agents"
 	_ "github.com/znasllc-io/memql/integrations/auth"
 	_ "github.com/znasllc-io/memql/integrations/azureblob"
+	// The generic calls capability (dsl/calls). On every node type for
+	// siteaccess's reason: its four builtins are declared in
+	// dsl/calls/builtins.memql, which every binary loads, so a capability
+	// missing from the registry is a boot-time resolution failure, and gating it
+	// by build tag would make whether an operator can mint a key depend on which
+	// replica their stream landed on. Its media bootstrap runs only on a node
+	// whose environment names a media server (integrations/calls/config.go).
+	_ "github.com/znasllc-io/memql/integrations/calls"
 	// The Materializer (epic memql#4977). Registered on EVERY node type,
 	// like customdomain below and for the same reason: the five builtins
 	// are declared in dsl/compose/builtins.memql, which every binary

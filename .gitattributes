@@ -15,3 +15,5 @@
 # therefore ci-required. Writing the artifact compact is what actually fixed
 # it, so the marker would now be doing nothing except hiding a one-line diff
 # that is already unreadable.
+# The golden calendar file must keep its CRLF bytes; text=auto would store LF.
+component/calls/testdata/*.ics -text

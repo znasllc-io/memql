@@ -659,6 +659,132 @@ QueryClient.prototype.branchRun = function (this: QueryClient, args: BranchRunAr
   return this.executeNamed("branchRun", buildBranchRun(args), opts);
 };
 
+/** The media servers rooms are placed on (calls, plan Task 4).
+THE CLUSTER OWNER'S. The servers are the cluster's, so the list admits a cluster owner and nobody else, a check the handler makes: the calls part, held by role or granted through an organization, is not enough. EVERY ACTIVE SERVER, one row each: {id, provider, publicUrl, region, seats, state, createdAt}. NEVER A CREDENTIAL, never the name of the secret holding one, and never the control address, which only the engine uses. `provider` is the value the environment recorded (docker-local or hetzner); nothing decides by it. */
+export interface CallsMediaServersArgs {
+}
+
+export function buildCallsMediaServers(args: CallsMediaServersArgs): string {
+  void args;
+  return "builtin callsMediaServers()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    callsMediaServers(args?: CallsMediaServersArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.callsMediaServers = function (this: QueryClient, args: CallsMediaServersArgs = {} as CallsMediaServersArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("callsMediaServers", buildCallsMediaServers(args), opts);
+};
+
+/** Set any of a deployable's calls limits (v1:calls:policy, calls, plan Task 4).
+PER SITE: the limits are the site's, on a row its owner owns, because a package deployable's name is unique only together with its package. ONLY WHAT IS NAMED CHANGES: a limit left out keeps the value it had, and one nobody ever set is the shipped default (calls.DefaultPolicy). Counts are whole numbers and DURATIONS ARE WHOLE SECONDS. Every value is held to the CLUSTER'S bounds (a room of 1 to 1000 people, a pass of 10 to 900 seconds, a waiter that polls at least once a minute and whose place outlives a poll), so no site claims more than the cluster allows; what a deployable allows inside those bounds is its operator's to choose. Judged in the site's organization, and refused for a deployable the caller cannot read, one with no owner, a caller who is not a person and any call inside a run. Returns the effective limits: {policyId, siteId} and one field per limit. */
+export interface CallsPolicySetArgs {
+  /** The deployable the limits are for. */
+  siteId: string;
+  /** People allowed in one room, 1 to 1000. */
+  maxPeople?: number;
+  /** Agents allowed in one room, 0 to 100. */
+  maxAgents?: number;
+  /** Join attempts allowed per room per minute, 1 to 10000. */
+  roomJoinsPerMinute?: number;
+  /** Upcoming scheduled calls allowed per key, 0 to 1000. */
+  maxUpcomingScheduled?: number;
+  /** The longest a scheduled call may be, in minutes, 1 to 1440. */
+  maxScheduledMinutes?: number;
+  /** How long a room outlives its host, in seconds, 0 to 86400. */
+  hostLeftGrace?: number;
+  /** How long a pass lives, in seconds, 10 to 900. */
+  passTtl?: number;
+  /** How far ahead a call may be booked, in seconds, 0 to 31622400. */
+  scheduleHorizon?: number;
+  /** How long a queue entry may go unpolled, in seconds, 10 to 86400, and longer than queuePoll. */
+  queueEntryTtl?: number;
+  /** How often a waiter polls, in seconds, 1 to 60. */
+  queuePoll?: number;
+}
+
+export function buildCallsPolicySet(args: CallsPolicySetArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  if (args.maxPeople !== undefined) parts.push("maxPeople: " + renderMemQLValue(args.maxPeople));
+  if (args.maxAgents !== undefined) parts.push("maxAgents: " + renderMemQLValue(args.maxAgents));
+  if (args.roomJoinsPerMinute !== undefined) parts.push("roomJoinsPerMinute: " + renderMemQLValue(args.roomJoinsPerMinute));
+  if (args.maxUpcomingScheduled !== undefined) parts.push("maxUpcomingScheduled: " + renderMemQLValue(args.maxUpcomingScheduled));
+  if (args.maxScheduledMinutes !== undefined) parts.push("maxScheduledMinutes: " + renderMemQLValue(args.maxScheduledMinutes));
+  if (args.hostLeftGrace !== undefined) parts.push("hostLeftGrace: " + renderMemQLValue(args.hostLeftGrace));
+  if (args.passTtl !== undefined) parts.push("passTtl: " + renderMemQLValue(args.passTtl));
+  if (args.scheduleHorizon !== undefined) parts.push("scheduleHorizon: " + renderMemQLValue(args.scheduleHorizon));
+  if (args.queueEntryTtl !== undefined) parts.push("queueEntryTtl: " + renderMemQLValue(args.queueEntryTtl));
+  if (args.queuePoll !== undefined) parts.push("queuePoll: " + renderMemQLValue(args.queuePoll));
+  return "builtin callsPolicySet(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    callsPolicySet(args: CallsPolicySetArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.callsPolicySet = function (this: QueryClient, args: CallsPolicySetArgs = {} as CallsPolicySetArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("callsPolicySet", buildCallsPolicySet(args), opts);
+};
+
+/** Turn the calls capability on or off for a deployable (calls, plan Task 4).
+A WRITE OF THE SITE'S `calls` FIELD AS THE PERSON ASKING, through updateSiteCalls, so the engine judges it as any write of theirs: the part, the deployable's organization (whose calls part the change asks, validateOrganizationSensitiveChanges) and the site's own row tier. Turning calls on needs a deployable with an owner, because every call's rows belong to the owner; turning them off does not. Returns {siteId, calls}. */
+export interface CallsSiteEnableArgs {
+  /** The deployable to switch calls on or off for. */
+  siteId: string;
+  /** True to turn calls on, false to turn them off. */
+  on: boolean;
+}
+
+export function buildCallsSiteEnable(args: CallsSiteEnableArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  parts.push("on: " + renderMemQLValue(args.on));
+  return "builtin callsSiteEnable(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    callsSiteEnable(args: CallsSiteEnableArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.callsSiteEnable = function (this: QueryClient, args: CallsSiteEnableArgs = {} as CallsSiteEnableArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("callsSiteEnable", buildCallsSiteEnable(args), opts);
+};
+
+/** Mint a TEST key for a deployable's calls (calls, plan Task 4).
+THE KEY COMES BACK ONCE. It is in this reply and, if the operator copies it, wherever they put it; the row holds only the HMAC-SHA256 digest of the key's sixteen raw bytes under the cluster's key pepper, so nothing can read it back. A lost key is replaced, never recovered. The key belongs to the deployable's owner, whoever asked, and is a test key: it spends no balance.
+Refused for a deployable the caller cannot read, one with no owner, the cluster's own surfaces, a name over 80 characters, a cluster with no media server (no pepper exists until one is configured), a caller who is not a person, and any call inside a run. Returns {keyId, key}. */
+export interface CallsTestKeyCreateArgs {
+  /** The deployable the key is for. */
+  siteId: string;
+  /** The operator's name for the key, at most 80 characters. Never sent to a caller. */
+  label?: string;
+}
+
+export function buildCallsTestKeyCreate(args: CallsTestKeyCreateArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  if (args.label !== undefined) parts.push("label: " + renderMemQLValue(args.label));
+  return "builtin callsTestKeyCreate(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    callsTestKeyCreate(args: CallsTestKeyCreateArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.callsTestKeyCreate = function (this: QueryClient, args: CallsTestKeyCreateArgs = {} as CallsTestKeyCreateArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("callsTestKeyCreate", buildCallsTestKeyCreate(args), opts);
+};
+
 /** Generate an event-email rule's automation construct and arm it (memql#4829). The generator is a DETERMINISTIC template over the rule's form -- the LLM authoring path stays off, because a rule that mails strangers is not a place for a model to improvise and a deterministic generator is one a person can read the output of. The generated .memql goes through the ordinary authoring pipeline: bundle, validate, activate. Activation takes effect IMMEDIATELY rather than at next boot. The rule row records the bundle and construct it produced; on refusal it records the engine's own sentence on lastError and the rule goes to 'failed' rather than silently staying draft. */
 export interface CampaignActivateEmailRuleArgs {
   /** The rule to generate and arm. The caller must own it: the generated construct runs under the AUTHOR's envelope, so who armed it decides what it can read. */
@@ -4131,6 +4257,28 @@ QueryClient.prototype.libraryRequestDocumentRevision = function (this: QueryClie
   return this.executeNamed("libraryRequestDocumentRevision", buildLibraryRequestDocumentRevision(args), opts);
 };
 
+/** Save a copy of a file shared with you into your own Library. */
+export interface LibrarySaveSharedCopyArgs {
+  /** The shared file's artifact id, as librarySharedWithMe names it. */
+  artifactId: string;
+}
+
+export function buildLibrarySaveSharedCopy(args: LibrarySaveSharedCopyArgs): string {
+  const parts: string[] = [];
+  parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  return "builtin librarySaveSharedCopy(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    librarySaveSharedCopy(args: LibrarySaveSharedCopyArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.librarySaveSharedCopy = function (this: QueryClient, args: LibrarySaveSharedCopyArgs = {} as LibrarySaveSharedCopyArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("librarySaveSharedCopy", buildLibrarySaveSharedCopy(args), opts);
+};
+
 /** One manual, version-guarded lesson event. Never invoked by automatic mining. */
 export interface LibrarySaveTrainingLessonArgs {
   requestId: string;
@@ -4167,6 +4315,75 @@ declare module "./query.js" {
 
 QueryClient.prototype.librarySaveTrainingLesson = function (this: QueryClient, args: LibrarySaveTrainingLessonArgs = {} as LibrarySaveTrainingLessonArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("librarySaveTrainingLesson", buildLibrarySaveTrainingLesson(args), opts);
+};
+
+/** Who you may share a Library file with. */
+export interface LibraryShareDirectoryArgs {
+}
+
+export function buildLibraryShareDirectory(args: LibraryShareDirectoryArgs): string {
+  void args;
+  return "builtin libraryShareDirectory()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryShareDirectory(args?: LibraryShareDirectoryArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryShareDirectory = function (this: QueryClient, args: LibraryShareDirectoryArgs = {} as LibraryShareDirectoryArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryShareDirectory", buildLibraryShareDirectory(args), opts);
+};
+
+/** Share one of your Library files with one person, for 1, 7, 10 or 30 days -- or renew a share. */
+export interface LibraryShareFileArgs {
+  /** The v1:library:artifact (a file) to share. Must be yours. */
+  artifactId: string;
+  /** The person to share it with, as libraryShareDirectory names them. */
+  recipientUserId: string;
+  /** How long the share lasts: 1, 7, 10 or 30. */
+  days: number;
+}
+
+export function buildLibraryShareFile(args: LibraryShareFileArgs): string {
+  const parts: string[] = [];
+  parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  parts.push("recipientUserId: " + renderMemQLValue(args.recipientUserId));
+  parts.push("days: " + renderMemQLValue(args.days));
+  return "builtin libraryShareFile(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryShareFile(args: LibraryShareFileArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryShareFile = function (this: QueryClient, args: LibraryShareFileArgs = {} as LibraryShareFileArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryShareFile", buildLibraryShareFile(args), opts);
+};
+
+/** Stop sharing a file with one person, at once. */
+export interface LibraryShareStopArgs {
+  /** The share to stop -- the `id` librarySharesForArtifact lists. */
+  shareId: string;
+}
+
+export function buildLibraryShareStop(args: LibraryShareStopArgs): string {
+  const parts: string[] = [];
+  parts.push("shareId: " + renderMemQLValue(args.shareId));
+  return "builtin libraryShareStop(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryShareStop(args: LibraryShareStopArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryShareStop = function (this: QueryClient, args: LibraryShareStopArgs = {} as LibraryShareStopArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryShareStop", buildLibraryShareStop(args), opts);
 };
 
 /** Search the caller's Library by meaning and get whole artifacts back, best match first. */

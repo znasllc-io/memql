@@ -110,6 +110,22 @@ secrets:
     optional: true
     description: "Deploy-gate only (#2179): path to a file holding a class=service_account JWT, written by the deploy-gate self-mint init container; deploy-gate-check prefers it over the static MEMQL_SVC_JWT secret."
 
+  # --- calls media server (the other six values are under `variables:`) ---
+
+  - name: MEMQL_CALLS_MEDIA_API_SECRET
+    component: calls
+    scope: node
+    kind: integration
+    optional: true
+    description: "The secret of the calls media server's key pair, at least 32 characters, that rooms and passes are signed with. Sealed into the calls.media.bootstrap global secret at boot and never sent to a client. One of the eight MEMQL_CALLS_MEDIA_* values, set all or none."
+
+  - name: MEMQL_CALLS_MEDIA_WEBHOOK_SECRET
+    component: calls
+    scope: node
+    kind: integration
+    optional: true
+    description: "The secret, at least 32 characters, of the key pair the calls media server signs its webhooks with. Sealed into the calls.media.webhook global secret at boot. One of the eight MEMQL_CALLS_MEDIA_* values, set all or none."
+
   # --- operator evaluation tooling ---
 
   - name: MEMQL_EVALUATION_TOKEN
@@ -621,13 +637,16 @@ variables:
   # name, so it cannot be enumerated here:
   #
   #   MEMQL_INBOUND_SOURCE_<NAME>_SECRET             the shared HMAC key
-  #   MEMQL_INBOUND_SOURCE_<NAME>_SIGNATURE_SCHEME   hmac-sha256-hex | hmac-sha256-base64 | none
+  #   MEMQL_INBOUND_SOURCE_<NAME>_SIGNATURE_SCHEME   hmac-sha256-hex | hmac-sha256-base64 |
+  #                                                  jwt-hs256-body-sha256 | none
   #   MEMQL_INBOUND_SOURCE_<NAME>_SIGNATURE_HEADER   e.g. X-Hub-Signature-256
   #   MEMQL_INBOUND_SOURCE_<NAME>_SIGNATURE_PREFIX   e.g. "sha256=" (optional)
   #   MEMQL_INBOUND_SOURCE_<NAME>_TIMESTAMP_HEADER   enables the replay window (optional)
   #   MEMQL_INBOUND_SOURCE_<NAME>_DEDUPE_HEADER      sender idempotency key (optional)
   #   MEMQL_INBOUND_SOURCE_<NAME>_MAX_BODY_BYTES     this source's own body cap (optional;
   #                                                  the github source defaults to 25 MiB)
+  #   MEMQL_INBOUND_SOURCE_<NAME>_JWT_ISSUER         the iss a jwt-hs256-body-sha256 token
+  #                                                  must name (that scheme only, required)
   #
   # <NAME> is the source name uppercased with '-' mapped to '_'. The SECRET is
   # secret material and belongs in the deployment's secret store, never in an
@@ -1666,6 +1685,46 @@ variables:
     optional: true
     secret: true
     description: "LiveKit signing secret, at least 32 characters; never sent to clients."
+
+  # --- calls media server (integrations/calls/config.go) ---
+  #
+  # The media server rooms of the generic calls capability are placed on. EIGHT
+  # values read together: all of them, or none (a cluster without calls). A
+  # partial or unusable set refuses boot. The two secrets are in `secrets:`
+  # above. A node carrying them records the server as
+  # v1:calls:mediaServer:bootstrap and seals both key pairs into global secrets
+  # at boot; media never passes through MemQL.
+
+  - name: MEMQL_CALLS_MEDIA_PROVIDER
+    component: calls
+    scope: node
+    optional: true
+    description: "What runs the calls media server: docker-local (a container beside the local cluster) or hetzner. Recorded on the media server row and never branched on. One of the eight MEMQL_CALLS_MEDIA_* values, set all or none."
+  - name: MEMQL_CALLS_MEDIA_API_URL
+    component: calls
+    scope: node
+    optional: true
+    description: "The calls media server's control API, http, https, ws or wss, which the engine calls to create and end rooms and to act on participants. One of the eight MEMQL_CALLS_MEDIA_* values, set all or none."
+  - name: MEMQL_CALLS_MEDIA_PUBLIC_URL
+    component: calls
+    scope: node
+    optional: true
+    description: "The wss or https address browsers connect to the calls media server at. One of the eight MEMQL_CALLS_MEDIA_* values, set all or none."
+  - name: MEMQL_CALLS_MEDIA_SEATS
+    component: calls
+    scope: node
+    optional: true
+    description: "How many seats the calls media server carries, a positive whole number, for room placement. One of the eight MEMQL_CALLS_MEDIA_* values, set all or none."
+  - name: MEMQL_CALLS_MEDIA_API_KEY
+    component: calls
+    scope: node
+    optional: true
+    description: "The API key of the calls media server's key pair that rooms and passes are signed with: the passes' issuer, not secret. One of the eight MEMQL_CALLS_MEDIA_* values, set all or none."
+  - name: MEMQL_CALLS_MEDIA_WEBHOOK_KEY
+    component: calls
+    scope: node
+    optional: true
+    description: "The API key of the key pair the calls media server signs its webhooks with: the webhook tokens' issuer, not secret. One of the eight MEMQL_CALLS_MEDIA_* values, set all or none."
 
   # --- streaming transcription (epic memql#4988) ---
   #

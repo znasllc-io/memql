@@ -767,6 +767,15 @@ seed capability cap-owner-execute-app-deployables-access { roleSlug: "owner"  ve
 @description("developer: the access part of the Deployables app -- mint, regenerate, re-time and remove the access codes that open part of a deployable to a named visitor (deployable access codes, design record 2026-10-29).")
 seed capability cap-developer-execute-app-deployables-access { roleSlug: "developer"  verb: "execute"  resourceType: "app:deployables/access"  predefined: true }
 
+// ---- app:deployables/calls -- turn a deployable's calls capability on and manage its keys ----
+//
+// OWNER AND DEVELOPER, as the parts above, and a part of its own: a calls deployable spends media
+// server capacity and admits strangers to rooms, a different consequence from publishing a build.
+@description("owner: the calls part of the Deployables app -- turn the calls capability on for a deployable and manage its keys.")
+seed capability cap-owner-execute-app-deployables-calls { roleSlug: "owner"  verb: "execute"  resourceType: "app:deployables/calls"  predefined: true }
+@description("developer: the calls part of the Deployables app -- turn the calls capability on for a deployable and manage its keys.")
+seed capability cap-developer-execute-app-deployables-calls { roleSlug: "developer"  verb: "execute"  resourceType: "app:deployables/calls"  predefined: true }
+
 // ---- app:deployables/health -- a deployable's Health figures on its Statistics page ----
 //
 // OWNER AND DEVELOPER (owner's direction, 2026-11-10): requests, errors, not
@@ -849,6 +858,26 @@ seed capability cap-developer-execute-app-deployables-wholesale { roleSlug: "dev
 seed capability cap-owner-execute-app-deployables-store { roleSlug: "owner"  verb: "execute"  resourceType: "app:deployables/store"  predefined: true }
 @description("developer: the store part of the Deployables app -- attach or change the Shopify store a storefront fronts (Connect Shopify, D3).")
 seed capability cap-developer-execute-app-deployables-store { roleSlug: "developer"  verb: "execute"  resourceType: "app:deployables/store"  predefined: true }
+
+// ---- app:files/share -- share one of your Library files with one person ----
+//
+// ALL FIVE ROLES, viewers included (owner's decision, 2026-11-18): sharing a
+// file a person owns is a personal act, not an administrative one, and ranks
+// may differ between sharer and recipient in either direction. A part rather
+// than a reading of `read app:files` so a grant can take it away from one
+// person or group without closing their Files app. Who may be PICKED is not
+// this part's question: libraryShareDirectory answers it (the sharer's own
+// organization, or everyone for a holder of `read principal`).
+@description("owner: the share part of the Files app -- share one of your own files with one person for a bounded time (file sharing, 2026-11-18).")
+seed capability cap-owner-execute-app-files-share { roleSlug: "owner"  verb: "execute"  resourceType: "app:files/share"  predefined: true }
+@description("developer: the share part of the Files app -- share one of your own files with one person for a bounded time (file sharing, 2026-11-18).")
+seed capability cap-developer-execute-app-files-share { roleSlug: "developer"  verb: "execute"  resourceType: "app:files/share"  predefined: true }
+@description("admin: the share part of the Files app -- share one of your own files with one person for a bounded time (file sharing, 2026-11-18).")
+seed capability cap-admin-execute-app-files-share { roleSlug: "admin"  verb: "execute"  resourceType: "app:files/share"  predefined: true }
+@description("user: the share part of the Files app -- share one of your own files with one person for a bounded time (file sharing, 2026-11-18).")
+seed capability cap-user-execute-app-files-share { roleSlug: "user"  verb: "execute"  resourceType: "app:files/share"  predefined: true }
+@description("viewer: the share part of the Files app -- share one of your own files with one person for a bounded time (file sharing, 2026-11-18).")
+seed capability cap-viewer-execute-app-files-share { roleSlug: "viewer"  verb: "execute"  resourceType: "app:files/share"  predefined: true }
 
 // ---- The pipelines parts (epic memql#5479, task memql#5498) ----
 //

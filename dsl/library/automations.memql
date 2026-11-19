@@ -245,6 +245,24 @@ automation archiveFileOnArtifactArchive {
   archiveBackingFile := mutation archiveLibraryFile(fileId: args.sourceConceptRef)
 }
 
+/// When a file artifact is archived, end every share of it, and each recipient's notice, so the
+/// file leaves every Shared with me list at once (file sharing, 2026-11-18). ACCESS DOES NOT WAIT
+/// FOR THIS: every view, download and copy re-reads the artifact under its sharer and refuses an
+/// archived one, so a run that never fires leaves a stale list entry, never an open door. Writes
+/// only share and shareNotice rows, which nothing triggers on, so it closes no cycle. Multi-fire
+/// safe: ending an ended share writes the same answer. The builtin admits this automation and no
+/// other caller.
+@trigger(event="node.updated", concept="v1:library:artifact")
+@filter(row => row.kind == "file" && row.archived == true)
+automation endSharesOnArtifactArchive {
+  args {
+    id any
+    ownerUserId any
+  }
+
+  endShares := builtin libraryEndSharesForArtifact(artifactId: args.id, ownerUserId: args.ownerUserId)
+}
+
 /// Analyze passage feedback, review exact replacements, then apply only what the
 /// person approved. Every step is journaled, so a resume reuses the AI result.
 @actor

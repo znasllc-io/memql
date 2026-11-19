@@ -24,6 +24,12 @@ const (
 	siteAccessSessionConcept = "v1:platform:siteAccessSession"
 )
 
+// callsClientUnreadableReason is why every v1:calls concept is client-unreadable:
+// the rows hold digests of bearer secrets (keys, passes, links) and the
+// admission queue, and the browser reaches calls only through the calls
+// integration, which reads them under the site owner's borrowed authority.
+const callsClientUnreadableReason = "its rows are the calls integration's bookkeeping (digests of bearer keys, passes and links, seats, the admission queue, media server credentials' names); the browser reaches calls only through the integration, which reads them as the site's owner, and a raw read would be an oracle for guessed secrets"
+
 // clientUnreadableConcepts are the concepts whose rows NO CLIENT READS, by any
 // path, whatever the row tier would say. The value is the reason, and a concept
 // does not go on this list without one.
@@ -76,6 +82,14 @@ const (
 var clientUnreadableConcepts = map[string]string{
 	siteAccessCodeConcept:    "its row holds the digest of a bearer credential and the operator's notes on who may use it, and the only client path to it is a builtin that passes the access part and the organization gate; a raw read passes neither",
 	siteAccessSessionConcept: "its row is what the bff honours in place of a code, with the digest of a live cookie, and nothing a person calls needs it except through the code's builtins; a raw read would hand the owner of a site the very rows the visitor protocol trusts",
+	"v1:calls:key":           callsClientUnreadableReason,
+	"v1:calls:session":       callsClientUnreadableReason,
+	"v1:calls:room":          callsClientUnreadableReason,
+	"v1:calls:seat":          callsClientUnreadableReason,
+	"v1:calls:queueEntry":    callsClientUnreadableReason,
+	"v1:calls:scheduledCall": callsClientUnreadableReason,
+	"v1:calls:mediaServer":   callsClientUnreadableReason,
+	"v1:calls:policy":        callsClientUnreadableReason,
 }
 
 // conceptIsClientUnreadable reports whether a concept is on clientUnreadableConcepts.

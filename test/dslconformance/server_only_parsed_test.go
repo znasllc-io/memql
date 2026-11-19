@@ -173,6 +173,48 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 			"attribute name changed, which would silently exempt nothing and gate nothing.")
 	}
 	want := map[serverOnlyKey]bool{
+		// The calls capability: only the calls integration reads or writes these rows, as the site owner or the cluster; a client-callable digest lookup would be an oracle for guessed secrets.
+		{Path: "calls/queries.memql", Name: "callsKeyById"}:                    true,
+		{Path: "calls/queries.memql", Name: "callsKeyByDigest"}:                true,
+		{Path: "calls/queries.memql", Name: "callsSessionById"}:                true,
+		{Path: "calls/queries.memql", Name: "callsSessionByTokenDigest"}:       true,
+		{Path: "calls/queries.memql", Name: "callsRoomById"}:                   true,
+		{Path: "calls/queries.memql", Name: "callsRoomByGuestDigest"}:          true,
+		{Path: "calls/queries.memql", Name: "callsRoomByHostDigest"}:           true,
+		{Path: "calls/queries.memql", Name: "callsOpenRoomsForKey"}:            true,
+		{Path: "calls/queries.memql", Name: "callsOpenRoomsOnServer"}:          true,
+		{Path: "calls/queries.memql", Name: "callsSeatById"}:                   true,
+		{Path: "calls/queries.memql", Name: "callsSeatsForRoom"}:               true,
+		{Path: "calls/queries.memql", Name: "callsSeatsForRooms"}:              true,
+		{Path: "calls/queries.memql", Name: "callsQueueEntryById"}:             true,
+		{Path: "calls/queries.memql", Name: "callsQueueEntriesForRoom"}:        true,
+		{Path: "calls/queries.memql", Name: "callsQueueEntriesForRooms"}:       true,
+		{Path: "calls/queries.memql", Name: "callsScheduledCallById"}:          true,
+		{Path: "calls/queries.memql", Name: "callsScheduledCallByGuestDigest"}: true,
+		{Path: "calls/queries.memql", Name: "callsScheduledCallByHostDigest"}:  true,
+		{Path: "calls/queries.memql", Name: "callsScheduledCallsForKey"}:       true,
+		{Path: "calls/queries.memql", Name: "callsScheduledCallDigestsById"}:   true,
+		{Path: "calls/queries.memql", Name: "callsMediaServerById"}:            true,
+		{Path: "calls/queries.memql", Name: "callsPolicyById"}:                 true,
+		{Path: "calls/queries.memql", Name: "callsActiveMediaServers"}:         true,
+		{Path: "calls/queries.memql", Name: "callsMediaServersNotRemoved"}:     true,
+		{Path: "calls/queries.memql", Name: "callsPolicyForSite"}:              true,
+		{Path: "calls/mutations.memql", Name: "createCallsKey"}:                true,
+		{Path: "calls/mutations.memql", Name: "updateCallsKey"}:                true,
+		{Path: "calls/mutations.memql", Name: "createCallsSession"}:            true,
+		{Path: "calls/mutations.memql", Name: "updateCallsSession"}:            true,
+		{Path: "calls/mutations.memql", Name: "createCallsRoom"}:               true,
+		{Path: "calls/mutations.memql", Name: "updateCallsRoom"}:               true,
+		{Path: "calls/mutations.memql", Name: "createCallsSeat"}:               true,
+		{Path: "calls/mutations.memql", Name: "updateCallsSeat"}:               true,
+		{Path: "calls/mutations.memql", Name: "createCallsQueueEntry"}:         true,
+		{Path: "calls/mutations.memql", Name: "updateCallsQueueEntry"}:         true,
+		{Path: "calls/mutations.memql", Name: "createCallsScheduledCall"}:      true,
+		{Path: "calls/mutations.memql", Name: "updateCallsScheduledCall"}:      true,
+		{Path: "calls/mutations.memql", Name: "createCallsMediaServer"}:        true,
+		{Path: "calls/mutations.memql", Name: "updateCallsMediaServer"}:        true,
+		{Path: "calls/mutations.memql", Name: "createCallsPolicy"}:             true,
+		{Path: "calls/mutations.memql", Name: "updateCallsPolicy"}:             true,
 		// actor.userId alone cannot enforce private credential admission, sealed
 		// address values, revision fencing or separation of research/attestation.
 		{Path: "worker/mutations.memql", Name: "storeWorkerEnergyProfile"}: true,
@@ -1432,6 +1474,17 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// The image adapter verifies immutable bytes and actual source/model
 		// provenance; actor.userId cannot attest either on a client's own row.
 		{Path: "library/mutations.memql", Name: "recordPreparedLibraryImage"}: true,
+
+		// File sharing (2026-11-18). Both concepts are @serverWritten. A
+		// share is the caller's own row, but actor.userId cannot hold the
+		// three bounds libraryShareFile does (one of four lifetimes, a
+		// recipient the directory offers, a file the caller owns); a notice is
+		// owned by the RECIPIENT, who must not be able to write one. Reached
+		// only through integrations/library/sharestore, behind share.go.
+		{Path: "library/mutations.memql", Name: "putLibraryShare"}:       true,
+		{Path: "library/mutations.memql", Name: "endLibraryShare"}:       true,
+		{Path: "library/mutations.memql", Name: "putLibraryShareNotice"}: true,
+		{Path: "library/mutations.memql", Name: "endLibraryShareNotice"}: true,
 
 		// Document history is authored only after a shared write lock, a fresh
 		// owned-row read and a revision comparison. Even the document's owner

@@ -99,6 +99,8 @@ func TestBrowserFacingConceptsForwardWithTheVerbsTheirSurfacesSubscribeTo(t *tes
 		{"v1:agents:agent", []string{"created", "updated", "deleted"}, "the Agents view"},
 		{"v1:library:artifact", []string{"created", "updated", "deleted"}, "the Artifacts page and Nexus's artifact slot"},
 		{"v1:library:file", []string{"created", "updated"}, "the Artifacts page's backing file row"},
+		{"v1:library:share", []string{"created", "updated"}, "the Files share panel's list of who has a file"},
+		{"v1:library:shareNotice", []string{"created", "updated"}, "the recipient's live Shared with me list"},
 		{"v1:authoring:bundle", []string{"created", "updated", "deleted"}, "Nexus Constructs"},
 		{"v1:authoring:construct", []string{"created", "updated", "deleted"}, "Nexus Constructs"},
 		{"v1:authoring:dependencyEdge", []string{"created", "updated", "deleted"}, "Nexus's dependency edges"},

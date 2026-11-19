@@ -1,0 +1,412 @@
+// mutations.memql
+//
+// One create and one update per calls concept, all @serverOnly: the calls integration is the only writer,
+// as the site's owner (borrowed authority), and a client that could write a row could mint its own key,
+// pass or seat. Each takes `versionTime` and writes `createdAt: args.versionTime ?? now`, as
+// dsl/work/mutations.memql does, so a caller replaying a journal keeps the version order it observed.
+// There are no deletes: an end is a status or a timestamp, and retention removes the rows that expire.
+
+/// Create a key row. @serverOnly: only the calls integration, having checked what the caller proved, writes it. `ownerUserId` is STAMPED from the actor (the site's owner) and is not an argument. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@actor
+@serverOnly
+mutation key createCallsKey {
+  args {
+    keyId  string!
+    versionTime  datetime
+    siteId  string!
+    digest  string! @maxLength(64) @pattern("^[0-9a-f]{64}$")
+    label  string
+    kind  string
+    status  string
+  }
+  insert {
+    accept { siteId, digest, label }
+    stamp {
+      id: args.keyId
+      ownerUserId: actor.userId
+      kind: args.kind ?? "test"
+      status: args.status ?? "active"
+      createdAt: args.versionTime ?? now
+    }
+  }
+}
+
+/// Update a key row (read-merge-validate-write). @serverOnly for createCallsKey's reason. Only the fields that change over a key's life are accepted: its site, owner and digests never move. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@serverOnly
+mutation key updateCallsKey {
+  args {
+    keyId  string!
+    versionTime  datetime
+    label  string
+    kind  string
+    status  string
+  }
+  update {
+    accept { label, kind, status }
+    stamp {
+      id: args.keyId
+      createdAt: args.versionTime ?? now
+    }
+  }
+}
+
+/// Create a session row. @serverOnly: only the calls integration, having checked what the caller proved, writes it. `ownerUserId` is STAMPED from the actor (the site's owner) and is not an argument. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@actor
+@serverOnly
+mutation session createCallsSession {
+  args {
+    sessionId  string!
+    versionTime  datetime
+    siteId  string!
+    tokenDigest  string! @maxLength(64) @pattern("^[0-9a-f]{64}$")
+    kind  string
+    keyId  string
+    seatId  string
+    roomId  string
+    expiresAt  datetime
+  }
+  insert {
+    accept { siteId, tokenDigest, kind, keyId, seatId, roomId, expiresAt }
+    stamp {
+      id: args.sessionId
+      ownerUserId: actor.userId
+      createdAt: args.versionTime ?? now
+    }
+  }
+}
+
+/// Update a session row (read-merge-validate-write). @serverOnly for createCallsSession's reason. Only the fields that change over a session's life are accepted: its site, owner and digests never move. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@serverOnly
+mutation session updateCallsSession {
+  args {
+    sessionId  string!
+    versionTime  datetime
+    seatId  string
+    roomId  string
+    expiresAt  datetime
+    endedAt  datetime
+  }
+  update {
+    accept { seatId, roomId, expiresAt, endedAt }
+    stamp {
+      id: args.sessionId
+      createdAt: args.versionTime ?? now
+    }
+  }
+}
+
+/// Create a room row. @serverOnly: only the calls integration, having checked what the caller proved, writes it. `ownerUserId` is STAMPED from the actor (the site's owner) and is not an argument. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@actor
+@serverOnly
+mutation room createCallsRoom {
+  args {
+    roomId  string!
+    versionTime  datetime
+    siteId  string!
+    deployable  string
+    keyId  string
+    mediaServerId  string
+    mediaRoom  string
+    status  string
+    locked  bool
+    hostSeatId  string
+    scheduledCallId  string
+    guestDigest  string @maxLength(64) @pattern("^[0-9a-f]{64}$")
+    hostDigest  string @maxLength(64) @pattern("^[0-9a-f]{64}$")
+    openedAt  datetime
+    joinWindowStartedAt  datetime
+    joinWindowCount  int
+  }
+  insert {
+    accept { siteId, deployable, keyId, mediaServerId, mediaRoom, locked, hostSeatId, scheduledCallId, guestDigest, hostDigest, openedAt, joinWindowStartedAt, joinWindowCount }
+    stamp {
+      id: args.roomId
+      ownerUserId: actor.userId
+      status: args.status ?? "open"
+      createdAt: args.versionTime ?? now
+    }
+  }
+}
+
+/// Update a room row (read-merge-validate-write). @serverOnly for createCallsRoom's reason. Only the fields that change over a room's life are accepted: its site, owner and digests never move. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@serverOnly
+mutation room updateCallsRoom {
+  args {
+    roomId  string!
+    versionTime  datetime
+    mediaServerId  string
+    mediaRoom  string
+    status  string
+    locked  bool
+    hostSeatId  string
+    hostLeftAt  datetime
+    endedAt  datetime
+    endReason  string
+    joinWindowStartedAt  datetime
+    joinWindowCount  int
+    shareSeatId  string
+    shareStartedAt  datetime
+  }
+  update {
+    accept { mediaServerId, mediaRoom, status, locked, hostSeatId, hostLeftAt, endedAt, endReason, joinWindowStartedAt, joinWindowCount, shareSeatId, shareStartedAt }
+    stamp {
+      id: args.roomId
+      createdAt: args.versionTime ?? now
+    }
+  }
+}
+
+/// Create a seat row. @serverOnly: only the calls integration, having checked what the caller proved, writes it. `ownerUserId` is STAMPED from the actor (the site's owner) and is not an argument. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@actor
+@serverOnly
+mutation seat createCallsSeat {
+  args {
+    seatId  string!
+    versionTime  datetime
+    siteId  string!
+    roomId  string!
+    identity  string
+    kind  string
+    displayName  string
+    host  bool
+    status  string
+    confirmAdult  bool
+    confirmNoMinors  bool
+    termsVersion  string
+    joinedAt  datetime
+    keyId  string
+  }
+  insert {
+    accept { siteId, roomId, identity, kind, displayName, host, status, confirmAdult, confirmNoMinors, termsVersion, joinedAt, keyId }
+    stamp {
+      id: args.seatId
+      ownerUserId: actor.userId
+      createdAt: args.versionTime ?? now
+    }
+  }
+}
+
+/// Update a seat row (read-merge-validate-write). @serverOnly for createCallsSeat's reason. Only the fields that change over a seat's life are accepted: its site, owner, digests and the key its holder unlocked never move. The three confirmations are among them because every join confirms again, a rejoin included, and the seat records what its latest join confirmed (a newer terms version above all); so are reconciliation's lastSeenAt and a host's letInAt. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@serverOnly
+mutation seat updateCallsSeat {
+  args {
+    seatId  string!
+    versionTime  datetime
+    displayName  string
+    host  bool
+    status  string
+    confirmAdult  bool
+    confirmNoMinors  bool
+    termsVersion  string
+    joinedAt  datetime
+    leftAt  datetime
+    lastSeenAt  datetime
+    letInAt  datetime
+  }
+  update {
+    accept { displayName, host, status, confirmAdult, confirmNoMinors, termsVersion, joinedAt, leftAt, lastSeenAt, letInAt }
+    stamp {
+      id: args.seatId
+      createdAt: args.versionTime ?? now
+    }
+  }
+}
+
+/// Create a queueEntry row. @serverOnly: only the calls integration, having checked what the caller proved, writes it. `ownerUserId` is STAMPED from the actor (the site's owner) and is not an argument. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@actor
+@serverOnly
+mutation queueEntry createCallsQueueEntry {
+  args {
+    queueEntryId  string!
+    versionTime  datetime
+    siteId  string!
+    roomId  string!
+    seatId  string
+    keyId  string
+    class  string
+    enqueuedAt  datetime
+    lastPollAt  datetime
+    status  string
+  }
+  insert {
+    accept { siteId, roomId, seatId, keyId, class, enqueuedAt, lastPollAt }
+    stamp {
+      id: args.queueEntryId
+      ownerUserId: actor.userId
+      status: args.status ?? "waiting"
+      createdAt: args.versionTime ?? now
+    }
+  }
+}
+
+/// Update a queueEntry row (read-merge-validate-write). @serverOnly for createCallsQueueEntry's reason. Only the fields that change over a queueEntry's life are accepted: its site, owner and digests never move. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@serverOnly
+mutation queueEntry updateCallsQueueEntry {
+  args {
+    queueEntryId  string!
+    versionTime  datetime
+    class  string
+    lastPollAt  datetime
+    status  string
+  }
+  update {
+    accept { class, lastPollAt, status }
+    stamp {
+      id: args.queueEntryId
+      createdAt: args.versionTime ?? now
+    }
+  }
+}
+
+/// Create a scheduledCall row. @serverOnly: only the calls integration, having checked what the caller proved, writes it. `ownerUserId` is STAMPED from the actor (the site's owner) and is not an argument. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@actor
+@serverOnly
+mutation scheduledCall createCallsScheduledCall {
+  args {
+    scheduledCallId  string!
+    versionTime  datetime
+    siteId  string!
+    keyId  string
+    start  datetime
+    end  datetime
+    title  string
+    status  string
+    guestDigest  string @maxLength(64) @pattern("^[0-9a-f]{64}$")
+    hostDigest  string @maxLength(64) @pattern("^[0-9a-f]{64}$")
+    calendarUid  string @maxLength(320)
+  }
+  insert {
+    accept { siteId, keyId, start, end, title, guestDigest, hostDigest, calendarUid }
+    stamp {
+      id: args.scheduledCallId
+      ownerUserId: actor.userId
+      status: args.status ?? "scheduled"
+      createdAt: args.versionTime ?? now
+    }
+  }
+}
+
+/// Update a scheduledCall row (read-merge-validate-write). @serverOnly for createCallsScheduledCall's reason. Only the fields that change over a scheduledCall's life are accepted: its site, owner and calendar UID never move, and its two digests move only when a reschedule mints new links, which is what makes the old links open nothing. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@serverOnly
+mutation scheduledCall updateCallsScheduledCall {
+  args {
+    scheduledCallId  string!
+    versionTime  datetime
+    start  datetime
+    end  datetime
+    title  string
+    status  string
+    roomId  string
+    guestDigest  string @maxLength(64) @pattern("^[0-9a-f]{64}$")
+    hostDigest  string @maxLength(64) @pattern("^[0-9a-f]{64}$")
+  }
+  update {
+    accept { start, end, title, status, roomId, guestDigest, hostDigest }
+    stamp {
+      id: args.scheduledCallId
+      createdAt: args.versionTime ?? now
+    }
+  }
+}
+
+/// Create a mediaServer row. @serverOnly: only the calls integration, having checked what the caller proved, writes it. The row is the cluster's, so no owner is stamped. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@serverOnly
+mutation mediaServer createCallsMediaServer {
+  args {
+    mediaServerId  string!
+    versionTime  datetime
+    provider  string
+    apiUrl  string
+    publicUrl  string
+    region  string
+    seats  int
+    state  string
+    credentialSecret  string
+  }
+  insert {
+    accept { provider, apiUrl, publicUrl, region, seats, credentialSecret }
+    stamp {
+      id: args.mediaServerId
+      state: args.state ?? "active"
+      createdAt: args.versionTime ?? now
+    }
+  }
+}
+
+/// Update a mediaServer row (read-merge-validate-write). @serverOnly for createCallsMediaServer's reason. Only the fields that change over a mediaServer's life are accepted: its site, owner and digests never move. `provider` is among them because the bootstrap server is whatever the environment names, and an operator may move it to another provider. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@serverOnly
+mutation mediaServer updateCallsMediaServer {
+  args {
+    mediaServerId  string!
+    versionTime  datetime
+    provider  string
+    apiUrl  string
+    publicUrl  string
+    region  string
+    seats  int
+    state  string
+    credentialSecret  string
+  }
+  update {
+    accept { provider, apiUrl, publicUrl, region, seats, state, credentialSecret }
+    stamp {
+      id: args.mediaServerId
+      createdAt: args.versionTime ?? now
+    }
+  }
+}
+
+/// Create a policy row, one per site. @serverOnly: only the calls integration, having checked what the caller proved, writes it. `ownerUserId` is STAMPED from the actor (the site's owner) and is not an argument. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@actor
+@serverOnly
+mutation policy createCallsPolicy {
+  args {
+    policyId  string!
+    versionTime  datetime
+    siteId  string!
+    maxPeople  int
+    maxAgents  int
+    roomJoinsPerMinute  int
+    maxUpcomingScheduled  int
+    maxScheduledMinutes  int
+    hostLeftGrace  int
+    passTtl  int
+    scheduleHorizon  int
+    queueEntryTtl  int
+    queuePoll  int
+  }
+  insert {
+    accept { siteId, maxPeople, maxAgents, roomJoinsPerMinute, maxUpcomingScheduled, maxScheduledMinutes, hostLeftGrace, passTtl, scheduleHorizon, queueEntryTtl, queuePoll }
+    stamp {
+      id: args.policyId
+      ownerUserId: actor.userId
+      createdAt: args.versionTime ?? now
+    }
+  }
+}
+
+/// Update a policy row (read-merge-validate-write). @serverOnly for createCallsPolicy's reason. Only the fields that change over a policy's life are accepted: its site, owner and digests never move. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@serverOnly
+mutation policy updateCallsPolicy {
+  args {
+    policyId  string!
+    versionTime  datetime
+    maxPeople  int
+    maxAgents  int
+    roomJoinsPerMinute  int
+    maxUpcomingScheduled  int
+    maxScheduledMinutes  int
+    hostLeftGrace  int
+    passTtl  int
+    scheduleHorizon  int
+    queueEntryTtl  int
+    queuePoll  int
+  }
+  update {
+    accept { maxPeople, maxAgents, roomJoinsPerMinute, maxUpcomingScheduled, maxScheduledMinutes, hostLeftGrace, passTtl, scheduleHorizon, queueEntryTtl, queuePoll }
+    stamp {
+      id: args.policyId
+      createdAt: args.versionTime ?? now
+    }
+  }
+}

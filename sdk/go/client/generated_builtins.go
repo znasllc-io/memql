@@ -785,6 +785,195 @@ func BranchRunBuild(args BranchRunArgs) string {
 	return b.String()
 }
 
+// CallsMediaServers -- The media servers rooms are placed on (calls, plan Task 4).
+// THE CLUSTER OWNER'S. The servers are the cluster's, so the list admits a cluster owner and nobody else, a check the handler makes: the calls part, held by role or granted through an organization, is not enough. EVERY ACTIVE SERVER, one row each: {id, provider, publicUrl, region, seats, state, createdAt}. NEVER A CREDENTIAL, never the name of the secret holding one, and never the control address, which only the engine uses. `provider` is the value the environment recorded (docker-local or hetzner); nothing decides by it.
+type CallsMediaServersArgs struct {
+}
+
+// CallsMediaServers calls the engine builtin callsMediaServers.
+func (qc *QueryClient) CallsMediaServers(ctx context.Context, args CallsMediaServersArgs) (*Result, error) {
+	call := CallsMediaServersBuild(args)
+	return qc.executeNamed(ctx, "callsMediaServers", call)
+}
+
+func CallsMediaServersBuild(args CallsMediaServersArgs) string {
+	_ = args
+	return "builtin callsMediaServers()"
+}
+
+// CallsPolicySet -- Set any of a deployable's calls limits (v1:calls:policy, calls, plan Task 4).
+// PER SITE: the limits are the site's, on a row its owner owns, because a package deployable's name is unique only together with its package. ONLY WHAT IS NAMED CHANGES: a limit left out keeps the value it had, and one nobody ever set is the shipped default (calls.DefaultPolicy). Counts are whole numbers and DURATIONS ARE WHOLE SECONDS. Every value is held to the CLUSTER'S bounds (a room of 1 to 1000 people, a pass of 10 to 900 seconds, a waiter that polls at least once a minute and whose place outlives a poll), so no site claims more than the cluster allows; what a deployable allows inside those bounds is its operator's to choose. Judged in the site's organization, and refused for a deployable the caller cannot read, one with no owner, a caller who is not a person and any call inside a run. Returns the effective limits: {policyId, siteId} and one field per limit.
+type CallsPolicySetArgs struct {
+	// The deployable the limits are for.
+	SiteId string
+	// People allowed in one room, 1 to 1000.
+	MaxPeople int
+	// Agents allowed in one room, 0 to 100.
+	MaxAgents int
+	// Join attempts allowed per room per minute, 1 to 10000.
+	RoomJoinsPerMinute int
+	// Upcoming scheduled calls allowed per key, 0 to 1000.
+	MaxUpcomingScheduled int
+	// The longest a scheduled call may be, in minutes, 1 to 1440.
+	MaxScheduledMinutes int
+	// How long a room outlives its host, in seconds, 0 to 86400.
+	HostLeftGrace int
+	// How long a pass lives, in seconds, 10 to 900.
+	PassTtl int
+	// How far ahead a call may be booked, in seconds, 0 to 31622400.
+	ScheduleHorizon int
+	// How long a queue entry may go unpolled, in seconds, 10 to 86400, and longer than queuePoll.
+	QueueEntryTtl int
+	// How often a waiter polls, in seconds, 1 to 60.
+	QueuePoll int
+}
+
+// CallsPolicySet calls the engine builtin callsPolicySet.
+func (qc *QueryClient) CallsPolicySet(ctx context.Context, args CallsPolicySetArgs) (*Result, error) {
+	call := CallsPolicySetBuild(args)
+	return qc.executeNamed(ctx, "callsPolicySet", call)
+}
+
+func CallsPolicySetBuild(args CallsPolicySetArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin callsPolicySet(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if args.MaxPeople != 0 {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("maxPeople: ")
+		b.WriteString(fmt.Sprintf("%v", args.MaxPeople))
+	}
+	if args.MaxAgents != 0 {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("maxAgents: ")
+		b.WriteString(fmt.Sprintf("%v", args.MaxAgents))
+	}
+	if args.RoomJoinsPerMinute != 0 {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("roomJoinsPerMinute: ")
+		b.WriteString(fmt.Sprintf("%v", args.RoomJoinsPerMinute))
+	}
+	if args.MaxUpcomingScheduled != 0 {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("maxUpcomingScheduled: ")
+		b.WriteString(fmt.Sprintf("%v", args.MaxUpcomingScheduled))
+	}
+	if args.MaxScheduledMinutes != 0 {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("maxScheduledMinutes: ")
+		b.WriteString(fmt.Sprintf("%v", args.MaxScheduledMinutes))
+	}
+	if args.HostLeftGrace != 0 {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("hostLeftGrace: ")
+		b.WriteString(fmt.Sprintf("%v", args.HostLeftGrace))
+	}
+	if args.PassTtl != 0 {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("passTtl: ")
+		b.WriteString(fmt.Sprintf("%v", args.PassTtl))
+	}
+	if args.ScheduleHorizon != 0 {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("scheduleHorizon: ")
+		b.WriteString(fmt.Sprintf("%v", args.ScheduleHorizon))
+	}
+	if args.QueueEntryTtl != 0 {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("queueEntryTtl: ")
+		b.WriteString(fmt.Sprintf("%v", args.QueueEntryTtl))
+	}
+	if args.QueuePoll != 0 {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("queuePoll: ")
+		b.WriteString(fmt.Sprintf("%v", args.QueuePoll))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CallsSiteEnable -- Turn the calls capability on or off for a deployable (calls, plan Task 4).
+// A WRITE OF THE SITE'S `calls` FIELD AS THE PERSON ASKING, through updateSiteCalls, so the engine judges it as any write of theirs: the part, the deployable's organization (whose calls part the change asks, validateOrganizationSensitiveChanges) and the site's own row tier. Turning calls on needs a deployable with an owner, because every call's rows belong to the owner; turning them off does not. Returns {siteId, calls}.
+type CallsSiteEnableArgs struct {
+	// The deployable to switch calls on or off for.
+	SiteId string
+	// True to turn calls on, false to turn them off.
+	On bool
+}
+
+// CallsSiteEnable calls the engine builtin callsSiteEnable.
+func (qc *QueryClient) CallsSiteEnable(ctx context.Context, args CallsSiteEnableArgs) (*Result, error) {
+	call := CallsSiteEnableBuild(args)
+	return qc.executeNamed(ctx, "callsSiteEnable", call)
+}
+
+func CallsSiteEnableBuild(args CallsSiteEnableArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin callsSiteEnable(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("on: ")
+	b.WriteString(fmt.Sprintf("%v", args.On))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CallsTestKeyCreate -- Mint a TEST key for a deployable's calls (calls, plan Task 4).
+// THE KEY COMES BACK ONCE. It is in this reply and, if the operator copies it, wherever they put it; the row holds only the HMAC-SHA256 digest of the key's sixteen raw bytes under the cluster's key pepper, so nothing can read it back. A lost key is replaced, never recovered. The key belongs to the deployable's owner, whoever asked, and is a test key: it spends no balance.
+// Refused for a deployable the caller cannot read, one with no owner, the cluster's own surfaces, a name over 80 characters, a cluster with no media server (no pepper exists until one is configured), a caller who is not a person, and any call inside a run. Returns {keyId, key}.
+type CallsTestKeyCreateArgs struct {
+	// The deployable the key is for.
+	SiteId string
+	// The operator's name for the key, at most 80 characters. Never sent to a caller.
+	Label string
+}
+
+// CallsTestKeyCreate calls the engine builtin callsTestKeyCreate.
+func (qc *QueryClient) CallsTestKeyCreate(ctx context.Context, args CallsTestKeyCreateArgs) (*Result, error) {
+	call := CallsTestKeyCreateBuild(args)
+	return qc.executeNamed(ctx, "callsTestKeyCreate", call)
+}
+
+func CallsTestKeyCreateBuild(args CallsTestKeyCreateArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin callsTestKeyCreate(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if args.Label != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("label: ")
+		b.WriteString(quoteMemQL(args.Label))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // CampaignActivateEmailRule -- Generate an event-email rule's automation construct and arm it (memql#4829). The generator is a DETERMINISTIC template over the rule's form -- the LLM authoring path stays off, because a rule that mails strangers is not a place for a model to improvise and a deterministic generator is one a person can read the output of. The generated .memql goes through the ordinary authoring pipeline: bundle, validate, activate. Activation takes effect IMMEDIATELY rather than at next boot. The rule row records the bundle and construct it produced; on refusal it records the engine's own sentence on lastError and the rule goes to 'failed' rather than silently staying draft.
 type CampaignActivateEmailRuleArgs struct {
 	// The rule to generate and arm. The caller must own it: the generated construct runs under the AUTHOR's envelope, so who armed it decides what it can read.
@@ -5429,6 +5618,27 @@ func LibraryRequestDocumentRevisionBuild(args LibraryRequestDocumentRevisionArgs
 	return b.String()
 }
 
+// LibrarySaveSharedCopy -- Save a copy of a file shared with you into your own Library.
+type LibrarySaveSharedCopyArgs struct {
+	// The shared file's artifact id, as librarySharedWithMe names it.
+	ArtifactId string
+}
+
+// LibrarySaveSharedCopy calls the engine builtin librarySaveSharedCopy.
+func (qc *QueryClient) LibrarySaveSharedCopy(ctx context.Context, args LibrarySaveSharedCopyArgs) (*Result, error) {
+	call := LibrarySaveSharedCopyBuild(args)
+	return qc.executeNamed(ctx, "librarySaveSharedCopy", call)
+}
+
+func LibrarySaveSharedCopyBuild(args LibrarySaveSharedCopyArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin librarySaveSharedCopy(")
+	b.WriteString("artifactId: ")
+	b.WriteString(quoteMemQL(args.ArtifactId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // LibrarySaveTrainingLesson -- One manual, version-guarded lesson event. Never invoked by automatic mining.
 type LibrarySaveTrainingLessonArgs struct {
 	RequestId string
@@ -5508,6 +5718,77 @@ func LibrarySaveTrainingLessonBuild(args LibrarySaveTrainingLessonArgs) string {
 		b.WriteString("reason: ")
 		b.WriteString(quoteMemQL(args.Reason))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryShareDirectory -- Who you may share a Library file with.
+type LibraryShareDirectoryArgs struct {
+}
+
+// LibraryShareDirectory calls the engine builtin libraryShareDirectory.
+func (qc *QueryClient) LibraryShareDirectory(ctx context.Context, args LibraryShareDirectoryArgs) (*Result, error) {
+	call := LibraryShareDirectoryBuild(args)
+	return qc.executeNamed(ctx, "libraryShareDirectory", call)
+}
+
+func LibraryShareDirectoryBuild(args LibraryShareDirectoryArgs) string {
+	_ = args
+	return "builtin libraryShareDirectory()"
+}
+
+// LibraryShareFile -- Share one of your Library files with one person, for 1, 7, 10 or 30 days -- or renew a share.
+type LibraryShareFileArgs struct {
+	// The v1:library:artifact (a file) to share. Must be yours.
+	ArtifactId string
+	// The person to share it with, as libraryShareDirectory names them.
+	RecipientUserId string
+	// How long the share lasts: 1, 7, 10 or 30.
+	Days int
+}
+
+// LibraryShareFile calls the engine builtin libraryShareFile.
+func (qc *QueryClient) LibraryShareFile(ctx context.Context, args LibraryShareFileArgs) (*Result, error) {
+	call := LibraryShareFileBuild(args)
+	return qc.executeNamed(ctx, "libraryShareFile", call)
+}
+
+func LibraryShareFileBuild(args LibraryShareFileArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryShareFile(")
+	b.WriteString("artifactId: ")
+	b.WriteString(quoteMemQL(args.ArtifactId))
+	if b.Len() > 25 {
+		b.WriteString(", ")
+	}
+	b.WriteString("recipientUserId: ")
+	b.WriteString(quoteMemQL(args.RecipientUserId))
+	if b.Len() > 25 {
+		b.WriteString(", ")
+	}
+	b.WriteString("days: ")
+	b.WriteString(fmt.Sprintf("%v", args.Days))
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryShareStop -- Stop sharing a file with one person, at once.
+type LibraryShareStopArgs struct {
+	// The share to stop -- the `id` librarySharesForArtifact lists.
+	ShareId string
+}
+
+// LibraryShareStop calls the engine builtin libraryShareStop.
+func (qc *QueryClient) LibraryShareStop(ctx context.Context, args LibraryShareStopArgs) (*Result, error) {
+	call := LibraryShareStopBuild(args)
+	return qc.executeNamed(ctx, "libraryShareStop", call)
+}
+
+func LibraryShareStopBuild(args LibraryShareStopArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryShareStop(")
+	b.WriteString("shareId: ")
+	b.WriteString(quoteMemQL(args.ShareId))
 	b.WriteString(")")
 	return b.String()
 }
