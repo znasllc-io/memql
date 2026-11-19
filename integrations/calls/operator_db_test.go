@@ -1018,6 +1018,19 @@ func TestSiteEnableWritesTheSwitchAsThePerson(t *testing.T) {
 	requireSentence(t, err)
 	_, err = w.builtin(developer, "callsSiteEnable", map[string]any{"siteId": w.lone, "on": true})
 	requireSentence(t, err)
+	// A deployable no organization holds, switched by a cluster owner, who can read it: the
+	// engine refuses a person's change to any existing record that has no organization
+	// (organization_required, validateOrganizationOwnership), and the person is told THAT,
+	// not that something "did not complete" -- the sentence the first live run of
+	// TestTwoPeopleHoldACallThroughTheFrontDoor failed on, with nothing in the log to say why.
+	operator := actorContext(w.operator, auth.RoleOwner)
+	msg := requireSentence(t, mustFail(w.builtin(operator, "callsSiteEnable", map[string]any{"siteId": w.lone, "on": true})))
+	require.Contains(t, msg, "no organization", "a deployable with no organization was refused without saying so: %q", msg)
+	stored, _ = latestPayload(t, w.db, siteConcept, siteConcept+":"+w.lone)
+	require.NotEqual(t, true, stored["calls"], "the switch was written to a deployable with no organization")
 	stored, _ = latestPayload(t, w.db, siteConcept, siteConcept+":"+w.site)
 	require.Equal(t, false, stored["calls"], "a refused switch was written")
 }
+
+// mustFail is the error of a call that returned rows and an error, for requireSentence.
+func mustFail(_ []map[string]any, err error) error { return err }

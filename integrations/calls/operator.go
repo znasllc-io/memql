@@ -194,13 +194,30 @@ func (i *Integration) handleSiteEnable(ctx context.Context, args map[string]any,
 		return nil, refuse("This deployable has no owner, so calls cannot be turned on: every call's rows belong to the deployable's owner. Give it an owner first.")
 	}
 	if err := i.store.setSiteCalls(ctx, site.ID, on); err != nil {
-		if strings.Contains(err.Error(), memql.CodeCapabilityNotHeld) || strings.Contains(err.Error(), "row-authz") {
+		msg := err.Error()
+		switch {
+		case strings.Contains(msg, organizationRequired):
+			// The engine refuses a person's change to an existing record no organization
+			// holds, a cluster owner's included (validateOrganizationOwnership). Said as it
+			// is, because "did not complete" sends the person to try again, which can
+			// never succeed: the deployable needs an organization first.
+			return nil, &refusal{sentence: "This deployable belongs to no organization yet, so calls were not switched. Give it an organization first.", cause: err}
+		case strings.Contains(msg, memql.CodeCapabilityNotHeld) || strings.Contains(msg, "row-authz") || strings.Contains(msg, organizationForbidden):
 			return nil, &refusal{sentence: "You cannot change this deployable, so calls were not switched. Ask whoever manages it.", cause: err}
 		}
 		return nil, i.failed("siteEnable", siteID, err)
 	}
 	return i.node("siteEnable:"+site.ID, map[string]any{"siteId": site.ID, "calls": on})
 }
+
+// The codes the engine's organization rules open their refusals with
+// (component/memql/organization_ownership.go). Matched by prefix, as row-authz is above;
+// TestSiteEnableWritesTheSwitchAsThePerson drives organizationRequired through the real
+// engine, so a change of wording there fails that test rather than going quiet here.
+const (
+	organizationRequired  = "organization_required:"
+	organizationForbidden = "organization_forbidden:"
+)
 
 // siteFor is the deployable an act names, read under the caller, with the refusals
 // every act shares: one the caller cannot read, and the cluster's own surfaces.

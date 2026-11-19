@@ -246,6 +246,9 @@ builtin callsMediaServers()
   on the row it reads before it acts on a request, which it does for every request that
   carries a key, a link or a session of a shape MemQL issues. People already in a call
   keep their media connections until they leave, and nobody joins or starts another.
+  A deployable that belongs to no organization is refused with a sentence that says so:
+  the engine lets no person change an existing record without an organization, a
+  cluster owner included, so give the deployable one first.
 - **`callsTestKeyCreate`** mints a test key and answers `{keyId, key}`, the key shown this
   once. A test key spends no balance; nothing mints any other kind yet. It needs a media
   server configured on the cluster, because the key pepper exists only once one has

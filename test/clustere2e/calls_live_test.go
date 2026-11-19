@@ -30,7 +30,8 @@ package clustere2e
 // THE SITE IS WRITTEN AS app/access_surface_db_test.go WRITES ONE: a raw insert through an
 // engine, as the cluster acting with internal origin, here over the database the cluster
 // runs on. No route creates a site for a test, and none is added for this one. The
-// deployable is live, owned by the person the token names, and has no bundle: the calls
+// deployable is live, owned by the person the token names, in the cluster's own
+// organization (liveCallsAccount says why it needs one), and has no bundle: the calls
 // routes are answered before the edge opens one.
 //
 // ASKING ONE REPLICA. The front door load-balances, so it cannot say which replica
@@ -258,6 +259,15 @@ func liveMediaServer(ctx context.Context, t *testing.T, qc *memqlclient.QueryCli
 	return publicURL
 }
 
+// liveCallsAccount is the organization the deployable belongs to: the cluster's own
+// (v1:accounts:account:self, stored bare as createSite stores it), which a cluster owner's
+// writes default to (organizationDefaultAccount) and which Deployables gives what an
+// operator creates. It is not optional: a person may not change an existing record that
+// no organization holds, a cluster owner included (organization_required,
+// validateOrganizationOwnership), so the calls switch would be refused. The first live run
+// failed exactly so, before any call.
+const liveCallsAccount = "self"
+
 // liveCallsSite is the deployable this leg holds its call on.
 type liveCallsSite struct {
 	id, owner, host string
@@ -277,6 +287,7 @@ func newLiveCallsSite(t *testing.T, eng *memql.MemQLEngine, db *bun.DB, qc *memq
 	payload, err := json.Marshal(map[string]any{
 		"hostname": s.host, "kind": "spa", "status": "live", "title": "clustere2e live call",
 		"bundleRef": "blob://sites/" + s.id + "/v1/", "ownerUserId": "v1:identity:user:" + owner,
+		"accountId": liveCallsAccount,
 	})
 	if err != nil {
 		t.Fatal(err)
