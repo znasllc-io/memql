@@ -62,7 +62,7 @@ func TestDNSGuidanceRefusesUnavailableBindingsAndUnresolvedTargets(t *testing.T)
 func TestCheckPointingRefusesMixedOldAndCurrentAddresses(t *testing.T) {
 	for _, old := range []string{"198.51.100.20", "2001:db8::99"} {
 		r := &fakeResolver{hosts: map[string][]string{testEdgeHost: {"203.0.113.10"}, "acme.com": {"203.0.113.10", old}}}
-		if result := CheckPointing(context.Background(), r, "acme.com", testEdgeHost); result.OK {
+		if result := CheckPointing(context.Background(), r, "acme.com", testEdgeHost, ""); result.OK {
 			t.Fatalf("accepted stale destination %s beside current target", old)
 		}
 	}

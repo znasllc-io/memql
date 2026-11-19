@@ -559,7 +559,7 @@ does nothing until **two** DNS records check out:
 | Record | Shape | What it proves |
 |---|---|---|
 | Ownership | `TXT _memql-verify.<hostname>` = the row's minted token | that whoever asked for this binding controls the NAME |
-| Pointing | `CNAME <hostname>` → `os.<domain>`, or an A/ALIAS record at an apex | that the domain's traffic arrives HERE |
+| Pointing | `CNAME <hostname>` → `os.<domain>`, or an A/ALIAS record at an apex; for a binding behind a front, a CNAME chain through the front it declares ([below](#behind-azure-front-door)) | that the domain's traffic arrives HERE |
 
 **Neither is redundant.** Pointing proves the DNS owner wants traffic to come
 here; it does not prove the person who typed the hostname into this cluster is
@@ -622,6 +622,91 @@ anywhere in the workspace.
 `scripts/deploy/bind-custom-domain.sh` and its unbind mirror apply the
 identical pair and are the operator's path — contract-conformant capability
 scripts, allowlisted, runnable by hand or from the cockpit surface.
+
+### Behind Azure Front Door
+
+A deployable's own domain can be served through a fronting proxy, which takes
+a flood of requests at its own edge before any of it reaches the cluster.
+Azure Front Door is the front this section is written for. The hostname then
+CNAMEs to the front's endpoint (`<endpoint>.azurefd.net`) rather than to
+`os.<domain>`, and resolves to the front's addresses, so the pointing check
+above refuses it: in DNS, nothing about the hostname reaches this cluster. The
+front is what forwards requests here, and DNS cannot see that.
+
+**The binding declares its front.** `frontedBy` on the binding names the
+front's endpoint, and the pointing check then also accepts a CNAME chain from
+the hostname that passes through exactly that name within 8 hops. Nothing in
+the engine knows any provider: `frontedBy` is a hostname, and the same works
+for any front that is reached by CNAME. Set it with `setCustomDomainFront`.
+It is gated as removing a binding is: the call needs `execute` on
+`app:deployables/domains`, and the binding's row tier admits only a cluster
+owner's write.
+
+```
+mutation setCustomDomainFront(
+  domainId: "<the binding's id>",
+  frontedBy: "<endpoint>.azurefd.net"
+)
+```
+
+The binding's id is on its row (`query customDomainsForSite(siteId: "<site>")`).
+`frontedBy` is the endpoint's hostname as the front shows it, two labels or
+more and without a trailing dot; any case is accepted and it is stored
+lowercase. An empty `frontedBy` removes the declaration, and the plain check
+applies again.
+
+The declaration matters only while a binding is being verified: the sweep
+picks it up on its next pass over a binding that is not yet live, and never
+re-checks one that is. A domain already `live` can therefore be moved behind a
+front without it, as long as the front forwards the challenge path below,
+because certificate renewal takes that path.
+
+**Ownership is unchanged.** `TXT _memql-verify.<hostname>` is still required,
+and still checked first on every pass, so naming somebody else's front proves
+nothing about a hostname you do not control. Nor can a chain show where the
+front forwards: that is proved by the certificate. `live` still waits for a
+Ready certificate, and the HTTP-01 order goes Ready only when the challenge,
+requested at the hostname, reaches this cluster through the front. A front
+that forwards anywhere else leaves the binding at `issuing`.
+
+**Configure the front:**
+
+1. **The origin is this cluster's AKS ingress**, the address `os.<domain>`
+   resolves to, **with the Host header preserved**: leave the origin host
+   header empty, so the front forwards each request's own `Host`. The exact-host
+   Ingress and the edge both route by `Host`; a front that rewrote it to the
+   origin's name would reach the OS shell instead of the deployable.
+2. **The origin needs its own certificate for the hostname.** The front
+   connects to the origin over HTTPS with the hostname as the TLS server name
+   and checks the certificate the origin presents against it (keep certificate
+   subject name validation on). That certificate is the exact-host Certificate
+   the binding's walk applies, issued by cert-manager over HTTP-01. The
+   certificate visitors see is the front's own, validated by Azure with a TXT
+   record of its own (`_dnsauth.<hostname>`), and it does not replace the
+   origin's.
+3. **`/.well-known/acme-challenge/*` is forwarded over HTTP.** Give that path
+   a route of its own that accepts HTTP, forwards over HTTP, does not redirect
+   to HTTPS and does not cache, so cert-manager's HTTP-01 challenge, which Let's
+   Encrypt fetches on port 80, still reaches the origin. Keep it after the
+   first issuance: renewal takes the same path.
+4. **One WAF rate-limit rule per socket address**: a rate-limit custom rule in
+   the front's WAF policy with requests grouped by socket address, so every
+   client address the front sees gets its own budget before anything reaches
+   the cluster. It belongs on the front because behind it the edge counts the
+   front's addresses rather than the visitor's ([what the edge
+   records](site-hosting.md#what-the-edge-records-about-a-request)).
+
+Then CNAME the hostname to the endpoint and watch the binding walk from
+`verifying` to `issuing` to `live`.
+
+**An apex cannot be fronted this way.** A front at a zone apex is reached
+through an alias or a flattened record, which resolves to the front's
+addresses with no CNAME to follow, so the check refuses it. Front a subdomain
+(`www.acme.com`, `calls.acme.com`) and leave the apex out of the front.
+
+**The Domains panel's record guidance still names `os.<domain>`.** It is
+derived from the hostname alone and does not read `frontedBy`, so for a
+fronted binding the CNAME to create is the one this section describes.
 
 ### What it deliberately does not do
 

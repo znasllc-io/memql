@@ -6410,6 +6410,34 @@ QueryClient.prototype.setCreditLimitStatus = function (this: QueryClient, args: 
   return this.executeNamed("setCreditLimitStatus", buildSetCreditLimitStatus(args), opts);
 };
 
+/** Declare the fronting proxy a binding's hostname is served through, or remove the declaration with an empty value. A hostname behind a front -- a CDN or edge network that takes the visitor's connection and forwards it here -- CNAMEs to the front's endpoint name rather than to this cluster, so the plain pointing check refuses it. With `frontedBy` set, the sweep also accepts a CNAME chain from the hostname that passes through exactly that name within 8 hops; empty restores the plain check.
+IT RELAXES POINTING AND NOTHING ELSE. Ownership is still the TXT token at `_memql-verify.<hostname>`, which the sweep requires first on every pass, so naming somebody else's front gets a caller nothing for a hostname they do not control. Nor does it skip a step: `live` still waits for a Ready certificate, which an HTTP-01 order reaches only when the challenge, requested at the hostname, arrives here through the front.
+removeCustomDomain's gate, for removeCustomDomain's reason: it writes no credential and decides nothing the sweep does not check again, so it is client-reachable, gated by `execute` on app:deployables/domains over the concept's clusterOwner tier, and outside the per-organization gate, as the cluster's other domain operations are.
+THE ARGUMENT CARRIES THE SHAPE, the one check a mutation body can make: a DNS name of at least two labels of letters, digits and hyphens, no label starting or ending with a hyphen, and a last label that starts with a letter, so an address is refused. Any case is accepted and stored lowercase. A root dot or surrounding space is refused rather than stripped, because a mutation body can lowercase a value but cannot cut a suffix, and refusing keeps the stored value in the form the pointing check compares. */
+// Bound concept: v1:platform:customDomain (machine-readable: BoundConcepts["setCustomDomainFront"] in generated_concepts.ts).
+export interface SetCustomDomainFrontArgs {
+  domainId: string;
+  /** The front's endpoint hostname, or "" to remove the declaration. */
+  frontedBy: string;
+}
+
+export function buildSetCustomDomainFront(args: SetCustomDomainFrontArgs): string {
+  const parts: string[] = [];
+  parts.push("domainId: " + renderMemQLValue(args.domainId));
+  parts.push("frontedBy: " + renderMemQLValue(args.frontedBy));
+  return "mutation setCustomDomainFront(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    setCustomDomainFront(args: SetCustomDomainFrontArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.setCustomDomainFront = function (this: QueryClient, args: SetCustomDomainFrontArgs = {} as SetCustomDomainFrontArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("setCustomDomainFront", buildSetCustomDomainFront(args), opts);
+};
+
 /** setDelegationPolicy wraps the mutation named "setDelegationPolicy". */
 // Bound concept: v1:worker:delegationPolicy (machine-readable: BoundConcepts["setDelegationPolicy"] in generated_concepts.ts).
 export interface SetDelegationPolicyArgs {

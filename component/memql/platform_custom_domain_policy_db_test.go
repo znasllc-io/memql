@@ -303,9 +303,66 @@ func TestCustomDomainsToReconcileExcludesTheSettledStatuses(t *testing.T) {
 	}
 }
 
+// ===========================================================================
+// The fronting proxy declaration -- setCustomDomainFront
+// ===========================================================================
+
+// THE DECLARATION IS STORED IN THE FORM THE POINTING CHECK COMPARES, through
+// the real write path: lowercase whatever case it arrived in, unchanged by a
+// value that is not a name, and cleared by an empty value -- which is what
+// restores the plain check (integrations/customdomain's CheckPointing). The
+// pattern alone is pinned in TestSetCustomDomainFrontTakesOnlyADNSName; what
+// only a write can show is the body's lowercasing and the clear.
+func TestSetCustomDomainFrontStoresTheNameLowercaseAndAnEmptyValueClearsIt(t *testing.T) {
+	eng, _, _ := sharedReadMergeEngine(t)
+	t.Setenv(memqlDomainEnv, customDomainTestDomain)
+
+	suffix := cdSuffix(t)
+	siteId := seedCustomDomainSite(t, eng, suffix)
+	domainId := "cd-front-" + suffix
+	if err := createCustomDomainRaw(t, eng, domainId, siteId, "front-"+suffix+".acme.com"); err != nil {
+		t.Fatalf("could not create the binding: %v", err)
+	}
+
+	mustRun(t, eng, "setCustomDomainFront", map[string]any{"domainId": domainId, "frontedBy": "ACME-Calls.Z01.Fronts.Example"})
+	if got := storedCustomDomainFront(t, eng, domainId); got != "acme-calls.z01.fronts.example" {
+		t.Fatalf("frontedBy stored as %q, want the lowercase name", got)
+	}
+
+	if _, err := runSiteMutation(t, ownerCustomDomainCtx(), eng, "setCustomDomainFront", map[string]any{
+		"domainId": domainId, "frontedBy": "fronts",
+	}); err == nil {
+		t.Fatal("a single-label front was admitted")
+	}
+	if got := storedCustomDomainFront(t, eng, domainId); got != "acme-calls.z01.fronts.example" {
+		t.Fatalf("a refused write changed the stored front to %q", got)
+	}
+
+	mustRun(t, eng, "setCustomDomainFront", map[string]any{"domainId": domainId, "frontedBy": ""})
+	if got := storedCustomDomainFront(t, eng, domainId); got != "" {
+		t.Fatalf("an empty value left frontedBy = %q; removing the declaration must clear it", got)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// storedCustomDomainFront reads a binding's frontedBy through the read the
+// sweep's own by-id lookups use, so the field is proved projected as well as
+// written.
+func storedCustomDomainFront(t *testing.T, eng *MemQLEngine, domainId string) string {
+	t.Helper()
+	res, err := eng.Execute(ownerCustomDomainCtx(), `query customDomainById(domainId: "`+domainId+`")`)
+	if err != nil {
+		t.Fatalf("customDomainById: %v", err)
+	}
+	rows := MaterializeRows(res)
+	if len(rows) != 1 {
+		t.Fatalf("customDomainById answered %d rows, want 1", len(rows))
+	}
+	return stringFromAny(rows[0]["frontedBy"])
+}
 
 // ownerCustomDomainCtx is a cluster owner: the only caller the concept's tier
 // admits, and therefore the only shape these tests need.

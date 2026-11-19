@@ -816,6 +816,9 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// removeCustomDomain is deliberately NOT here. It writes no credential
 		// and decides nothing the tier has not already decided: an operator
 		// asks for a binding to come down, and the sweep does the rest.
+		// setCustomDomainFront is not here for the same reason: the front it
+		// names relaxes only the pointing check, which the sweep runs again on
+		// every pass behind the ownership token.
 		{Path: "platform/mutations.memql", Name: "createCustomDomain"}:                true,
 		{Path: "platform/mutations.memql", Name: "recordCustomDomainCheck"}:           true,
 		{Path: "platform/mutations.memql", Name: "markCustomDomainVerified"}:          true,

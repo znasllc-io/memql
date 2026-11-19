@@ -24,17 +24,26 @@ package customdomain
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"net"
+	"net/netip"
+	"os"
 	"strings"
+	"time"
+
+	"golang.org/x/net/dns/dnsmessage"
 )
 
-// Resolver is the DNS surface the checks need: two lookups, and nothing else.
+// Resolver is the DNS surface the checks need: four lookups, and nothing else.
 //
 // Narrow on purpose, and it is what makes the whole verification path testable
-// with no network (design section C). The production implementation is a thin
-// wrapper over net.Resolver; every test in this package drives a map.
+// with no network (design section C). The production implementation wraps
+// net.Resolver, plus one question of its own for CNAMEHop; every check in this
+// package is tested against a map.
 type Resolver interface {
 	// LookupTXT returns the TXT records at name.
 	LookupTXT(ctx context.Context, name string) ([]string, error)
@@ -43,11 +52,28 @@ type Resolver interface {
 	LookupCNAME(ctx context.Context, name string) (string, error)
 	// LookupHost returns the A/AAAA addresses for name.
 	LookupHost(ctx context.Context, name string) ([]string, error)
+	// CNAMEHop returns the target of the CNAME record AT name -- one hop of
+	// the chain, never the rest of it -- or "" with no error when name carries
+	// no CNAME, which is where a chain ends. The target is returned as the
+	// wire reports it, fully qualified; callers normalize.
+	//
+	// It exists beside LookupCNAME because LookupCNAME reports only the END of
+	// a chain, and a fronted binding is proved by a name in its MIDDLE: the
+	// front's endpoint, which itself CNAMEs on into the front's network
+	// (CheckPointing).
+	CNAMEHop(ctx context.Context, name string) (string, error)
 }
 
 // SystemResolver is the production Resolver: the host's own recursive
-// resolver, through net.Resolver.
-type SystemResolver struct{ r net.Resolver }
+// resolver, through net.Resolver, and for CNAMEHop the first nameserver the
+// host's resolver configuration names.
+type SystemResolver struct {
+	r net.Resolver
+	// nameserver is the host:port CNAMEHop asks. Empty -- the production value
+	// -- reads the first nameserver of resolvConfPath at every call. A test
+	// points it at a server on the loopback interface.
+	nameserver string
+}
 
 // NewSystemResolver returns the default system resolver.
 func NewSystemResolver() *SystemResolver { return &SystemResolver{} }
@@ -62,6 +88,245 @@ func (s *SystemResolver) LookupCNAME(ctx context.Context, name string) (string, 
 
 func (s *SystemResolver) LookupHost(ctx context.Context, name string) ([]string, error) {
 	return s.r.LookupHost(ctx, name)
+}
+
+// resolvConfPath is the system resolver configuration CNAMEHop takes its
+// nameserver from.
+const resolvConfPath = "/etc/resolv.conf"
+
+// cnameHopTimeout bounds one exchange with the nameserver; the TCP retry gets
+// one of its own, and the caller's context ends either sooner. Five seconds is
+// the system resolver's own per-attempt default (resolv.conf's `timeout` when
+// unset), so one hop waits no longer than one ordinary lookup would.
+const cnameHopTimeout = 5 * time.Second
+
+// CNAMEHop asks for the CNAME record at name, once, and returns its target
+// without following it.
+//
+// # Where the question goes, and why there
+//
+// To the FIRST nameserver in /etc/resolv.conf, over UDP, asked again over TCP
+// when the reply comes back truncated. net.Resolver has no method that answers
+// one hop -- its LookupCNAME follows the chain and reports the end -- so this is
+// a question of our own, built with golang.org/x/net/dns/dnsmessage, and it is
+// sent where the host's other lookups go. In a pod that file names the
+// cluster's DNS service, which forwards to the resolver the node uses; on a
+// developer machine it names the network's resolver. One file, read the same
+// way in both, is what makes the walk behave the same in each. It is read at
+// every call, so a laptop that changes networks asks its new resolver.
+//
+// THE FIRST NAMESERVER ONLY, with no failover to the second. The sweep runs
+// again in two minutes, and a hop that could not be read is reported on the
+// row as exactly that (frontMissDetail) -- a retry loop here would buy a slower
+// pass and, on the next one, the same question anyway.
+//
+// A REPLY IS BELIEVED ONLY WHEN IT ANSWERS THIS QUESTION: its ID, which is
+// random, and its question's name, type and class must match. Over UDP anyone
+// who can reach the socket can send a reply, so one that does not match is
+// ignored and the read goes on until the deadline (parseReply).
+//
+// KNOWN LIMITATION, macOS: the file there is generated from the network
+// configuration and lists the primary resolver only. A scoped resolver the
+// system consults for some domains (split DNS from a VPN) is not in it, so on
+// such a machine a hop for one of those domains can disagree with LookupCNAME.
+// A pod has no such resolver.
+func (s *SystemResolver) CNAMEHop(ctx context.Context, name string) (string, error) {
+	server := s.nameserver
+	if server == "" {
+		var err error
+		if server, err = firstNameserver(resolvConfPath); err != nil {
+			return "", &net.DNSError{Err: err.Error(), Name: NormalizeHostname(name)}
+		}
+	}
+	return askCNAME(ctx, server, name)
+}
+
+// firstNameserver returns the first usable `nameserver` line of a
+// resolv.conf-format file, as host:port.
+//
+// An address that does not parse is skipped, the way the system resolver skips
+// it. A file naming none is an error rather than a guess at 127.0.0.1: a hop
+// sent to a resolver nobody configured fails as a timeout naming nothing,
+// where this names the file to look at.
+func firstNameserver(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("cannot read the resolver configuration %s: %w", path, err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || fields[0] != "nameserver" {
+			continue
+		}
+		if _, perr := netip.ParseAddr(fields[1]); perr != nil {
+			continue
+		}
+		return net.JoinHostPort(fields[1], "53"), nil
+	}
+	return "", fmt.Errorf("the resolver configuration %s names no nameserver", path)
+}
+
+// askCNAME sends one CNAME question for name to server and returns the target
+// of the CNAME record the reply carries for that name, or "" when it carries
+// none. Every failure is a *net.DNSError, so dnsErrorText renders it the way it
+// renders the other lookups' failures.
+func askCNAME(ctx context.Context, server, name string) (string, error) {
+	host := NormalizeHostname(name)
+	fail := func(text string) error {
+		return &net.DNSError{Err: text, Name: host, Server: server}
+	}
+	if host == "" {
+		return "", fail("no name to ask about")
+	}
+	qname, err := dnsmessage.NewName(host + ".")
+	if err != nil {
+		return "", fail(err.Error())
+	}
+	q := dnsmessage.Question{Name: qname, Type: dnsmessage.TypeCNAME, Class: dnsmessage.ClassINET}
+	var idBytes [2]byte
+	if _, err := rand.Read(idBytes[:]); err != nil {
+		return "", fail(err.Error())
+	}
+	id := binary.BigEndian.Uint16(idBytes[:])
+	// Recursion is requested: the server is a recursive resolver, answering
+	// for zones it does not hold.
+	query, err := (&dnsmessage.Message{
+		Header:    dnsmessage.Header{ID: id, RecursionDesired: true},
+		Questions: []dnsmessage.Question{q},
+	}).Pack()
+	if err != nil {
+		return "", fail(err.Error())
+	}
+
+	reply, err := exchange(ctx, "udp", server, query, id, q)
+	if err == nil && reply.header.Truncated {
+		// The reply did not fit a datagram. TCP carries it whole.
+		reply, err = exchange(ctx, "tcp", server, query, id, q)
+	}
+	if err != nil {
+		var ne net.Error
+		if errors.As(err, &ne) && ne.Timeout() {
+			return "", &net.DNSError{Err: server + " did not answer in time", Name: host, Server: server, IsTimeout: true}
+		}
+		return "", fail(err.Error())
+	}
+
+	switch reply.header.RCode {
+	case dnsmessage.RCodeSuccess:
+	case dnsmessage.RCodeNameError:
+		return "", &net.DNSError{Err: "no such host", Name: host, Server: server, IsNotFound: true}
+	default:
+		return "", fail("server misbehaving (" + reply.header.RCode.String() + ")")
+	}
+	for _, a := range reply.answers {
+		if a.Header.Type != dnsmessage.TypeCNAME || !strings.EqualFold(a.Header.Name.String(), qname.String()) {
+			continue
+		}
+		if c, ok := a.Body.(*dnsmessage.CNAMEResource); ok {
+			return c.CNAME.String(), nil
+		}
+	}
+	return "", nil
+}
+
+// dnsReply is the part of a nameserver's reply askCNAME reads.
+type dnsReply struct {
+	header  dnsmessage.Header
+	answers []dnsmessage.Resource
+}
+
+// exchange sends query to server over network ("udp" or "tcp") and returns the
+// reply that answers it, within cnameHopTimeout.
+func exchange(ctx context.Context, network, server string, query []byte, id uint16, q dnsmessage.Question) (dnsReply, error) {
+	ctx, cancel := context.WithTimeout(ctx, cnameHopTimeout)
+	defer cancel()
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(ctx, network, server)
+	if err != nil {
+		return dnsReply{}, err
+	}
+	defer conn.Close()
+	// The deadline ends a read that is waiting; AfterFunc ends one when the
+	// caller cancels without a deadline of its own.
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(deadline)
+	}
+	stop := context.AfterFunc(ctx, func() { _ = conn.SetDeadline(time.Now()) })
+	defer stop()
+
+	if network == "tcp" {
+		return exchangeStream(conn, query, id, q)
+	}
+	return exchangeDatagram(conn, query, id, q)
+}
+
+// exchangeDatagram is the UDP half: write the question, then read until a reply
+// answers it or the deadline passes.
+func exchangeDatagram(conn net.Conn, query []byte, id uint16, q dnsmessage.Question) (dnsReply, error) {
+	if _, err := conn.Write(query); err != nil {
+		return dnsReply{}, err
+	}
+	buf := make([]byte, 65535)
+	for {
+		n, err := conn.Read(buf)
+		if err != nil {
+			return dnsReply{}, err
+		}
+		if reply, ok := parseReply(buf[:n], id, q); ok {
+			return reply, nil
+		}
+		// Not a reply to this question. Ignored rather than believed: see
+		// CNAMEHop.
+	}
+}
+
+// exchangeStream is the TCP half: one question and one reply, each prefixed
+// with its two-byte length (RFC 1035 section 4.2.2).
+func exchangeStream(conn net.Conn, query []byte, id uint16, q dnsmessage.Question) (dnsReply, error) {
+	if _, err := conn.Write(append(binary.BigEndian.AppendUint16(nil, uint16(len(query))), query...)); err != nil {
+		return dnsReply{}, err
+	}
+	var size [2]byte
+	if _, err := io.ReadFull(conn, size[:]); err != nil {
+		return dnsReply{}, err
+	}
+	msg := make([]byte, binary.BigEndian.Uint16(size[:]))
+	if _, err := io.ReadFull(conn, msg); err != nil {
+		return dnsReply{}, err
+	}
+	reply, ok := parseReply(msg, id, q)
+	if !ok || reply.header.Truncated {
+		return dnsReply{}, errors.New("the reply over TCP does not answer the question asked")
+	}
+	return reply, nil
+}
+
+// parseReply reads msg as the reply to question q asked under id, and answers
+// false for anything else: a malformed message, a query rather than a
+// response, another ID, or another question.
+func parseReply(msg []byte, id uint16, q dnsmessage.Question) (dnsReply, bool) {
+	var p dnsmessage.Parser
+	h, err := p.Start(msg)
+	if err != nil || !h.Response || h.ID != id {
+		return dnsReply{}, false
+	}
+	got, err := p.Question()
+	if err != nil || got.Type != q.Type || got.Class != q.Class || !strings.EqualFold(got.Name.String(), q.Name.String()) {
+		return dnsReply{}, false
+	}
+	if h.Truncated {
+		// The sections after the question may be cut off mid-record; the
+		// caller asks again over TCP rather than reading them.
+		return dnsReply{header: h}, true
+	}
+	if err := p.SkipAllQuestions(); err != nil {
+		return dnsReply{}, false
+	}
+	answers, err := p.AllAnswers()
+	if err != nil {
+		return dnsReply{}, false
+	}
+	return dnsReply{header: h, answers: answers}, true
 }
 
 // The typed failure reasons. These four strings are a CONTRACT: they are
@@ -226,7 +491,44 @@ func CheckOwnership(ctx context.Context, r Resolver, hostname, token string) Che
 // Some providers implement apex aliasing (ALIAS / ANAME / CNAME flattening)
 // that a resolver reports as an address rather than a CNAME, and both of those
 // are a working configuration this must not call broken.
-func CheckPointing(ctx context.Context, r Resolver, hostname, edgeHost string) CheckResult {
+//
+// # A declared front (frontedBy)
+//
+// A hostname served through a fronting proxy -- a CDN, or an edge network that
+// takes the visitor's connection and forwards it here -- does not point at this
+// cluster in DNS at all. It CNAMEs to the front's endpoint name, and resolves
+// to the front's addresses. Both shapes above refuse it, and on DNS evidence
+// alone they are right to.
+//
+// frontedBy is the binding naming its front. When it is set, a CNAME chain from
+// the hostname that passes through EXACTLY that name within frontChainHopLimit
+// hops counts as pointing. Exactly, not by suffix: a declaration naming the
+// front's parent domain would otherwise admit every endpoint that network
+// serves, for every one of its customers. The front is a hostname and nothing
+// more -- no branch here knows any provider -- and it widens rather than
+// narrows: a fronted binding whose hostname points at this cluster directly
+// still passes the plain check, which is also all that runs when no front is
+// declared. The walk is CNAMEHop, one question per hop, because LookupCNAME
+// reports only a chain's end and the front is a name in its middle.
+//
+// OWNERSHIP IS NOT RELAXED, and that is what makes relaxing this safe. The
+// declaration widens only what counts as pointing. Who may bind the hostname is
+// still decided by CheckOwnership's TXT token, which the reconciler requires
+// before this check on every pass (Reconciler.verify) -- so naming somebody
+// else's front gets a caller nothing: the chain may well pass through it, but
+// the token cannot be published in a zone they do not control.
+//
+// WHAT A CHAIN CANNOT SHOW is where the front forwards. That is proved later,
+// and not by DNS: `live` still waits for a Ready certificate, and an HTTP-01
+// order goes Ready only when the challenge, requested at the hostname, reaches
+// this cluster through the front. A front forwarding anywhere else leaves the
+// binding at `issuing`, saying why.
+//
+// KNOWN LIMITATION: an APEX cannot be fronted this way. A front at a zone apex
+// is reached through an alias or a flattened record, which resolves to the
+// front's addresses with no CNAME to follow, so the walk ends at once and the
+// plain check refuses the front's addresses.
+func CheckPointing(ctx context.Context, r Resolver, hostname, edgeHost, frontedBy string) CheckResult {
 	host := NormalizeHostname(hostname)
 	edge := NormalizeHostname(edgeHost)
 	if host == "" {
@@ -241,6 +543,93 @@ func CheckPointing(ctx context.Context, r Resolver, hostname, edgeHost string) C
 		return failed(ReasonNotPointing, "this cluster's edge host did not resolve, so there is nothing to check the record against")
 	}
 
+	front := NormalizeHostname(frontedBy)
+	// A HOSTNAME IS NOT ITS OWN FRONT. The walk starts at the hostname's first
+	// CNAME, so the only way it could meet the hostname again is a loop back to
+	// it -- a zone that does not resolve -- and that must not read as passing
+	// through the declared name. Such a declaration is treated as none.
+	if front == "" || front == host {
+		return checkPointingHere(ctx, r, host, edge)
+	}
+	passedThrough, reached, err := followChainToFront(ctx, r, host, front)
+	if reached {
+		return passed()
+	}
+	if direct := checkPointingHere(ctx, r, host, edge); direct.OK {
+		return direct
+	}
+	// Both failed. The detail names the FRONT rather than the edge host: the
+	// operator declared one, and "it should be a CNAME to <edge>" would tell
+	// them to route around it.
+	return failed(ReasonNotPointing, frontMissDetail(host, front, passedThrough, err))
+}
+
+// frontChainHopLimit is how many hops from the hostname the declared front may
+// sit in its CNAME chain.
+//
+// EIGHT, because a real chain through a front is short -- the hostname's own
+// CNAME usually names the front at the first hop, and the front's network adds
+// a few more beyond it -- so the limit never decides a working configuration.
+// What it decides is a broken one: a loop (a -> b -> a) is followed to the
+// limit and refused, so a misconfigured zone costs at most eight questions a
+// pass rather than a walk that never ends.
+const frontChainHopLimit = 8
+
+// followChainToFront walks the CNAME chain from host, one record at a time,
+// looking for front. It returns the names it passed through (host itself
+// excluded), whether front was among them, and the error that stopped it.
+//
+// It stops at the first of four: the front; a name with no CNAME, which is the
+// chain's end; a hop that could not be read; frontChainHopLimit hops.
+func followChainToFront(ctx context.Context, r Resolver, host, front string) (passedThrough []string, reached bool, err error) {
+	name := host
+	for len(passedThrough) < frontChainHopLimit {
+		target, herr := r.CNAMEHop(ctx, name)
+		if herr != nil {
+			return passedThrough, false, herr
+		}
+		next := NormalizeHostname(target)
+		if next == "" {
+			return passedThrough, false, nil
+		}
+		passedThrough = append(passedThrough, next)
+		if next == front {
+			return passedThrough, true, nil
+		}
+		name = next
+	}
+	return passedThrough, false, nil
+}
+
+// frontMissDetail says why a fronted binding's chain did not reach its front:
+// the front it declared, and the chain as far as it was followed, which is the
+// line of a zone file somebody has to change.
+func frontMissDetail(host, front string, passedThrough []string, err error) string {
+	chain := strings.Join(append([]string{host}, passedThrough...), " -> ")
+	switch {
+	case err != nil:
+		at := host
+		if len(passedThrough) > 0 {
+			at = passedThrough[len(passedThrough)-1]
+		}
+		return fmt.Sprintf("%s is declared fronted by %s, but the CNAME at %s could not be read (%s); followed so far: %s",
+			host, front, at, dnsErrorText(err), chain)
+	case len(passedThrough) == 0:
+		return fmt.Sprintf("%s is declared fronted by %s but carries no CNAME; it needs a CNAME to %s",
+			host, front, front)
+	case len(passedThrough) >= frontChainHopLimit:
+		return fmt.Sprintf("%s is declared fronted by %s, but its CNAME chain (%s) does not reach it within %d hops; it needs a CNAME to %s",
+			host, front, chain, frontChainHopLimit, front)
+	default:
+		return fmt.Sprintf("%s is declared fronted by %s, but its CNAME chain (%s) does not pass through it; it needs a CNAME to %s",
+			host, front, chain, front)
+	}
+}
+
+// checkPointingHere is the plain check: the hostname reaches this cluster
+// itself, by CNAME to the edge host or by addresses that are all the edge
+// host's. host and edge arrive normalized and non-empty.
+func checkPointingHere(ctx context.Context, r Resolver, host, edge string) CheckResult {
 	cname, cerr := r.LookupCNAME(ctx, host)
 	if cerr == nil {
 		if NormalizeHostname(cname) == edge {

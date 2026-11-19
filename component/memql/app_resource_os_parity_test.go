@@ -268,8 +268,9 @@ func TestTheDeployablesPartsAreDeclaredOnTheirConstructs(t *testing.T) {
 		"siteDelete":                  "app:deployables/retire",
 		"deleteSite":                  "app:deployables/retire",
 		// domains
-		"customDomainAdd":    "app:deployables/domains",
-		"removeCustomDomain": "app:deployables/domains",
+		"customDomainAdd":      "app:deployables/domains",
+		"removeCustomDomain":   "app:deployables/domains",
+		"setCustomDomainFront": "app:deployables/domains",
 		// access (deployable access codes, design record 2026-10-29): the four
 		// operator acts, the gate listing the panel's Add form draws from, and
 		// the list of the codes themselves -- six builtins, and every one a

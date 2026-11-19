@@ -147,6 +147,7 @@ shape customDomain customDomainFull {
   row.id
   siteId
   hostname
+  frontedBy
   accountId
   token
   status

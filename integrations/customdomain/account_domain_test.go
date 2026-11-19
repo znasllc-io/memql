@@ -64,6 +64,8 @@ func (z txtZone) LookupTXT(_ context.Context, name string) ([]string, error) {
 
 func (z txtZone) LookupCNAME(_ context.Context, name string) (string, error) { return name, nil }
 
+func (z txtZone) CNAMEHop(context.Context, string) (string, error) { return "", nil }
+
 func (z txtZone) LookupHost(context.Context, string) ([]string, error) { return nil, nil }
 
 const (

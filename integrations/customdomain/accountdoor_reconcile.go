@@ -380,7 +380,11 @@ func (r *DoorReconciler) recheckLive(ctx context.Context, doors []Door, out *Doo
 		checks := make(map[string]HostCheck, len(frontdoor.AccountRoles()))
 		allOK := true
 		for _, h := range frontdoor.AccountHosts(d.ReservedName) {
-			res := CheckPointing(ctx, r.resolver, h.Name, r.edgeHost)
+			// NO FRONT, here or in verify below: this re-check exists to notice
+			// a door's host repointed away from THIS cluster, and a front would
+			// let "routed through the front" pass while the front forwarded the
+			// door's callback anywhere.
+			res := CheckPointing(ctx, r.resolver, h.Name, r.edgeHost, "")
 			checks[string(h.Role)] = HostCheck{OK: res.OK, Reason: res.Reason, Detail: res.Detail}
 			if !res.OK {
 				allOK = false
@@ -463,7 +467,7 @@ func (r *DoorReconciler) verify(ctx context.Context, d Door, out *DoorPassResult
 	allOK := true
 
 	for _, h := range frontdoor.AccountHosts(d.ReservedName) {
-		res := CheckPointing(ctx, r.resolver, h.Name, r.edgeHost)
+		res := CheckPointing(ctx, r.resolver, h.Name, r.edgeHost, "")
 		checks[string(h.Role)] = HostCheck{OK: res.OK, Reason: res.Reason, Detail: res.Detail}
 		if !res.OK {
 			allOK = false

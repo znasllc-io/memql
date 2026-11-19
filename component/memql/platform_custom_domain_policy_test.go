@@ -1,9 +1,13 @@
 package memql
 
 import (
+	"io"
+	"log/slog"
 	"os"
 	"strings"
 	"testing"
+
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
 // The three custom-domain guards (epic memql#4805, design D10), pure half.
@@ -163,5 +167,64 @@ func TestCustomDomainTerminalStatus(t *testing.T) {
 		if customDomainTerminalStatus(s) {
 			t.Errorf("%q was treated as terminal", s)
 		}
+	}
+}
+
+// THE FRONT A BINDING DECLARES IS A DNS NAME, refused at the mutation when it is
+// not one (setCustomDomainFront, dsl/platform/mutations.memql). The argument's
+// pattern is the whole check, so it is measured here against the loaded tree
+// rather than trusted: an empty value removes the declaration, any case is
+// admitted (the body lowercases it), and everything else must be a name of at
+// least two labels with no root dot -- the mutation cannot strip one, and the
+// stored value has to be the form the pointing check compares.
+func TestSetCustomDomainFrontTakesOnlyADNSName(t *testing.T) {
+	if _, err := LoadUnifiedConcepts(nil); err != nil {
+		t.Fatalf("LoadUnifiedConcepts: %v", err)
+	}
+	fns := newFunctionRegistry()
+	if _, _, err := LoadUnifiedFunctions(slog.New(slog.NewTextHandler(io.Discard, nil)), fns, memorynodes.DefaultRegistry()); err != nil {
+		t.Fatalf("LoadUnifiedFunctions: %v", err)
+	}
+	fn, err := fns.Get("setCustomDomainFront")
+	if err != nil || fn == nil {
+		t.Fatalf("setCustomDomainFront is not in the loaded tree: %v", err)
+	}
+	validate := fn.SnapshotArgumentValidator()
+	label63 := strings.Repeat("a", 63)
+
+	for _, front := range []string{
+		"",                              // removes the declaration
+		"acme-calls.z01.fronts.example", // an endpoint name
+		"ACME-Calls.Z01.Fronts.Example", // any case; stored lowercase
+		"a.example",                     // two labels is enough
+		"xn--80ak6aa92e.example",        // an IDN label in its ASCII form
+		label63 + ".example",            // a label at the 63-octet limit
+		"edge-7f3k2.b01.fronts.example", // digits inside labels
+	} {
+		if err := validate(map[string]any{"domainId": "d1", "frontedBy": front}); err != nil {
+			t.Errorf("frontedBy %q was refused: %v", front, err)
+		}
+	}
+	for _, front := range []string{
+		"fronts",                      // a single label
+		"acme-calls.fronts.example.",  // the root dot
+		" acme-calls.fronts.example",  // surrounding space
+		"acme..fronts.example",        // an empty label
+		"-acme.fronts.example",        // a label starting with a hyphen
+		"acme-.fronts.example",        // a label ending with a hyphen
+		"acme_calls.fronts.example",   // not a hostname character
+		"*.fronts.example",            // a wildcard
+		"203.0.113.10",                // an address, not a name
+		"https://acme.fronts.example", // a URL
+		label63 + "a.example",         // a 64-octet label
+	} {
+		if err := validate(map[string]any{"domainId": "d1", "frontedBy": front}); err == nil {
+			t.Errorf("frontedBy %q was admitted; it is not a DNS name of two or more labels", front)
+		}
+	}
+	// THE ARGUMENT IS REQUIRED, so removing the declaration is a statement (an
+	// empty value) rather than an omission a caller can make by accident.
+	if err := validate(map[string]any{"domainId": "d1"}); err == nil {
+		t.Error("a call naming no frontedBy at all was admitted")
 	}
 }

@@ -45,9 +45,14 @@ type Engine interface {
 // Binding is the projection of one v1:platform:customDomain row the sweep and
 // the add capability work with.
 type Binding struct {
-	ID            string
-	SiteID        string
-	Hostname      string
+	ID       string
+	SiteID   string
+	Hostname string
+	// FrontedBy is the fronting proxy the hostname is served through, or
+	// empty. Set by the setCustomDomainFront mutation, never by this package;
+	// the sweep only reads it, and it relaxes the pointing check alone
+	// (CheckPointing).
+	FrontedBy     string
 	AccountID     string
 	Token         string
 	Status        string
@@ -348,6 +353,7 @@ func bindingFromRow(r map[string]any) Binding {
 		ID:            memql.BareShortId(rowString(r, "id")),
 		SiteID:        memql.BareShortId(rowString(r, "siteId")),
 		Hostname:      rowString(r, "hostname"),
+		FrontedBy:     rowString(r, "frontedBy"),
 		AccountID:     memql.BareShortId(rowString(r, "accountId")),
 		Token:         rowString(r, "token"),
 		Status:        rowString(r, "status"),

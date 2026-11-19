@@ -105,6 +105,13 @@ func (s stubDoorResolver) LookupCNAME(_ context.Context, host string) (string, e
 	return "somewhere-else.example.", nil
 }
 
+// CNAMEHop answers the same one-record chain LookupCNAME does. A door declares
+// no front, so the pointing check never walks a door's chain; this exists only
+// because the Resolver interface has it.
+func (s stubDoorResolver) CNAMEHop(ctx context.Context, host string) (string, error) {
+	return s.LookupCNAME(ctx, host)
+}
+
 func (s stubDoorResolver) LookupHost(_ context.Context, host string) ([]string, error) {
 	if host == doorEdgeHost || s.pointing[host] {
 		return []string{"203.0.113.10"}, nil

@@ -199,13 +199,18 @@ func (r *Reconciler) step(ctx context.Context, b Binding, out *PassResult) error
 // for propagation". Reporting the actionable miss first is the difference
 // between a panel that tells somebody what to do and one that tells them to
 // wait.
+//
+// A DECLARED FRONT REACHES THE SECOND CHECK ONLY. frontedBy widens what counts
+// as pointing; the token still decides who may bind the name, and it is still
+// required first on every pass (CheckPointing says why that is what makes the
+// widening safe; TestAFrontedBindingWithoutItsOwnershipTokenIsStillRefused).
 func (r *Reconciler) verify(ctx context.Context, b Binding, out *PassResult) error {
 	now := r.now()
 
 	if res := CheckOwnership(ctx, r.resolver, b.Hostname, b.Token); !res.OK {
 		return r.store.RecordCheck(ctx, b.ID, res.Reason, res.Detail, now)
 	}
-	if res := CheckPointing(ctx, r.resolver, b.Hostname, r.edgeHost); !res.OK {
+	if res := CheckPointing(ctx, r.resolver, b.Hostname, r.edgeHost, b.FrontedBy); !res.OK {
 		return r.store.RecordCheck(ctx, b.ID, res.Reason, res.Detail, now)
 	}
 

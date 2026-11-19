@@ -4602,6 +4602,7 @@
         "accountId",
         "failureDetail",
         "failureReason",
+        "frontedBy",
         "hostname",
         "issuedAt",
         "lastCheckedAt",

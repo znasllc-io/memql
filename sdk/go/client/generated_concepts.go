@@ -897,6 +897,7 @@ var BoundConcepts = map[string]string{
 	"setConstructCompiledForm":                         "v1:authoring:construct",
 	"setConstructStatus":                               "v1:authoring:construct",
 	"setCreditLimitStatus":                             "v1:commerce:creditLimit",
+	"setCustomDomainFront":                             "v1:platform:customDomain",
 	"setDelegationPolicy":                              "v1:worker:delegationPolicy",
 	"setEmailRuleStatus":                               "v1:campaigns:emailRule",
 	"setGlobalSecret":                                  "v1:platform:globalSecret",

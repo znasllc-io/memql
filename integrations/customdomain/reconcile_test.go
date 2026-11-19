@@ -199,6 +199,65 @@ func TestOnlyThePointingCheckPassingIssuesNothing(t *testing.T) {
 }
 
 // ===========================================================================
+// A declared front (frontedBy)
+// ===========================================================================
+
+// fronted is a row that declares the front its hostname is served through.
+func fronted(r map[string]any) map[string]any {
+	r["frontedBy"] = testFront
+	return r
+}
+
+// THE DECLARATION REACHES THE CHECK. A row that names its front, publishes its
+// token and CNAMEs through that front is verified, which pins the whole path
+// the field takes: from the row the sweep reads to the check that reads it.
+func TestAFrontedBindingIsVerifiedWhenItsChainPassesThroughTheFront(t *testing.T) {
+	eng := &fakeEngine{t: t, rows: []map[string]any{fronted(row("d1", "www.acme.com", StatusVerifying))}}
+	res := &fakeResolver{
+		txt:   map[string][]string{"_memql-verify.www.acme.com": {testToken}},
+		cname: frontedZone(),
+		hosts: frontedAddrs(),
+	}
+	prov := &recordingProvisioner{}
+	rec := newTestReconciler(t, eng, res, prov)
+
+	out, err := rec.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out.Verified != 1 || !eng.ranMutation("markCustomDomainVerified") {
+		t.Fatalf("a binding whose chain passes through the front it declares was not verified; calls:\n  %s",
+			strings.Join(eng.calls, "\n  "))
+	}
+}
+
+// OWNERSHIP IS NOT RELAXED BY A FRONT. The two checks are separate calls and
+// the declaration reaches only the second: a hostname whose chain passes
+// through the front it names, and whose TXT token is NOT published, is refused
+// for the token. Otherwise naming somebody else's front would be a way to bind
+// a hostname nobody proved they control.
+func TestAFrontedBindingWithoutItsOwnershipTokenIsStillRefused(t *testing.T) {
+	eng := &fakeEngine{t: t, rows: []map[string]any{fronted(row("d1", "www.acme.com", StatusVerifying))}}
+	res := &fakeResolver{
+		txt:   map[string][]string{},
+		cname: frontedZone(),
+		hosts: frontedAddrs(),
+	}
+	prov := &recordingProvisioner{}
+	rec := newTestReconciler(t, eng, res, prov)
+
+	if _, err := rec.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if eng.ranMutation("markCustomDomainVerified") || len(prov.binds) != 0 {
+		t.Fatal("a fronted binding with no ownership proof was promoted -- a front would be a way past the token")
+	}
+	if !strings.Contains(strings.Join(eng.calls, "\n"), ReasonTokenMissing) {
+		t.Errorf("the recorded reason does not name %q", ReasonTokenMissing)
+	}
+}
+
+// ===========================================================================
 // The walk
 // ===========================================================================
 
