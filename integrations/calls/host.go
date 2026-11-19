@@ -64,22 +64,23 @@ import (
 // # The roster
 //
 // A HOST SEES WHOM ITS CONTROLS NAME through the call's roster (Roster, calls.Roster):
-// whether the call is locked, as whichever host of it last set it, so a host's page offers
-// Lock or Unlock and never both; the seats in the call in the order they were let in
-// (joinedAt, which every admission writes), each with its media identity, so a client
-// matches the media server's participants to seats; and the seats waiting to come in, in
-// line order, each with when it began waiting (waitingSince, written whenever a seat
-// begins to wait). LINE ORDER is the order the call's waiters would come in: first those
-// holding a place in the media server's line, in that line's order (calls.OrderQueue:
-// class, then arrival), then those held behind the lock with no place, by when they began
-// waiting, since a lifted lock sends each of them to the back of the line on its own next
-// poll. The roster is the host's alone, by the rule for who is a host above: anybody else,
-// and an ended call, read none (nil, not an error). It is a read that writes nothing, made
-// fresh on every ask, since a host's page polls it to see who is knocking and whether
-// another host locked the call. KNOWN LIMITATION: a waiter held behind the lock keeps no
-// record of its polls, so one who closed the page is listed until the call ends or a host
-// removes them; and a waiter whose place in line ran out is listed in its old place until
-// its entry is marked expired.
+// whether the call is locked now (a booked call opens locked, and any host of it locks or
+// unlocks it), so a host's page offers Lock or Unlock and never both; the seats in the
+// call in the order they were let in (joinedAt, which every admission writes), each with
+// its media identity, so a client matches the media server's participants to seats; and
+// the seats waiting to come in, in line order, each with when it began waiting
+// (waitingSince, written whenever a seat begins to wait). LINE ORDER is the order the
+// call's waiters would come in: first those holding a place in the media server's line,
+// in that line's order (calls.OrderQueue: class, then arrival), then those held behind
+// the lock with no place, by when they began waiting, since a lifted lock sends each of
+// them to the back of the line on its own next poll. The roster is the host's alone, by
+// the rule for who is a host above: anybody else, and an ended call, read none (nil, not
+// an error). It is a read that writes nothing, made fresh on every ask, since a host's
+// page polls it to see who is knocking and whether another host locked the call. KNOWN
+// LIMITATION: a waiter held behind the lock keeps no record of its polls, so one who
+// closed the page is listed until the call ends or a host removes them; and a waiter
+// whose place in line ran out is listed in its old place until its entry is marked
+// expired.
 //
 // # Ending a call
 //

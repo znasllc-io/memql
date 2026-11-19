@@ -635,8 +635,9 @@ delete it with the last one.
 
 All three run on the host's network, as LiveKit's own self-hosting layout runs them, from
 `/etc/memql-media/compose.yaml`, and Docker restarts them after a reboot. Docker runs
-with `live-restore`, so a restart of Docker itself, which Ubuntu's unattended security
-updates make when they update it, leaves the containers and their calls running. A
+with `live-restore`, so a restart of the Docker daemon, which Ubuntu's unattended
+security updates make when they update Docker, leaves the containers and their calls
+running. A
 server is made with the LiveKit and Redis versions the local target runs, and keeps them
 until it is replaced ([Replacing a server](#replacing-a-server)): an upgrade of LiveKit
 is reviewed first, for both targets. The Caddy build is LiveKit's own, Caddy with the
