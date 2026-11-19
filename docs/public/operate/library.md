@@ -362,6 +362,124 @@ permission tree exists: row authz is unchanged, and a folder confers nothing.
 
 ---
 
+## Sharing a file
+
+A person shares **one file** with **one other person** on the same cluster for
+**1, 7, 10 or 30 days** -- no other lifetime. The recipient sees it under
+*Shared with me*, and may **view** it, **download** it and **save a copy** of
+their own. They cannot rename, move, delete or share it onward. The sharer sees
+who has a file and can stop sharing at any time. Expiry, a stop, and the sharer
+archiving the file each end access at once. Files only; there is no folder
+sharing and no email.
+
+**Who may share.** Every rank, viewers included: the part
+`execute app:files/share` is seeded on all five roles, so a grant can take it
+from one person or group without closing their Files app.
+
+**Who may be picked** is `libraryShareDirectory()`: one row per person,
+`{userId, displayName}`, never an email and never the caller. A holder of
+`read principal` (owner, developer, admin by seed) is offered everyone active
+on the cluster. Anyone else is offered the active people of their own
+**organization** -- those holding an active membership in an active group of
+kind `account` that the caller is also an active member of. Custom groups do
+not count. It is Fleet's directory (`fleetShareDirectory`) narrowed to the
+organization, from the same code (`component/memql/library_share_directory.go`).
+
+### The rows
+
+| Concept | Owned by | What it is |
+|---|---|---|
+| `v1:library:share` | the **sharer** | The grant: `recipientUserId`, `recipientDisplayName` (a snapshot), `artifactId`, `days`, `expiresAt`, `revokedAt`. |
+| `v1:library:shareNotice` | the **recipient** | A display row: `shareId`, `artifactId`, `sharerUserId`, `sharerDisplayName`, `title`, `mimeType`, `format`, `size`, `expiresAt`, `endedAt`. |
+
+The grant is the **sharer's** because a grant the recipient owned is one the
+recipient could extend. The notice is the **recipient's** only so their own
+stream hears it arrive: row admission gates graph events by owner, so a
+sharer-owned row could never reach the recipient's *Shared with me* list live.
+**The notice grants nothing.** Every access reads the share it names.
+
+Both concepts are `@serverWritten`. Their four writes (`putLibraryShare`,
+`endLibraryShare`, `putLibraryShareNotice`, `endLibraryShareNotice`) are
+`@serverOnly` and reached only through `integrations/library/sharestore`, after
+`integrations/library/share.go` has decided the act under the original caller.
+A raw insert by the sharer is refused too: it would skip the four lifetimes,
+the directory and the ownership check.
+
+### The calls
+
+| Call | Who | Answers |
+|---|---|---|
+| `libraryShareDirectory()` | holder of `execute app:files/share` | rows `{userId, displayName}` |
+| `libraryShareFile(artifactId, recipientUserId, days)` | holder of the part, a signed-in person, on their own non-archived file | `{shareId, expiresAt, days}` |
+| `libraryShareStop(shareId)` | the sharer | `{shareId, stopped}` |
+| `librarySaveSharedCopy(artifactId)` | the recipient, while the share is active | `{artifactId, fileId}` of the new copy |
+| `librarySharesForArtifact(artifactId)` | the sharer | the file's ACTIVE shares (`id` is the shareId) |
+| `librarySharedWithMe(artifactId?)` | the recipient | their notices that have not ended or expired |
+
+**Renew.** Calling `libraryShareFile` again for a person whose share of the
+file is still active updates that same share: a new `expiresAt` (now plus
+`days`) and the new `days`, and the notice's `expiresAt` with it. After a stop
+or an expiry it makes a **fresh** share at a new id; the ended one stays,
+stopped, as the record. A share is never reused once ended, because every write
+is a read-merge and an ended share's `revokedAt` would ride along. The check
+and the write run under the file's version gate, so two clicks on two replicas
+cannot make two active shares.
+
+**Refused:** a file that is not the caller's (a cluster owner included), an
+archived file, anything but a `kind=file` artifact, the caller themselves,
+anyone the directory does not offer (one sentence for "does not exist" and "not
+yours to pick"), any other number of days, and a borrowed or synthetic actor --
+a deployable visitor's call under the site owner's authority, or an automation,
+is not a person deciding to share.
+
+### Every access re-checks the share
+
+`GET /artifacts/{id}/content` falls back to the shared path when the caller's
+own read finds nothing, and `librarySaveSharedCopy` uses the same resolver,
+`EngineLibraryStore.SharedFile` (`component/server/artifact_handler.go`):
+
+1. The caller's own notice for the artifact names the share and the sharer.
+2. The share is read **under the sharer's borrowed authority** -- never
+   internal origin -- with `memql.ContextWithFreshRead`, from an `@cache(0)`
+   query. It must name the caller and the artifact, carry no `revokedAt`, and
+   expire after now **on this node's clock** (compared in Go: the result
+   cache's key carries no clock).
+3. The artifact and its file are read under the sharer: still theirs, a file,
+   not archived.
+4. The blob key is held to the **sharer's** `library/{owner}/` prefix
+   (`core/librarykey`) before a byte is read.
+
+Any failure is the route's ordinary `404`. A shared read serves the current
+version only: `?version=` is a `404` too.
+
+**The copy** is a new `v1:library:file` (`source: derived`) in the recipient's
+own `library/{owner}/` prefix, written through `component/server/libraryfile`
+under the recipient's actor and counted against their storage, then promoted to
+their index at once. It is theirs: it stays after the share ends and the sharer
+cannot see it.
+
+### Ending a share
+
+- **Stop**: `libraryShareStop` reads the share back as the caller's own (the
+  end runs at internal origin, which skips the write guard's owner check), sets
+  `revokedAt`, and sets the notice's `endedAt`. The next access on any replica
+  is refused.
+- **Expiry** writes nothing: every access compares `expiresAt`, and both lists
+  filter it out.
+- **Archive**: every access refuses an archived artifact as soon as it is
+  archived. The `endSharesOnArtifactArchive` automation then ends the file's
+  shares and notices so it leaves every list; its builtin
+  (`libraryEndSharesForArtifact`) admits that engine automation and nothing
+  else, and acts only on an artifact it reads back, under its owner, as
+  archived. A run that never fires leaves a stale list entry, never an open
+  door.
+
+Both concepts broadcast `graph.node.created` and `graph.node.updated` across
+the mesh (`component/node/routing.go`), which is what makes a share arrive, and
+a stop leave, live on a replica other than the one that took the write.
+
+---
+
 ## Search by meaning
 
 After an upload, a detached analysis pass runs: extract text for the known
