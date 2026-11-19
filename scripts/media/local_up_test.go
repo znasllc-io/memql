@@ -354,8 +354,12 @@ func TestLocalUpDryRunRendersTheMediaServer(t *testing.T) {
 	for _, c := range cfg.Room.EnabledCodecs {
 		codecs = append(codecs, c.Mime)
 	}
-	if !slices.Equal(codecs, []string{"audio/opus", "video/vp8", "video/h264"}) {
-		t.Errorf("enabled_codecs = %v, want audio/opus, video/vp8, video/h264", codecs)
+	// Opus, VP8 and H.264, plus RED (audio redundancy) and RTX (video retransmission):
+	// v1.13.7 registers either only when the list names it (pkg/rtc/mediaengine.go), and
+	// they are what carries a call across a lossy network. The rest of the server's
+	// default list stays off.
+	if !slices.Equal(codecs, []string{"audio/opus", "audio/red", "video/vp8", "video/h264", "video/rtx"}) {
+		t.Errorf("enabled_codecs = %v, want audio/opus, audio/red, video/vp8, video/h264, video/rtx", codecs)
 	}
 	if cfg.Limit.SubscriptionLimitVideo != 10 {
 		t.Errorf("limit.subscription_limit_video = %d, want 10", cfg.Limit.SubscriptionLimitVideo)

@@ -36,10 +36,27 @@ room:
   # (300 s, then 20 s after the last departure); the engine re-creates a room before the
   # first pass into one with nobody in it.
   auto_create: false
+  # This list REPLACES v1.13.7's default one, and the server registers only what it
+  # names (pkg/rtc/mediaengine.go), so each entry is a decision:
+  #   - audio/opus: the audio codec every browser implements, and what clients publish.
+  #   - audio/red: redundant audio (RFC 2198), each packet carrying a copy of the frame
+  #     before it, so a lost packet's audio is recovered from the next one on a lossy
+  #     network instead of heard as a gap.
+  #   - video/vp8 and video/h264: the two video codecs WebRTC requires every browser to
+  #     implement, so every participant can send and decode one of them.
+  #   - video/rtx: retransmission of lost video packets on a stream of their own
+  #     (RFC 4588), for lossy networks; the server registers it beside each video codec
+  #     only when it is named here.
+  # Off, though the default list carries them: video/vp9, video/av1 and video/h265, which
+  # not every browser can encode, so a room using one would need a second encoding for
+  # the rest; and audio/pcmu and audio/pcma, G.711 telephone audio, which a participant
+  # publishing Opus never needs.
   enabled_codecs:
     - mime: audio/opus
+    - mime: audio/red
     - mime: video/vp8
     - mime: video/h264
+    - mime: video/rtx
 
 # Of the quality caps (cameras up to 720p, screen shares up to 1080p at 15 fps, at most
 # 10 video subscriptions per participant), only the last is something the server can

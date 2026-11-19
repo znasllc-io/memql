@@ -338,6 +338,16 @@ components:
   # AFTER engine-bff: domain-derive patches the `bff` Deployment that component
   # adds, and components apply in listed order.
   - ../../components/domain-derive
+  # THE CALLS MEDIA SERVERS, the same component overlays/cloud composes: an
+  # external media target (a rented server beside the cluster). The bff reads the
+  # eight MEMQL_CALLS_MEDIA_* values from the memql-calls-media Secret OPTIONALLY,
+  # so an installation that never creates it starts exactly as before, with no
+  # media server; without the component an installation on this overlay could
+  # never reach one. The edge's media host suffix is derived from the domain
+  # (media.$(MEMQL_DOMAIN)); an installation whose servers live elsewhere
+  # overrides that one value. After engine-bff and domain-derive, which add the
+  # bff and the ConfigMap it patches and expands from.
+  - ../../components/calls-media
   # INTERNAL TLS (memql#4484) -- the memql-ca / identity-tls chain every mesh
   # node mounts and NOTHING used to create. Before this the pods sat in
   # ContainerCreating forever with no log line, because the container never

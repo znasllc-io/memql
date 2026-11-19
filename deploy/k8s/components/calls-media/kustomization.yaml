@@ -13,11 +13,11 @@
 #      (scripts/k3d/seed-secrets.sh); a cloud installation creates it beside its other
 #      Secrets.
 #
-#      OPTIONAL, AND THAT IS THE POINT. Most installations have no media server, and the
-#      cloud overlay is the base real installations build on. Without `optional: true`
-#      every bff pod on a cluster with no such Secret would sit in
-#      CreateContainerConfigError waiting for one nobody is going to create. With it, a
-#      cluster with no media server starts exactly as it did before this component
+#      OPTIONAL, AND THAT IS THE POINT. Most installations have no media server, and
+#      they build on overlays/cloud and overlays/cloud-entry, which both compose this.
+#      Without `optional: true` every bff pod on a cluster with no such Secret would sit
+#      in CreateContainerConfigError waiting for one nobody is going to create. With it,
+#      a cluster with no media server starts exactly as it did before this component
 #      existed: none of the eight is set, calls has no media server, and a join answers
 #      no_media_server. The engine's own rule is all eight or none (a partial set refuses
 #      boot), which a Secret seeded whole cannot violate.
