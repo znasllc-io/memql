@@ -63,13 +63,18 @@ Every participant takes a seat in the call's room. A join is decided against the
 its media server, in this order:
 
 1. A call that has ended refuses it (`call_ended`).
-2. A host passes the lock: the key holder who started the call, anyone who joins with its
-   host link, and a seat a host admitted.
-3. A room holds `maxPeople` people (8) and `maxAgents` agents (2); past that a join is
-   refused (`room_full`, `agent_seats_full`).
-4. In a locked call anybody else waits (`wait`, reason `locked`) until a host admits them
+2. The attempt counts toward the room's join rate, `roomJoinsPerMinute` (30) a minute, a
+   rejoin and a refused attempt included; past that it is refused (`rate`, answered
+   `429`), and nothing else is decided.
+3. A seat a host removed is refused (`removed`). A session already seated in the call
+   rejoins on its own seat with a fresh pass, counted against no room or server limit,
+   and one waiting to come in keeps its place. A session seated in another call still
+   open is refused (`in_another_call`).
+4. A room holds `maxPeople` people (8) and `maxAgents` agents (2); past that a join is
+   refused (`room_full`, `agent_seats_full`), a host's too.
+5. In a locked call a newcomer waits (`wait`, reason `locked`) until a host admits them
    or unlocks the call.
-5. A media server carries the seats `MEMQL_CALLS_MEDIA_SEATS` gives it, across every call
+6. A media server carries the seats `MEMQL_CALLS_MEDIA_SEATS` gives it, across every call
    on it. With none free, a join takes a place in the server's line (`queue`, reason
    `capacity`). The line drains by class -- people joining a call already running, then
    booked calls that are due, then new calls -- and by arrival within a class. A waiter
@@ -79,11 +84,10 @@ its media server, in this order:
    place keeps its arrival, and the place comes back when the lock lifts; one that waited
    behind the lock from the start joins the back of the line then.
 
-A room counts every join attempt, a refused one and a rejoin included, and takes
-`roomJoinsPerMinute` (30) a minute (`rate`, answered `429`). A session already seated in
-the call rejoins on the same seat with a fresh pass, counted against no limit; one seated
-in another open call is refused (`in_another_call`). One key holds one call at a time: a
-start is refused while a call of the key is open (`key_in_call`).
+A host passes the lock -- the key holder who started the call, anyone who joins with its
+host link, and a seat a host admitted -- and is decided against the room's size and the
+server's seats as anybody else is. One key holds one call at a time: a start is refused
+while a call of the key is open (`key_in_call`).
 
 **Every join confirms three things**, and the seat records them: the person is 18 or
 older, nobody under 18 will appear on their camera or screen, and which version of the
@@ -239,8 +243,9 @@ builtin callsMediaServers()
   deployable with an owner, since every calls row belongs to the owner; a system-owned
   deployable holds no calls. Switched off, every calls route answers `404`: the edge drops
   its copy of the deployable through the change feed, and the bff checks the switch again
-  on every request it is forwarded. People already in a call keep their media connections
-  until they leave, and nobody joins or starts another.
+  on the row it reads before it acts on a request, which it does for every request that
+  carries a key, a link or a session of a shape MemQL issues. People already in a call
+  keep their media connections until they leave, and nobody joins or starts another.
 - **`callsTestKeyCreate`** mints a test key and answers `{keyId, key}`, the key shown this
   once. A test key spends no balance; nothing mints any other kind yet. It needs a media
   server configured on the cluster, because the key pepper exists only once one has
@@ -270,12 +275,109 @@ builtin callsMediaServers()
 To try a deployable, mint a test key, switch its calls on, open the deployable and unlock
 with the key, start a call, and open its guest link in a second browser.
 
+### Making these calls
+
+MemQL OS has no screen for these yet. They are made over the stream as a signed-in
+person, with the Go SDK (`sdk/go/client`), the way
+`TestTwoPeopleHoldACallThroughTheFrontDoor` makes them. The operator credential is refused,
+and so is a personal access token, which the bff does not take, so the call carries your
+own access token, from a sign-in as a person who holds `execute app:deployables/calls`
+(the owner and developer roles do). You need `curl`, `jq`, Go and a checkout of this
+repository.
+
+1. **Sign in by the device flow**, as the editor's built-in client, which every cluster
+   knows. Ask for a code:
+
+   ```bash
+   domain=<the installation's domain>
+   curl -sS -X POST "https://identity.$domain/device/code" -d client_id=memql-vscode
+   ```
+
+   It answers a `device_code`, a `user_code` and a `verification_uri`. Open the
+   `verification_uri` in a browser where you are signed in to the cluster, check that the
+   page names the request you just made, enter the `user_code` and approve it. Then trade
+   the device code for your access token, which this keeps out of the terminal and the
+   shell's history:
+
+   ```bash
+   export MEMQL_TOKEN="$(curl -sS -X POST "https://identity.$domain/oauth/token" \
+     -d grant_type=urn:ietf:params:oauth:grant-type:device_code \
+     -d client_id=memql-vscode -d device_code=<device_code> | jq -r .access_token)"
+   ```
+
+   `MEMQL_TOKEN` reading `null` means the approval had not landed yet: run the same
+   command again after a few seconds. The token lasts 15 minutes. The code expires after
+   10 ([Device code](auth/sign-in-paths.md#device-code)).
+
+2. **Write the calls as a program** in the checkout, at `calls-setup/main.go` at the top of
+   the repository, so it is part of the module that holds the SDK:
+
+   ```go
+   package main
+
+   import (
+   	"context"
+   	"fmt"
+   	"os"
+   	"time"
+
+   	memqlclient "github.com/znasllc-io/memql/sdk/go/client"
+   )
+
+   func main() {
+   	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+   	defer cancel()
+   	conn, err := memqlclient.Connect(ctx, memqlclient.ConnectConfig{
+   		Endpoint: "https://api." + os.Getenv("MEMQL_DOMAIN"),
+   		Token:    os.Getenv("MEMQL_TOKEN"),
+   	})
+   	if err != nil {
+   		fmt.Fprintln(os.Stderr, "connect:", err)
+   		os.Exit(1)
+   	}
+   	defer conn.Close()
+   	qc := memqlclient.NewQueryClient(conn.Dispatcher())
+   	site := os.Getenv("MEMQL_SITE")
+
+   	if _, err := qc.CallsSiteEnable(ctx, memqlclient.CallsSiteEnableArgs{SiteId: site, On: true}); err != nil {
+   		fmt.Fprintln(os.Stderr, "callsSiteEnable:", err)
+   		os.Exit(1)
+   	}
+   	if _, err := qc.CallsPolicySet(ctx, memqlclient.CallsPolicySetArgs{SiteId: site, MaxPeople: 4}); err != nil {
+   		fmt.Fprintln(os.Stderr, "callsPolicySet:", err)
+   		os.Exit(1)
+   	}
+   	minted, err := qc.CallsTestKeyCreate(ctx, memqlclient.CallsTestKeyCreateArgs{SiteId: site, Label: "Reviewers"})
+   	if err != nil {
+   		fmt.Fprintln(os.Stderr, "callsTestKeyCreate:", err)
+   		os.Exit(1)
+   	}
+   	fmt.Println(memqlclient.RowString(minted.Single(), "key"))
+   }
+   ```
+
+   Leave out the calls you do not want: `callsPolicySet` is only for limits other than the
+   defaults, and an argument it is not given keeps its value. Switching calls off is
+   `On: false`.
+
+3. **Run it** with the deployable's site id, the last part of its address in MemQL OS
+   (`/deployables/<site id>`):
+
+   ```bash
+   MEMQL_DOMAIN=$domain MEMQL_SITE=<site id> go run ./calls-setup
+   ```
+
+   It prints the test key, once: put it where the people testing the deployable can read
+   it. Then delete `calls-setup/`, and `unset MEMQL_TOKEN`.
+
 ## The routes
 
 A page calls ten routes on its own deployable's origin, under `/_memql/calls/`. Every
 POST sends a JSON object (`Content-Type: application/json`) from the deployable's own
-origin, holding no field the route does not take, and every answer is JSON and
-`Cache-Control: no-store`.
+origin, holding no field the route does not take. Every answer carries
+`Cache-Control: no-store`, and every answer the bff or the edge's own checks give is JSON;
+the one exception is a `502` the edge gives as plain text when it cannot reach the bff at
+all, so a page must not assume a JSON body on a `5xx`.
 
 | Route | Sends | Answers |
 |---|---|---|
@@ -315,7 +417,7 @@ switch on:
 
 | Status | `error` | When |
 |---|---|---|
-| 400 | `invalid` | a body that cannot be read, a missing confirmation, and `in_past`, `beyond_horizon`, `too_long`, `title_too_long`, `minutes_invalid` |
+| 400 | `invalid` | a body that cannot be read, a missing confirmation, an unlock whose key does not parse (refused unread, so a page can tell a mistyped key from one that opens nothing), and `in_past`, `beyond_horizon`, `too_long`, `title_too_long`, `minutes_invalid` |
 | 401 | `no_session` | no session, or one that ended or expired; the cookie is taken back |
 | 401 | `invalid_key` | an unlock whose key opens nothing |
 | 403 | `forbidden` | `removed`, `key_not_active`, `not_host`, a session that may not do this, and the edge's `foreign_origin` |
@@ -340,12 +442,14 @@ read until a key, a link or a cookie of a shape MemQL issues is presented.
 | `MEMQL_CALLS_MEDIA_PUBLIC_URL` | bff | where browsers connect: wss or https |
 | `MEMQL_CALLS_MEDIA_SEATS` | bff | how many participants the server carries at once |
 | `MEMQL_CALLS_MEDIA_API_KEY`, `MEMQL_CALLS_MEDIA_API_SECRET` | bff | the key pair rooms and passes are signed with; the secret 32 characters or more |
-| `MEMQL_CALLS_MEDIA_WEBHOOK_KEY`, `MEMQL_CALLS_MEDIA_WEBHOOK_SECRET` | bff | the key pair the server signs its webhooks with: another key, the secret 32 characters or more |
+| `MEMQL_CALLS_MEDIA_WEBHOOK_KEY`, `MEMQL_CALLS_MEDIA_WEBHOOK_SECRET` | bff | the key pair the server signs its webhooks with, the secret 32 characters or more. Use a key other than the API key: LiveKit holds one secret per key, so a server given the same key twice cannot keep both secrets, and `memql-media configure` refuses it (the bff does not check) |
 | `MEMQL_CALLS_MEDIA_HOST_SUFFIX` | edge | the DNS name every media server's host is at or under, which a calls page's policy admits |
 
-**All eight or none.** With none set the cluster has no calls media server, and a call
-can be neither started nor opened (`no_media_server`). A partial set refuses the bff's
-boot, naming what is missing. The eight come from the `memql-calls-media` Secret, which
+**All eight or none.** With none set the bff records no media server, and on a cluster
+that never had one a call can be neither started nor opened (`no_media_server`); a
+server recorded before stays recorded and is still placed on
+([Removing a server](#removing-a-server)). A partial set refuses the bff's boot, naming
+what is missing. The eight come from the `memql-calls-media` Secret, which
 the bff reads optionally (`deploy/k8s/components/calls-media`), so an installation
 without it starts unchanged. At boot the bff records the server the values name and
 seals its key pairs into the `calls.media.bootstrap` and `calls.media.webhook` global
@@ -706,12 +810,14 @@ reaches it.
   does not trust the server's certificate, or, in production, the participant's network
   lets out only HTTPS and the TURN name has no certificate: `memql-media configure`
   checks both names and says which one does not answer.
-- **Seats stay `admitted` and never read `in_call`, and a participant who left stays
-  listed until a pass closes the seat.** The media server's webhooks are not arriving. The
-  reconcile pass still repairs every call every 30 seconds, so calls work, with that lag.
-  Check that the server reaches `https://api.<domain>/inbound/livekit` (locally, the
-  LiveKit container trusts the mkcert root and maps `api.<domain>` to the host), and that
-  the bff answers there: one with no media server configured answers `404`.
+- **Seats read `in_call` only up to 30 seconds after their participants connect, and a
+  participant who left stays listed until a pass closes the seat.** The media server's
+  webhooks are not arriving. The reconcile pass still repairs every call every 30
+  seconds -- it moves a seat whose participant it sees to `in_call` and closes one that
+  has stayed gone -- so calls work, with that lag. Check that the server reaches
+  `https://api.<domain>/inbound/livekit` (locally, the LiveKit container trusts the
+  mkcert root and maps `api.<domain>` to the host), and that the bff answers there: one
+  with no media server configured answers `404`.
 - **The bff's boot is refused, naming `MEMQL_CALLS_MEDIA_*` values.** A partial set of
   the eight: set them all, or none.
 - **A join answers `429` `limited`.** The room has taken its `roomJoinsPerMinute` join
@@ -749,6 +855,21 @@ reaches it.
   the engine to find the credential by the webhook's issuer first.
 - A removed person who clears their session and comes back through the call's link takes
   a new seat: nothing identifies a person across sessions yet.
+- A call can run with nobody able to host it. An ad hoc call whose host waited in line
+  from the start and gave up, or hung up while still in line, never had a host in it, so
+  nothing counts down: guests let in later hold it, with no host controls, for as long as
+  they stay, and the key's one call with it. A booked call whose host never came is held
+  the same way until its booked end and the grace.
+- Everything calls keeps for a deployable belongs to the owner it had when it was
+  written. After a deployable changes owner, its keys, bookings and calls open nothing
+  (they are read as the new owner), `callsPolicySet` on it fails for good (its policy row
+  keeps the old owner), and it runs on the default limits. Part 1 moves no calls
+  deployable to a new owner; this is to be fixed before part 2, where a transfer would
+  strand paid keys.
+- Behind a fronting proxy every caller arriving through one front address shares the
+  edge's calls budgets ([A deployable on its own domain](#a-deployable-on-its-own-domain)),
+  until the edge can learn a visitor's own address behind a front it can prove, which is
+  to come before public traffic.
 - A waiter held behind the lock keeps no record of its polls, so one who closed the page
   stays in the host's roster until the call ends or a host removes them, and a waiter
   whose place ran out is listed in its old place until the place is marked expired.

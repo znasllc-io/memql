@@ -609,9 +609,10 @@ site whose bundle calls back into MemQL -- which, per
 [the contract](#the-contract-a-build-is-a-directory-of-static-files) above,
 is essentially every site hosting more than pure marketing copy.
 
-(Five exact method and path pairs under `/_memql/access`, and on a deployable
-whose calls switch is on ten under `/_memql/calls`, are *not* this proxy's and
-answer with it off: see [Part of a site, for visitors holding a
+(Five exact method and path pairs under `/_memql/access`, and ten under
+`/_memql/calls`, are *not* this proxy's: they answer whatever `apiProxy` says,
+and the ten calls pairs answer `404` and forward nothing while the deployable's
+calls switch is off. See [Part of a site, for visitors holding a
 code](#part-of-a-site-for-visitors-holding-a-code) and [Calls on a
 deployable](#calls-on-a-deployable).)
 

@@ -23,7 +23,7 @@
 //
 // @sdk, so the OS and tooling call a typed method rather than hand-building a call string.
 
-/// Mint a TEST key for a deployable's calls (calls, plan Task 4).
+/// Mint a TEST key for a deployable's calls.
 ///
 /// THE KEY COMES BACK ONCE. It is in this reply and, if the operator copies it, wherever they put it;
 /// the row holds only the HMAC-SHA256 digest of the key's sixteen raw bytes under the cluster's key
@@ -42,7 +42,7 @@ builtin callsTestKeyCreate {
   label   string   @description("The operator's name for the key, at most 80 characters. Never sent to a caller.")
 }
 
-/// Turn the calls capability on or off for a deployable (calls, plan Task 4).
+/// Turn the calls capability on or off for a deployable.
 ///
 /// A WRITE OF THE SITE'S `calls` FIELD AS THE PERSON ASKING, through updateSiteCalls, so the engine
 /// judges it as any write of theirs: the part, the deployable's organization (whose calls part the
@@ -58,7 +58,7 @@ builtin callsSiteEnable {
   on      boolean!  @description("True to turn calls on, false to turn them off.")
 }
 
-/// Set any of a deployable's calls limits (v1:calls:policy, calls, plan Task 4).
+/// Set any of a deployable's calls limits (v1:calls:policy).
 ///
 /// PER SITE: the limits are the site's, on a row its owner owns, because a package deployable's name
 /// is unique only together with its package. ONLY WHAT IS NAMED CHANGES: a limit left out keeps the
@@ -88,7 +88,7 @@ builtin callsPolicySet {
   queuePoll             int      @description("How often a waiter polls, in seconds, 1 to 60.")
 }
 
-/// The media servers rooms are placed on (calls, plan Task 4).
+/// The media servers rooms are placed on.
 ///
 /// THE CLUSTER OWNER'S. The servers are the cluster's, so the list admits a cluster owner and nobody
 /// else, a check the handler makes: the calls part, held by role or granted through an organization,

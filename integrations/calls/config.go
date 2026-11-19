@@ -16,7 +16,7 @@ import (
 )
 
 // config.go -- the media server the environment names, and the boot work that records
-// it (design section 7.1; plan Task 4).
+// it (design section 7.1).
 //
 // # All eight or none
 //

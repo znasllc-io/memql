@@ -659,7 +659,7 @@ QueryClient.prototype.branchRun = function (this: QueryClient, args: BranchRunAr
   return this.executeNamed("branchRun", buildBranchRun(args), opts);
 };
 
-/** The media servers rooms are placed on (calls, plan Task 4).
+/** The media servers rooms are placed on.
 THE CLUSTER OWNER'S. The servers are the cluster's, so the list admits a cluster owner and nobody else, a check the handler makes: the calls part, held by role or granted through an organization, is not enough. EVERY ACTIVE SERVER, one row each: {id, provider, publicUrl, region, seats, state, createdAt}. NEVER A CREDENTIAL, never the name of the secret holding one, and never the control address, which only the engine uses. `provider` is the value the environment recorded (docker-local or hetzner); nothing decides by it. */
 export interface CallsMediaServersArgs {
 }
@@ -679,7 +679,7 @@ QueryClient.prototype.callsMediaServers = function (this: QueryClient, args: Cal
   return this.executeNamed("callsMediaServers", buildCallsMediaServers(args), opts);
 };
 
-/** Set any of a deployable's calls limits (v1:calls:policy, calls, plan Task 4).
+/** Set any of a deployable's calls limits (v1:calls:policy).
 PER SITE: the limits are the site's, on a row its owner owns, because a package deployable's name is unique only together with its package. ONLY WHAT IS NAMED CHANGES: a limit left out keeps the value it had, and one nobody ever set is the shipped default (calls.DefaultPolicy). Counts are whole numbers and DURATIONS ARE WHOLE SECONDS. Every value is held to the CLUSTER'S bounds (a room of 1 to 1000 people, a pass of 10 to 900 seconds, a waiter that polls at least once a minute and whose place outlives a poll), so no site claims more than the cluster allows; what a deployable allows inside those bounds is its operator's to choose. Judged in the site's organization, and refused for a deployable the caller cannot read, one with no owner, a caller who is not a person and any call inside a run. Returns the effective limits: {policyId, siteId} and one field per limit. */
 export interface CallsPolicySetArgs {
   /** The deployable the limits are for. */
@@ -732,7 +732,7 @@ QueryClient.prototype.callsPolicySet = function (this: QueryClient, args: CallsP
   return this.executeNamed("callsPolicySet", buildCallsPolicySet(args), opts);
 };
 
-/** Turn the calls capability on or off for a deployable (calls, plan Task 4).
+/** Turn the calls capability on or off for a deployable.
 A WRITE OF THE SITE'S `calls` FIELD AS THE PERSON ASKING, through updateSiteCalls, so the engine judges it as any write of theirs: the part, the deployable's organization (whose calls part the change asks, validateOrganizationSensitiveChanges) and the site's own row tier. Turning calls on needs a deployable with an owner, because every call's rows belong to the owner; turning them off does not. Returns {siteId, calls}. */
 export interface CallsSiteEnableArgs {
   /** The deployable to switch calls on or off for. */
@@ -758,7 +758,7 @@ QueryClient.prototype.callsSiteEnable = function (this: QueryClient, args: Calls
   return this.executeNamed("callsSiteEnable", buildCallsSiteEnable(args), opts);
 };
 
-/** Mint a TEST key for a deployable's calls (calls, plan Task 4).
+/** Mint a TEST key for a deployable's calls.
 THE KEY COMES BACK ONCE. It is in this reply and, if the operator copies it, wherever they put it; the row holds only the HMAC-SHA256 digest of the key's sixteen raw bytes under the cluster's key pepper, so nothing can read it back. A lost key is replaced, never recovered. The key belongs to the deployable's owner, whoever asked, and is a test key: it spends no balance.
 Refused for a deployable the caller cannot read, one with no owner, the cluster's own surfaces, a name over 80 characters, a cluster with no media server (no pepper exists until one is configured), a caller who is not a person, and any call inside a run. Returns {keyId, key}. */
 export interface CallsTestKeyCreateArgs {

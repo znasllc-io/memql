@@ -627,6 +627,11 @@ scripts, allowlisted, runnable by hand or from the cockpit surface.
 
 A deployable's own domain can be served through a fronting proxy, which takes
 a flood of requests at its own edge before any of it reaches the cluster.
+It shields only what goes through it: the cluster's ingress, at the address
+`os.<domain>` resolves to, still answers a request sent to it directly with the
+deployable's hostname as its `Host`, and such a request reaches the edge without
+passing the front or its WAF. Restricting the origin to the front's own traffic
+is not part of this setup.
 Azure Front Door is the front this section is written for. The hostname then
 CNAMEs to the front's endpoint (`<endpoint>.azurefd.net`) rather than to
 `os.<domain>`, and resolves to the front's addresses, so the pointing check

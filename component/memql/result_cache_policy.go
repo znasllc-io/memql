@@ -60,6 +60,13 @@ const (
 //     read would keep it open for up to a minute, which makes "the moment the
 //     10 minutes pass" false. The prefix covers siteAccessCode and
 //     siteAccessSession.
+//   - "v1:calls:" -- a deployable's calls: its keys, sessions, links, rooms
+//     and seats (integrations/calls). Every request is decided from the rows
+//     it reads, so a key frozen, a session ended or a seat removed must stop
+//     opening anything at once, and a decision under a cross-replica gate
+//     must not read another replica's stale answer. Every calls query is
+//     @cache(0) besides; the prefix keeps a construct written without it off
+//     the default path.
 //
 // The denylist is a DEFAULT-CACHING guard only. It does NOT forbid an
 // explicit per-query @cache(ttl=N) -- if an author deliberately caches a
