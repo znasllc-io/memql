@@ -13,6 +13,7 @@ package media
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -610,6 +612,103 @@ func TestTheServerKeepsItsCallsThroughADockerRestart(t *testing.T) {
 	if perm != "0644" {
 		t.Errorf("/etc/docker/daemon.json is %s, want 0644", perm)
 	}
+}
+
+// TestTheServerKeepsItsLogsUnderAWeek: LiveKit logs participant identities, rooms and
+// connection details on every join and leave, and Caddy logs every connection, and the
+// design's retention commitment, which the privacy notice rests on, is that LiveKit's
+// logs live less than seven days (design section 11). Ubuntu's Docker would keep every
+// container's log in json-file with no size or age limit, for as long as the server
+// runs -- and a server keeps its first boot until it is replaced. So the first boot sends
+// every container's log to the system journal (daemon.json's log-driver, the default for
+// every container, none of which sets its own) and caps the journal at six days and a
+// size: MaxRetentionSec deletes a journal file once its oldest entry is past six days,
+// MaxFileSec rotates files daily so a deletion takes at most a day's logs early and never
+// leaves one past the bound, and SystemMaxUse keeps the disk safe. journald is restarted
+// at first boot so the cap holds from the first container on. `docker logs` and `docker
+// compose logs`, which the runbook uses, read the journald driver.
+func TestTheServerKeepsItsLogsUnderAWeek(t *testing.T) {
+	c := parseCloudInit(t, renderedCloudInit(t))
+	daemon, _ := writtenFile(t, c, "/etc/docker/daemon.json")
+	var cfg map[string]any
+	if err := json.Unmarshal([]byte(daemon), &cfg); err != nil {
+		t.Fatalf("/etc/docker/daemon.json is not JSON: %v\n%s", err, daemon)
+	}
+	if cfg["log-driver"] != "journald" {
+		t.Errorf("/etc/docker/daemon.json sets log-driver %v, want journald: json-file keeps every container's log for good", cfg["log-driver"])
+	}
+
+	dropIn, perm := writtenFile(t, c, "/etc/systemd/journald.conf.d/90-memql-media.conf")
+	if perm != "0644" {
+		t.Errorf("the journald drop-in is %s, want 0644", perm)
+	}
+	settings := map[string]string{}
+	section := ""
+	for _, line := range strings.Split(dropIn, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case line == "" || strings.HasPrefix(line, "#"):
+		case strings.HasPrefix(line, "["):
+			section = line
+		default:
+			name, value, _ := strings.Cut(line, "=")
+			if section == "[Journal]" {
+				settings[strings.TrimSpace(name)] = strings.TrimSpace(value)
+			}
+		}
+	}
+	for name, bound := range map[string]time.Duration{"MaxRetentionSec": 6 * 24 * time.Hour, "MaxFileSec": 24 * time.Hour} {
+		got, err := journaldSpan(settings[name])
+		if err != nil {
+			t.Errorf("[Journal] %s = %q: %v", name, settings[name], err)
+			continue
+		}
+		if got <= 0 || got > bound {
+			t.Errorf("[Journal] %s is %v, want more than none and at most %v, so no log outlives a week", name, got, bound)
+		}
+	}
+	if settings["SystemMaxUse"] == "" {
+		t.Error("[Journal] sets no SystemMaxUse, so the journal can fill the disk before it is six days old")
+	}
+
+	lines := runcmdLines(c)
+	if !slices.Contains(lines, "systemctl restart systemd-journald") {
+		t.Errorf("runcmd does not restart journald, so its cap holds only from the next reboot:\n%s", strings.Join(lines, "\n"))
+	}
+
+	raw, _ := writtenFile(t, c, "/etc/memql-media/compose.yaml")
+	var compose struct {
+		Services map[string]map[string]any `yaml:"services"`
+	}
+	if err := yaml.Unmarshal([]byte(raw), &compose); err != nil {
+		t.Fatal(err)
+	}
+	for name, service := range compose.Services {
+		if _, own := service["logging"]; own {
+			t.Errorf("the %s container sets a log driver of its own, outside the journal's cap", name)
+		}
+	}
+}
+
+// journaldSpan reads a journald time span as the drop-in writes one: a whole number with
+// one unit (s, min, h, day, week), or bare seconds.
+func journaldSpan(value string) (time.Duration, error) {
+	units := []struct {
+		suffix string
+		unit   time.Duration
+	}{{"week", 7 * 24 * time.Hour}, {"day", 24 * time.Hour}, {"min", time.Minute}, {"h", time.Hour}, {"s", time.Second}}
+	number, unit := value, time.Second
+	for _, u := range units {
+		if strings.HasSuffix(value, u.suffix) {
+			number, unit = strings.TrimSuffix(value, u.suffix), u.unit
+			break
+		}
+	}
+	n, err := strconv.Atoi(number)
+	if err != nil {
+		return 0, fmt.Errorf("not a whole number of one unit")
+	}
+	return time.Duration(n) * unit, nil
 }
 
 // productionCompose is the slice of the server's compose file these tests read.

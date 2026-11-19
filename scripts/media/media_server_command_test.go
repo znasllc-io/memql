@@ -19,6 +19,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -55,13 +56,34 @@ exit 2
 
 // fakeServerOpenSSL is the TLS handshake with the TURN name through Caddy: it succeeds,
 // the certificate verified for the name, when FAKE_TURN_TLS is set, and fails as a
-// handshake with no certificate for the name does otherwise.
+// handshake with no certificate for the name does otherwise. FAKE_TURN_HANGS makes it a
+// name that accepts the connection and never completes the handshake.
 const fakeServerOpenSSL = `#!/usr/bin/env bash
 printf 'openssl %s\n' "$*" >> "$FAKE_SERVER_LOG"
 [ "$1" = "s_client" ] || exit 2
 cat >/dev/null
+[ -n "$FAKE_TURN_HANGS" ] && exec sleep 20
 [ -n "$FAKE_TURN_TLS" ] || { printf 'verify error:num=62:hostname mismatch\n' >&2; exit 1; }
 exit 0
+`
+
+// fakeServerTimeout stands in for coreutils' timeout, which Ubuntu has and a Mac running
+// these tests may not: it runs the command, and ends it as timeout does, answering 124,
+// when it outlasts the seconds given. It logs its argv, so a test can see what was bounded.
+const fakeServerTimeout = `#!/usr/bin/env bash
+printf 'timeout %s\n' "$*" >> "$FAKE_SERVER_LOG"
+seconds="$1"
+shift
+"$@" &
+pid=$!
+( sleep "$seconds"; kill -TERM "$pid" 2>/dev/null ) &
+watcher=$!
+wait "$pid"
+code=$?
+kill "$watcher" 2>/dev/null
+wait "$watcher" 2>/dev/null
+[ "$code" -gt 128 ] && exit 124
+exit "$code"
 `
 
 // serverFixture is one media server after its first boot: the command, the template and
@@ -71,6 +93,10 @@ type serverFixture struct {
 	values                            map[string]string
 	running, rooms, publicIPv4        string
 	answers, upFails, turnTLS         bool
+	// turnHangs makes the TURN name accept the connection and never complete TLS.
+	turnHangs bool
+	// tlsCheckSeconds bounds each TLS handshake check, or "" for the command's own bound.
+	tlsCheckSeconds string
 	// openssl is the command memql-media checks the TURN name's TLS with: the fake's name,
 	// or one that is not installed.
 	openssl string
@@ -111,6 +137,7 @@ func newServerFixture(t *testing.T) *serverFixture {
 		filepath.Join(s.bin, "docker"):  fakeServerDocker,
 		filepath.Join(s.bin, "curl"):    fakeServerCurl,
 		filepath.Join(s.bin, "openssl"): fakeServerOpenSSL,
+		filepath.Join(s.bin, "timeout"): fakeServerTimeout,
 	}
 	for _, w := range []struct{ from, to string }{
 		{"/usr/local/sbin/memql-media", s.command},
@@ -180,8 +207,12 @@ func (s *serverFixture) run(t *testing.T, stdin string, args ...string) (string,
 		"FAKE_ANSWERS="+flag(s.answers),
 		"FAKE_UP_FAILS="+flag(s.upFails),
 		"FAKE_TURN_TLS="+flag(s.turnTLS),
+		"FAKE_TURN_HANGS="+flag(s.turnHangs),
 		"MEMQL_MEDIA_OPENSSL="+s.openssl,
 	)
+	if s.tlsCheckSeconds != "" {
+		cmd.Env = append(cmd.Env, "MEMQL_MEDIA_TLS_CHECK_SECONDS="+s.tlsCheckSeconds)
+	}
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -597,6 +628,57 @@ func TestConfigureChecksTheTURNNamesTLSThroughCaddy(t *testing.T) {
 			t.Errorf("the server was not started before the wait: %v", ups)
 		}
 	})
+}
+
+// THE TURN NAME'S HANDSHAKE IS BOUNDED. A name that accepts the connection and never
+// completes TLS -- a half-started Caddy, a middlebox -- would otherwise hold configure on
+// one handshake for good, past its own wait, with the operator's SSH session open and no
+// word of what it waits on. Each handshake runs under timeout, so configure gives up within
+// its wait and the handshake's bound, and fails naming the TURN name, the server started.
+func TestConfigureBoundsTheTURNHandshake(t *testing.T) {
+	s := newServerFixture(t)
+	s.turnHangs = true
+	s.tlsCheckSeconds = "1"
+	began := time.Now()
+	_, stderr, code := s.configure(t, "--wait-seconds=1")
+	took := time.Since(began)
+	if took > 15*time.Second {
+		t.Fatalf("configure took %v with a TURN handshake that never completes: the handshake is not bounded", took)
+	}
+	if code != 5 || !strings.Contains(stderr, "turn.m1.media.example.com") {
+		t.Fatalf("exited %d, want a code-5 failure naming the TURN name:\n%s", code, stderr)
+	}
+	bounded := false
+	for _, line := range s.timeoutCalls(t) {
+		if strings.HasPrefix(line, "1 openssl s_client ") {
+			bounded = true
+		}
+	}
+	if !bounded {
+		t.Errorf("the TURN handshake did not run under timeout with the handshake's bound: %v", s.timeoutCalls(t))
+	}
+	if ups := s.upCalls(t); len(ups) != 1 {
+		t.Errorf("the server was not started before the wait: %v", ups)
+	}
+}
+
+// timeoutCalls is every command memql-media ran under timeout, as timeout's argv.
+func (s *serverFixture) timeoutCalls(t *testing.T) []string {
+	t.Helper()
+	b, err := os.ReadFile(s.log)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, line := range strings.Split(string(b), "\n") {
+		if strings.HasPrefix(line, "timeout ") {
+			out = append(out, strings.TrimPrefix(line, "timeout "))
+		}
+	}
+	return out
 }
 
 // A server without openssl cannot make the TURN name's check, and says so plainly rather

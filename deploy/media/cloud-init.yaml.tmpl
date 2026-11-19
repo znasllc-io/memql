@@ -73,10 +73,30 @@ write_files:
 # the server would end, with nobody there to drain it first. With live-restore the
 # containers keep running while the daemon restarts. write_files runs at the start of the
 # first boot, before the packages are installed, so the daemon starts with it.
+#
+# EVERY CONTAINER LOGS TO THE JOURNAL, which the drop-in below keeps under a week. LiveKit
+# logs participant identities, rooms and connection details on every join and leave, and
+# the design keeps LiveKit's logs less than seven days (design section 11); Docker's
+# default json-file driver keeps them with no size or age limit for as long as the server
+# runs, and a server keeps its first boot. No service sets a driver of its own, so this is
+# every container's. docker logs and docker compose logs read the journald driver.
   - path: /etc/docker/daemon.json
     permissions: "0644"
     content: |
-      {"live-restore": true}
+      {"live-restore": true, "log-driver": "journald"}
+
+# The journal, the containers' logs included, under a week: a file is deleted once its
+# oldest entry is six days old, files rotate daily so that takes at most a day's logs early,
+# and the whole journal is capped so it cannot fill the disk first. runcmd restarts journald
+# so the cap holds from the first boot.
+  - path: /etc/systemd/journald.conf.d/90-memql-media.conf
+    permissions: "0644"
+    content: |
+      # The calls media server: no log outlives six days.
+      [Journal]
+      MaxRetentionSec=6day
+      MaxFileSec=1day
+      SystemMaxUse=1G
 
 # LiveKit asks for 16 MiB UDP socket buffers and warns that anything under 5 MB is too
 # small for a production server (mediatransportutil rtcconfig, at the version v1.13.7
@@ -183,6 +203,7 @@ write_files:
       DATA_DIR="${MEMQL_MEDIA_DATA_DIR:-/var/lib/memql-media}"
       CLOUD_INIT="${MEMQL_MEDIA_CLOUD_INIT:-cloud-init}"
       OPENSSL="${MEMQL_MEDIA_OPENSSL:-openssl}"
+      TLS_CHECK_SECONDS="${MEMQL_MEDIA_TLS_CHECK_SECONDS:-10}"
       METADATA_URL="${MEMQL_MEDIA_METADATA_URL:-http://169.254.169.254/hetzner/v1/metadata}"
       PROJECT="memql-media"
       COMPOSE_FILE="${MEDIA_DIR}/compose.yaml"
@@ -419,9 +440,10 @@ write_files:
       }
 
       # TURN answers behind its name, so only the TLS handshake through Caddy is checked,
-      # with the certificate verified for that name.
+      # with the certificate verified for that name, and within a bound: a name that takes
+      # the connection and never completes TLS must not hold configure past its wait.
       function turn_name_answers() {
-          "$OPENSSL" s_client -connect 127.0.0.1:443 -servername "$TURN_HOST" \
+          timeout "$TLS_CHECK_SECONDS" "$OPENSSL" s_client -connect 127.0.0.1:443 -servername "$TURN_HOST" \
               -verify_hostname "$TURN_HOST" -verify_return_error </dev/null >/dev/null 2>&1
       }
 
@@ -492,14 +514,15 @@ write_files:
       main "$@"
 
 # In order: the private directory (memql-media keeps it 0700 too), the socket buffers,
-# the host firewall with exactly the Hetzner firewall's ports (ICMP is allowed by ufw's
-# own defaults), Docker, and the pinned images, so the operator's step only renders and
-# starts. A pull that fails here is not fatal: compose pulls a missing image at start.
-# The last entry is a shell line, single-quoted for YAML, so nothing in it is read as a
-# mapping.
+# the journal's cap, the host firewall with exactly the Hetzner firewall's ports (ICMP is
+# allowed by ufw's own defaults), Docker, and the pinned images, so the operator's step
+# only renders and starts. A pull that fails here is not fatal: compose pulls a missing
+# image at start. The last entry is a shell line, single-quoted for YAML, so nothing in it
+# is read as a mapping.
 runcmd:
   - [chmod, "0700", /etc/memql-media]
   - [sysctl, --system]
+  - [systemctl, restart, systemd-journald]
   - [ufw, default, deny, incoming]
   - [ufw, default, allow, outgoing]
   - [ufw, allow, 22/tcp]

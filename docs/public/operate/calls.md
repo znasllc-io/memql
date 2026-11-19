@@ -539,7 +539,8 @@ server's public IPv4 from Hetzner's metadata, the webhook URL
 `https://api.<domain>/inbound/livekit`, and its TURN server on), renders Caddy's for the
 two names, starts the server, and waits until both names answer through Caddy: LiveKit
 at the public host, and a TLS handshake with a certificate for the TURN name (what
-answers behind that name is TURN, so the handshake is the whole check). If it reports
+answers behind that name is TURN, so the handshake is the whole check; each attempt gives
+up after 10 seconds, so a name that never completes TLS cannot hold the command). If it reports
 either missing, the server is started but Caddy has no certificate for that name yet:
 check the records from step 2 and that ports 80 and 443 reach the server, then run the
 same command again, which changes nothing already in place and checks again.
@@ -667,7 +668,11 @@ All three run on the host's network, as LiveKit's own self-hosting layout runs t
 `/etc/memql-media/compose.yaml`, and Docker restarts them after a reboot. Docker runs
 with `live-restore`, so a restart of the Docker daemon, which Ubuntu's unattended
 security updates make when they update Docker, leaves the containers and their calls
-running. A
+running. Every container logs to the system journal (Docker's `journald` log driver),
+and the journal keeps nothing past six days and at most 1 GB
+(`/etc/systemd/journald.conf.d/90-memql-media.conf`), so LiveKit's logs, which name
+participants' identities and rooms, live less than a week; `docker logs` and
+`docker compose logs` read them there. A
 server is made with the LiveKit and Redis versions the local target runs, and keeps them
 until it is replaced ([Replacing a server](#replacing-a-server)): an upgrade of LiveKit
 is reviewed first, for both targets. The Caddy build is LiveKit's own, Caddy with the
