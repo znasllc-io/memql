@@ -99,6 +99,10 @@ type mediaFixture struct {
 	dir, home, bin, stateDir string
 	cert, key                string
 	kubectlLog, dockerLog    string
+	// root is the tree the scripts run from: the repository, or a copy of the files
+	// local-up.sh reads (relocate), for a test that changes one of them. tmp is the run's
+	// TMPDIR, where a dry run renders and must leave nothing.
+	root, tmp string
 
 	apiKey, apiSecret         string
 	webhookKey, webhookSecret string
@@ -128,6 +132,8 @@ func newMediaFixture(t *testing.T) *mediaFixture {
 	dir := t.TempDir()
 	f := &mediaFixture{
 		dir:           dir,
+		root:          repoRoot(t),
+		tmp:           filepath.Join(dir, "tmp"),
 		home:          filepath.Join(dir, "home"),
 		bin:           filepath.Join(dir, "bin"),
 		stateDir:      filepath.Join(dir, "state"),
@@ -144,7 +150,7 @@ func newMediaFixture(t *testing.T) *mediaFixture {
 		clusterDomain: "memql.localhost",
 		caPEM:         "-----BEGIN CERTIFICATE-----\nfixture-ca\n-----END CERTIFICATE-----\n",
 	}
-	for _, d := range []string{f.home, f.bin, filepath.Dir(f.cert)} {
+	for _, d := range []string{f.home, f.bin, f.tmp, filepath.Dir(f.cert)} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -204,9 +210,9 @@ type envelope struct {
 // its stderr and its exit code. stdout must be exactly one envelope.
 func (f *mediaFixture) run(t *testing.T, script string, args ...string) (envelope, string, int) {
 	t.Helper()
-	path := filepath.Join(repoRoot(t), "scripts", "media", script)
+	path := filepath.Join(f.root, "scripts", "media", script)
 	cmd := exec.Command("bash", append([]string{path}, args...)...)
-	cmd.Dir = repoRoot(t)
+	cmd.Dir = f.root
 	cmd.Stdin = nil
 	down := ""
 	if f.dockerDown {
@@ -215,6 +221,7 @@ func (f *mediaFixture) run(t *testing.T, script string, args ...string) (envelop
 	cmd.Env = append(os.Environ(),
 		"PATH="+f.bin+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"HOME="+f.home,
+		"TMPDIR="+f.tmp,
 		"FAKE_KUBECTL_LOG="+f.kubectlLog,
 		"FAKE_DOCKER_LOG="+f.dockerLog,
 		"FAKE_DOCKER_DOWN="+down,
@@ -249,6 +256,34 @@ func (f *mediaFixture) run(t *testing.T, script string, args ...string) (envelop
 		}
 	}
 	return env, stderr.String(), code
+}
+
+// relocate points the fixture at a copy of the files local-up.sh and local-down.sh read
+// -- the two scripts, the libraries they source and deploy/media -- so a test can change
+// one of them without touching the repository. It returns the copy's root.
+func (f *mediaFixture) relocate(t *testing.T) string {
+	t.Helper()
+	root := filepath.Join(f.dir, "tree")
+	for _, rel := range []string{
+		"scripts/media/local-up.sh",
+		"scripts/media/local-down.sh",
+		"scripts/lib/capability.sh",
+		"scripts/lib/localtls.sh",
+		"deploy/media/compose.yaml",
+		"deploy/media/livekit.yaml.tmpl",
+		"deploy/media/Caddyfile.tmpl",
+	} {
+		src := filepath.Join(repoRoot(t), filepath.FromSlash(rel))
+		dst := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(dst, []byte(readFile(t, src)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.root = root
+	return root
 }
 
 // upArgs are a run's arguments against the fixture, with docker at dockerPath.
@@ -310,20 +345,32 @@ type liveKitConfig struct {
 	} `yaml:"webhook"`
 }
 
-// TestLocalUpDryRunRendersTheMediaServer: a dry run reads the cluster, renders the
-// server's configuration and starts nothing -- with no Docker at all, which is how it
-// is run here.
-func TestLocalUpDryRunRendersTheMediaServer(t *testing.T) {
+// renderedLiveKit adds what deploy/media/livekit.yaml.tmpl leaves to each target -- where
+// the HTTP port listens and whether the server runs its own TURN -- to what every target
+// shares (liveKitConfig).
+type renderedLiveKit struct {
+	liveKitConfig `yaml:",inline"`
+	BindAddresses []string `yaml:"bind_addresses"`
+	TURN          struct {
+		Enabled       bool   `yaml:"enabled"`
+		Domain        string `yaml:"domain"`
+		TLSPort       int    `yaml:"tls_port"`
+		UDPPort       int    `yaml:"udp_port"`
+		ExternalTLS   bool   `yaml:"external_tls"`
+		ProxyProtocol bool   `yaml:"proxy_protocol"`
+	} `yaml:"turn"`
+}
+
+// TestLocalUpRendersTheMediaServer: a run reads the cluster and renders the server's
+// configuration from the shared template, filled for this machine.
+func TestLocalUpRendersTheMediaServer(t *testing.T) {
 	f := newMediaFixture(t)
-	env, _, code := f.run(t, "local-up.sh", f.upArgs(f.noDocker(), "--dry-run=true")...)
+	env, _, code := f.run(t, "local-up.sh", f.upArgs(f.dockerStub(), "--wait-seconds=0")...)
 	if code != 0 || !env.OK {
-		t.Fatalf("dry run failed: exit %d, %+v", code, env.Error)
+		t.Fatalf("run failed: exit %d, %+v", code, env.Error)
 	}
 	if env.Capability != "media.localUp" {
 		t.Errorf("capability = %q, want media.localUp", env.Capability)
-	}
-	if env.Result["dryRun"] != true || env.Result["started"] != false {
-		t.Errorf("a dry run reported dryRun=%v started=%v", env.Result["dryRun"], env.Result["started"])
 	}
 	if got := env.Result["publicUrl"]; got != f.publicURL {
 		t.Errorf("publicUrl = %v, want the Secret's %s", got, f.publicURL)
@@ -333,12 +380,20 @@ func TestLocalUpDryRunRendersTheMediaServer(t *testing.T) {
 	}
 
 	raw := readFile(t, filepath.Join(f.stateDir, "livekit.yaml"))
-	var cfg liveKitConfig
+	var cfg renderedLiveKit
 	if err := yaml.Unmarshal([]byte(raw), &cfg); err != nil {
 		t.Fatalf("the rendered livekit.yaml does not parse: %v", err)
 	}
 	if cfg.Port != 7880 || cfg.Redis.Address != "redis:6379" {
 		t.Errorf("port %d, redis %q; want 7880 and the compose redis service", cfg.Port, cfg.Redis.Address)
+	}
+	// The container's every interface, which compose.yaml publishes; and no TURN of its
+	// own, since the browser runs on this machine and reaches the published ports.
+	if !slices.Equal(cfg.BindAddresses, []string{""}) {
+		t.Errorf("bind_addresses = %q, want every interface of the container", cfg.BindAddresses)
+	}
+	if cfg.TURN.Enabled || cfg.TURN.TLSPort != 0 || cfg.TURN.UDPPort != 0 {
+		t.Errorf("turn = %+v, want it off locally", cfg.TURN)
 	}
 	if len(cfg.Keys) != 2 || cfg.Keys[f.apiKey] != f.apiSecret || cfg.Keys[f.webhookKey] != f.webhookSecret {
 		t.Errorf("keys hold %d pairs, not the Secret's room key and webhook key", len(cfg.Keys))
@@ -397,7 +452,7 @@ func TestLocalUpDryRunRendersTheMediaServer(t *testing.T) {
 		t.Errorf("livekit.yaml is %o, want 600: it holds both key pairs", m)
 	}
 	if strings.Contains(readFile(t, f.kubectlLog), "create") || strings.Contains(readFile(t, f.kubectlLog), "apply") {
-		t.Error("a dry run wrote to the cluster")
+		t.Error("a run wrote to the cluster")
 	}
 	// The script copies a credential Secret onto disk, so it reads only the local cluster,
 	// whatever kubectl's current context points at.
@@ -406,8 +461,81 @@ func TestLocalUpDryRunRendersTheMediaServer(t *testing.T) {
 			t.Errorf("a kubectl read followed the current context instead of naming k3d-memql: %s", call)
 		}
 	}
+}
+
+// TestLocalUpDryRunWritesNothing: a dry run reads the cluster and renders the server's
+// configuration, to prove the Secret and the templates make one, but into a directory of
+// its own that it removes: the rendering carries both key pairs, and a run that reports
+// changed: false must not have written them anywhere. It needs no Docker at all, which is
+// how it is run here.
+func TestLocalUpDryRunWritesNothing(t *testing.T) {
+	f := newMediaFixture(t)
+	env, _, code := f.run(t, "local-up.sh", f.upArgs(f.noDocker(), "--dry-run=true")...)
+	if code != 0 || !env.OK {
+		t.Fatalf("dry run failed: exit %d, %+v", code, env.Error)
+	}
+	if env.Result["dryRun"] != true || env.Result["started"] != false || env.Changed {
+		t.Errorf("a dry run reported dryRun=%v started=%v changed=%v", env.Result["dryRun"], env.Result["started"], env.Changed)
+	}
+	if got := env.Result["stateDir"]; got != f.stateDir {
+		t.Errorf("stateDir = %v, want %s, where a run would render", got, f.stateDir)
+	}
+	if _, err := os.Stat(f.stateDir); err == nil {
+		t.Error("a dry run created the state directory; its files carry both key pairs")
+	}
+	left, err := os.ReadDir(f.tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(left) != 0 {
+		t.Errorf("a dry run left %d entries in TMPDIR, where it rendered the key pairs", len(left))
+	}
 	if _, err := os.Stat(f.dockerLog); err == nil {
 		t.Error("a dry run ran docker")
+	}
+
+	// A refusal part-way through a dry run's rendering leaves nothing either.
+	f = newMediaFixture(t)
+	root := f.relocate(t)
+	if err := os.WriteFile(filepath.Join(root, "deploy", "media", "Caddyfile.tmpl"), []byte("https://{{MEDIA_HOST}}:{{NO_SUCH_VALUE}} {\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env, _, code = f.run(t, "local-up.sh", f.upArgs(f.noDocker(), "--dry-run=true")...)
+	if code != 5 || env.Error == nil {
+		t.Fatalf("a template the script cannot fill exited %d with %+v, want a code-5 failure", code, env.Error)
+	}
+	if left, _ := os.ReadDir(f.tmp); len(left) != 0 {
+		t.Errorf("a failed dry run left %d entries in TMPDIR", len(left))
+	}
+}
+
+// A template that cannot be read stops the run with the reason, instead of rendering an
+// empty configuration (the read used to sit inside the substitution's argument, where its
+// failure was lost).
+func TestLocalUpRefusesATemplateItCannotRead(t *testing.T) {
+	f := newMediaFixture(t)
+	root := f.relocate(t)
+	template := filepath.Join(root, "deploy", "media", "livekit.yaml.tmpl")
+	if err := os.Remove(template); err != nil {
+		t.Fatal(err)
+	}
+	// A directory where the file should be: unreadable as a file whoever runs the test,
+	// root included.
+	if err := os.Mkdir(template, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	env, _, code := f.run(t, "local-up.sh", f.upArgs(f.dockerStub(), "--wait-seconds=0")...)
+	if code != 5 || env.Error == nil || env.Error.Code != 5 {
+		t.Fatalf("exited %d with %+v, want a code-5 failure", code, env.Error)
+	}
+	if !strings.Contains(env.Error.Message, "livekit.yaml.tmpl") {
+		t.Errorf("the failure does not name the template: %q", env.Error.Message)
+	}
+	if _, err := os.Stat(filepath.Join(f.stateDir, "livekit.yaml")); err == nil {
+		t.Error("a template that could not be read was rendered anyway")
+	}
+	if _, err := os.Stat(f.dockerLog); err == nil && strings.Contains(readFile(t, f.dockerLog), " up ") {
+		t.Error("the server was started without its configuration")
 	}
 }
 
@@ -416,9 +544,9 @@ func TestLocalUpDryRunRendersTheMediaServer(t *testing.T) {
 // a checkout, where `git add` could reach them.
 func TestLocalUpRendersOutsideTheRepositoryByDefault(t *testing.T) {
 	f := newMediaFixture(t)
-	env, _, code := f.run(t, "local-up.sh", "--tls-cert="+f.cert, "--tls-key="+f.key, "--dry-run=true")
+	env, _, code := f.run(t, "local-up.sh", "--tls-cert="+f.cert, "--tls-key="+f.key, "--docker="+f.dockerStub(), "--wait-seconds=0")
 	if code != 0 || !env.OK {
-		t.Fatalf("dry run failed: exit %d, %+v", code, env.Error)
+		t.Fatalf("run failed: exit %d, %+v", code, env.Error)
 	}
 	want := filepath.Join(f.home, ".memql", "media")
 	if got := env.Result["stateDir"]; got != want {
@@ -577,8 +705,25 @@ func TestLocalUpRecreatesTheServerOnlyWhenItsConfigurationChanges(t *testing.T) 
 		t.Fatalf("the same configuration rendered twice gave digests %q and %q", first, again)
 	}
 	f.webhookSecret = randomHex(t, 32)
-	if changed := digest(); changed == first {
+	rotated := digest()
+	if rotated == first {
 		t.Error("a new webhook secret left the digest unchanged, so the running server would keep the old one")
+	}
+
+	// The compose file is part of the server's definition too: a new image pin must
+	// recreate the containers on it, not leave the old version running and report
+	// nothing changed.
+	root := f.relocate(t)
+	compose := filepath.Join(root, "deploy", "media", "compose.yaml")
+	if got := digest(); got != rotated {
+		t.Fatalf("a copy of the same tree gave digest %q, want %q", got, rotated)
+	}
+	pinned := strings.Replace(readFile(t, compose), "livekit/livekit-server:v1.13.7", "livekit/livekit-server:v1.13.8", 1)
+	if err := os.WriteFile(compose, []byte(pinned), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := digest(); got == rotated {
+		t.Error("a new image pin in compose.yaml left the digest unchanged, so compose up would report no change on the old server")
 	}
 }
 

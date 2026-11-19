@@ -222,8 +222,8 @@ Redis it keeps room state in, and Caddy terminating TLS in front of it), from
 
 ```bash
 make media-up     # start it (make up runs this last)
-make media-down   # stop it and remove its rendered configuration
-make up MEDIA=0   # bring the cluster up without it
+make media-down   # stop it and remove its rendered configuration (make down runs this first)
+make up MEDIA=0   # bring the cluster up without it (calls then fail; see below)
 ```
 
 `make secrets` seeds the `memql-calls-media` Secret the bff reads: the provider
@@ -236,8 +236,23 @@ configuration into `~/.memql/media` (mode 0700, outside every checkout, since it
 holds both key pairs). Caddy serves the front door's own mkcert pair, so a
 browser that trusts the front door trusts the media server, and LiveKit's
 webhooks go back through the front door to `https://api.<domain>/inbound/livekit`.
+The same LiveKit template configures a rented production server
+([Production media server](calls.md#production-media-server)).
+
 The bff reads the Secret optionally, so a cluster without it starts unchanged
-and calls answer that no media server is configured.
+and calls answer that no media server is configured. But `make secrets` seeds it
+whether or not the media server runs: with `MEDIA=0`, after `make media-down`,
+and on a cluster the editor's installer set up (it seeds the Secrets and does not
+start the media server), the Secret is there and the server is not. The bff then
+records the media server the Secret names when it boots and keeps it, so a call
+is placed on a server that is not running and its join fails when the engine
+creates the room. `make media-up` starts the server; nothing needs restarting.
+
+`make down` stops the media server and removes its rendered configuration before
+it deletes the cluster, so no container keeps running, and no key pair stays in
+`~/.memql/media`, for a cluster that is gone. A dry run of `make media-up`
+(`scripts/media/local-up.sh --dry-run=true`) renders the configuration into a
+scratch directory, removes it and writes nothing else.
 
 ### One local stack at a time
 

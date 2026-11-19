@@ -1,16 +1,41 @@
-# deploy/media/livekit.yaml.tmpl -- the calls media server's LiveKit configuration.
+# deploy/media/livekit.yaml.tmpl -- the calls media server's LiveKit configuration, for
+# every target.
 #
-# RENDERED, NEVER READ AS IT STANDS. scripts/media/local-up.sh fills the double-brace
-# placeholders from the memql-calls-media Secret and the cluster's domain into a file
-# outside the repository (~/.memql/media/livekit.yaml, mode 0600: it carries both key
-# pairs), which deploy/media/compose.yaml mounts. Every key was checked against
-# livekit-server v1.13.7, the version the image is pinned at: its config-sample.yaml, and
-# pkg/config/config.go with the livekit/protocol webhook package it pins at that tag.
+# RENDERED, NEVER READ AS IT STANDS, by two renderers that fill the same double-brace
+# placeholders the same way:
+#   - scripts/media/local-up.sh, for the server beside the local cluster, from the
+#     memql-calls-media Secret and the cluster's domain, into ~/.memql/media/livekit.yaml
+#     (deploy/media/compose.yaml mounts it);
+#   - memql-media configure, on a rented server, from the values the operator hands it
+#     over SSH, into /etc/memql-media/livekit.yaml. deploy/media/cloud-init.yaml.tmpl
+#     installs that command and writes this file beside it, as it stands.
+# Either rendering carries both key pairs, so it is written 0600; this template carries
+# none, which is what lets it travel in a server's user data.
+#
+# ONE FILE FOR EVERY TARGET, so what a call is -- the rooms, the codecs, the video
+# subscription cap, the webhook and its four events -- cannot differ between the server
+# a change is tried on and the one people call through. Only where the server is varies:
+# where its HTTP port listens, where its Redis is, the address its ICE candidates name,
+# and whether it runs a TURN server of its own. Those are the scalar placeholders below,
+# each explained where it is used.
+#
+# Every key was checked against livekit-server v1.13.7, the version both targets pin:
+# its config-sample.yaml, pkg/config/config.go and pkg/service/turn.go at that tag, and
+# the livekit/protocol webhook package it pins.
 
 port: 7880
 
+# Where the HTTP port (signalling and the control API) listens. Locally "" (every
+# interface of the container, which compose.yaml publishes); on a rented server
+# 127.0.0.1, because Caddy, on the same host, is its only client and nothing else should
+# reach it.
+bind_addresses:
+  - "{{BIND_ADDRESS}}"
+
 redis:
-  address: redis:6379
+  # Locally the compose network's redis service; on a rented server, where every
+  # service shares the host's network, Redis on loopback.
+  address: "{{REDIS_ADDRESS}}"
 
 # Two key pairs. Rooms and passes are signed with the first (MEMQL_CALLS_MEDIA_API_KEY);
 # the server signs its webhooks with the second (MEMQL_CALLS_MEDIA_WEBHOOK_KEY, named in
@@ -21,13 +46,15 @@ keys:
 
 rtc:
   tcp_port: 7881
-  # One UDP port, muxed, rather than a range: compose.yaml publishes exactly it.
+  # One UDP port, muxed, rather than a range: exactly one port to publish locally and to
+  # open in a rented server's firewall.
   udp_port: 7882
-  # The address the server's ICE candidates name. The browser runs on this machine and
-  # reaches the published ports at loopback; external-address discovery stays off
-  # (v1.13.7's default), so a STUN answer naming this machine's public address cannot
-  # replace it.
-  node_ip: 127.0.0.1
+  # The address the server's ICE candidates name. Locally 127.0.0.1: the browser runs on
+  # this machine and reaches the published ports at loopback. On a rented server its
+  # public IPv4, read from the provider's metadata at the operator's step. Either way it
+  # is set, so external-address discovery (use_external_ip, off by default) never runs
+  # and no STUN answer can replace it.
+  node_ip: "{{NODE_IP}}"
 
 room:
   # The engine creates every room, with its participant limit (integrations/calls
@@ -66,6 +93,30 @@ room:
 # pending is a participant nobody hears.
 limit:
   subscription_limit_video: 10
+
+# The server's own TURN server, whose address and credentials LiveKit hands a
+# participant when it joins with a pass (the credentials are derived from the API secret
+# and last v1.13.7's default 300 s, so nobody gets one any other way). Off locally
+# (false, "", 0, 0): the browser is on the same machine and reaches the published ports
+# directly. On a rented server it is on, twice:
+#   - over TLS on port 443, for networks that let only HTTPS out. v1.13.7 advertises it
+#     as turns:<domain>:443 whatever tls_port says (pkg/service/roommanager.go), so 443
+#     is shared with signalling: Caddy routes the connection by TLS server name, ends
+#     TLS (external_tls) and hands it to tls_port 5349 on loopback with a PROXY header
+#     naming the client (proxy_protocol), because TURN echoes the address it sees back
+#     to the client and Firefox abandons an allocation whose address is loopback. With
+#     proxy_protocol on, a connection to 5349 from anywhere but loopback is closed.
+#   - over UDP on 3478, which also serves participants as STUN. Without a STUN server of
+#     its own, v1.13.7 hands every browser Google's and Twilio's public ones (as it does
+#     locally, for a developer's own browser), and each participant's address would go
+#     to them.
+turn:
+  enabled: {{TURN_ENABLED}}
+  domain: "{{TURN_DOMAIN}}"
+  tls_port: {{TURN_TLS_PORT}}
+  udp_port: {{TURN_UDP_PORT}}
+  external_tls: true
+  proxy_protocol: true
 
 webhook:
   api_key: "{{WEBHOOK_KEY}}"

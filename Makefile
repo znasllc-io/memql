@@ -198,7 +198,7 @@ db:
 #   make up          # fresh bring-up: cluster + ArgoCD + secrets + images, wait healthy,
 #                    # then the local calls media server (MEDIA=0 skips it)
 #   make up-refresh  # clean slate: nuke + repave (fresh DB), then the same bring-up
-#   make down        # tear down cluster
+#   make down        # tear down cluster, stopping the local calls media server first
 #   make secrets     # (re-)seed k8s Secrets in a running cluster
 #   make media-up    # start the local calls media server beside the cluster
 #   make media-down  # stop it and remove its rendered configuration
@@ -298,7 +298,7 @@ up-refresh:
 # script interprets it, with cap_bool or scripts/lib/bool_flag.sh.
 # scripts/make/boolean_forwarding_test.go.
 
-## Tear down the local k3d cluster (PURGE=1 also removes the kubeconfig context)
+## Tear down the local k3d cluster, after the local calls media server (PURGE=1 also removes the kubeconfig context)
 ## Pass PURGE=1 to also remove the kubeconfig context.
 down:
 	@bash scripts/k3d/down.sh \

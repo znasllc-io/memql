@@ -883,11 +883,14 @@ bundle and the generic `/_memql/*` proxy, and forwards each to the bff:
 the host `MEMQL_CALLS_MEDIA_HOST_SUFFIX` names and every host under it
 (`component/edge/csp_calls.go`); and its `Permissions-Policy` lets the page ask
 for the camera (`camera=(self)`), which every other site is refused before the
-browser can prompt. Set `MEMQL_CALLS_MEDIA_HOST_SUFFIX` on the edge to the DNS
-name the installation's media servers are under, for example `media.example.com`
-for `m1.media.example.com`. Unset, or not a host name, the policy names no media
-server: the routes answer and passes are minted, but the browser refuses to
-connect to the call, and the edge's one warning at boot is the clue.
+browser can prompt. `MEMQL_CALLS_MEDIA_HOST_SUFFIX` is the DNS name the
+installation's media servers are under. The edge derives it as `media.<domain>`
+(for example `media.example.com` for `m1.media.example.com`), and an installation
+overrides it only when its servers live under another name
+([Production media server](calls.md#production-media-server)). Unset, or not a
+host name, the policy names no media server: the routes answer and passes are
+minted, but the browser refuses to connect to the call, and the edge's one
+warning at boot is the clue.
 
 ---
 

@@ -8,6 +8,22 @@
 # Deletes the cluster and optionally removes the kubeconfig entry. Idempotent:
 # deleting an absent cluster is a successful no-op (changed=false).
 #
+# THE LOCAL CALLS MEDIA SERVER GOES FIRST. `make up` starts it beside the
+# cluster (scripts/media/local-up.sh), with `restart: unless-stopped` and its
+# key pairs rendered into ~/.memql/media, so a teardown that deleted only the
+# cluster left a server that Docker brought back on every start, holding
+# credentials for a cluster that no longer existed. stop_media_server runs
+# scripts/media/local-down.sh (make media-down) before the cluster is deleted:
+#   - stopped: it ran, and the containers and rendered files are gone (or there
+#     were none);
+#   - unavailable: there is nothing to stop -- the tree has no
+#     scripts/media/local-down.sh (this script is staged into the editor's
+#     installer, and scripts/media is not), or Docker is missing or its daemon
+#     is down (local-down.sh's exit 4), and no container can run then;
+#   - failed: local-down.sh failed. The cluster is still deleted, because that is
+#     the teardown asked for, and then the run fails (exit 5) naming
+#     make media-down, rather than answering success over a server still running.
+#
 # This is a CAPABILITY SCRIPT: non-interactive, structured params in, a single
 # JSON result envelope on stdout, human logs on stderr, honest exit codes.
 # Contract: docs/internal/design/capability-script-contract.md
@@ -19,6 +35,8 @@
 #   scripts/k3d/down.sh --print-spec
 #
 # Exit codes: 0 ok | 2 bad param | 4 prerequisite missing (k3d absent)
+#             | 5 op failed (the media server would not stop; the cluster was
+#               deleted first)
 #
 # Refs: #2063 #2061 #2221
 
@@ -31,6 +49,16 @@ source "${SCRIPT_DIR}/../lib/capability.sh"
 cap_init "k3d.down" "Tear down the local k3d cluster."
 cap_spec_param "cluster" "k3d cluster name"
 cap_spec_param "purge"   "also remove the kubeconfig context (flag)"
+
+# The media server's teardown, found from the repository root rather than as a
+# sibling of this directory, and only when it is there: see the file note, and
+# bringup.sh, which finds local-up.sh the same way for the same reason.
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+MEDIA_DOWN_SCRIPT="${REPO_ROOT}/scripts/media/local-down.sh"
+# stopped | unavailable | failed, and the one-line reason for the last two.
+MEDIA_STATE=""
+MEDIA_DETAIL=""
+
 #=============================================================================
 # PREREQUISITE CHECKS
 #=============================================================================
@@ -60,6 +88,55 @@ function delete_cluster() {
     k3d cluster delete "$cluster" >&2
     cap_info "Cluster '${cluster}' deleted."
     return 0
+}
+
+# stop_media_server -- make media-down (see the file note for the three outcomes).
+# local-down.sh's envelope is captured, never forwarded: this script's stdout
+# carries exactly one envelope, its own. Its `changed` is this run's too.
+function stop_media_server() {
+    if [[ ! -f "$MEDIA_DOWN_SCRIPT" ]]; then
+        MEDIA_STATE="unavailable"
+        MEDIA_DETAIL="${MEDIA_DOWN_SCRIPT} is not part of this tree"
+        cap_info "No local calls media server to stop: ${MEDIA_DETAIL}."
+        return 0
+    fi
+    cap_info "Stopping the local calls media server (make media-down)..."
+    local out rc=0
+    out="$(bash "$MEDIA_DOWN_SCRIPT")" || rc=$?
+    case "$rc" in
+        0)
+            MEDIA_STATE="stopped"
+            # capability.sh writes the envelope as "changed":<bool> and nothing else
+            # spells it, so the match is exact.
+            if [[ "$out" == *'"changed":true'* ]]; then
+                cap_changed
+            fi
+            ;;
+        4)
+            MEDIA_STATE="unavailable"
+            MEDIA_DETAIL="$(media_failure_message "$out")"
+            cap_info "No local calls media server can be running: ${MEDIA_DETAIL}"
+            ;;
+        *)
+            MEDIA_STATE="failed"
+            MEDIA_DETAIL="$(media_failure_message "$out")"
+            cap_error "the local calls media server did not stop (exit ${rc}): ${MEDIA_DETAIL}"
+            ;;
+    esac
+}
+
+# media_failure_message <envelope> -- the error.message of local-down.sh's
+# envelope, read with jq where it is installed and with a pattern where it is
+# not (bringup.sh reads local-up.sh's the same way).
+function media_failure_message() {
+    local message=""
+    if command -v jq >/dev/null 2>&1; then
+        message="$(printf '%s' "$1" | jq -r '.error.message // empty' 2>/dev/null || true)"
+    fi
+    if [[ -z "$message" ]]; then
+        message="$(printf '%s' "$1" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p' | head -n 1)"
+    fi
+    printf '%s' "${message:-make media-down gave no reason}"
 }
 
 function remove_kubeconfig() {
@@ -95,6 +172,7 @@ function main() {
 
     check_prerequisites
 
+    stop_media_server
     local deleted=false
     if delete_cluster "$cluster"; then
         deleted=true
@@ -102,10 +180,15 @@ function main() {
     fi
     remove_kubeconfig "$cluster" "$purge"
 
-    cap_info "Done. Run 'make up' to recreate the cluster."
     cap_result_set     cluster "$cluster"
     cap_result_set_raw deleted "$deleted"
     cap_result_set_raw purged  "$( [[ -n "$purge" ]] && echo true || echo false )"
+    cap_result_set     mediaServer "$MEDIA_STATE"
+    cap_result_set     mediaServerDetail "$MEDIA_DETAIL"
+    if [[ "$MEDIA_STATE" == "failed" ]]; then
+        cap_fail 5 "the cluster was torn down, but the local calls media server did not stop: ${MEDIA_DETAIL}. Its containers may still be running, with their configuration in ~/.memql/media; once that is fixed, stop it with 'make media-down'."
+    fi
+    cap_info "Done. Run 'make up' to recreate the cluster."
     cap_ok
 }
 

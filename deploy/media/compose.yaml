@@ -20,6 +20,9 @@
 # against and the one deploy/k8s/components/ask-voice runs: an upgrade is reviewed for
 # CreateJobToken first, which on LiveKit's development branch lets a running agent job
 # ask a self-hosted server for new passes. scripts/media/local_up_test.go pins all three.
+# A rented server (deploy/media/cloud-init.yaml.tmpl) runs the same LiveKit and Redis
+# tags, pinned by digest as well, and scripts/media/provision_hetzner_test.go fails when
+# the two disagree: a bump here is a bump there.
 
 name: memql-media
 

@@ -1,0 +1,461 @@
+#cloud-config
+#
+# deploy/media/cloud-init.yaml.tmpl -- the first boot of a calls media server on a
+# rented host (Hetzner Cloud). scripts/media/provision-hetzner.sh renders it into the
+# server's user data; the runbook is docs/public/operate/calls.md ("Production media
+# server").
+#
+# NO SECRET IS IN HERE, AND NONE MAY BE ADDED. Hetzner keeps a server's user data and
+# hands it out again -- through its API and its console, and through the metadata
+# service to every process on the server -- so whatever is written here stays readable
+# long after the boot it was for. The server's two key pairs, and the names its
+# certificates are for, arrive later, from the operator, over SSH:
+#
+#     ssh root@<ipv4> memql-media configure --domain=<instance domain> < media.env
+#
+# memql-media (written below) reads the values on stdin, so they are in no argv, no
+# environment and no file on the way; the one copy written is the configuration the
+# server runs on, 0600 in a 0700 directory. What this file does is everything that needs
+# neither keys nor names: install Docker, write the server's compose file, the shared
+# LiveKit template and memql-media, open the host firewall, and pull the pinned images.
+# It starts nothing, because nothing can run before the keys arrive.
+#
+# THE SAME FOR EVERY MEDIA SERVER. Nothing here names a server, an installation or a
+# domain, so one rendering serves m1 and m2 alike. The one placeholder is the LiveKit
+# template, which the provision script embeds from deploy/media/livekit.yaml.tmpl, the
+# file the local target renders too, so what a call is cannot differ between targets.
+#
+# COMMENTS AT THE START OF A LINE, like this one, are the repository's and are not sent:
+# the provision script drops them (Hetzner takes at most 32 KiB of user data). Comments
+# inside a file below are the server's own and are sent with it.
+#
+# THE LAYOUT IS LIVEKIT'S OWN for a self-hosted server (the generator behind its "Deploy
+# to a VM" guide, github.com/livekit/deploy, generate/templates at a6e5931): LiveKit,
+# Redis and Caddy with the layer-4 module, all on the host's network, Caddy routing port
+# 443 by TLS server name to LiveKit's signalling port and to its TURN server, and
+# obtaining both certificates. Where this differs, the reason is beside it:
+#   - the images are pinned by tag and digest, not `latest`;
+#   - Docker and Compose come from Ubuntu's archive (docker.io, docker-compose-v2), not a
+#     Compose binary downloaded from GitHub at boot with nothing checking it;
+#   - ICE runs on one UDP port, 7882, rather than 50000-60000: one firewall rule, the
+#     same port as the local target;
+#   - the keys and the names are not in this file (above);
+#   - TURN learns the client's address from a PROXY header Caddy sends (LiveKit
+#     v1.13.7's turn.proxy_protocol), instead of the generator's script that rewrites
+#     Caddy's TURN upstream to the host's address so the connection does not come from
+#     loopback, which Firefox refuses;
+#   - Caddy's configuration is JSON, which needs no adapter, and has no admin endpoint;
+#   - a host firewall (ufw) repeats the Hetzner firewall's rules, so the ports LiveKit
+#     listens on all interfaces for -- 7880, and 5349, plain TURN behind Caddy -- stay
+#     closed even if the cloud firewall is detached.
+
+package_update: true
+package_upgrade: true
+packages:
+  - docker.io
+  - docker-compose-v2
+  - ufw
+# The operator reaches the server with the SSH key the provision script names, never a
+# password.
+ssh_pwauth: false
+
+write_files:
+# LiveKit asks for 16 MiB UDP socket buffers and warns that anything under 5 MB is too
+# small for a production server (mediatransportutil rtcconfig, at the version v1.13.7
+# pins); Ubuntu's default ceiling is about 208 KiB. Host networking means the
+# containers share these.
+  - path: /etc/sysctl.d/90-memql-media.conf
+    permissions: "0644"
+    content: |
+      # The calls media server: room for LiveKit's 16 MiB UDP socket buffers.
+      net.core.rmem_max = 16777216
+      net.core.wmem_max = 16777216
+
+# The server's compose file. Host networking, as LiveKit's layout runs it: LiveKit's TURN
+# relay and its media are one process sending to the host's own public address, and Caddy
+# reaches LiveKit on loopback. The relative paths are the files memql-media configure
+# writes beside it. LiveKit and Redis run the tags the local target's compose.yaml runs
+# (scripts/media/provision_hetzner_test.go holds the two to one version); an upgrade is
+# reviewed for CreateJobToken first. The Caddy build is LiveKit's own (livekit/caddyl4 at
+# v2.11.3, built from github.com/livekit/deploy a6e5931: Caddy v2.11.3 with caddy-l4
+# v0.1.1 and the YAML adapter).
+  - path: /etc/memql-media/compose.yaml
+    permissions: "0644"
+    content: |
+      # The calls media server: LiveKit, its Redis, and Caddy with the layer-4 module, on
+      # the host's network. memql-media configure writes the two mounted files and starts
+      # it; nothing here is a credential.
+      name: memql-media
+      services:
+        livekit:
+          image: livekit/livekit-server:v1.13.7@sha256:6fd3b7088874c4d119160dd688798dfec852bc014786d392caad15f6f63912a3
+          command: ["--config", "/etc/livekit/livekit.yaml"]
+          restart: unless-stopped
+          network_mode: host
+          depends_on: [redis]
+          ulimits:
+            nofile: {soft: 65536, hard: 65536}
+          volumes:
+            - ./livekit.yaml:/etc/livekit/livekit.yaml:ro
+        redis:
+          image: redis:7.4-alpine@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe
+          restart: unless-stopped
+          network_mode: host
+          # Room state only, on loopback, and none of it kept: a restarted server starts
+          # empty, and the engine's reconciliation repairs the calls' rows.
+          command: ["redis-server", "--bind", "127.0.0.1", "--protected-mode", "yes", "--save", "", "--appendonly", "no"]
+        caddy:
+          image: livekit/caddyl4:v2.11.3@sha256:9dd090159a6042a907dbff0ce9dda27a21d2a559dc7b03b60a8e6b1b60b8348e
+          command: ["run", "--config", "/etc/caddy/caddy.json"]
+          restart: unless-stopped
+          network_mode: host
+          depends_on: [livekit]
+          volumes:
+            - ./caddy.json:/etc/caddy/caddy.json:ro
+            # Certificates and the ACME account, kept across restarts, so a restart does
+            # not ask Let's Encrypt again.
+            - /var/lib/memql-media/caddy:/data
+
+# The LiveKit template, embedded from deploy/media/livekit.yaml.tmpl as it stands. It
+# carries placeholders where the keys go, and memql-media configure fills them.
+  - path: /etc/memql-media/livekit.yaml.tmpl
+    permissions: "0644"
+    content: |
+{{LIVEKIT_TEMPLATE}}
+
+# memql-media, the server's own command (the operator's step). Why it reads stdin: above.
+# What configure renders, per placeholder, is explained in the LiveKit template; the
+# Caddy configuration it writes is the layout above. A change of either recreates every
+# container, which ends every call on the server: the runbook drains a server first.
+# When no answer comes through TLS, it fails having started the server, so running it
+# again only checks again.
+  - path: /usr/local/sbin/memql-media
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      #
+      # memql-media -- this calls media server's own command, installed by its first boot
+      # (deploy/media/cloud-init.yaml.tmpl in the MemQL repository, which says why each part
+      # is as it is; the runbook is docs/public/operate/calls.md there).
+      #
+      #   memql-media configure --domain=<instance domain> [--node-ip=<IPv4>] [--wait-seconds=<n>] < media.env
+      #   memql-media rooms
+      #
+      # configure reads the eight MEMQL_CALLS_MEDIA_* values on stdin (NAME=value lines: the
+      # file the installation's memql-calls-media Secret is made from), renders LiveKit's and
+      # Caddy's configuration, (re)starts the server, and waits until LiveKit answers through
+      # Caddy. Run again, it changes nothing already in place. rooms prints how many rooms
+      # LiveKit holds; a drain waits for 0. MEMQL_MEDIA_* exist for its tests only.
+      #
+      # Exit codes: 0 ok | 2 bad argument | 3 refused (the values cannot configure this server)
+      #             | 4 prerequisite missing | 5 failed
+
+      set -euo pipefail
+
+      MEDIA_DIR="${MEMQL_MEDIA_DIR:-/etc/memql-media}"
+      DATA_DIR="${MEMQL_MEDIA_DATA_DIR:-/var/lib/memql-media}"
+      CLOUD_INIT="${MEMQL_MEDIA_CLOUD_INIT:-cloud-init}"
+      METADATA_URL="${MEMQL_MEDIA_METADATA_URL:-http://169.254.169.254/hetzner/v1/metadata}"
+      PROJECT="memql-media"
+      COMPOSE_FILE="${MEDIA_DIR}/compose.yaml"
+      TEMPLATE="${MEDIA_DIR}/livekit.yaml.tmpl"
+
+      # Values go into YAML double quotes through a bash substitution: no quote, backslash,
+      # ampersand or newline. Browsers reach the server on 443 only.
+      LABEL='[a-z0-9]([a-z0-9-]*[a-z0-9])?'
+      DNS_NAME="^${LABEL}(\.${LABEL})+$"
+      KEY_PATTERN='^[A-Za-z0-9._-]+$'
+      SECRET_PATTERN='^[A-Za-z0-9._+/=-]{32,}$'
+      PUBLIC_URL_PATTERN="^(wss|https)://(${LABEL}(\.${LABEL})+)(:443)?$"
+      OCTET='(0|[1-9][0-9]?|1[0-9][0-9]|2[0-4][0-9]|25[0-5])'
+      IPV4_PATTERN="^${OCTET}\.${OCTET}\.${OCTET}\.${OCTET}$"
+
+      DOMAIN="" NODE_IP="" WAIT_SECONDS=180
+      PROVIDER="" API_URL="" PUBLIC_URL="" SEATS=""
+      API_KEY="" API_SECRET="" WEBHOOK_KEY="" WEBHOOK_SECRET=""
+      PUBLIC_HOST="" TURN_HOST="" WEBHOOK_URL="" CHANGED=""
+
+      function info() { printf 'INFO:  %s\n' "$*" >&2; }
+      function warn() { printf 'WARN:  %s\n' "$*" >&2; }
+      function fail() {
+          local code="$1"
+          shift
+          printf 'ERROR: %s\n' "$*" >&2
+          exit "$code"
+      }
+      function usage_fail() {
+          fail 2 "$1. Usage: memql-media configure --domain=<instance domain> [--node-ip=<IPv4>] [--wait-seconds=<n>] < media.env, or memql-media rooms"
+      }
+      function refuse() { fail 3 "$1. Correct the values and run this command again."; }
+      function compose() { docker compose --project-name "$PROJECT" --file "$COMPOSE_FILE" "$@"; }
+
+      # A refusal names a flag, never what follows its '='.
+      function parse_configure_args() {
+          local arg
+          for arg in "$@"; do
+              case "$arg" in
+                  --domain=*) DOMAIN="${arg#--domain=}" ;;
+                  --node-ip=*) NODE_IP="${arg#--node-ip=}" ;;
+                  --wait-seconds=*) WAIT_SECONDS="${arg#--wait-seconds=}" ;;
+                  *) usage_fail "configure does not take ${arg%%=*}" ;;
+              esac
+          done
+          [[ "$DOMAIN" =~ $DNS_NAME ]] || usage_fail "--domain must be the installation's domain, a lower-case DNS name of two or more labels"
+          if [[ -n "$NODE_IP" && ! "$NODE_IP" =~ $IPV4_PATTERN ]]; then
+              usage_fail "--node-ip must be an IPv4 address"
+          fi
+          [[ "$WAIT_SECONDS" =~ ^[0-9]{1,5}$ ]] || usage_fail "--wait-seconds takes a whole number of seconds"
+          WAIT_SECONDS=$((10#$WAIT_SECONDS))
+      }
+
+      # The eight names only, each once (a second copy is a value the server and the Secret
+      # could disagree on). A line that is not NAME=value is refused by number: it may be a
+      # secret pasted on its own.
+      function read_values() {
+          local line name value number=0 seen=" "
+          while IFS= read -r line || [[ -n "$line" ]]; do
+              number=$((number + 1))
+              line="${line%$'\r'}"
+              case "$line" in '' | '#'*) continue ;; esac
+              [[ "$line" == *=* ]] || refuse "line ${number} on stdin is not NAME=value (not repeated here: it may hold a secret)"
+              name="${line%%=*}"
+              value="${line#*=}"
+              [[ "$name" =~ ^MEMQL_CALLS_MEDIA_[A-Z_]+$ ]] || refuse "line ${number} on stdin names something other than a MEMQL_CALLS_MEDIA_* value"
+              [[ "$seen" != *" ${name} "* ]] || refuse "stdin names ${name} twice"
+              seen+="${name} "
+              case "$name" in
+                  MEMQL_CALLS_MEDIA_PROVIDER) PROVIDER="$value" ;;
+                  MEMQL_CALLS_MEDIA_API_URL) API_URL="$value" ;;
+                  MEMQL_CALLS_MEDIA_PUBLIC_URL) PUBLIC_URL="$value" ;;
+                  MEMQL_CALLS_MEDIA_SEATS) SEATS="$value" ;;
+                  MEMQL_CALLS_MEDIA_API_KEY) API_KEY="$value" ;;
+                  MEMQL_CALLS_MEDIA_API_SECRET) API_SECRET="$value" ;;
+                  MEMQL_CALLS_MEDIA_WEBHOOK_KEY) WEBHOOK_KEY="$value" ;;
+                  MEMQL_CALLS_MEDIA_WEBHOOK_SECRET) WEBHOOK_SECRET="$value" ;;
+                  *) refuse "stdin names ${name}, which is not one of the eight MEMQL_CALLS_MEDIA_* values" ;;
+              esac
+          done
+      }
+
+      # The engine's rules (integrations/calls config.go) and the rendering's. A refusal names
+      # the value at fault and never repeats it.
+      function validate_values() {
+          local missing="" name
+          for name in PROVIDER API_URL PUBLIC_URL SEATS API_KEY API_SECRET WEBHOOK_KEY WEBHOOK_SECRET; do
+              [[ -n "${!name}" ]] || missing+="${missing:+, }MEMQL_CALLS_MEDIA_${name}"
+          done
+          [[ -z "$missing" ]] || refuse "stdin has no ${missing}: a media server takes all eight values"
+          [[ "$PROVIDER" == "hetzner" ]] || refuse "MEMQL_CALLS_MEDIA_PROVIDER must be hetzner on this server"
+          [[ "$API_KEY" =~ $KEY_PATTERN ]] || refuse "MEMQL_CALLS_MEDIA_API_KEY must be letters, digits, '.', '_' and '-'"
+          [[ "$WEBHOOK_KEY" =~ $KEY_PATTERN ]] || refuse "MEMQL_CALLS_MEDIA_WEBHOOK_KEY must be letters, digits, '.', '_' and '-'"
+          [[ "$API_SECRET" =~ $SECRET_PATTERN ]] || refuse "MEMQL_CALLS_MEDIA_API_SECRET must be 32 or more letters, digits and . _ + / = -"
+          [[ "$WEBHOOK_SECRET" =~ $SECRET_PATTERN ]] || refuse "MEMQL_CALLS_MEDIA_WEBHOOK_SECRET must be 32 or more letters, digits and . _ + / = -"
+          [[ "$API_KEY" != "$WEBHOOK_KEY" ]] || refuse "the API key and the webhook key are the same, and LiveKit holds one secret per key"
+          [[ "$SEATS" =~ ^[1-9][0-9]{0,5}$ ]] || refuse "MEMQL_CALLS_MEDIA_SEATS must be a positive whole number"
+          if [[ "$PUBLIC_URL" =~ $PUBLIC_URL_PATTERN ]]; then
+              PUBLIC_HOST="${BASH_REMATCH[2]}"
+          else
+              refuse "MEMQL_CALLS_MEDIA_PUBLIC_URL must be wss://<this server's host>, on port 443, with no path"
+          fi
+          [[ "$API_URL" == "https://${PUBLIC_HOST}" || "$API_URL" == "https://${PUBLIC_HOST}:443" ]] \
+              || refuse "MEMQL_CALLS_MEDIA_API_URL must be https://${PUBLIC_HOST}: Caddy serves the control API at the public host"
+          TURN_HOST="turn.${PUBLIC_HOST}"
+          WEBHOOK_URL="https://api.${DOMAIN}/inbound/livekit"
+          case "$PUBLIC_HOST" in
+              *".media.${DOMAIN}") ;;
+              *) warn "${PUBLIC_HOST} is not under media.${DOMAIN}, the suffix the edge derives from the domain. A calls page lets the browser connect only to hosts under MEMQL_CALLS_MEDIA_HOST_SUFFIX: set it on the edge to a name this host is under, or browsers will refuse this server." ;;
+          esac
+      }
+
+      # The first SSH can arrive while the first boot still installs Docker. Its verdict is
+      # advice: what configure needs is checked next, by name.
+      function wait_for_first_boot() {
+          command -v "$CLOUD_INIT" >/dev/null 2>&1 || return 0
+          info "waiting for this server's first boot to finish..."
+          local rc=0
+          "$CLOUD_INIT" status --wait >/dev/null 2>&1 || rc=$?
+          if [[ "$rc" -ne 0 ]]; then
+              warn "the first boot ended with cloud-init status ${rc}; see /var/log/cloud-init-output.log"
+          fi
+      }
+
+      function require_server() {
+          command -v docker >/dev/null 2>&1 || fail 4 "Docker is not installed; see /var/log/cloud-init-output.log"
+          docker info >/dev/null 2>&1 || fail 4 "the Docker daemon is not running: systemctl start docker"
+          docker compose version >/dev/null 2>&1 || fail 4 "the Docker Compose plugin (docker-compose-v2) is not installed"
+          [[ -r "$TEMPLATE" && -r "$COMPOSE_FILE" ]] || fail 4 "${MEDIA_DIR} lacks livekit.yaml.tmpl or compose.yaml, which the first boot writes"
+      }
+
+      # ICE candidates name the public IPv4: Hetzner's metadata says it, unless --node-ip does.
+      function resolve_node_ip() {
+          if [[ -z "$NODE_IP" ]]; then
+              NODE_IP="$(curl -fsS --max-time 5 "${METADATA_URL}/public-ipv4" 2>/dev/null)" \
+                  || fail 4 "could not read this server's public IPv4 from ${METADATA_URL}; name it with --node-ip=<IPv4>"
+          fi
+          [[ "$NODE_IP" =~ $IPV4_PATTERN ]] || fail 4 "the metadata service did not answer with an IPv4 address; name it with --node-ip=<IPv4>"
+      }
+
+      # Every value was validated: none holds & or \, which a bash replacement treats specially.
+      function substitute() {
+          local text="$1"
+          shift
+          while [[ $# -ge 2 ]]; do
+              text="${text//"{{$1}}"/$2}"
+              shift 2
+          done
+          printf '%s' "$text"
+      }
+
+      function caddy_config() {
+          cat <<EOF
+      {
+        "admin": {"disabled": true},
+        "logging": {"logs": {"default": {"level": "INFO"}}},
+        "storage": {"module": "file_system", "root": "/data"},
+        "apps": {
+          "tls": {"certificates": {"automate": ["${PUBLIC_HOST}", "${TURN_HOST}"]}},
+          "layer4": {"servers": {"media": {
+            "listen": [":443"],
+            "routes": [
+              {"match": [{"tls": {"sni": ["${TURN_HOST}"]}}],
+               "handle": [{"handler": "tls"},
+                          {"handler": "proxy", "proxy_protocol": "v2", "upstreams": [{"dial": ["127.0.0.1:5349"]}]}]},
+              {"match": [{"tls": {"sni": ["${PUBLIC_HOST}"]}}],
+               "handle": [{"handler": "tls", "connection_policies": [{"alpn": ["http/1.1"]}]},
+                          {"handler": "proxy", "upstreams": [{"dial": ["127.0.0.1:7880"]}]}]}
+            ]
+          }}}
+        }
+      }
+      EOF
+      }
+
+      # 0600, through a temporary file and a rename, and only when the content differs.
+      function write_if_changed() {
+          local target="$1" tmp
+          if [[ -f "$target" && "$(cat "$target")" == "$2" ]]; then
+              return 0
+          fi
+          tmp="${target}.tmp.$$"
+          if ! (umask 077 && printf '%s\n' "$2" >"$tmp"); then
+              rm -f "$tmp"
+              fail 5 "could not write ${target}"
+          fi
+          mv -f "$tmp" "$target" || fail 5 "could not write ${target}"
+          CHANGED=1
+      }
+
+      function render() {
+          local raw text
+          mkdir -p "$MEDIA_DIR" "${DATA_DIR}/caddy" || fail 5 "could not create ${MEDIA_DIR} and ${DATA_DIR}/caddy"
+          chmod 0700 "$MEDIA_DIR" "${DATA_DIR}/caddy" || fail 5 "could not make ${MEDIA_DIR} private"
+          raw="$(cat "$TEMPLATE")" || fail 4 "could not read ${TEMPLATE}"
+          text="$(substitute "$raw" \
+              API_KEY "$API_KEY" API_SECRET "$API_SECRET" \
+              WEBHOOK_KEY "$WEBHOOK_KEY" WEBHOOK_SECRET "$WEBHOOK_SECRET" WEBHOOK_URL "$WEBHOOK_URL" \
+              BIND_ADDRESS 127.0.0.1 REDIS_ADDRESS 127.0.0.1:6379 NODE_IP "$NODE_IP" \
+              TURN_ENABLED true TURN_DOMAIN "$TURN_HOST" TURN_TLS_PORT 5349 TURN_UDP_PORT 3478)"
+          [[ "$text" != *"{{"* ]] || fail 5 "${TEMPLATE} has a value this command does not fill: the two come from different MemQL versions, so make the server again"
+          write_if_changed "${MEDIA_DIR}/caddy.json" "$(caddy_config)"
+          write_if_changed "${MEDIA_DIR}/livekit.yaml" "$text"
+      }
+
+      function all_running() {
+          local running
+          running="$(compose ps --status running --services 2>/dev/null | sort | tr '\n' ' ')" || return 1
+          [[ "$running" == "caddy livekit redis " ]]
+      }
+
+      # A container reads its configuration once, and compose does not recreate one for a
+      # changed mounted file: a change recreates them all, which ends every call on the server.
+      function start() {
+          if [[ -z "$CHANGED" ]] && all_running; then
+              info "the server already runs this configuration"
+              return 0
+          fi
+          local -a recreate=()
+          if [[ -n "$CHANGED" ]]; then
+              recreate=(--force-recreate)
+          fi
+          info "starting the media server (LiveKit, Redis, Caddy)..."
+          compose up --detach --wait --remove-orphans ${recreate[@]+"${recreate[@]}"} >&2 \
+              || fail 5 "docker compose could not start the server; its output is above, and its logs: docker compose --project-name ${PROJECT} --file ${COMPOSE_FILE} logs"
+      }
+
+      # LiveKit answers OK at its root: through Caddy, that proves the certificate, the route
+      # and the server together. --resolve pins the name to this host, so DNS is not checked.
+      function wait_for_answer() {
+          local url="https://${PUBLIC_HOST}/" deadline body
+          if [[ "$WAIT_SECONDS" -eq 0 ]]; then
+              return 0
+          fi
+          deadline=$((SECONDS + WAIT_SECONDS))
+          while :; do
+              body="$(curl --silent --max-time 5 --resolve "${PUBLIC_HOST}:443:127.0.0.1" "$url" 2>/dev/null)" || body=""
+              if [[ "$body" == "OK" ]]; then
+                  info "LiveKit answers at ${url}"
+                  return 0
+              fi
+              [[ "$SECONDS" -lt "$deadline" ]] || break
+              sleep 3
+          done
+          fail 5 "the server is started, but LiveKit did not answer at ${url} within ${WAIT_SECONDS}s. Caddy needs certificates for ${PUBLIC_HOST} and ${TURN_HOST} first: check that their A and AAAA records point here and that ports 80 and 443 reach this server, then run this command again. Caddy's log: docker logs ${PROJECT}-caddy-1"
+      }
+
+      function configure() {
+          parse_configure_args "$@"
+          read_values
+          validate_values
+          wait_for_first_boot
+          require_server
+          resolve_node_ip
+          render
+          start
+          wait_for_answer
+          printf 'configured: browsers connect to %s; TURN is %s; webhooks go to %s\n' "$PUBLIC_URL" "$TURN_HOST" "$WEBHOOK_URL"
+      }
+
+      function rooms() {
+          [[ $# -eq 0 ]] || usage_fail "rooms takes no arguments"
+          local count
+          count="$(compose exec -T redis redis-cli HLEN rooms 2>/dev/null)" \
+              || fail 5 "could not ask Redis how many rooms the server holds; is it running? docker compose --project-name ${PROJECT} --file ${COMPOSE_FILE} ps"
+          count="${count%$'\r'}"
+          [[ "$count" =~ ^[0-9]+$ ]] || fail 5 "Redis did not answer with a number of rooms"
+          printf '%s\n' "$count"
+      }
+
+      function main() {
+          local command="${1:-}"
+          if [[ $# -gt 0 ]]; then
+              shift
+          fi
+          case "$command" in
+              configure) configure "$@" ;;
+              rooms) rooms "$@" ;;
+              *) usage_fail "the commands are configure and rooms" ;;
+          esac
+      }
+
+      main "$@"
+
+# In order: the private directory (memql-media keeps it 0700 too), the socket buffers,
+# the host firewall with exactly the Hetzner firewall's ports (ICMP is allowed by ufw's
+# own defaults), Docker, and the pinned images, so the operator's step only renders and
+# starts. A pull that fails here is not fatal: compose pulls a missing image at start.
+# The last entry is a shell line, single-quoted for YAML, so nothing in it is read as a
+# mapping.
+runcmd:
+  - [chmod, "0700", /etc/memql-media]
+  - [sysctl, --system]
+  - [ufw, default, deny, incoming]
+  - [ufw, default, allow, outgoing]
+  - [ufw, allow, 22/tcp]
+  - [ufw, allow, 80/tcp]
+  - [ufw, allow, 443/tcp]
+  - [ufw, allow, 7881/tcp]
+  - [ufw, allow, 7882/udp]
+  - [ufw, allow, 3478/udp]
+  - [ufw, --force, enable]
+  - [systemctl, enable, --now, docker]
+  - 'docker compose --project-name memql-media --file /etc/memql-media/compose.yaml pull --quiet || echo "memql-media - the images were not pulled at first boot, and memql-media configure pulls them"'

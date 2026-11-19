@@ -6,8 +6,11 @@
 // cap_bool now; PURGE in the environment is its default, and an explicit flag
 // beats it either way.
 //
-// Hermetic: stub k3d and kubectl on a PATH prefix log every call. No cluster
-// or kubeconfig is touched.
+// Hermetic: stub k3d, kubectl and docker on a PATH prefix log every call, and
+// HOME is the test's own. No cluster, kubeconfig, container or rendered media
+// configuration is touched: down.sh also stops the local calls media server
+// (scripts/media/local-down.sh, down_media_test.go), which reaches Docker and
+// ~/.memql/media.
 package k3d
 
 import (
@@ -35,23 +38,47 @@ exit 0
 printf 'kubectl %s\n' "$*" >> "$DOWN_CALLS"
 exit 0
 `
+	// The Docker the media server's teardown reaches. DOWN_DOCKER_DOWN answers like a
+	// stopped daemon, DOWN_MEDIA_RUNNING lists a media container, and
+	// DOWN_MEDIA_DOWN_FAILS makes compose down fail.
+	downStubDocker = `#!/bin/sh
+printf 'docker %s\n' "$*" >> "$DOWN_CALLS"
+case "$*" in
+  info*) [ -n "$DOWN_DOCKER_DOWN" ] && exit 1; exit 0 ;;
+  "compose version"*) exit 0 ;;
+  *" ps "*) [ -n "$DOWN_MEDIA_RUNNING" ] && printf 'c0ffee\n'; exit 0 ;;
+  *" down "*) [ -n "$DOWN_MEDIA_DOWN_FAILS" ] && exit 1; exit 0 ;;
+esac
+exit 0
+`
 )
 
 type downEnvelope struct {
-	OK     bool `json:"ok"`
-	Result struct {
-		Deleted bool `json:"deleted"`
-		Purged  bool `json:"purged"`
+	OK      bool `json:"ok"`
+	Changed bool `json:"changed"`
+	Result  struct {
+		Deleted           bool   `json:"deleted"`
+		Purged            bool   `json:"purged"`
+		MediaServer       string `json:"mediaServer"`
+		MediaServerDetail string `json:"mediaServerDetail"`
 	} `json:"result"`
 	Error *struct {
-		Code int `json:"code"`
+		Code    int    `json:"code"`
+		Message string `json:"message"`
 	} `json:"error"`
 }
 
 func downRun(t *testing.T, env []string, args ...string) (int, downEnvelope, string) {
 	t.Helper()
+	return downRunWithHome(t, t.TempDir(), env, args...)
+}
+
+// downRunWithHome is downRun with HOME at home, where a test can leave the media
+// server's rendered configuration for down.sh to remove.
+func downRunWithHome(t *testing.T, home string, env []string, args ...string) (int, downEnvelope, string) {
+	t.Helper()
 	dir := t.TempDir()
-	for name, body := range map[string]string{"k3d": downStubK3d, "kubectl": downStubKubectl} {
+	for name, body := range map[string]string{"k3d": downStubK3d, "kubectl": downStubKubectl, "docker": downStubDocker} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o755); err != nil {
 			t.Fatalf("write stub %s: %v", name, err)
 		}
@@ -62,7 +89,8 @@ func downRun(t *testing.T, env []string, args ...string) (int, downEnvelope, str
 		t.Fatal(err)
 	}
 	cmd := exec.Command("bash", append([]string{script, "--cluster=memql"}, args...)...)
-	cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "DOWN_CALLS="+calls, "PURGE=")
+	cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "DOWN_CALLS="+calls, "PURGE=",
+		"HOME="+home, "DOWN_DOCKER_DOWN=", "DOWN_MEDIA_RUNNING=", "DOWN_MEDIA_DOWN_FAILS=")
 	cmd.Env = append(cmd.Env, env...)
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout

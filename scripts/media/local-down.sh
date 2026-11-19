@@ -5,7 +5,8 @@
 #
 # Capability: media.localDown -- stop the local calls media server that
 # scripts/media/local-up.sh started (make media-down), and remove the configuration it
-# rendered.
+# rendered. make down runs it too, before it deletes the cluster (scripts/k3d/down.sh),
+# so a teardown leaves no media container restarting and no key pair on disk.
 #
 # The containers are removed by Compose PROJECT NAME (memql-media), with no compose file:
 # the file's values are required at interpolation (deploy/media/compose.yaml), and a

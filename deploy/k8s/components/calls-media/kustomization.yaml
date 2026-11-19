@@ -4,8 +4,9 @@
 # directly, the bff drives it through its control API and LiveKit's webhooks come back
 # through the front door. The servers are an EXTERNAL media target in every
 # environment -- a container beside the cluster locally (scripts/media/local-up.sh,
-# `make media-up`), a rented server in a cloud installation -- so this component runs
-# nothing. It wires two values, one per node that needs one:
+# `make media-up`), a rented server in a cloud installation (scripts/media/
+# provision-hetzner.sh; the runbook is docs/public/operate/calls.md) -- so this component
+# runs nothing. It wires two values, one per node that needs one:
 #
 #   1. The bff reads the eight MEMQL_CALLS_MEDIA_* values (integrations/calls/config.go:
 #      provider, control API, public URL, seats, and the two key pairs) from the

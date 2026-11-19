@@ -37,12 +37,25 @@
 # in ~/.memql/certs), rendered from deploy/media/*.tmpl. livekit.yaml carries both key
 # pairs, so the directory is 0700 and the files 0600, and nothing lands in the repository
 # for `git add` to reach. No credential is passed in argv or the environment; the
-# containers read them from the rendered file. make media-down removes the files.
+# containers read them from the rendered file. make media-down (and make down, which runs
+# it) removes the files.
+#
+# livekit.yaml.tmpl is SHARED with the rented-server target (memql-media configure, in
+# deploy/media/cloud-init.yaml.tmpl), so what a call is cannot differ between the two;
+# this script fills its per-target placeholders with this machine's values
+# (render_configuration).
+#
+# A DRY RUN WRITES NOTHING. It renders into a scratch directory under TMPDIR, which proves
+# the Secret and the templates make a configuration, and removes it before it answers --
+# also when it stops part-way (_local_up_on_exit). The state directory is not created:
+# a rendering carries both key pairs, and a run that answers changed: false must not have
+# left them anywhere.
 #
 # IDEMPOTENT. A second run renders the same files, Compose leaves the running containers
 # alone, and the envelope says changed: false. A changed file (a re-seeded key, a reissued
-# pair) changes the digest the containers carry (MEDIA_CONFIG_DIGEST), which makes Compose
-# recreate them: the server reads its configuration only at start.
+# pair, a new image pin in compose.yaml) changes the digest the containers carry
+# (MEDIA_CONFIG_DIGEST), which makes Compose recreate them: the server reads its
+# configuration only at start.
 #
 # This is a CAPABILITY SCRIPT: non-interactive, structured params in, a single JSON
 # result envelope on stdout, human logs on stderr, honest exit codes.
@@ -73,7 +86,7 @@ cap_spec_param "tls-cert"     "the front door's TLS certificate, which Caddy ser
 cap_spec_param "tls-key"      "the front door's TLS private key (default: the pair make secrets loads)"
 cap_spec_param "docker"       "the docker CLI (default: docker on PATH)"
 cap_spec_param "wait-seconds" "how long to wait for LiveKit to answer through TLS; 0 does not wait (default: 60)"
-cap_spec_param "dry-run"      "render the configuration and report what would start, starting nothing (flag)"
+cap_spec_param "dry-run"      "check that the configuration renders and report what would start, writing and starting nothing (flag)"
 
 #=============================================================================
 # CONFIGURATION
@@ -124,6 +137,24 @@ FRONT_DOOR_CA=""
 
 STARTED=false
 ANSWERED=false
+
+# A dry run's scratch directory while it exists; _local_up_on_exit removes it.
+DRY_RUN_DIR=""
+
+# _local_up_on_exit -- capability.sh's result guarantee, plus removing a dry run's scratch
+# directory however the run ends: it holds a rendering with both key pairs. The status is
+# captured first and restored right before _cap_on_exit, which reports it (the pattern
+# capability.sh documents; scripts/install/install-binary.sh's _install_on_exit).
+function _local_up_on_exit() {
+    local rc=$?
+    set +e
+    if [[ -n "$DRY_RUN_DIR" ]]; then
+        rm -rf "$DRY_RUN_DIR" 2>/dev/null
+    fi
+    (exit "$rc")
+    _cap_on_exit
+}
+trap _local_up_on_exit EXIT
 
 #=============================================================================
 # OUTPUT HELPERS
@@ -291,9 +322,13 @@ function write_private() {
 }
 
 function render_template() {
-    local template="$1" target="$2" text
+    local template="$1" target="$2" raw text
     shift 2
-    text="$(substitute "$(cat "$template")" "$@")"
+    # Read in its own assignment, so a failed read stops here. Inside the substitution's
+    # argument -- "$(substitute "$(cat ...)")" -- its status was lost, and a template that
+    # could not be read rendered as an empty file.
+    raw="$(cat "$template" 2>/dev/null)" || cap_fail 5 "could not read ${template}"
+    text="$(substitute "$raw" "$@")"
     # A placeholder left over is a template this script does not know how to fill, and a
     # server started on it would carry the literal braces.
     if [[ "$text" == *"{{"* ]]; then
@@ -302,31 +337,43 @@ function render_template() {
     write_private "$target" "$text"
 }
 
+# render_configuration <dir> -- the three files the containers read, into <dir>.
+#
+# livekit.yaml.tmpl's per-target placeholders take this machine's values: the HTTP port
+# on every interface of the container (compose.yaml publishes it), Redis as the compose
+# network names it, ICE candidates naming loopback (the browser is on this machine), and
+# no TURN server of its own, which only a server across the internet needs. The template
+# says why each exists; memql-media configure fills them for a rented server.
 function render_configuration() {
-    mkdir -p "$STATE_DIR" || cap_fail 5 "could not create ${STATE_DIR}"
-    chmod 700 "$STATE_DIR" || cap_fail 5 "could not make ${STATE_DIR} private"
-    render_template "${TEMPLATE_DIR}/livekit.yaml.tmpl" "${STATE_DIR}/${RENDERED_LIVEKIT}" \
+    local dir="$1"
+    mkdir -p "$dir" || cap_fail 5 "could not create ${dir}"
+    chmod 700 "$dir" || cap_fail 5 "could not make ${dir} private"
+    render_template "${TEMPLATE_DIR}/livekit.yaml.tmpl" "${dir}/${RENDERED_LIVEKIT}" \
         API_KEY "$API_KEY" API_SECRET "$API_SECRET" \
         WEBHOOK_KEY "$WEBHOOK_KEY" WEBHOOK_SECRET "$WEBHOOK_SECRET" \
-        WEBHOOK_URL "$WEBHOOK_URL"
-    render_template "${TEMPLATE_DIR}/Caddyfile.tmpl" "${STATE_DIR}/${RENDERED_CADDY}" \
+        WEBHOOK_URL "$WEBHOOK_URL" \
+        BIND_ADDRESS "" REDIS_ADDRESS "redis:6379" NODE_IP "127.0.0.1" \
+        TURN_ENABLED false TURN_DOMAIN "" TURN_TLS_PORT 0 TURN_UDP_PORT 0
+    render_template "${TEMPLATE_DIR}/Caddyfile.tmpl" "${dir}/${RENDERED_CADDY}" \
         MEDIA_HOST "$MEDIA_HOST" HTTPS_PORT "$HTTPS_PORT"
-    write_private "${STATE_DIR}/${RENDERED_CA}" "$FRONT_DOOR_CA"
-    info "rendered the media server's configuration into ${STATE_DIR}"
+    write_private "${dir}/${RENDERED_CA}" "$FRONT_DOOR_CA"
 }
 
 #=============================================================================
 # STARTING
 #=============================================================================
 
-# config_digest -- one SHA-256 over every file the containers read, which is what makes
-# Compose recreate them when one changes (see the file note). A digest of a file carrying
+# config_digest -- one SHA-256 over every file the containers read, and over compose.yaml
+# itself, which is what makes Compose recreate them when one changes (see the file note).
+# compose.yaml is in it because the containers' definition is in it: without it, a new
+# image pin would leave the running containers' digest unchanged, so already_running
+# would report no change while compose up replaced them. A digest of a file carrying
 # 256-bit secrets says nothing about them. It runs inside a command substitution, so it
 # reports a failure through its status and never with cap_fail, whose envelope would be
 # captured instead of printed.
 function config_digest() {
     cat "${STATE_DIR}/${RENDERED_LIVEKIT}" "${STATE_DIR}/${RENDERED_CADDY}" "${STATE_DIR}/${RENDERED_CA}" \
-        "$TLS_CERT" "$TLS_KEY" | openssl dgst -sha256 | awk '{print $NF}'
+        "$TLS_CERT" "$TLS_KEY" "$COMPOSE_FILE" | openssl dgst -sha256 | awk '{print $NF}'
 }
 
 # already_running <digest> -- succeeds when every service of the project is running and the
@@ -452,14 +499,22 @@ function main() {
     validate_media_secret
     require_tls_pair
     read_front_door_ca
-    render_configuration
 
     if [[ -n "$DRY_RUN" ]]; then
-        info "dry run: would start ${PROJECT} from ${COMPOSE_FILE}, serving ${PUBLIC_URL} with webhooks to ${WEBHOOK_URL}"
+        # Rendered, then removed: see the file note. A failure part-way leaves the removal
+        # to _local_up_on_exit.
+        DRY_RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/memql-media-dry-run.XXXXXX")" \
+            || cap_fail 5 "could not make a scratch directory under ${TMPDIR:-/tmp} for the dry run's rendering"
+        render_configuration "$DRY_RUN_DIR"
+        rm -rf "$DRY_RUN_DIR" || cap_fail 5 "could not remove the dry run's rendering at ${DRY_RUN_DIR}"
+        DRY_RUN_DIR=""
+        info "dry run: the configuration renders; nothing was written. A run would render it into ${STATE_DIR} and start ${PROJECT} from ${COMPOSE_FILE}, serving ${PUBLIC_URL} with webhooks to ${WEBHOOK_URL}"
         report
         cap_ok
     fi
 
+    render_configuration "$STATE_DIR"
+    info "rendered the media server's configuration into ${STATE_DIR}"
     start_media_server
     wait_for_answer
     info "media server up: browsers connect to ${PUBLIC_URL}; the bff's control API is LiveKit's port 7880; webhooks go to ${WEBHOOK_URL}"
