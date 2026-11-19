@@ -268,7 +268,7 @@ func (e *MemQLEngine) shareDirectoryFor(ctx context.Context, accountGroupsOnly b
 // then first and last, then a placeholder -- never their email, which a plain
 // user is not entitled to read.
 func sharePersonName(payload map[string]any) string {
-	if name := strings.TrimSpace(stringFromAny(payload["displayName"])); name != "" {
+	if name := NameWithoutEmail(stringFromAny(payload["displayName"])); name != "" {
 		return name
 	}
 	first := strings.TrimSpace(stringFromAny(payload["firstName"]))
@@ -277,6 +277,21 @@ func sharePersonName(payload map[string]any) string {
 		return full
 	}
 	return "Unnamed person"
+}
+
+// NameWithoutEmail keeps an email address out of a name shown to another
+// person. Someone who joined by invitation starts with their email as their
+// display name, so the share directory offered "ana@example.com" to people
+// who may not read emails; a name that IS an address (no spaces, one "@" past
+// the first character) becomes the part before the "@" (Jesús, Nov 18 2026).
+// Any other name, and the empty name, pass through trimmed.
+func NameWithoutEmail(name string) string {
+	name = strings.TrimSpace(name)
+	at := strings.IndexByte(name, '@')
+	if at <= 0 || strings.ContainsAny(name, " \t") || strings.Count(name, "@") != 1 {
+		return name
+	}
+	return name[:at]
 }
 
 func sortShareEntries(entries []shareEntry) {
