@@ -154,7 +154,8 @@ function untilLabel(expiresAt: string): string {
 function leftLabel(expiresAt: string, now: Date): string {
   const ms = new Date(expiresAt).getTime() - now.getTime();
   if (ms <= 0) return "ended";
-  const days = Math.floor(ms / 86_400_000);
-  if (days === 0) return "less than a day left";
+  // Rounded UP, so a share made a moment ago for 7 days reads "7 days left"
+  // and one for 1 day reads "1 day left".
+  const days = Math.ceil(ms / 86_400_000);
   return days === 1 ? "1 day left" : `${days} days left`;
 }
