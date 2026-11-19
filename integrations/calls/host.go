@@ -117,8 +117,10 @@ import (
 // leave time: its last sign of life, which a media server's participant_left records as
 // the disconnect, events.go), and a host seat let back in clears it (service.go). A BOOKED
 // CALL COUNTS FROM ITS BOOKED START AT THE EARLIEST, so a host who opens it early to check
-// it and leaves does not end it before it begins (hostLeft). A HOST WHO NEVER GOT IN NEVER
-// LEFT: a call whose host has been queued since Start counts nothing down. A BOOKED CALL
+// it and leaves does not end it before it begins (hostLeft). An AD HOC CALL whose host
+// never got in counts from that host's explicit leave or expired queue lease, once no
+// host is still waiting. The same durable timestamps drive session reads and reconciliation
+// on every replica; a host still polling in line has not abandoned the call. A BOOKED CALL
 // WHOSE HOST NEVER CAME is its host's until its BOOKED END, and counts from there (design
 // section 8: the host is whoever joins with the host link): the key holder booked that
 // window, so a guest who opens it -- early, on time or late -- waits for the host, and a
@@ -774,8 +776,10 @@ type hostLeftVerdict struct {
 //
 // WHERE THE COUNTDOWN COUNTS FROM is all this decides beside calls.HostLeft:
 //
-//   - An ad hoc call: from hostLeftAt, when its last host seat left. A host who never got
-//     in never left, so a call whose host was queued from Start counts nothing.
+//   - An ad hoc call: from hostLeftAt, when its last host seat left. If no host ever
+//     got in, from the last queued host's explicit leave or queue-lease expiry. A host
+//     still polling in line counts nothing, but abandoning that line cannot leave guests
+//     an unlimited room or hold the key's one call forever (abandonedHostAt).
 //   - A booked call whose host came and left: from the later of hostLeftAt and its booked
 //     start. A host who opens the call early to check it and leaves would otherwise see it
 //     end before it began, booking and all.
@@ -789,8 +793,8 @@ type hostLeftVerdict struct {
 //     stopped polling and never came. COST: guests can hold a hostless booked call, and its
 //     key's one call, until its booked end and the grace.
 //   - A booking that is gone, or carries no start or no end, changes nothing: a host who
-//     left counts from hostLeftAt, and a call whose host never came counts nothing, as an
-//     ad hoc call's does.
+//     left counts from hostLeftAt, and a booked call whose host never came counts
+//     nothing without a booked end.
 //
 // A moment still ahead of now is a countdown that has not begun, which calls.HostLeft
 // answers as none with no deadline, so no seat is shown a countdown before it starts; a key
@@ -801,10 +805,13 @@ func (s *Service) hostLeft(ctx context.Context, v roomView, now time.Time) (host
 		return none, nil
 	}
 	since := v.room.HostLeftAt
-	// A host who never got in never left, so an ad hoc call with none who left counts
-	// nothing; nor does a booked call whose host is in line now.
-	if since.IsZero() && (v.room.ScheduledCallID == "" || v.hostComing(now)) {
-		return none, nil
+	if since.IsZero() {
+		if v.hostComing(now) {
+			return none, nil
+		}
+		if v.room.ScheduledCallID == "" {
+			since = v.abandonedHostAt()
+		}
 	}
 	if v.room.ScheduledCallID != "" {
 		booking, err := s.store.bookingByID(ctx, v.room.OwnerUserID, v.room.ScheduledCallID)
@@ -832,6 +839,72 @@ func (s *Service) hostLeft(ctx context.Context, v roomView, now time.Time) (host
 	}
 	action, deadline := callrules.HostLeft(state, now, v.policy.HostLeftGrace)
 	return hostLeftVerdict{action: action, deadline: deadline, to: to}, nil
+}
+
+// abandonedHostAt is the last host's abandonment of an ad hoc room before any host
+// was admitted. Ask only when no host is present or still polling in line. Explicit
+// leave uses the seat's leftAt; a waiting seat uses its last queue lease's expiry even
+// after another replica marked that entry expired. Never use the reconciliation time:
+// retries, a restarted replica and session reads must agree on one finite deadline.
+// The room's opening is a fallback for an orphaned room with no host/queue rows.
+func (v roomView) abandonedHostAt() time.Time {
+	since := v.room.OpenedAt
+	for _, seat := range v.seats {
+		if !seat.Host {
+			continue
+		}
+		if seat.LeftAt.After(since) {
+			since = seat.LeftAt
+		}
+		if seat.Status != seatWaiting {
+			continue
+		}
+		for _, entry := range v.entries {
+			if entry.SeatID != seat.ID {
+				continue
+			}
+			seen := entry.LastPollAt
+			if seen.IsZero() {
+				seen = entry.EnqueuedAt
+			}
+			if expiry := seen.Add(v.policy.QueueEntryTTL); expiry.After(since) {
+				since = expiry
+			}
+		}
+	}
+	return since
+}
+
+// recordAbandonedHost freezes an ad hoc room's abandonment before a join/poll can
+// replace its expired host lease or create another host waiter. Merely requeueing is
+// not returning to the call: only hostIsBack after admission may clear this record.
+// Callers already hold the room/server gates and have read this load fresh; filtering
+// it to this room avoids extra queries and keeps other sites' rows out of the decision.
+func (s *Service) recordAbandonedHost(ctx context.Context, room roomRow, load serverLoad, policy callrules.Policy, now time.Time) (roomRow, error) {
+	if room.ScheduledCallID != "" || !room.HostLeftAt.IsZero() {
+		return room, nil
+	}
+	v := roomView{room: room, policy: policy}
+	for _, seat := range load.seats {
+		if seat.RoomID == room.ID {
+			v.seats = append(v.seats, seat)
+		}
+	}
+	for _, entry := range load.entries {
+		if entry.RoomID == room.ID {
+			v.entries = append(v.entries, entry)
+		}
+	}
+	if v.hostPresent() || v.hostComing(now) {
+		return room, nil
+	}
+	since := v.abandonedHostAt()
+	version := memql.VersionTimeAfter(room.Version, now)
+	if err := s.store.updateRoom(ctx, room.OwnerUserID, room, map[string]any{"hostLeftAt": since}, version); err != nil {
+		return room, err
+	}
+	room.HostLeftAt, room.Version = since, version
+	return room, nil
 }
 
 // keyHolderIn is the seat a call is handed to when nobody hosting it is in it: a seat in

@@ -138,8 +138,13 @@ A call ends in one of three ways, and its room records which (`endReason`):
 - **`ended`**: a host ended it.
 - **`host_left`**: nobody hosting it has been in it for `hostLeftGrace` (5 minutes). A key
   holder still in the call takes it over at once instead, and a host who comes back
-  within the grace stops the countdown. A host who never got in, because they waited in
-  line from the start, never left, so nothing counts down for them.
+  within the grace stops the countdown. For an ad hoc call whose host never got past
+  the capacity queue, the grace starts when that host hangs up or their queue lease
+  expires (10 minutes after the last recorded poll by default). A host still polling in
+  line has not abandoned the call. Every replica derives the same deadline from the
+  saved leave/poll times, so a delayed reconciliation does not extend it. Once the
+  host abandons the queue, requeueing or repeatedly leaving cannot restart the grace:
+  the host must actually be admitted again to clear it.
 - **`empty`**: the last person in it left with nobody waiting to come in.
 
 **A booked call is its host's until its booked end.** A host who opens it early to check
@@ -860,11 +865,11 @@ reaches it.
   the engine to find the credential by the webhook's issuer first.
 - A removed person who clears their session and comes back through the call's link takes
   a new seat: nothing identifies a person across sessions yet.
-- A call can run with nobody able to host it. An ad hoc call whose host waited in line
-  from the start and gave up, or hung up while still in line, never had a host in it, so
-  nothing counts down: guests let in later hold it, with no host controls, for as long as
-  they stay, and the key's one call with it. A booked call whose host never came is held
-  the same way until its booked end and the grace.
+- A booked call whose host never came holds the key's one call until its booked end
+  and the grace while guests wait behind its lock. An ad hoc call whose queued host
+  abandons it is bounded by the host-left grace after leaving or queue-lease expiry;
+  `TestAdHocCallWhoseQueuedHostGivesUpHasBoundedGrace` covers both paths on independent
+  service instances, along with return and key-holder handover regressions.
 - Everything calls keeps for a deployable belongs to the owner it had when it was
   written. After a deployable changes owner, its keys, bookings and calls open nothing
   (they are read as the new owner), `callsPolicySet` on it fails for good (its policy row

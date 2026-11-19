@@ -924,6 +924,11 @@ func (s *Service) joinGated(ctx context.Context, site callrules.SiteRef, room ro
 	if err != nil {
 		return callrules.JoinResult{}, out, seatRow{}, err
 	}
+	remembered, err := s.recordAbandonedHost(fresh, *current, load, policy, now)
+	if err != nil {
+		return callrules.JoinResult{}, out, seatRow{}, err
+	}
+	*current = remembered
 	ttls, err := s.queueLifetimes(fresh, site, policy, load)
 	if err != nil {
 		return callrules.JoinResult{}, out, seatRow{}, err
@@ -1202,6 +1207,10 @@ func (s *Service) answerWaiting(ctx context.Context, site callrules.SiteRef, roo
 	if err != nil {
 		return callrules.JoinResult{}, seatRow{}, err
 	}
+	room, err = s.recordAbandonedHost(ctx, room, load, policy, now)
+	if err != nil {
+		return callrules.JoinResult{}, seatRow{}, err
+	}
 	ttls, err := s.queueLifetimes(ctx, site, policy, load)
 	if err != nil {
 		return callrules.JoinResult{}, seatRow{}, err
@@ -1443,7 +1452,10 @@ func (s *Service) leaveGated(ctx context.Context, owner string, room roomRow, se
 		}
 		return seat, true, nil
 	}
-	if seat.Host && seat.occupying() && !v.hostPresent() && current.HostLeftAt.IsZero() {
+	// An ad hoc host abandoning the queue starts the same grace as a host leaving
+	// media, once no other host is still in line. A later requeue must not restart it.
+	if seat.Host && !v.hostPresent() && current.HostLeftAt.IsZero() &&
+		(seat.occupying() || (current.ScheduledCallID == "" && !v.hostComing(now))) {
 		if err := s.store.updateRoom(fresh, owner, *current, map[string]any{"hostLeftAt": now}, memql.VersionTimeAfter(current.Version, now)); err != nil {
 			return seat, false, err
 		}

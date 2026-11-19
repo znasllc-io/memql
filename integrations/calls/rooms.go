@@ -253,9 +253,10 @@ func (s *Store) keyByID(ctx context.Context, owner, keyID string) (*Key, error) 
 
 // roomRow is one v1:calls:room. Its ids are BARE and its digests are never read back.
 // ScheduledCallID names the booking a booked call's room was opened for, and is empty for
-// an ad hoc call's. HostLeftAt is when the last host seat in the call left, the zero time
-// while a host is in it or none ever was. ShareSeatID and ShareStartedAt are the newest
-// screen share the media server reported (events.go), the zero time before any.
+// an ad hoc call's. HostLeftAt is when the last host left, including an ad hoc host
+// abandoning its queue; the zero time while a host is in it or none has left/abandoned.
+// ShareSeatID and ShareStartedAt are the newest screen share the media server reported
+// (events.go), the zero time before any.
 type roomRow struct {
 	ID, SiteID, OwnerUserID, KeyID, MediaServerID, MediaRoom, Status, HostSeatID string
 	ScheduledCallID, EndReason, ShareSeatID                                      string
