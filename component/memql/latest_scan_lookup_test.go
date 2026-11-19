@@ -97,7 +97,7 @@ func TestLatestScanKeysLookUpOnlyMandatorySetTermsOnALookupField(t *testing.T) {
 // spells `status == "open"` as the trait isOpen(row) (TestNoInlineTraitablePredicates),
 // so the reference is expanded for the enumeration: its body's terms count as the
 // read's own, and a partial lookup index whose equality the trait supplies serves
-// the read (the calls capacity read, ruling final I3). A reference under OR or NOT
+// the read (the calls capacity read). A reference under OR or NOT
 // is not required, and an unknown one adds nothing.
 func TestLatestScanKeysReadTheTermsATopLevelTraitRequires(t *testing.T) {
 	specs := newSpecRegistry()

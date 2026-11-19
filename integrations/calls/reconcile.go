@@ -41,7 +41,7 @@ import (
 //     lastSeenRefresh old, so a present seat costs one write per two minutes and not one
 //     per pass, and a record that it went missing (absentSince) is cleared. A seat the
 //     list does not show is MISSING, and absence, not the age of its stamp, decides
-//     (calls.SeatAbsent, ruling final I2): the first pass to miss it records when
+//     (calls.SeatAbsent): the first pass to miss it records when
 //     (absentSince) and closes nothing, and it is closed (left) once it has been missing
 //     for a pass's lifetime from then, or from a later sign of life -- before that it may
 //     still be connecting on the pass it was handed, or coming back -- AT its last sign of

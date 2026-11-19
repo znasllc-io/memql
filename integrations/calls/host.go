@@ -119,10 +119,11 @@ import (
 // CALL COUNTS FROM ITS BOOKED START AT THE EARLIEST, so a host who opens it early to check
 // it and leaves does not end it before it begins (hostLeft). A HOST WHO NEVER GOT IN NEVER
 // LEFT: a call whose host has been queued since Start counts nothing down. A BOOKED CALL
-// WHOSE HOST NEVER CAME is its host's until its BOOKED END, and counts from there (ruling
-// final I1): the key holder booked that window, so a guest who opens it -- early, on time
-// or late -- waits for the host, and a host who is late is let in by the host link inside
-// it rather than finding both links dead. While a host seat of the call waits in line with
+// WHOSE HOST NEVER CAME is its host's until its BOOKED END, and counts from there (design
+// section 8: the host is whoever joins with the host link): the key holder booked that
+// window, so a guest who opens it -- early, on time or late -- waits for the host, and a
+// host who is late is let in by the host link inside it rather than finding both links
+// dead. While a host seat of the call waits in line with
 // a live place, the host is coming and nothing counts. A host seat passes the lock, so it
 // only ever waits in line: once its place has expired (its holder stopped polling) the
 // host never came, and the countdown runs from the booked end. A call with a KEY HOLDER in
@@ -778,7 +779,7 @@ type hostLeftVerdict struct {
 //   - A booked call whose host came and left: from the later of hostLeftAt and its booked
 //     start. A host who opens the call early to check it and leaves would otherwise see it
 //     end before it began, booking and all.
-//   - A BOOKED CALL WHOSE HOST NEVER CAME: from its booked END (ruling final I1). The key
+//   - A BOOKED CALL WHOSE HOST NEVER CAME: from its booked END. The key
 //     holder booked that window, and a host who has not come yet is late, not gone: a
 //     guest who opened the call, early, on time or late, waits for them, and the host link
 //     lets them in until then. With endsEmpty, which ends a booked call empty only after its

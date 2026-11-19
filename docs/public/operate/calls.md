@@ -199,9 +199,9 @@ The media server's own list of participants is the truth, and the events only fo
 So every 30 seconds one bff replica, the holder of the cluster lease `calls-reconcile`,
 repairs every open call against that list: it closes the seats whose participant has
 stayed gone for `passTtl` (above), disconnects every participant that holds no seat of
-the call (a pass cannot be revoked,
-so this is what keeps a removed person out), expires the places in line nobody polls,
-applies the countdown and ends the calls nobody is in. It hands out no pass.
+the call (a pass cannot be revoked, so this is what keeps a removed person out), expires
+the places in line nobody polls, applies the countdown and ends the calls nobody is in.
+It hands out no pass.
 
 ### What is stored
 
@@ -306,8 +306,8 @@ repository.
    ```
 
    `MEMQL_TOKEN` reading `null` means the approval had not landed yet: run the same
-   command again after a few seconds. The token lasts 15 minutes. The code expires after
-   10 ([Device code](auth/sign-in-paths.md#device-code)).
+   command again after a few seconds. The token lasts 15 minutes by default, and the code
+   expires after 10 ([Device code](auth/sign-in-paths.md#device-code)).
 
 2. **Write the calls as a program** in the checkout, at `calls-setup/main.go` at the top of
    the repository, so it is part of the module that holds the SDK:
@@ -643,11 +643,12 @@ server's public IPv4 from Hetzner's metadata, the webhook URL
 `https://api.<domain>/inbound/livekit`, and its TURN server on), renders Caddy's for the
 two names, starts the server, and waits until both names answer through Caddy: LiveKit
 at the public host, and a TLS handshake with a certificate for the TURN name (what
-answers behind that name is TURN, so the handshake is the whole check; each attempt gives
-up after 10 seconds, so a name that never completes TLS cannot hold the command). If it reports
-either missing, the server is started but Caddy has no certificate for that name yet:
-check the records from step 2 and that ports 80 and 443 reach the server, then run the
-same command again, which changes nothing already in place and checks again.
+answers behind that name is TURN, so the handshake is the whole check; each attempt
+gives up after 10 seconds, so a name that never completes TLS cannot hold the command).
+If it reports either missing, the server is started but Caddy has no certificate for
+that name yet: check the records from step 2 and that ports 80 and 443 reach the server,
+then run the same command again, which changes nothing already in place and checks
+again.
 
 Then put the same file in the instance's `memql-calls-media` Secret, the way the
 instance keeps its Secrets: an entry in its secret store that its ExternalSecret reads,

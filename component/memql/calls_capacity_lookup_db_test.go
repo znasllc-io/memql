@@ -57,7 +57,7 @@ func TestCallsCapacityReadsStartFromTheirLookups(t *testing.T) {
 	}
 }
 
-// THE OPEN ROOMS READ ENUMERATES ONLY ROOMS WITH AN OPEN VERSION KEPT (ruling final I3). The
+// THE OPEN ROOMS READ ENUMERATES ONLY ROOMS WITH AN OPEN VERSION KEPT. The
 // capacity count every join, start and poll makes under its media server's gate reads the
 // server's open rooms, and the lookup it starts from holds only the versions of a room
 // written while it was open (memory_nodes_calls_open_room_lookup_idx, partial on status).

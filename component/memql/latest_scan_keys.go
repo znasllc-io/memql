@@ -178,7 +178,7 @@ func latestScanLowerBounds(expr ExpressionNode) []compiledExpression {
 // DSL requires (test/dslconformance TestNoInlineTraitablePredicates). So a
 // reference is expanded through specBody and its body's payload lookup terms
 // count, which is what lets a partial lookup index serve the read (the calls
-// capacity read's open rooms, ruling final I3; payloadLookupFor requires every
+// capacity read's open rooms; payloadLookupFor requires every
 // equality of a partial index). Only terms are taken from a body, never the
 // concept or an id comparison, which the read itself names; a reference under
 // OR or NOT is not required and is not expanded, and a body is read at most

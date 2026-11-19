@@ -108,7 +108,7 @@ func TestReconcileRepairsMissedAndReorderedEvents(t *testing.T) {
 
 // TestAPassThatMissesSeatsClosesNothingUntilTheyStayGone: a seat closes only once it has
 // been missing for a pass's lifetime, counted from the first pass that found it missing,
-// never from the age of its last stamp (ruling final I2). Every seat of a call is refreshed
+// never from the age of its last stamp. Every seat of a call is refreshed
 // in the same pass, so every stamp in it is two minutes old at once; when the media server
 // restarts, the pass that lands before anybody is back finds every seat missing, and must
 // close none of them, or the call ends empty with everybody about to return. The seats

@@ -13,7 +13,7 @@ const (
 	callsOpenRoomLookupIndexName     = "memory_nodes_calls_open_room_lookup_idx"
 )
 
-// THE CAPACITY READ TAKES ONLY OPEN ROOMS (ruling final I3). Every join, start and queue
+// THE CAPACITY READ TAKES ONLY OPEN ROOMS. Every join, start and queue
 // poll counts the occupied seats of a media server's OPEN rooms (callsOpenRoomsOnServer)
 // under the server's write gate, and the lookup index 20261118120000 built for that read
 // holds every version of every room ever placed on the server: the engine takes each id it

@@ -195,7 +195,7 @@ const (
 // a front such as Azure Front Door reaches the ingress from the front's egress addresses, so
 // the right-most entry is the front's, and every visitor arriving through one front address
 // shares each per-address budget below: one of them flooding spends everybody's. KNOWN
-// LIMITATION (ruling final B-I1), carried to launch hardening, before public traffic: the
+// LIMITATION, carried to launch hardening, before public traffic: the
 // edge keys on the visitor's own address only once the front is proven by a value it adds.
 // What part 1 ships is the minimum: the hang-up and the host's controls have a bucket of
 // their own, so the polls of everybody behind one front address cannot keep a person from

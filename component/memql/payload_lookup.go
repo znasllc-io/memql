@@ -76,11 +76,11 @@ var payloadLookups = []payloadLookup{
 	{index: "memory_nodes_calls_key_lookup_idx", field: "keyId", concepts: []string{"v1:calls:room", "v1:calls:scheduledCall"}},
 	// The capacity read every join, start and queue poll makes: the open rooms of one
 	// media server, whose seats every call on it shares. It requires an open room, so
-	// it is served by the index of the versions written while a room was open (ruling
-	// final I3), listed first so payloadLookupFor finds it before the index of every
-	// version below: with v1:calls:room keeping only its newest version past a day, an
-	// ended room leaves this one, and the read costs the server's open rooms and the
-	// rooms open on it within the last day rather than its whole history.
+	// it is served by the index of the versions written while a room was open, listed
+	// first so payloadLookupFor finds it before the index of every version below: with
+	// v1:calls:room keeping only its newest version past a day, an ended room leaves
+	// this one, and the read costs the server's open rooms and the rooms open on it
+	// within the last day rather than its whole history.
 	{index: "memory_nodes_calls_open_room_lookup_idx", field: "mediaServerId", concepts: []string{"v1:calls:room"},
 		partial: []payloadEquality{{"status", "open"}}},
 	// Every version of every room placed on a media server (migration 20261118120000),

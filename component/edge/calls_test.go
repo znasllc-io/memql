@@ -962,7 +962,7 @@ func TestCallsRateLimitsUnlockAndJoinSeparately(t *testing.T) {
 		if rec := serveAccess(h, join("203.0.113.9")); rec.Code != http.StatusOK {
 			t.Fatalf("a join after the polls = %d, want 200", rec.Code)
 		}
-		// THE POLLS CANNOT SPEND THE HANG-UP OR THE HOST'S CONTROLS (ruling final B-I1):
+		// THE POLLS CANNOT SPEND THE HANG-UP OR THE HOST'S CONTROLS:
 		// behind a fronting proxy everybody arriving through one front address shares that
 		// address's budget, and a crowd's polls must not leave a person unable to leave.
 		for _, name := range controls {

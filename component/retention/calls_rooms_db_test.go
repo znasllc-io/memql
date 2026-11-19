@@ -14,7 +14,7 @@ import (
 // expire after a day (dsl/calls/concepts.memql; pinned by component/memql
 // calls_concepts_test.go TestCallsRoomKeepsOnlyItsNewestVersionPastADay).
 //
-// WHY IT MATTERS (ruling final I3): every join, start and poll counts its media server's
+// WHY IT MATTERS: every join, start and poll counts its media server's
 // load under the server's write gate, starting from the open rooms of the server, and the
 // lookup that read starts from holds only the versions written while a room was open. An
 // ended room leaves that index only once its superseded open versions are gone, so this is

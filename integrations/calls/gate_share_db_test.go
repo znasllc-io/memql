@@ -20,7 +20,7 @@ import (
 )
 
 // gate_share_db_test.go -- calls decisions take a bounded share of the process's write-gate
-// pool (service.go gates, ruling final I4), against a real engine, a real database and a
+// pool (service.go gates), against a real engine, a real database and a
 // gate pool shaped as the bff's.
 //
 // Postgres-gated: an unreachable database skips, and MEMQL_REQUIRE_DB=1 turns the skip

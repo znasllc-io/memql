@@ -669,7 +669,7 @@ func (s *Store) loadOn(ctx context.Context, server MediaServer) (serverLoad, err
 // for, as the cluster acting, ordered by id: the first of loadOn's reads, and the calls
 // reconciliation walks (reconcile.go).
 //
-// WHAT IT COSTS (ruling final I3): the read requires an open room (isOpen), so it starts
+// WHAT IT COSTS: the read requires an open room (isOpen), so it starts
 // from the lookup index of the versions written while a room was open (migration
 // 20261119120000), and v1:calls:room keeps only its newest version past a day
 // (@retention), so an ended room leaves that index a day after it ended. It enumerates

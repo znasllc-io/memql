@@ -111,7 +111,7 @@ func TestCallsHotReadsHaveLookupIndexes(t *testing.T) {
 		}
 	}
 	// THE CAPACITY READ REQUIRES AN OPEN ROOM, and the index that serves it holds only the
-	// versions written while a room was open (ruling final I3).
+	// versions written while a room was open.
 	server := payloadLookupTerm{field: "mediaServerId", values: []string{"v1:calls:mediaServer:m1"}}
 	open := payloadLookupTerm{field: "status", values: []string{"open"}}
 	lookup, ok := payloadLookupFor("v1:calls:room", server, []payloadLookupTerm{server, open})
@@ -121,7 +121,7 @@ func TestCallsHotReadsHaveLookupIndexes(t *testing.T) {
 }
 
 // TestCallsRoomKeepsOnlyItsNewestVersionPastADay pins the declaration the capacity read's
-// bound rests on (ruling final I3): a room's superseded versions expire a day after they
+// bound rests on: a room's superseded versions expire a day after they
 // are written, unarchived, and its newest version stays for good. The open-room lookup
 // holds only the versions written while a room was open, so an ended room, once its
 // superseded versions have expired, leaves it, and the read a media server's every join

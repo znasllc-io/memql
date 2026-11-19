@@ -143,7 +143,7 @@ type SeatAbsence struct {
 }
 
 // SeatAbsent decides a seat in a call whose identity the media server does not show on a
-// pass. ABSENCE DECIDES, NOT THE AGE OF A STAMP (ruling final I2): a present seat's
+// pass. ABSENCE DECIDES, NOT THE AGE OF A STAMP: a present seat's
 // lastSeenAt is refreshed only every so often, so it is routinely as old as the grace, and
 // a rule on its age alone closed a seat on the first pass that missed it -- every seat of a
 // call at once when a media server restarted and the pass landed before anybody was back.

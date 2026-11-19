@@ -77,7 +77,7 @@ import (
 // for. A room's server never changes after placement, so it is read before the gates are
 // taken and the room is read again inside them.
 //
-// THE GATES TAKE A BOUNDED SHARE OF THE PROCESS'S GATE POOL (gates, ruling final I4): at
+// THE GATES TAKE A BOUNDED SHARE OF THE PROCESS'S GATE POOL (gates): at
 // most callsGateShare calls decisions hold a write-gate connection at once in one process,
 // and the rest wait in the process for a slot, so a burst of decisions behind one server's
 // lock never holds the connections every other feature's write gates in the process need.
@@ -1510,7 +1510,7 @@ func (s *Service) movedSession(err error) error {
 // keeps as key, booking, room, server (see the file note), within the calls share of the
 // process's gate pool.
 //
-// A BOUNDED SHARE OF THE POOL (ruling final I4). The gate pool is the process's, every
+// A BOUNDED SHARE OF THE POOL. The gate pool is the process's, every
 // write gate of every feature takes its connection there (component/database gate_pool.go:
 // four per process), and a gate holds its connection from the moment it asks for its
 // locks, waiting included. Calls decisions serialize on a few locks -- every join, poll and
