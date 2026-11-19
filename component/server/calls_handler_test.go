@@ -139,12 +139,15 @@ type callsFakeService struct {
 	siteErr        error
 	// sessions are the tokens the service honours, and what each one is.
 	sessions map[string]calls.Session
-	// rosters are what Roster answers, by session token: the call a host seat is in. A
-	// token with none answers no roster, as the service answers a guest's seat, a host seat
-	// outside the call and an ended call.
-	rosters  map[string]*calls.Roster
-	refusals map[string]callsFakeRefusal
-	got      []callsFakeCall
+	// rosters are the roster SessionCall answers, by session token: the call a host seat is
+	// in, so a token with one is a host's. A token with none answers no roster and no host,
+	// as the service answers a guest's seat, a host seat outside the call and an ended call.
+	rosters map[string]*calls.Roster
+	// countdowns are when the host-left countdown of the token's call ends, for a token
+	// whose call is counting down.
+	countdowns map[string]time.Time
+	refusals   map[string]callsFakeRefusal
+	got        []callsFakeCall
 }
 
 func (f *callsFakeService) record(c callsFakeCall) {
@@ -228,15 +231,16 @@ func (f *callsFakeService) Session(_ context.Context, site calls.SiteRef, token 
 	return f.known(calls.Session{Token: token, Site: site})
 }
 
-func (f *callsFakeService) Roster(_ context.Context, sess calls.Session) (*calls.Roster, error) {
-	f.record(callsFakeCall{op: "Roster", session: &sess})
-	if r, ok := f.refusal("Roster"); ok {
-		return nil, r.err
+func (f *callsFakeService) SessionCall(_ context.Context, sess calls.Session) (calls.SeatCall, error) {
+	f.record(callsFakeCall{op: "SessionCall", session: &sess})
+	if r, ok := f.refusal("SessionCall"); ok {
+		return calls.SeatCall{}, r.err
 	}
 	if _, err := f.known(sess); err != nil {
-		return nil, err
+		return calls.SeatCall{}, err
 	}
-	return f.rosters[sess.Token], nil
+	roster := f.rosters[sess.Token]
+	return calls.SeatCall{Host: roster != nil, Roster: roster, CountdownEndsAt: f.countdowns[sess.Token]}, nil
 }
 
 func (f *callsFakeService) Start(_ context.Context, sess calls.Session, body calls.StartBody) (calls.StartResult, error) {
@@ -397,11 +401,12 @@ func newCallsRig(t *testing.T) *callsRig {
 	secrets := newCallsSecrets(t)
 	svc := &callsFakeService{
 		t: t, secrets: secrets,
-		site:     &CallsSite{ID: callsTestSite, OwnerUserID: callsTestOwner, DeployableName: callsTestDeployable, Calls: true},
-		admits:   map[string]bool{callsTestOwner: true, callsTestMember: true},
-		sessions: map[string]calls.Session{},
-		rosters:  map[string]*calls.Roster{},
-		refusals: map[string]callsFakeRefusal{},
+		site:       &CallsSite{ID: callsTestSite, OwnerUserID: callsTestOwner, DeployableName: callsTestDeployable, Calls: true},
+		admits:     map[string]bool{callsTestOwner: true, callsTestMember: true},
+		sessions:   map[string]calls.Session{},
+		rosters:    map[string]*calls.Roster{},
+		countdowns: map[string]time.Time{},
+		refusals:   map[string]callsFakeRefusal{},
 	}
 	// THE SITE'S KEY HOLDER IS ALREADY IN, so every route that takes a session has one to
 	// take. unlock mints the same token again, which is the fake keeping one row per key.
@@ -971,7 +976,7 @@ func TestACallsBodyIsRefusedBeforeAnythingIsRead(t *testing.T) {
 func TestWhatACallsRequestCosts(t *testing.T) {
 	rig := newCallsRig(t)
 	want := map[string][]string{
-		"unlock": {"SiteAsOwner", "Unlock"}, "session": {"SiteAsOwner", "Session", "Roster"},
+		"unlock": {"SiteAsOwner", "Unlock"}, "session": {"SiteAsOwner", "Session", "SessionCall"},
 		"start": {"SiteAsOwner", "Start"}, "schedule": {"SiteAsOwner", "Schedule"},
 		"reschedule": {"SiteAsOwner", "Reschedule"}, "cancel": {"SiteAsOwner", "Cancel"},
 		"join": {"SiteAsOwner", "Join"}, "queue": {"SiteAsOwner", "Queue"},
@@ -1294,7 +1299,7 @@ func TestAHostsSessionCarriesTheCallsRoster(t *testing.T) {
 		rec := rig.get("/calls/session", rig.secrets.hostSession)
 		assertCallsReply(t, rec, http.StatusOK,
 			`{"kind":"host","keyId":"key1","seatId":"seat1","roomId":"room1","expiresAt":"2026-11-19T12:00:00Z","expiresInMs":86400000}`)
-		if got := rig.svc.ops(); !reflect.DeepEqual(got, []string{"SiteAsOwner", "Session", "Roster"}) {
+		if got := rig.svc.ops(); !reflect.DeepEqual(got, []string{"SiteAsOwner", "Session", "SessionCall"}) {
 			t.Fatalf("calls = %v: the service was not asked, so the handler decided who is a host", got)
 		}
 	})
@@ -1309,7 +1314,7 @@ func TestAHostsSessionCarriesTheCallsRoster(t *testing.T) {
 		rec := rig.get("/calls/session", rig.secrets.hostSession)
 		assertCallsReply(t, rec, http.StatusOK,
 			`{"kind":"host","keyId":"key1","seatId":"seat1","roomId":"room1","expiresAt":"2026-11-19T12:00:00Z","expiresInMs":86400000,`+
-				`"roster":{"locked":false,"inCall":[`+
+				`"host":true,"roster":{"locked":false,"inCall":[`+
 				`{"seat":"seat1","displayName":"Ada","kind":"person","host":true,"status":"in_call","identity":"identity1"},`+
 				`{"seat":"seat2","displayName":"Grace","kind":"person","host":false,"status":"admitted","identity":"identity2"}],`+
 				`"waiting":[]}}`)
@@ -1352,15 +1357,64 @@ func TestAHostsSessionCarriesTheCallsRoster(t *testing.T) {
 
 	t.Run("a roster that could not be read is answered as any failure", func(t *testing.T) {
 		rig := newCallsRig(t)
-		rig.svc.refusals["Roster"] = callsFakeRefusal{err: calls.ErrNoSession}
+		rig.svc.refusals["SessionCall"] = callsFakeRefusal{err: calls.ErrNoSession}
 		rec := rig.get("/calls/session", rig.secrets.hostSession)
 		assertCallsReply(t, rec, http.StatusUnauthorized, `{"error":"no_session"}`)
 		assertCallsCookieCleared(t, rec)
 
-		rig.svc.refusals["Roster"] = callsFakeRefusal{err: errors.New("calls: read the room's seats: the engine did not complete the statement")}
+		rig.svc.refusals["SessionCall"] = callsFakeRefusal{err: errors.New("calls: read the room's seats: the engine did not complete the statement")}
 		rec = rig.get("/calls/session", rig.secrets.hostSession)
 		assertCallsReply(t, rec, http.StatusBadGateway, `{"error":"failed"}`)
 		assertNoCallsCookie(t, rec)
+	})
+}
+
+// EVERY SEAT'S SESSION SAYS WHETHER IT HOSTS ITS CALL AND WHEN THE HOST-LEFT COUNTDOWN ENDS
+// (design section 8, "End": a countdown on screen). The service decides both from the
+// rows (integrations/calls host.go SessionCall); the reply carries `host` only when it is
+// true and `countdownEndsAt` only while a countdown runs, in RFC 3339 on the service's
+// clock, which a page counts down from against the reply's own expiresAt and expiresInMs.
+func TestASeatsSessionSaysWhetherItHostsAndWhenTheCountdownEnds(t *testing.T) {
+	guest := func(rig *callsRig) string {
+		rig.svc.sessions[rig.secrets.guestSession] = calls.Session{Kind: calls.SessionGuest, SeatID: "seat2", RoomID: callsTestRoomID,
+			ExpiresAt: callsT0.Add(calls.SessionLifetime), Site: calls.SiteRef{SiteID: callsTestSite}}
+		return rig.secrets.guestSession
+	}
+
+	t.Run("a guest whose host left is told when the call ends, and is not told it hosts", func(t *testing.T) {
+		rig := newCallsRig(t)
+		token := guest(rig)
+		rig.svc.countdowns[token] = callsT0.Add(4*time.Minute + 30*time.Second)
+		assertCallsReply(t, rig.get("/calls/session", token), http.StatusOK,
+			`{"kind":"guest","seatId":"seat2","roomId":"room1","expiresAt":"2026-11-19T12:00:00Z","expiresInMs":86400000,`+
+				`"countdownEndsAt":"2026-11-18T12:04:30Z"}`)
+	})
+
+	t.Run("a host's session says it hosts, beside its roster, and no countdown", func(t *testing.T) {
+		rig := newCallsRig(t)
+		rig.svc.rosters[rig.secrets.hostSession] = &calls.Roster{InCall: []calls.RosterSeat{{Seat: callsTestSeatID, Host: true, Status: "in_call"}}}
+		var body map[string]json.RawMessage
+		rec := rig.get("/calls/session", rig.secrets.hostSession)
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("not an object: %v: %s", err, rec.Body.String())
+		}
+		if string(body["host"]) != "true" || body["roster"] == nil {
+			t.Fatalf("a host's session reply is %s, want host true beside the roster", rec.Body.String())
+		}
+		if _, counting := body["countdownEndsAt"]; counting {
+			t.Fatalf("a host's session reply carries a countdown: %s", rec.Body.String())
+		}
+	})
+
+	t.Run("a seat with neither is told neither", func(t *testing.T) {
+		rig := newCallsRig(t)
+		token := guest(rig)
+		rec := rig.get("/calls/session", token)
+		for _, field := range []string{`"host"`, `"countdownEndsAt"`} {
+			if strings.Contains(rec.Body.String(), field) {
+				t.Fatalf("a guest's session with no countdown carries %s: %s", field, rec.Body.String())
+			}
+		}
 	})
 }
 

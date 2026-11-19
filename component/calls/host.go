@@ -43,6 +43,23 @@ type RosterWaiter struct {
 	Since                   time.Time
 }
 
+// SeatCall is what a session seated in an open call is told about that call when it asks
+// after itself, which every seat's page does while it is in the call (design section 8,
+// "End": the host-left countdown is shown on screen). Host is whether the seat hosts the
+// call now: a host seat admitted or in the call, which is how a key holder the call was
+// handed to learns it is theirs, since a hand-over hands out no new pass. CountdownEndsAt
+// is when the call ends unless a host is back first, while the host-left countdown runs:
+// HostLeft's deadline, the same instant for every seat, and still said once it has passed
+// until a pass has ended the call; the zero time when no countdown runs. Roster is the
+// call as its host controls name it, for a host and nobody else. The zero SeatCall is
+// what a session seated nowhere, a seat that left or was removed, and a seat of an ended
+// call are told.
+type SeatCall struct {
+	Host            bool
+	CountdownEndsAt time.Time
+	Roster          *Roster
+}
+
 // The host controls (design section 7.7, "Host controls"). Each is stable: a client
 // sends it as written.
 const (

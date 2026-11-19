@@ -378,14 +378,14 @@ func (s *Service) reconcileGated(ctx context.Context, server MediaServer, hint r
 			return reconcilePlan{}, err
 		}
 	}
-	action, to, err := s.hostLeft(fresh, v, now)
+	verdict, err := s.hostLeft(fresh, v, now)
 	if err != nil {
 		return reconcilePlan{}, err
 	}
 	due := false
-	switch action {
+	switch verdict.action {
 	case callrules.HostLeftHandOver:
-		if err := s.handOver(fresh, v, *to, now); err != nil {
+		if err := s.handOver(fresh, v, *verdict.to, now); err != nil {
 			return reconcilePlan{}, err
 		}
 		tally.handedOver++
@@ -465,8 +465,8 @@ func (s *Service) endIfDue(ctx context.Context, hint roomRow) (bool, error) {
 	if empty {
 		return true, s.endRows(fresh, v, callrules.EndReasonEmpty, now)
 	}
-	action, _, err := s.hostLeft(fresh, v, now)
-	if err != nil || action != callrules.HostLeftEnd {
+	verdict, err := s.hostLeft(fresh, v, now)
+	if err != nil || verdict.action != callrules.HostLeftEnd {
 		return false, err
 	}
 	return true, s.endRows(fresh, v, callrules.EndReasonHostLeft, now)

@@ -20,6 +20,11 @@ func TestHostLeftCountdown(t *testing.T) {
 		{"within grace", HostState{HostLeftAt: left}, left.Add(4 * time.Minute), HostLeftCountdown, left.Add(grace)},
 		{"at deadline ends", HostState{HostLeftAt: left}, left.Add(grace), HostLeftEnd, left.Add(grace)},
 		{"after grace", HostState{HostLeftAt: left}, left.Add(6 * time.Minute), HostLeftEnd, left.Add(grace)},
+		// A countdown that has not begun -- a booked call's runs from its booked start, or
+		// from its booked end for a host who never came -- is none yet, and says no deadline.
+		{"not begun", HostState{HostLeftAt: left}, left.Add(-time.Second), HostLeftNone, time.Time{}},
+		{"not begun, a key holder in the call", HostState{HostLeftAt: left, OtherKeyHolderSeat: "seat1"}, left.Add(-time.Hour), HostLeftHandOver, time.Time{}},
+		{"just begun", HostState{HostLeftAt: left}, left, HostLeftCountdown, left.Add(grace)},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

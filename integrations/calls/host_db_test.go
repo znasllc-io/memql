@@ -408,58 +408,120 @@ func TestHostLeftCountdownEndsOrHandsOver(t *testing.T) {
 	require.True(t, rowTime(roomD, "hostLeftAt").IsZero())
 }
 
-// TestABookedCallWhoseHostNeverCameCountsFromItsStart: a booked call opened by a guest
-// waits for its host, who may never come. The host-left countdown runs from the booked
-// start -- not from the early opening, which would cut the host's own minutes -- and when
-// it runs out the call ends host_left and its booking is marked ended. A call opened
-// after its start counts from its opening, so a guest who is late does not open a call
-// that is already over.
-func TestABookedCallWhoseHostNeverCameCountsFromItsStart(t *testing.T) {
+// TestABookedCallWhoseHostNeverCameWaitsForItUntilItsEnd: a booked call is its host's for
+// the window its key holder booked. A guest who opens it -- early, on time or late -- waits
+// behind its lock, and a host who never came has not left, so no countdown runs before the
+// booked end: an interviewer six minutes late, a minute past where a countdown from the
+// booked start would have run out, is let in by the host link and lets the candidate in.
+// After the booked end the countdown runs from the end: a call a guest still waits in ends
+// host_left a grace later, not empty, because somebody is still waiting to come in, and
+// its booking is marked ended.
+func TestABookedCallWhoseHostNeverCameWaitsForItUntilItsEnd(t *testing.T) {
 	cw := newCallWorld(t, "nohost", 50)
 	if cw == nil {
 		return
 	}
+	ctx := context.Background()
 	grace := callrules.DefaultPolicy().HostLeftGrace
-	sess := cw.host()
-	early := cw.booked(sess, 5*time.Minute, 30, "Opened early")
-	opened, _, err := cw.join(early.GuestToken, "Early guest")
-	require.NoError(t, err)
-	require.Equal(t, callrules.OutcomeWait, opened.Outcome)
-	roomID, _ := cw.bookingRoom(early.ID)
 
-	cw.clock.Advance(early.Start.Sub(cw.clock.Now()) + grace - time.Second)
+	// The candidate opens the interview early and waits behind its lock.
+	interview := cw.booked(cw.host(), 5*time.Minute, 30, "Late interviewer")
+	waits, candidate, err := cw.join(interview.GuestToken, "Candidate")
+	require.NoError(t, err)
+	require.Equal(t, callrules.OutcomeWait, waits.Outcome)
+	roomID, _ := cw.bookingRoom(interview.ID)
+
+	// The automation's passes, every thirty seconds, to the booked start plus six minutes:
+	// none ends the call.
+	for late := interview.Start.Add(grace + time.Minute); cw.clock.Now().Before(late); {
+		cw.clock.Advance(30 * time.Second)
+		cw.reconcile()
+		require.Equal(t, "open", cw.row(roomConcept, roomID)["status"], "a booked call whose host never came was ended inside its booked window")
+	}
+	require.Equal(t, callrules.BookingStarted, cw.row(scheduledCallConcept, interview.ID)["status"])
+
+	// The interviewer arrives, by the host link, is let into the call and lets the
+	// candidate in.
+	in, interviewer, err := cw.joinBy(callrules.JoinBody{HostToken: interview.HostToken, Name: "Interviewer"})
+	require.NoError(t, err, "the host link was refused inside the booked window")
+	require.Equal(t, callrules.OutcomeAdmit, in.Outcome, "a host arriving late inside the booked window was not let in")
+	require.Equal(t, roomID, interviewer.RoomID, "the host was let into another room")
+	require.NoError(t, cw.act(interviewer, callrules.HostAdmit, candidate.SeatID))
+	admitted, err := cw.svc.Queue(ctx, candidate)
+	require.NoError(t, err)
+	require.Equal(t, callrules.OutcomeAdmit, admitted.Outcome, "the late host could not let the candidate in")
+
+	// Nobody hosting it ever comes: the candidate waits through the booked window, and the
+	// countdown runs from the booked end.
+	unhosted := cw.booked(cw.host(), 5*time.Minute, 30, "No interviewer")
+	cw.advanceTo(unhosted.Start)
+	waits, _, err = cw.join(unhosted.GuestToken, "Candidate")
+	require.NoError(t, err)
+	require.Equal(t, callrules.OutcomeWait, waits.Outcome)
+	unhostedRoom, _ := cw.bookingRoom(unhosted.ID)
+	cw.advanceTo(unhosted.End)
 	cw.reconcile()
-	require.Equal(t, "open", cw.row(roomConcept, roomID)["status"], "the countdown ran from the early opening")
+	require.Equal(t, "open", cw.row(roomConcept, unhostedRoom)["status"], "the call ended at its booked end with somebody still waiting")
+	cw.advanceTo(unhosted.End.Add(grace - time.Second))
+	cw.reconcile()
+	require.Equal(t, "open", cw.row(roomConcept, unhostedRoom)["status"], "the countdown from the booked end ran out early")
 	cw.clock.Advance(time.Second)
 	cw.reconcile()
-	room := cw.row(roomConcept, roomID)
-	require.Equal(t, "ended", room["status"], "a booked call whose host never came stayed open past the countdown")
-	require.Equal(t, callrules.EndReasonHostLeft, room["endReason"])
-	require.Equal(t, callrules.BookingEnded, cw.row(scheduledCallConcept, early.ID)["status"], "the call ended and its booking did not")
+	room := cw.row(roomConcept, unhostedRoom)
+	require.Equal(t, "ended", room["status"], "a booked call whose host never came stayed open past its booked end and the grace")
+	require.Equal(t, callrules.EndReasonHostLeft, room["endReason"], "a call with a guest still waiting is not empty: the countdown ends it")
+	require.Equal(t, callrules.BookingEnded, cw.row(scheduledCallConcept, unhosted.ID)["status"], "the call ended and its booking did not")
+}
 
-	// Opened late, the call counts from its opening.
-	late := cw.booked(sess, 10*time.Minute, 60, "Opened late")
-	cw.clock.Advance(late.Start.Sub(cw.clock.Now()) + 20*time.Minute)
-	lateIn, _, err := cw.join(late.GuestToken, "Late guest")
+// TestAHostWhoCameAndLeftABookedCallGetsTheCountdown: a host who was in a booked call and
+// left it after its start is counted from that leave, as in any call: the call ends
+// host_left the grace after it, its booked end still far off.
+func TestAHostWhoCameAndLeftABookedCallGetsTheCountdown(t *testing.T) {
+	cw := newCallWorld(t, "hostcamebooked", 50)
+	if cw == nil {
+		return
+	}
+	ctx := context.Background()
+	grace := callrules.DefaultPolicy().HostLeftGrace
+	sc := cw.booked(cw.host(), 5*time.Minute, 60, "Host comes and goes")
+	cw.advanceTo(sc.Start)
+	in, host, err := cw.joinBy(callrules.JoinBody{HostToken: sc.HostToken, Name: "Host"})
 	require.NoError(t, err)
-	require.Equal(t, callrules.OutcomeWait, lateIn.Outcome)
-	lateRoom, _ := cw.bookingRoom(late.ID)
-	cw.clock.Advance(grace - time.Second)
+	require.Equal(t, callrules.OutcomeAdmit, in.Outcome)
+	roomID, _ := cw.bookingRoom(sc.ID)
+	waits, guest, err := cw.joinBy(callrules.JoinBody{Token: sc.GuestToken, Name: "Guest"})
+	require.NoError(t, err)
+	require.Equal(t, callrules.OutcomeWait, waits.Outcome)
+	require.NoError(t, cw.act(host, callrules.HostAdmit, guest.SeatID))
+	guestIn, err := cw.svc.Queue(ctx, guest)
+	require.NoError(t, err)
+	require.Equal(t, callrules.OutcomeAdmit, guestIn.Outcome)
+	cw.media.setPresent(roomID, person(guestIn.Identity))
+
+	cw.clock.Advance(10 * time.Minute)
+	left := cw.clock.Now()
+	require.NoError(t, cw.svc.Leave(ctx, host))
+	cw.advanceTo(left.Add(grace - time.Second))
 	cw.reconcile()
-	require.Equal(t, "open", cw.row(roomConcept, lateRoom)["status"], "a call opened late was ended before its own countdown ran")
+	require.Equal(t, "open", cw.row(roomConcept, roomID)["status"], "the countdown ran out before the grace after the host left")
 	cw.clock.Advance(time.Second)
 	cw.reconcile()
-	require.Equal(t, "ended", cw.row(roomConcept, lateRoom)["status"])
+	ended := cw.row(roomConcept, roomID)
+	require.Equal(t, "ended", ended["status"], "a booked call whose host left stayed open past the countdown")
+	require.Equal(t, callrules.EndReasonHostLeft, ended["endReason"])
+	require.Equal(t, callrules.BookingEnded, cw.row(scheduledCallConcept, sc.ID)["status"])
 }
 
 // TestABookedCallWhoseQueuedHostGaveUpEnds: a host passes a booked call's lock, so a host
 // who opens the call with its host link while the media server is full waits only for a
 // seat, with a place in line. One who stops polling gives that place up after the queue
-// entry's lifetime, and is not coming any more. The automation's passes then end the call
-// by the countdown from its booked start, host_left, whether or not a guest waits behind
-// the lock: before its booked end a booked call that empties is not ended empty (host.go
-// endsEmpty). Its booking is marked ended, and its key starts a call again. No pass
-// deletes the media room of a call it leaves open.
+// entry's lifetime, and is not coming any more: a host who never got in never came. Before
+// its booked end a booked call is its host's (host.go hostLeft) and one that empties is
+// not ended empty (host.go endsEmpty), so no pass ends either call before then. After it,
+// the call nobody waits in ends empty at its booked end, and the one a guest still waits
+// in behind the lock ends host_left, the grace after its booked end. Each booking is
+// marked ended, and each key starts a call again. No pass deletes the media room of a call
+// it leaves open.
 func TestABookedCallWhoseQueuedHostGaveUpEnds(t *testing.T) {
 	cw := newCallWorld(t, "hostgaveup", 1)
 	if cw == nil {
@@ -472,8 +534,8 @@ func TestABookedCallWhoseQueuedHostGaveUpEnds(t *testing.T) {
 	// Two booked calls on two keys, each opened by its host link and queued behind A; the
 	// second has a guest waiting behind its lock too.
 	alone, withGuest := cw.host(), cw.host()
-	x := cw.booked(alone, 5*time.Minute, 30, "Host alone")
-	y := cw.booked(withGuest, 5*time.Minute, 30, "Host and a guest")
+	x := cw.booked(alone, 5*time.Minute, 10, "Host alone")
+	y := cw.booked(withGuest, 5*time.Minute, 10, "Host and a guest")
 	for _, sc := range []callrules.ScheduledCall{x, y} {
 		queued, _, err := cw.joinBy(callrules.JoinBody{HostToken: sc.HostToken, Name: "Host " + sc.Title})
 		require.NoError(t, err)
@@ -487,10 +549,10 @@ func TestABookedCallWhoseQueuedHostGaveUpEnds(t *testing.T) {
 	require.Equal(t, true, cw.row(roomConcept, roomX)["locked"])
 
 	// Nobody polls again. The automation passes every thirty seconds, past the queue
-	// entry's lifetime and past the booked start plus the grace, and no pass may delete
-	// the media room of a call it leaves open.
+	// entry's lifetime and past the booked end plus the grace, and no pass may delete the
+	// media room of a call it leaves open.
 	p := callrules.DefaultPolicy()
-	until := x.Start.Add(p.HostLeftGrace)
+	until := x.End.Add(p.HostLeftGrace)
 	if expiry := cw.clock.Now().Add(p.QueueEntryTTL); expiry.After(until) {
 		until = expiry
 	}
@@ -508,11 +570,13 @@ func TestABookedCallWhoseQueuedHostGaveUpEnds(t *testing.T) {
 	assert.Empty(t, deletedOpen, "a pass deleted the media room of a call it left open")
 	ended := cw.row(roomConcept, roomX)
 	assert.Equal(t, "ended", ended["status"], "a booked call whose queued host gave up stayed open")
-	assert.Equal(t, callrules.EndReasonHostLeft, ended["endReason"], "a booked call was ended empty before its booked end")
+	assert.Equal(t, callrules.EndReasonEmpty, ended["endReason"], "nobody was in it or waiting: it ends empty, at its booked end")
+	assert.False(t, rowTime(ended, "endedAt").Before(x.End), "a booked call whose queued host gave up ended inside its booked window")
 	assert.Equal(t, callrules.BookingEnded, cw.row(scheduledCallConcept, x.ID)["status"])
 	ended = cw.row(roomConcept, roomY)
 	assert.Equal(t, "ended", ended["status"], "a booked call with a guest waiting for a host who gave up stayed open")
-	assert.Equal(t, callrules.EndReasonHostLeft, ended["endReason"])
+	assert.Equal(t, callrules.EndReasonHostLeft, ended["endReason"], "a guest still waits in it: the countdown from its booked end ends it")
+	assert.False(t, rowTime(ended, "endedAt").Before(y.End.Add(p.HostLeftGrace)), "the countdown from the booked end ran out early")
 	assert.Equal(t, callrules.BookingEnded, cw.row(scheduledCallConcept, y.ID)["status"])
 
 	// Both keys start calls again once A frees the server's seat: the first is let in and
@@ -599,9 +663,10 @@ func TestTheLastPersonLeavingEndsTheCall(t *testing.T) {
 // TestABookedCallThatEmptiesBeforeItsEndWaitsForItsHost: a booked call is its host's to
 // keep until its booked end. A guest who opens it early -- to try the link -- and leaves
 // does not end it, nor does a pass, and its host, arriving at the start, joins it. A
-// booked call nobody comes back to is ended by the host-left countdown from its booked
-// start, its booking marked ended. After its booked end the empty-room rule applies as it
-// does to any call: the last person leaving ends it, empty.
+// booked call nobody comes back to stays open, through the booked start plus the grace,
+// until its booked end, where the empty-room rule ends it, empty, its booking marked
+// ended. After its booked end the empty-room rule applies as it does to any call: the
+// last person leaving ends it, empty.
 func TestABookedCallThatEmptiesBeforeItsEndWaitsForItsHost(t *testing.T) {
 	cw := newCallWorld(t, "bookedempty", 50)
 	if cw == nil {
@@ -631,25 +696,27 @@ func TestABookedCallThatEmptiesBeforeItsEndWaitsForItsHost(t *testing.T) {
 	require.Equal(t, roomID, host.RoomID, "the host was let into another room")
 	cw.media.setPresent(roomID, person(in.Identity))
 
-	// A booked call nobody comes back to: the countdown from its booked start ends it.
+	// A booked call nobody comes back to stays its host's until its booked end, where it
+	// ends empty: nobody is in it and nobody waits.
 	abandoned := cw.booked(cw.host(), 5*time.Minute, 30, "Nobody comes")
 	waits, gone, err := cw.joinBy(callrules.JoinBody{Token: abandoned.GuestToken, Name: "Early guest"})
 	require.NoError(t, err)
 	require.Equal(t, callrules.OutcomeWait, waits.Outcome)
 	abandonedRoom, _ := cw.bookingRoom(abandoned.ID)
 	require.NoError(t, cw.svc.Leave(ctx, gone))
-	cw.advanceTo(abandoned.Start.Add(grace - time.Second))
+	cw.advanceTo(abandoned.Start.Add(grace + time.Minute))
 	cw.reconcile()
-	require.Equal(t, "open", cw.row(roomConcept, abandonedRoom)["status"], "the countdown ended an abandoned booked call early")
-	cw.clock.Advance(time.Second)
+	require.Equal(t, "open", cw.row(roomConcept, abandonedRoom)["status"], "a pass ended an abandoned booked call inside its booked window")
+	cw.advanceTo(abandoned.End)
 	cw.reconcile()
 	ended := cw.row(roomConcept, abandonedRoom)
-	require.Equal(t, "ended", ended["status"], "an abandoned booked call stayed open past its countdown")
-	require.Equal(t, callrules.EndReasonHostLeft, ended["endReason"])
+	require.Equal(t, "ended", ended["status"], "an abandoned booked call stayed open past its booked end")
+	require.Equal(t, callrules.EndReasonEmpty, ended["endReason"], "nobody was in it or waiting: it ends empty at its booked end")
 	require.Equal(t, callrules.BookingEnded, cw.row(scheduledCallConcept, abandoned.ID)["status"])
 
-	// After its booked end, the last person leaving ends a booked call as any other.
-	cw.advanceTo(interview.End)
+	// After its booked end, the last person leaving ends a booked call as any other. (The
+	// abandoned call's booked end is past the interview's, so the clock already is.)
+	require.False(t, cw.clock.Now().Before(interview.End))
 	require.NoError(t, cw.svc.Leave(ctx, host))
 	done := cw.row(roomConcept, roomID)
 	require.Equal(t, "ended", done["status"], "the last person left a booked call after its end and it goes on")
@@ -787,11 +854,12 @@ func TestEndingABookedCallMarksItsBookingEnded(t *testing.T) {
 	require.NoError(t, cw.svc.Leave(ctx, host))
 	require.Equal(t, callrules.BookingEnded, cw.row(scheduledCallConcept, emptied.ID)["status"])
 
-	// The third, back to back with the second, opened by a guest at its start.
+	// The third, back to back with the second, opened by a guest at its start, whose host
+	// never comes: the countdown runs from its booked end (host.go hostLeft).
 	waits, _, err := cw.join(countedOut.GuestToken, "Guest")
 	require.NoError(t, err)
 	require.Equal(t, callrules.OutcomeWait, waits.Outcome)
-	cw.clock.Advance(countedOut.Start.Sub(cw.clock.Now()) + callrules.DefaultPolicy().HostLeftGrace)
+	cw.advanceTo(countedOut.End.Add(callrules.DefaultPolicy().HostLeftGrace))
 	cw.reconcile()
 	require.Equal(t, callrules.BookingEnded, cw.row(scheduledCallConcept, countedOut.ID)["status"])
 
@@ -959,12 +1027,14 @@ func (cw *callWorld) callsVersions() int {
 	return stateWhere(cw.t, cw.db, `concept IN (?) AND payload->>'siteId' = ?`, bun.In(concepts), siteConcept+":"+cw.site).Versions
 }
 
-// roster is the roster a session reads, which must not fail.
+// roster is the roster a session reads, which must not fail: what its own ask about its
+// call (SessionCall) answers to a host seat in an open call, and nil to every other.
 func (cw *callWorld) roster(sess callrules.Session) *callrules.Roster {
 	cw.t.Helper()
-	roster, err := cw.svc.Roster(context.Background(), sess)
+	call, err := cw.svc.SessionCall(context.Background(), sess)
 	require.NoError(cw.t, err)
-	return roster
+	require.Equal(cw.t, call.Host, call.Roster != nil, "a seat was told it hosts the call with no roster, or given one without being told")
+	return call.Roster
 }
 
 // rosterSeats is the ids a roster lists in the call, in order.
@@ -1065,7 +1135,7 @@ func TestTheRosterNamesTheSeatsAHostActsOn(t *testing.T) {
 		require.NoError(t, cw.svc.Leave(ctx, hostSess))
 		require.Nil(t, cw.roster(hostSess), "a host who left read the roster")
 
-		_, err = cw.svc.Roster(ctx, callrules.Session{Token: strings.Repeat("a", 32), Site: cw.ref})
+		_, err = cw.svc.SessionCall(ctx, callrules.Session{Token: strings.Repeat("a", 32), Site: cw.ref})
 		require.ErrorIs(t, err, callrules.ErrNoSession, "a session that opens nothing is not a session with no roster")
 	})
 
@@ -1159,5 +1229,118 @@ func TestTheRosterNamesTheSeatsAHostActsOn(t *testing.T) {
 		require.Equal(t, guest.SeatID, again.SeatID, "the rejoin took a second seat")
 
 		require.Equal(t, []callrules.RosterWaiter{{Seat: guest.SeatID, DisplayName: "Again", Kind: "person", Since: back}}, cw.roster(hostSess).Waiting)
+	})
+}
+
+// ---------------------------------------------------------------------------
+// what a seat is told about its call
+// ---------------------------------------------------------------------------
+
+// sessionCall is what a session's own ask about itself says of its call, which must not
+// fail.
+func (cw *callWorld) sessionCall(sess callrules.Session) callrules.SeatCall {
+	cw.t.Helper()
+	call, err := cw.svc.SessionCall(context.Background(), sess)
+	require.NoError(cw.t, err)
+	return call
+}
+
+// TestASeatIsToldWhetherItHostsAndWhenTheCountdownEnds: every seat of an open call learns
+// from its own session (GET /session) whether it hosts the call now -- the hand-over to a
+// key holder included, which hands out no new pass -- and, while the host-left countdown
+// runs, when it ends unless a host comes back: the deadline the countdown itself ends the
+// call at (calls.HostLeft), the same instant for every seat. A host back in the call stops
+// it, a booked call whose host never came has none before its booked end, and an ended call
+// tells nobody anything. The host's roster comes with its host flag, and only then.
+func TestASeatIsToldWhetherItHostsAndWhenTheCountdownEnds(t *testing.T) {
+	t.Run("the host-left countdown, and a host back in the call", func(t *testing.T) {
+		cw := newCallWorld(t, "seatcountdown", 50)
+		if cw == nil {
+			return
+		}
+		ctx := context.Background()
+		grace := callrules.DefaultPolicy().HostLeftGrace
+		hostSess, started := cw.started("Host")
+		in, guest, err := cw.join(started.Call.GuestToken, "Guest")
+		require.NoError(t, err)
+		require.Equal(t, callrules.OutcomeAdmit, in.Outcome)
+		cw.media.setPresent(started.Call.ID, person(started.Join.Identity), person(in.Identity))
+
+		host := cw.sessionCall(hostSess)
+		require.True(t, host.Host, "the host seat in the call is not told it hosts")
+		require.NotNil(t, host.Roster, "a host is told it hosts but given no roster")
+		require.True(t, host.CountdownEndsAt.IsZero(), "a countdown runs with the host in the call")
+		require.Equal(t, callrules.SeatCall{}, cw.sessionCall(guest), "a guest was told something while the host is in the call")
+
+		cw.clock.Advance(time.Minute)
+		left := cw.clock.Now()
+		require.NoError(t, cw.svc.Leave(ctx, hostSess))
+		require.Equal(t, callrules.SeatCall{CountdownEndsAt: left.Add(grace)}, cw.sessionCall(guest),
+			"a guest is not told when the call ends now that the host left")
+		require.Equal(t, callrules.SeatCall{}, cw.sessionCall(hostSess), "a host who left is told about a call it is not in")
+
+		back, _, err := cw.svc.Join(ctx, cw.ref, &hostSess, callrules.JoinBody{Name: "Host", Confirm: confirmed})
+		require.NoError(t, err)
+		require.Equal(t, callrules.OutcomeAdmit, back.Outcome)
+		require.True(t, cw.sessionCall(guest).CountdownEndsAt.IsZero(), "the host came back and the guest is still counted down")
+		require.True(t, cw.sessionCall(hostSess).Host)
+
+		// Run out and not yet ended by a pass: the deadline still stands, now past, so a page
+		// can say the call is ending. The pass ends it, and then nobody is told anything.
+		require.NoError(t, cw.svc.Leave(ctx, hostSess))
+		again := cw.clock.Now()
+		cw.advanceTo(again.Add(grace + time.Second))
+		require.Equal(t, again.Add(grace), cw.sessionCall(guest).CountdownEndsAt, "a countdown that ran out is not told as one")
+		cw.reconcile()
+		require.Equal(t, "ended", cw.row(roomConcept, started.Call.ID)["status"])
+		require.Equal(t, callrules.SeatCall{}, cw.sessionCall(guest), "a seat of an ended call is told about it")
+	})
+
+	t.Run("a key holder the call is handed to is told it hosts it", func(t *testing.T) {
+		cw := newCallWorld(t, "seathandover", 50)
+		if cw == nil {
+			return
+		}
+		ctx := context.Background()
+		hostSess, started := cw.started("Host")
+		keyRes, keyHolder := cw.keyHolderJoin(started.Call.GuestToken, "Key holder")
+		require.Equal(t, callrules.OutcomeAdmit, keyRes.Outcome)
+		cw.media.setPresent(started.Call.ID, person(started.Join.Identity), person(keyRes.Identity))
+		require.False(t, cw.sessionCall(keyHolder).Host, "a key holder is told it hosts before the call is handed to it")
+
+		require.NoError(t, cw.svc.Leave(ctx, hostSess))
+		cw.reconcile()
+		handed := cw.sessionCall(keyHolder)
+		require.True(t, handed.Host, "the key holder the call was handed to is not told it hosts")
+		require.NotNil(t, handed.Roster)
+		require.True(t, handed.CountdownEndsAt.IsZero(), "a call with a host in it still counts down")
+	})
+
+	t.Run("a booked call whose host never came counts down only after its booked end", func(t *testing.T) {
+		cw := newCallWorld(t, "seatbooked", 50)
+		if cw == nil {
+			return
+		}
+		grace := callrules.DefaultPolicy().HostLeftGrace
+		sc := cw.booked(cw.host(), 5*time.Minute, 30, "Unhosted")
+		cw.advanceTo(sc.Start)
+		waits, candidate, err := cw.join(sc.GuestToken, "Candidate")
+		require.NoError(t, err)
+		require.Equal(t, callrules.OutcomeWait, waits.Outcome)
+		cw.advanceTo(sc.Start.Add(grace + time.Minute))
+		require.Equal(t, callrules.SeatCall{}, cw.sessionCall(candidate), "a countdown runs inside a booked call's window")
+		cw.advanceTo(sc.End)
+		require.Equal(t, callrules.SeatCall{CountdownEndsAt: sc.End.Add(grace)}, cw.sessionCall(candidate),
+			"a seat waiting past the booked end is not told when the call ends")
+	})
+
+	t.Run("a session seated nowhere is told nothing, and one that opens nothing is no session", func(t *testing.T) {
+		cw := newCallWorld(t, "seatnowhere", 50)
+		if cw == nil {
+			return
+		}
+		require.Equal(t, callrules.SeatCall{}, cw.sessionCall(cw.host()))
+		_, err := cw.svc.SessionCall(context.Background(), callrules.Session{Token: strings.Repeat("a", 32), Site: cw.ref})
+		require.ErrorIs(t, err, callrules.ErrNoSession)
 	})
 }

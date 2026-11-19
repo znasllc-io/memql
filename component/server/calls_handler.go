@@ -62,13 +62,20 @@ import (
 // Leaving a call does not end the session: a key holder starts the next call on it, and a
 // guest who hung up comes back on the same seat.
 //
-// A HOST'S PAGE POLLS GET /session, about every three seconds, to see who is knocking. To a
-// host seat in an open call the session answers the call's roster as well (integrations/calls
-// host.go): whether the call is locked, so the page offers Lock or Unlock and not both; the
-// seats in the call, each with its media identity so a page can match the media server's
-// participants to seats; and the seats waiting to come in, in line order. Its seat ids are
-// the ones POST /host takes; nothing else tells a page whom a waiter is, since a waiter is
-// not in the media room. Every other session's answer carries no roster.
+// EVERY SEAT'S PAGE POLLS GET /session while it is in a call, and the answer says what only
+// the rows record (integrations/calls host.go SessionCall): `host`, true while the seat
+// hosts its open call, which is how a key holder the call was handed to learns it is theirs,
+// since a hand-over hands out no new pass; and `countdownEndsAt`, while the host-left
+// countdown runs, the instant the call ends unless a host is back first (design section 8,
+// "End": a countdown on screen), on the service's clock, which a page counts down from
+// against this answer's own expiresAt and expiresInMs. Each is absent otherwise. A host's
+// page polls about every three seconds to see who is knocking, and to a host seat in an
+// open call the session answers the call's roster as well: whether the call is locked, so
+// the page offers Lock or Unlock and not both; the seats in the call, each with its media
+// identity so a page can match the media server's participants to seats; and the seats
+// waiting to come in, in line order. Its seat ids are the ones POST /host takes; nothing
+// else tells a page whom a waiter is, since a waiter is not in the media room. Every other
+// session's answer carries no roster.
 //
 // # Every answer in one place
 //
@@ -131,9 +138,11 @@ type CallsService interface {
 	SiteAsOwner(ctx context.Context, siteID, owner string) (*CallsSite, error)
 	Unlock(ctx context.Context, site calls.SiteRef, key string) (calls.Session, error)
 	Session(ctx context.Context, site calls.SiteRef, token string) (calls.Session, error)
-	// Roster is the call a session's host seat is in, as the host controls name it, or nil
-	// for a session that is not a host seat in an open call. A read that writes nothing.
-	Roster(ctx context.Context, sess calls.Session) (*calls.Roster, error)
+	// SessionCall is what a session seated in an open call is told about it: whether its
+	// seat hosts the call now, when the host-left countdown ends while one runs, and, to a
+	// host, the roster the host controls name. The zero SeatCall for every other session. A
+	// read that writes nothing.
+	SessionCall(ctx context.Context, sess calls.Session) (calls.SeatCall, error)
 	Start(ctx context.Context, sess calls.Session, body calls.StartBody) (calls.StartResult, error)
 	Schedule(ctx context.Context, sess calls.Session, req calls.ScheduleRequest) (calls.ScheduledCall, error)
 	Reschedule(ctx context.Context, sess calls.Session, callID string, req calls.ScheduleRequest) (calls.ScheduledCall, error)
@@ -462,17 +471,20 @@ func (h *callsHandler) serveUnlock(w http.ResponseWriter, r *http.Request, c cal
 		return
 	}
 	setCallsCookie(w, sess.Token)
-	h.write(w, http.StatusOK, h.sessionReply(sess, nil))
+	h.write(w, http.StatusOK, h.sessionReply(sess, calls.SeatCall{}))
 }
 
-// serveSession says what the cookie holds, and to a host seat in an open call, who is in
-// the call, who is knocking and whether it is locked (the roster). A HOST'S PAGE POLLS
-// THIS, about every three seconds, the queue's own pace, to see who waits to be let in:
-// nothing else tells it, since a waiter is not in the media room.
+// serveSession says what the cookie holds, and to a session seated in an open call what it
+// is told about that call: whether it hosts it, when the host-left countdown ends while one
+// runs, and to a host, who is in the call, who is knocking and whether it is locked (the
+// roster). EVERY SEAT'S PAGE POLLS THIS while it is in the call (the file note), a host's
+// about every three seconds, the queue's own pace, to see who waits to be let in: nothing
+// else tells it, since a waiter is not in the media room.
 //
-// THE SERVICE DECIDES WHO IS A HOST, from the seat, so the roster is asked of every seated
+// THE SERVICE DECIDES WHO IS A HOST, from the seat, so the call is asked of every seated
 // session: a session's kind does not say, because a guest's session can hold a host seat by
-// the host link. A session seated nowhere has no call to list, and costs no roster read.
+// the host link, and a key holder's guest seat becomes a host's when the call is handed to
+// it. A session seated nowhere has no call to tell it about, and costs no read of one.
 func (h *callsHandler) serveSession(w http.ResponseWriter, r *http.Request, c callsCall) {
 	if !h.requireSession(w, c) || !h.resolveSite(w, r, &c) {
 		return
@@ -482,14 +494,14 @@ func (h *callsHandler) serveSession(w http.ResponseWriter, r *http.Request, c ca
 		h.refuse(w, c, err, calls.JoinResult{})
 		return
 	}
-	var roster *calls.Roster
+	var call calls.SeatCall
 	if strings.TrimSpace(sess.SeatID) != "" {
-		if roster, err = h.svc.Roster(r.Context(), c.session()); err != nil {
+		if call, err = h.svc.SessionCall(r.Context(), c.session()); err != nil {
 			h.refuse(w, c, err, calls.JoinResult{})
 			return
 		}
 	}
-	h.write(w, http.StatusOK, h.sessionReply(sess, roster))
+	h.write(w, http.StatusOK, h.sessionReply(sess, call))
 }
 
 // callsConfirmBody is the three confirmations every seat records.
@@ -825,7 +837,9 @@ func setCallsRetryAfter(w http.ResponseWriter, d time.Duration) {
 // script never holds it.
 //
 // `expiresAt` AND `expiresInMs` ARE ONE INSTANT, stated twice. The remainder is the one a
-// client schedules from, so a wrong client clock does not move the moment.
+// client schedules from, so a wrong client clock does not move the moment; it also tells a
+// page the server's now (expiresAt less expiresInMs), which is what `countdownEndsAt` is
+// counted down from.
 type callsSessionReply struct {
 	Kind        string `json:"kind"`
 	KeyID       string `json:"keyId,omitempty"`
@@ -833,6 +847,13 @@ type callsSessionReply struct {
 	RoomID      string `json:"roomId,omitempty"`
 	ExpiresAt   string `json:"expiresAt"`
 	ExpiresInMs int64  `json:"expiresInMs"`
+	// Host is true while the session's seat hosts its open call (a host seat admitted or in
+	// the call), and absent otherwise.
+	Host bool `json:"host,omitempty"`
+	// CountdownEndsAt is when the call ends unless a host is back first, in RFC 3339, while
+	// its host-left countdown runs (and once it has run out, until a pass ends the call), for
+	// any seat of the call; absent otherwise.
+	CountdownEndsAt string `json:"countdownEndsAt,omitempty"`
 	// Roster is there for a host seat in an open call and absent for every other session.
 	Roster *callsRosterReply `json:"roster,omitempty"`
 }
@@ -865,16 +886,21 @@ type callsRosterWaiterReply struct {
 	Since       string `json:"since,omitempty"`
 }
 
-func (h *callsHandler) sessionReply(sess calls.Session, roster *calls.Roster) callsSessionReply {
-	return callsSessionReply{
+func (h *callsHandler) sessionReply(sess calls.Session, call calls.SeatCall) callsSessionReply {
+	reply := callsSessionReply{
 		Kind:        sess.Kind,
 		KeyID:       memql.BareShortId(sess.KeyID),
 		SeatID:      memql.BareShortId(sess.SeatID),
 		RoomID:      memql.BareShortId(sess.RoomID),
 		ExpiresAt:   sess.ExpiresAt.UTC().Format(time.RFC3339Nano),
 		ExpiresInMs: callsMs(sess.ExpiresAt.Sub(h.now())),
-		Roster:      rosterReply(roster),
+		Host:        call.Host,
+		Roster:      rosterReply(call.Roster),
 	}
+	if !call.CountdownEndsAt.IsZero() {
+		reply.CountdownEndsAt = call.CountdownEndsAt.UTC().Format(time.RFC3339Nano)
+	}
+	return reply
 }
 
 func rosterReply(roster *calls.Roster) *callsRosterReply {

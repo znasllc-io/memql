@@ -121,6 +121,10 @@ media server's participant identity, and the seats waiting to come in, in line o
 host's page polls it about every 3 seconds; nothing else tells a page who is knocking,
 since a waiter is not in the media room. Any other session's answer carries no roster.
 
+**Who hosts** is told the same way. Every seat's `GET /session` says `host: true` while
+the seat hosts its open call, so a key holder the call was handed to learns that it hosts
+it without a new pass, and its page can show the host controls.
+
 One screen share at a time: a new one stops every other participant's share in the call.
 
 ### How a call ends
@@ -134,11 +138,19 @@ A call ends in one of three ways, and its room records which (`endReason`):
   line from the start, never left, so nothing counts down for them.
 - **`empty`**: the last person in it left with nobody waiting to come in.
 
-**A booked call never ends before its start.** Its countdown runs from its booked start
-at the earliest, so a host who opens it early to check it and leaves does not end it.
-**It ends empty only after its booked end**: before that, a booked call that empties
-stays open for the people still to come, and the countdown ends it if nobody does. A call
+**A booked call is its host's until its booked end.** A host who opens it early to check
+it and leaves is counted from the booked start, so the call never ends before it begins.
+A host who never came has not left: a guest who opens the call, early, on time or late,
+waits behind its lock, nothing counts down before the booked end, and a host who arrives
+late is let in by the host link and runs the call. After the booked end a call whose host
+never came is counted from the end: it ends `host_left` the grace later if somebody still
+waits in it, and `empty` if nobody does. **It ends empty only after its booked end**:
+before that, a booked call that empties stays open for the people still to come. A call
 that runs past its booked end is never cut off.
+
+**Every seat is told the countdown.** While it runs, every seat's session says when the
+call ends unless a host is back first (`countdownEndsAt`, below), the instant the
+reconcile pass ends it at, so every page can show the same countdown.
 
 **A media disconnect is not a leave.** A browser disconnects from the media server the
 same way when its page is refreshed, its tab is closed or its call is hung up, so the
@@ -265,7 +277,7 @@ origin, holding no field the route does not take, and every answer is JSON and
 | Route | Sends | Answers |
 |---|---|---|
 | `POST /unlock` | `{"key"}` | the key's session, and sets the cookie |
-| `GET /session` | nothing | what the cookie holds; to a host seat in an open call, the roster too |
+| `GET /session` | nothing | what the cookie holds; to a seat in an open call, whether it hosts it and, while the countdown runs, when the call ends; to a host, the roster too |
 | `POST /start` | `{"name", "confirm"}` | `{"call": {"id", "guestToken", "hostToken"}, "join"}` |
 | `POST /schedule` | `{"start", "minutes", "title"}` | the booking: `id`, `start`, `end`, `title`, `guestToken`, `hostToken`, `guestLink`, `hostLink`, `ics` |
 | `POST /reschedule` | `{"id", "start", "minutes", "title"}` | the booking, with new links |
@@ -277,7 +289,11 @@ origin, holding no field the route does not take, and every answer is JSON and
 
 `confirm` is `{"adult": true, "noMinors": true, "terms": "<version>"}`, and `start` an RFC
 3339 time. A session's answer is `{kind, keyId, seatId, roomId, expiresAt, expiresInMs}`,
-its ids bare, and never its token. A join's answer is
+its ids bare, and never its token; to a seat in an open call it adds `host: true` while
+the seat hosts the call, `countdownEndsAt` (an RFC 3339 time) while the host-left
+countdown runs, and to a host the `roster`, each absent otherwise. `expiresAt` less
+`expiresInMs` is the server's clock, which a page counts `countdownEndsAt` down from. A
+join's answer is
 `{outcome, url, pass, identity, host, expiresInMs, retryAfterMs, position, reason}`:
 `admit` with the media server's address, the pass and the seat's media identity, or
 `wait` (behind the lock) or `queue` (with the place, counted from one), each with when to
@@ -684,7 +700,8 @@ reaches it.
   ask again.
 - **A call ended.** Its room's `endReason` says why: a host ended it (`ended`), the
   host-left countdown ran out (`host_left`), or the last person left with nobody waiting
-  (`empty`). A booked call ends neither of the last two ways before its start.
+  (`empty`). A booked call ends neither of the last two ways before its start, nor, when
+  its host never came, before its booked end.
 - **Everybody's connection dropped at once.** The media server restarted, or the call's
   media room was closed. Each page asks for a fresh pass (a poll or a rejoin), and each
   pass opens the call's media room again first, so everybody comes back into a room that

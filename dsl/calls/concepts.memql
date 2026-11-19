@@ -64,7 +64,8 @@ concept session {
 /// the guest and host links; the plain links are shown once. A room ends when a host ends it, when the last
 /// person in it leaves with nobody waiting (for a booked call, only after its booked end), or when nobody
 /// hosting it has been in it for the policy's hostLeftGrace (`hostLeftAt`; for a booked call, counted from
-/// its booked start at the earliest) and no key holder in it took over; `endReason` says which.
+/// its booked start at the earliest, and from its booked end when its host never came) and no key holder in
+/// it took over; `endReason` says which.
 /// `shareSeatId` and `shareStartedAt` record the newest screen share the media server reported, so a share
 /// event delivered late cannot take over from a newer one. Server-written and client-unreadable.
 @serverWritten
@@ -81,7 +82,7 @@ concept room {
   status  enum("open", "ended")  @description("Absent reads as open.")
   locked  bool  @description("A locked room admits nobody new.")
   hostSeatId  string  @description("The v1:calls:seat that hosts the room.")
-  hostLeftAt  datetime  @description("When the last host seat in the call left, or empty: the host-left countdown runs from it -- for a booked call, from its booked start when that is later, so a booked call is never counted out before it begins. Cleared when a host is back in the call, or when a key holder takes over.")
+  hostLeftAt  datetime  @description("When the last host seat in the call left, or empty: the host-left countdown runs from it -- for a booked call, from its booked start when that is later, so a booked call is never counted out before it begins. A booked call whose host never came has none, and counts from its booked end. Cleared when a host is back in the call, or when a key holder takes over.")
   scheduledCallId  string  @description("The v1:calls:scheduledCall this room was opened for, if any.")
   guestDigest  string @maxLength(64) @pattern("^[0-9a-f]{64}$")  @description("SHA-256, lowercase hex, of the guest link secret.")
   hostDigest  string @maxLength(64) @pattern("^[0-9a-f]{64}$")  @description("SHA-256, lowercase hex, of the host link secret.")
