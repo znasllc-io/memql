@@ -404,11 +404,12 @@ func (s *Store) updateRoom(ctx context.Context, owner string, prior roomRow, fie
 // when a key opened the session that took it; JoinedAt is its latest admission (a
 // re-entry writes it again), LeftAt when it last left, LastSeenAt its last sign of life
 // (reconciliation seeing its identity on the media server, or the media server's
-// webhook about it: events.go), and LetInAt a host's admission past the call's lock.
+// webhook about it: events.go), AbsentSince when a pass first found it missing there
+// (reconcile.go, calls.SeatAbsent), and LetInAt a host's admission past the call's lock.
 type seatRow struct {
 	ID, RoomID, Identity, Kind, DisplayName, Status, TermsVersion, KeyID string
 	Host, ConfirmAdult, ConfirmNoMinors                                  bool
-	JoinedAt, LeftAt, LastSeenAt, LetInAt                                time.Time
+	JoinedAt, LeftAt, LastSeenAt, AbsentSince, LetInAt                   time.Time
 	// WaitingSince is when the seat last began waiting to come in (the concept's
 	// waitingSince). Read it only while the seat is waiting.
 	WaitingSince time.Time
@@ -443,6 +444,7 @@ func seatFromRow(r map[string]any) seatRow {
 		JoinedAt:        rowTime(r, "joinedAt"),
 		LeftAt:          rowTime(r, "leftAt"),
 		LastSeenAt:      rowTime(r, "lastSeenAt"),
+		AbsentSince:     rowTime(r, "absentSince"),
 		LetInAt:         rowTime(r, "letInAt"),
 		WaitingSince:    rowTime(r, "waitingSince"),
 		Version:         rowTime(r, "createdAt"),

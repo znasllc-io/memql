@@ -109,8 +109,8 @@ concept room {
 /// (every join confirms again): 18 or older, no one under 18 on their camera or screen, and the terms
 /// version. `keyId` is the key the seat's holder unlocked, when a key opened their session: a key holder in
 /// the call, who takes over as host when the host leaves. `lastSeenAt` is the seat's last sign of life on
-/// the media server, and `letInAt` a host's admission past the call's lock. Server-written and
-/// client-unreadable.
+/// the media server, `absentSince` when a reconciliation pass first found it missing there, and `letInAt`
+/// a host's admission past the call's lock. Server-written and client-unreadable.
 @serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @displayCard(primary="displayName", secondary="roomId", status="status")
@@ -131,6 +131,7 @@ concept seat {
   leftAt  datetime  @description("When the participant left, or empty.")
   keyId  string  @description("The v1:calls:key the seat's holder unlocked, when a key opened the session that took the seat, or empty. Written from the session when the seat is taken, never from a request. A seat in the call that names one is a key holder who can take over as host when the host leaves (design 8).")
   lastSeenAt  datetime  @description("The seat's last sign of life: when reconciliation last saw the media server show this seat's identity in its room (refreshed only once it is two minutes old, so the writes it costs stay bounded), or the time of the media server's participant_joined or participant_left webhook for it, when that is newer. A seat whose identity is gone is closed at this time, or at joinedAt when it was never seen since it was let in.")
+  absentSince  datetime  @description("When a reconciliation pass first found this seat's identity missing from its media room while the seat held a seat there, or empty: cleared when the media server shows it again. The seat is closed once it has been missing for the pass lifetime (passTtl) from then, or from a later lastSeenAt, so one pass that misses a seat, as after a media server restart, closes nothing (calls.SeatAbsent). One written before the seat's latest joinedAt belongs to the stint before and counts for nothing.")
   letInAt  datetime  @description("When a host admitted this seat past the call's lock (the admit host control), or empty. A seat let in passes the lock for the rest of the call, as a host does, and is still decided against the room's size and the media server's seats like any new ask.")
   waitingSince  datetime  @description("When the seat last began waiting to come into its call: written by the join that seats it waiting, behind the lock or in the media server's line, and by one that brings a seat that left back to wait. It is what a host's roster says a waiter has waited since. Read it only while status is waiting: a seat let in or gone keeps its last value.")
   accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")

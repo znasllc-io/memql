@@ -156,10 +156,12 @@ reconcile pass ends it at, so every page can show the same countdown.
 same way when its page is refreshed, its tab is closed or its call is hung up, so the
 media server's report of a disconnect only records the seat's last sign of life. Only
 the leave route, `POST /leave`, the hang-up, closes a seat at once. A seat whose
-participant stays gone is closed by the reconcile pass one pass lifetime (`passTtl`)
-after it was last seen, at that time: a host seat closed so starts the countdown, and the
-empty rule applies then. So a refresh, which reconnects within seconds, does not end a
-call.
+participant stays gone is closed by the reconcile pass once it has been missing for one
+pass lifetime (`passTtl`), counted from the first pass that found it missing, and it is
+closed as having left when it was last seen: a host seat closed so starts the countdown
+from then, and the empty rule applies then. A pass that misses a seat only records that
+(`absentSince`), so neither a refresh, which reconnects within seconds, nor a media
+server restart that a pass lands in the middle of, ends a call.
 
 ### Booked calls
 
@@ -191,8 +193,9 @@ applied only when it is newer than what the rows record:
 
 The media server's own list of participants is the truth, and the events only follow it.
 So every 30 seconds one bff replica, the holder of the cluster lease `calls-reconcile`,
-repairs every open call against that list: it closes the seats whose participant is gone,
-disconnects every participant that holds no seat of the call (a pass cannot be revoked,
+repairs every open call against that list: it closes the seats whose participant has
+stayed gone for `passTtl` (above), disconnects every participant that holds no seat of
+the call (a pass cannot be revoked,
 so this is what keeps a removed person out), expires the places in line nobody polls,
 applies the countdown and ends the calls nobody is in. It hands out no pass.
 
@@ -207,7 +210,7 @@ deployable's rows belong to the deployable's owner.
 | `v1:calls:key` | key: its digest, kind and status |
 | `v1:calls:session` | session: its token's digest; deleted 30 days after it is written |
 | `v1:calls:room` | call: its media server, lock, host-left time and how it ended |
-| `v1:calls:seat` | participant in a call: kind, status, confirmations, when last seen |
+| `v1:calls:seat` | participant in a call: kind, status, confirmations, when last seen and when a pass found it missing |
 | `v1:calls:queueEntry` | place in a media server's line; deleted after 30 days |
 | `v1:calls:scheduledCall` | booked call: its links' digests and its status |
 | `v1:calls:mediaServer` | media server: the cluster's, and no deployable's |
@@ -705,9 +708,11 @@ reaches it.
 - **Everybody's connection dropped at once.** The media server restarted, or the call's
   media room was closed. Each page asks for a fresh pass (a poll or a rejoin), and each
   pass opens the call's media room again first, so everybody comes back into a room that
-  exists. On a production server Docker runs with `live-restore`, so a restart of Docker
-  alone, which an unattended security update can make, leaves calls running; a restart
-  of LiveKit ends them.
+  exists. A reconcile pass that lands before they are back closes nobody: it records each
+  seat missing, and closes only one still missing `passTtl` later, so everybody back
+  within that keeps their seat. On a production server Docker runs with `live-restore`,
+  so a restart of Docker alone, which an unattended security update can make, leaves
+  calls running; a restart of LiveKit ends them.
 - **A person a host removed is back.** A pass cannot be revoked, so the reconcile pass
   disconnects their identity again within 30 seconds whenever the media server shows it.
   A person who cleared their session and came back through the link has a seat of their

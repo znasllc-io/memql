@@ -79,6 +79,7 @@ shape seat callsSeatFull {
   leftAt
   keyId
   lastSeenAt
+  absentSince
   letInAt
   waitingSince
   accountId

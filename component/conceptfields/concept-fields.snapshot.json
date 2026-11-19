@@ -891,6 +891,7 @@
       "concept": "v1:calls:seat",
       "file": "calls/concepts.memql",
       "fields": [
+        "absentSince",
         "accountId",
         "confirmAdult",
         "confirmNoMinors",

@@ -69,32 +69,50 @@ func TestHostActionsNameTheirSeatAndTheirSources(t *testing.T) {
 	}
 }
 
-// TestSeatGone: a seat the media server no longer shows is gone once its last sign of
-// life -- the later of when it was last seen and when it was let in -- is a grace old,
-// and it left at that sign. A seat let in again after leaving is judged from its new
-// admission, never from the stint before.
-func TestSeatGone(t *testing.T) {
+// TestSeatAbsent: a seat the media server does not show on a pass is closed only once it has
+// been MISSING for the grace, counted from the first pass that found it missing (or from a
+// later sign of life), never from the age of its last stamp: a seat seen two minutes ago
+// and missed now has only just gone missing, so the first pass that misses it records that
+// and closes nothing. It closes at its last sign of life -- the later of when it was last
+// seen and when it was let in -- and a mark from before its latest admission is the stint
+// before's, so a seat let in again is judged from its new stint.
+func TestSeatAbsent(t *testing.T) {
 	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	grace := 2 * time.Minute
 	for _, c := range []struct {
-		name                  string
-		lastSeen, joined, now time.Time
-		gone                  bool
-		at                    time.Time
+		name                           string
+		lastSeen, joined, missing, now time.Time
+		want                           SeatAbsence
 	}{
-		{"seen, inside the grace", base, base.Add(-time.Hour), base.Add(grace - time.Second), false, base},
-		{"seen, at the grace", base, base.Add(-time.Hour), base.Add(grace), true, base},
-		{"seen long ago", base, base.Add(-time.Hour), base.Add(time.Hour), true, base},
-		{"never seen, just let in", time.Time{}, base, base.Add(time.Second), false, base},
-		{"never seen, its pass long spent", time.Time{}, base, base.Add(grace + time.Minute), true, base},
-		{"let in again after an old stint", base.Add(-time.Hour), base, base.Add(time.Minute), false, base},
-		{"let in again, never seen since", base.Add(-time.Hour), base, base.Add(grace), true, base},
-		{"no sign of life at all", time.Time{}, time.Time{}, base, true, base},
+		// The stamp is as old as the grace, which is what a present seat's routinely is: the
+		// first pass to miss it marks it, and closes nothing.
+		{"first missed, its stamp a grace old", base, base.Add(-time.Hour), time.Time{}, base.Add(grace),
+			SeatAbsence{Mark: true, At: base}},
+		{"first missed, its stamp long old", base, base.Add(-time.Hour), time.Time{}, base.Add(time.Hour),
+			SeatAbsence{Mark: true, At: base}},
+		{"missing, inside the grace", base, base.Add(-time.Hour), base.Add(time.Hour), base.Add(time.Hour + grace - time.Second),
+			SeatAbsence{At: base}},
+		{"missing for the grace", base, base.Add(-time.Hour), base.Add(time.Hour), base.Add(time.Hour + grace),
+			SeatAbsence{Gone: true, At: base}},
+		// A sign of life after the mark -- a media server's event about the seat -- restarts
+		// the grace from it.
+		{"seen again after the mark", base.Add(time.Hour + time.Minute), base.Add(-time.Hour), base.Add(time.Hour), base.Add(time.Hour + grace),
+			SeatAbsence{At: base.Add(time.Hour + time.Minute)}},
+		{"never seen, just let in", time.Time{}, base, time.Time{}, base.Add(time.Second),
+			SeatAbsence{Mark: true, At: base}},
+		{"never seen, missing for the grace", time.Time{}, base, base.Add(time.Second), base.Add(time.Second + grace),
+			SeatAbsence{Gone: true, At: base}},
+		{"a mark from the stint before", base.Add(-time.Hour), base, base.Add(-30 * time.Minute), base.Add(time.Minute),
+			SeatAbsence{Mark: true, At: base}},
+		{"let in again, missing for the grace since", base.Add(-time.Hour), base, base.Add(time.Second), base.Add(time.Second + grace),
+			SeatAbsence{Gone: true, At: base}},
+		{"no sign of life at all, missing for the grace", time.Time{}, time.Time{}, base, base.Add(grace),
+			SeatAbsence{Gone: true, At: base}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			gone, at := SeatGone(c.lastSeen, c.joined, c.now, grace)
-			if gone != c.gone || !at.Equal(c.at) {
-				t.Fatalf("got %v at %v, want %v at %v", gone, at, c.gone, c.at)
+			got := SeatAbsent(c.lastSeen, c.joined, c.missing, c.now, grace)
+			if got.Mark != c.want.Mark || got.Gone != c.want.Gone || !got.At.Equal(c.want.At) {
+				t.Fatalf("got %+v, want %+v", got, c.want)
 			}
 		})
 	}

@@ -129,21 +129,51 @@ func HostActionSources(action string) ([]string, bool) {
 	return slices.Clone(sources), ok
 }
 
-// SeatGone decides a seat in a call whose identity the media server no longer shows.
-// Its last sign of life is the later of the last time it was seen there and the time it
-// was let in, so a seat let in again after leaving is judged from its new admission and
-// never from the stint before. It is gone once that sign is grace old -- before then it
-// may still be connecting on the pass it was handed -- and it left at that sign: the
-// participant list is read every so often, so the last time a seat was seen is the
-// closest the record comes to when it went. A seat with no sign of life at all is gone
-// now.
-func SeatGone(lastSeenAt, joinedAt, now time.Time, grace time.Duration) (bool, time.Time) {
+// SeatAbsence is what a reconciliation pass does with a seat in a call whose identity the
+// media server does not show (SeatAbsent).
+type SeatAbsence struct {
+	// Mark: no pass has found the seat missing in its current stint, so this pass is the
+	// first to: it records now as when the seat went missing, and closes nothing.
+	Mark bool
+	// Gone: the seat has been missing for the grace, and is closed as having left At.
+	Gone bool
+	// At is the seat's last sign of life: the later of the last time it was seen and the
+	// time it was let in, or, for a seat with neither, when it was first found missing.
+	At time.Time
+}
+
+// SeatAbsent decides a seat in a call whose identity the media server does not show on a
+// pass. ABSENCE DECIDES, NOT THE AGE OF A STAMP (ruling final I2): a present seat's
+// lastSeenAt is refreshed only every so often, so it is routinely as old as the grace, and
+// a rule on its age alone closed a seat on the first pass that missed it -- every seat of a
+// call at once when a media server restarted and the pass landed before anybody was back.
+// So the first pass to miss a seat only records when (absentSince, Mark), and the seat is
+// closed once it has been missing for the grace from then, or from a later sign of life (a
+// media server's event about it), whichever is later (Gone). Before then it may still be
+// connecting on the pass it was handed, or coming back.
+//
+// It left AT ITS LAST SIGN OF LIFE, the later of lastSeenAt and joinedAt: the participant
+// list is read every so often, so the last time a seat was seen is the closest the record
+// comes to when it went. A record of going missing from before the seat's latest admission
+// is the stint before's, and is no record for this one, so a seat let in again is judged
+// from its new stint and never from the one before.
+func SeatAbsent(lastSeenAt, joinedAt, absentSince, now time.Time, grace time.Duration) SeatAbsence {
 	at := lastSeenAt
 	if joinedAt.After(at) {
 		at = joinedAt
 	}
-	if at.IsZero() {
-		return true, now
+	if absentSince.IsZero() || absentSince.Before(joinedAt) {
+		return SeatAbsence{Mark: true, At: at}
 	}
-	return !now.Before(at.Add(grace)), at
+	from := absentSince
+	if at.After(from) {
+		from = at
+	}
+	if now.Before(from.Add(grace)) {
+		return SeatAbsence{At: at}
+	}
+	if at.IsZero() {
+		at = absentSince
+	}
+	return SeatAbsence{Gone: true, At: at}
 }

@@ -75,11 +75,11 @@ import (
 //     disconnects the same way when its page is refreshed, its tab closed or its call
 //     hung up, so applying the Leave route's rules would end a one-person call on a
 //     refresh. Only that route, an explicit hang-up, closes a seat at once. A seat that
-//     stays gone is closed by reconciliation's vanish rule one pass lifetime after this
-//     time, AT this time (calls.SeatGone), which stamps hostLeftAt for a host seat and
-//     applies the empty-room rule there: a vanished host's countdown starts at the
-//     disconnect, whenever the webhook arrived (a booked call's at its booked start,
-//     when that is later: host.go hostLeft).
+//     stays gone is closed by reconciliation's vanish rule once a pass has found it
+//     missing for a pass lifetime (calls.SeatAbsent), AT this time, which stamps
+//     hostLeftAt for a host seat and applies the empty-room rule there: a vanished host's
+//     countdown starts at the disconnect, whenever the webhook arrived (a booked call's at
+//     its booked start, when that is later: host.go hostLeft).
 //   - track_published of a screen share, or its audio, takes over: one share at a time per
 //     call, and a new one stops every other participant's share and share audio (design
 //     7.7). The room records the share under its gate, and the mutes are made after the

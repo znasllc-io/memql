@@ -24,9 +24,10 @@ import (
 // the media server's participant list, whatever the events said. A seat connected is in
 // the call and seen now; seen again within two minutes, nothing is written. A seat stuck
 // in the call with nobody connected is closed at its last seen time, or at its admission
-// when it was never seen, once a pass's lifetime has gone by -- before that it may still
-// be connecting. A participant the call never let in is disconnected, and so is one
-// whose seat left while its connection lingered.
+// when it was never seen, once it has been missing for a pass's lifetime, counted from the
+// first pass that missed it -- before that it may still be connecting, or coming back. A
+// participant the call never let in is disconnected, and so is one whose seat left while
+// its connection lingered.
 func TestReconcileRepairsMissedAndReorderedEvents(t *testing.T) {
 	cw := newCallWorld(t, "reconcileseats", 50)
 	if cw == nil {
@@ -48,16 +49,19 @@ func TestReconcileRepairsMissedAndReorderedEvents(t *testing.T) {
 	joined := rowTime(cw.row(seatConcept, g3.SeatID), "joinedAt")
 
 	// Missed joins: whoever is connected is in the call, seen now, and the stranger is
-	// disconnected. The seat that has not connected yet keeps its place.
+	// disconnected. The seat that has not connected yet keeps its place: the pass records
+	// that it found it missing, and closes nothing.
 	cw.reconcile()
 	for _, seatID := range []string{hostSess.SeatID, g1.SeatID, g2.SeatID} {
 		seat := cw.row(seatConcept, seatID)
 		require.Equal(t, "in_call", seat["status"], "a connected seat is not in the call")
 		require.Equal(t, t0, rowTime(seat, "lastSeenAt"))
+		require.True(t, rowTime(seat, "absentSince").IsZero(), "a connected seat was recorded missing")
 	}
 	require.Contains(t, cw.media.removals(), fakeMediaRemoval{Server: BootstrapMediaServerID, Room: roomID, Identity: stranger},
 		"a participant the call never let in was left connected")
 	require.Equal(t, "admitted", cw.row(seatConcept, g3.SeatID)["status"], "a seat still connecting on its pass was closed")
+	require.Equal(t, t0, rowTime(cw.row(seatConcept, g3.SeatID), "absentSince"), "the first pass to miss a seat did not record it")
 
 	// Seen again inside two minutes, nothing is written.
 	versions := cw.versions(seatConcept, g1.SeatID)
@@ -67,19 +71,28 @@ func TestReconcileRepairsMissedAndReorderedEvents(t *testing.T) {
 	require.Equal(t, "admitted", cw.row(seatConcept, g3.SeatID)["status"])
 
 	// A missed leave: the first drops off without a word. At two minutes the others are
-	// seen again, and the two seats nobody is connected for are closed: the first at its
-	// last seen time, the one that never connected at its admission.
+	// seen again, and the seat that never connected, missing since the first pass, is
+	// closed at its admission. The one that dropped off was last seen two minutes ago --
+	// the age a present seat's stamp routinely is -- so this pass, the first to miss it,
+	// only records that, and it is still in the call.
 	cw.clock.Advance(30 * time.Second)
 	cw.media.setPresent(roomID, person(started.Join.Identity), person(in2.Identity))
+	cw.reconcile()
+	never := cw.row(seatConcept, g3.SeatID)
+	require.Equal(t, "left", never["status"])
+	require.Equal(t, joined, rowTime(never, "leftAt"), "a seat never seen was not closed at its admission")
+	missed := cw.row(seatConcept, g1.SeatID)
+	require.Equal(t, "in_call", missed["status"], "one pass that missed a seat closed it")
+	require.Equal(t, cw.clock.Now(), rowTime(missed, "absentSince"))
+	require.Equal(t, cw.clock.Now(), rowTime(cw.row(seatConcept, g2.SeatID), "lastSeenAt"), "a seat seen two minutes on was not refreshed")
+	require.Equal(t, "in_call", cw.row(seatConcept, hostSess.SeatID)["status"])
+
+	// It stays gone for a pass's lifetime after that: closed at its last seen time.
+	cw.clock.Advance(callrules.DefaultPolicy().PassTTL)
 	cw.reconcile()
 	gone := cw.row(seatConcept, g1.SeatID)
 	require.Equal(t, "left", gone["status"], "a seat stuck in the call with nobody connected was not closed")
 	require.Equal(t, t0, rowTime(gone, "leftAt"), "a vanished seat was not closed at its last seen time")
-	never := cw.row(seatConcept, g3.SeatID)
-	require.Equal(t, "left", never["status"])
-	require.Equal(t, joined, rowTime(never, "leftAt"), "a seat never seen was not closed at its admission")
-	require.Equal(t, cw.clock.Now(), rowTime(cw.row(seatConcept, g2.SeatID), "lastSeenAt"), "a seat seen two minutes on was not refreshed")
-	require.Equal(t, "in_call", cw.row(seatConcept, hostSess.SeatID)["status"])
 
 	// A crossed leave: the second left, but its connection lingers on the pass it still
 	// holds. Reconciliation disconnects it and leaves the seat as it left.
@@ -90,6 +103,71 @@ func TestReconcileRepairsMissedAndReorderedEvents(t *testing.T) {
 	require.Len(t, cw.media.removals(), before+1)
 	require.Equal(t, fakeMediaRemoval{Server: BootstrapMediaServerID, Room: roomID, Identity: in2.Identity}, cw.media.removals()[before])
 	require.Equal(t, "left", cw.row(seatConcept, g2.SeatID)["status"], "reconciliation took a seat that left back into the call")
+	require.Equal(t, "open", cw.row(roomConcept, roomID)["status"], "a call with its host in it was ended")
+}
+
+// TestAPassThatMissesSeatsClosesNothingUntilTheyStayGone: a seat closes only once it has
+// been missing for a pass's lifetime, counted from the first pass that found it missing,
+// never from the age of its last stamp (ruling final I2). Every seat of a call is refreshed
+// in the same pass, so every stamp in it is two minutes old at once; when the media server
+// restarts, the pass that lands before anybody is back finds every seat missing, and must
+// close none of them, or the call ends empty with everybody about to return. The seats
+// that come back within the grace keep their places, and their records of going missing
+// are cleared; a seat that stays gone for the grace is closed at its last sign of life.
+func TestAPassThatMissesSeatsClosesNothingUntilTheyStayGone(t *testing.T) {
+	cw := newCallWorld(t, "reconcilemissed", 50)
+	if cw == nil {
+		return
+	}
+	grace := callrules.DefaultPolicy().PassTTL
+	hostSess, started := cw.started("Host")
+	roomID := started.Call.ID
+	in, guest, err := cw.join(started.Call.GuestToken, "Guest")
+	require.NoError(t, err)
+	everybody := []MediaParticipant{person(started.Join.Identity), person(in.Identity)}
+	cw.media.setPresent(roomID, everybody...)
+	cw.reconcile()
+	seen := cw.clock.Now()
+
+	// The media server restarts with both stamps two minutes old, and a pass lands before
+	// anybody is back: it closes nothing.
+	cw.clock.Advance(2 * time.Minute)
+	cw.media.setPresent(roomID)
+	cw.reconcile()
+	missedAt := cw.clock.Now()
+	for _, seatID := range []string{hostSess.SeatID, guest.SeatID} {
+		seat := cw.row(seatConcept, seatID)
+		require.Equal(t, "in_call", seat["status"], "one pass that missed a seat closed it")
+		require.Equal(t, missedAt, rowTime(seat, "absentSince"), "the pass did not record when it found the seat missing")
+	}
+	require.Equal(t, "open", cw.row(roomConcept, roomID)["status"], "a pass during a media server restart ended the call")
+	require.True(t, rowTime(cw.row(roomConcept, roomID), "hostLeftAt").IsZero(), "a host only missing started the countdown")
+
+	// Everybody is back inside the grace: the seats stand, and nothing records them missing.
+	cw.clock.Advance(grace - time.Second)
+	cw.media.setPresent(roomID, everybody...)
+	cw.reconcile()
+	for _, seatID := range []string{hostSess.SeatID, guest.SeatID} {
+		seat := cw.row(seatConcept, seatID)
+		require.Equal(t, "in_call", seat["status"], "a seat back within the grace was closed")
+		require.True(t, rowTime(seat, "absentSince").IsZero(), "a seat seen again is still recorded missing")
+	}
+
+	// The guest drops off for good: missed, still missing inside the grace, then closed at
+	// its last sign of life once it has been missing for the grace.
+	cw.clock.Advance(2 * time.Minute)
+	lastSeen := rowTime(cw.row(seatConcept, guest.SeatID), "lastSeenAt")
+	require.False(t, lastSeen.Before(seen), "the guest's stamp went backwards")
+	cw.media.setPresent(roomID, person(started.Join.Identity))
+	cw.reconcile()
+	cw.clock.Advance(grace - time.Second)
+	cw.reconcile()
+	require.Equal(t, "in_call", cw.row(seatConcept, guest.SeatID)["status"], "a seat missing for less than the grace was closed")
+	cw.clock.Advance(time.Second)
+	cw.reconcile()
+	gone := cw.row(seatConcept, guest.SeatID)
+	require.Equal(t, "left", gone["status"], "a seat missing for the grace was not closed")
+	require.Equal(t, lastSeen, rowTime(gone, "leftAt"), "a vanished seat was not closed at its last sign of life")
 	require.Equal(t, "open", cw.row(roomConcept, roomID)["status"], "a call with its host in it was ended")
 }
 

@@ -39,11 +39,21 @@ import (
 //  1. Each seat in the call against the list. A seat the list shows is in the call
 //     (in_call) and seen now, its lastSeenAt written only once the stored one is
 //     lastSeenRefresh old, so a present seat costs one write per two minutes and not one
-//     per pass. A seat the list does not show is closed (left) once its last sign of
-//     life is a pass's lifetime old -- before that it may still be connecting on the pass
-//     it was handed -- AT that sign: its lastSeenAt, or its admission when it was never
-//     seen since (calls.SeatGone). The list read before the gates cannot show a seat let
-//     in after it, and the same grace is what keeps that seat from being closed.
+//     per pass, and a record that it went missing (absentSince) is cleared. A seat the
+//     list does not show is MISSING, and absence, not the age of its stamp, decides
+//     (calls.SeatAbsent, ruling final I2): the first pass to miss it records when
+//     (absentSince) and closes nothing, and it is closed (left) once it has been missing
+//     for a pass's lifetime from then, or from a later sign of life -- before that it may
+//     still be connecting on the pass it was handed, or coming back -- AT its last sign of
+//     life: its lastSeenAt, or its admission when it was never seen since. The age of the
+//     stamp cannot decide, because a present seat's is routinely as old as the grace (it
+//     is refreshed every lastSeenRefresh), and every seat of a call is refreshed in the
+//     same pass: a pass that landed during a media server restart, before anybody was
+//     back, would close them all and end the call empty. The list read before the gates
+//     cannot show a seat let in after it, and the grace from that pass's record is what
+//     keeps that seat from being closed. COST: one write when a seat goes missing and one
+//     when it comes back, and a vanished seat closes up to one pass later than its stamp
+//     alone would close it.
 //  2. Each identity the list shows that holds no seat in the call now -- a stranger, a
 //     removed seat back on its pass, a seat that left while its connection lingered -- is
 //     disconnected, after the gates. A seat that is not in the call holds no media
@@ -87,7 +97,8 @@ import (
 // Per media server, one read of its open rooms; per open call, one participant list
 // from the media server and four reads under its gates (room, seats, queue entries,
 // limits), read again only after a step that wrote. A call with people in it writes at
-// least once every lastSeenRefresh, so while calls run most passes write something, and
+// least once every lastSeenRefresh, and once more for each seat that goes missing or comes
+// back, so while calls run most passes write something, and
 // a scheduled automation's first write opens its run in the work journal (component/
 // automations journal.go heldUntilWrite): a pass that changed nothing leaves no run.
 //
@@ -122,11 +133,11 @@ const mediaCallBound = 10 * time.Second
 
 // reconcileTally is what one pass changed, for its log line.
 type reconcileTally struct {
-	rooms, closed, seen, disconnected, expired, handedOver, ended int
+	rooms, closed, missing, seen, disconnected, expired, handedOver, ended int
 }
 
 func (t reconcileTally) changed() bool {
-	return t.closed+t.disconnected+t.expired+t.handedOver+t.ended > 0
+	return t.closed+t.missing+t.disconnected+t.expired+t.handedOver+t.ended > 0
 }
 
 // Reconcile repairs every open call against what its media server shows (the file note).
@@ -149,7 +160,8 @@ func (s *Service) Reconcile(ctx context.Context) error {
 	}
 	if tally.changed() {
 		s.logger.Info("calls: reconciled the open calls", "component", pluginName,
-			"rooms", tally.rooms, "seatsSeen", tally.seen, "seatsClosed", tally.closed, "identitiesDisconnected", tally.disconnected,
+			"rooms", tally.rooms, "seatsSeen", tally.seen, "seatsMissing", tally.missing, "seatsClosed", tally.closed,
+			"identitiesDisconnected", tally.disconnected,
 			"entriesExpired", tally.expired, "handedOver", tally.handedOver, "ended", tally.ended)
 	}
 	if first != nil {
@@ -287,6 +299,11 @@ func (s *Service) reconcileGated(ctx context.Context, server MediaServer, hint r
 			if seat.LastSeenAt.IsZero() || now.Sub(seat.LastSeenAt) >= lastSeenRefresh {
 				fields["lastSeenAt"] = now
 			}
+			if !seat.AbsentSince.IsZero() {
+				// Back: whatever it was missing for no longer counts (an empty string clears
+				// an optional time, the concept's convention).
+				fields["absentSince"] = ""
+			}
 			if len(fields) == 0 {
 				continue
 			}
@@ -297,17 +314,25 @@ func (s *Service) reconcileGated(ctx context.Context, server MediaServer, hint r
 			tally.seen++
 			continue
 		}
-		gone, at := callrules.SeatGone(seat.LastSeenAt, seat.JoinedAt, now, v.policy.PassTTL)
-		if !gone {
+		absence := callrules.SeatAbsent(seat.LastSeenAt, seat.JoinedAt, seat.AbsentSince, now, v.policy.PassTTL)
+		switch {
+		case absence.Mark:
+			if err := s.store.updateSeat(fresh, owner, seat, map[string]any{"absentSince": now}, memql.VersionTimeAfter(seat.Version, now)); err != nil {
+				return reconcilePlan{}, err
+			}
+			wrote = true
+			tally.missing++
+			continue
+		case !absence.Gone:
 			continue
 		}
-		if err := s.store.updateSeat(fresh, owner, seat, map[string]any{"status": seatLeft, "leftAt": at}, memql.VersionTimeAfter(seat.Version, now)); err != nil {
+		if err := s.store.updateSeat(fresh, owner, seat, map[string]any{"status": seatLeft, "leftAt": absence.At}, memql.VersionTimeAfter(seat.Version, now)); err != nil {
 			return reconcilePlan{}, err
 		}
 		wrote = true
 		tally.closed++
-		if seat.Host && at.After(hostGoneAt) {
-			hostGoneAt = at
+		if seat.Host && absence.At.After(hostGoneAt) {
+			hostGoneAt = absence.At
 		}
 	}
 	if wrote {

@@ -234,10 +234,10 @@ func TestParticipantJoinedPutsASeatInTheCallAndRemovesAStranger(t *testing.T) {
 // call left, so participant_left records the disconnect as the seat's last sign of life
 // and changes nothing else: the only person in an ad hoc call is still in it, and their
 // page, refreshed, joins again with its session and gets a fresh pass into the same call
-// on the same seat. Nobody comes back: reconciliation closes the seat one pass lifetime
-// after the disconnect, AT the disconnect, and the call then ends empty. A host who
-// disconnects starts the host-left countdown at the disconnect too, not at the pass that
-// noticed.
+// on the same seat. Nobody comes back: reconciliation's first pass to miss the seat
+// records that, and the pass that finds it missing for a pass lifetime closes it, AT the
+// disconnect, and the call then ends empty. A host who disconnects starts the host-left
+// countdown at the disconnect too, not at the pass that noticed.
 func TestAParticipantLeftIsNotALeave(t *testing.T) {
 	cw := newCallWorld(t, "leftisnotleave", 50)
 	if cw == nil {
@@ -270,9 +270,13 @@ func TestAParticipantLeftIsNotALeave(t *testing.T) {
 
 	// They do not come back.
 	cw.media.setPresent(room)
-	cw.advanceTo(left.Add(policy.PassTTL - time.Second))
+	cw.advanceTo(left.Add(policy.PassTTL))
 	cw.reconcile()
-	require.Equal(t, "in_call", cw.row(seatConcept, hostSess.SeatID)["status"], "the seat was closed before a pass lifetime had passed")
+	missed := cw.clock.Now()
+	require.Equal(t, "in_call", cw.row(seatConcept, hostSess.SeatID)["status"], "the first pass to miss the seat closed it")
+	cw.advanceTo(missed.Add(policy.PassTTL - time.Second))
+	cw.reconcile()
+	require.Equal(t, "in_call", cw.row(seatConcept, hostSess.SeatID)["status"], "the seat was closed before it had been missing for a pass lifetime")
 	cw.clock.Advance(time.Second)
 	cw.reconcile()
 	gone := cw.row(seatConcept, hostSess.SeatID)
@@ -293,6 +297,8 @@ func TestAParticipantLeftIsNotALeave(t *testing.T) {
 	require.Equal(t, outcomeApplied, cw.deliver(eventBody(t, eventParticipantLeft, b.Call.ID, b.Join.Identity, hostGone, nil)))
 	cw.media.setPresent(b.Call.ID, person(inB.Identity))
 	cw.advanceTo(hostGone.Add(policy.PassTTL))
+	cw.reconcile()
+	cw.clock.Advance(policy.PassTTL)
 	cw.reconcile()
 	require.Equal(t, "left", cw.row(seatConcept, hostB.SeatID)["status"])
 	require.Equal(t, hostGone, rowTime(cw.row(roomConcept, b.Call.ID), "hostLeftAt"), "the countdown did not start at the host's disconnect")
