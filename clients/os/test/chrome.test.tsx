@@ -202,8 +202,9 @@ describe("windows and desks (spec K bullets 2-3)", () => {
 });
 
 describe("desk switch motion (owner, Nov 2026)", () => {
-  it("slides the windows with the desks: the desk left stays drawn and inert for one slide", () => {
-    document.documentElement.style.setProperty("--os-duration-med", "260ms");
+  // Themes write the token in seconds or milliseconds (Graphite: ".26s").
+  it.each(["260ms", ".26s"])("slides the windows with the desks for the whole slide (token %s): the desk left stays drawn and inert", (token) => {
+    document.documentElement.style.setProperty("--os-duration-med", token);
     try {
       renderShell();
       openFromLauncher("Files");
@@ -217,7 +218,10 @@ describe("desk switch motion (owner, Nov 2026)", () => {
       expect(leaving.getAttribute("data-slide")).toBe("out");
       expect(leaving.hasAttribute("inert")).toBe(true);
       expect(arriving.getAttribute("data-slide")).toBe("in");
-      act(() => { vi.advanceTimersByTime(260); });
+      act(() => { vi.advanceTimersByTime(250); });
+      expect(leaving.hasAttribute("hidden")).toBe(false);
+      expect(arriving.getAttribute("data-slide")).toBe("in");
+      act(() => { vi.advanceTimersByTime(10); });
       expect(leaving.hasAttribute("hidden")).toBe(true);
       expect(leaving.hasAttribute("data-slide")).toBe(false);
       expect(arriving.hasAttribute("data-slide")).toBe(false);
