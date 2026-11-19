@@ -473,6 +473,7 @@ export function Dock({
         {canAsk && <button type="button" className="os-ask-orb" aria-label="Ask" onClick={() => openAsk(null)}>
           <Mark className="os-ask-mark" />
         </button>}
+        <span className="os-dock-desks" data-os-dock-desks />
         <span
           className="os-dot os-connection-dot"
           data-os-dot={connectionTone}
