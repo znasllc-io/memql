@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties, type ReactElement } from "react";
-import { ChevronDown, ChevronRight, Folder, Layers, Library, Monitor, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Folder, Layers, Library, Monitor, Trash2, Users } from "lucide-react";
 
 import type { FolderTree, TreeNode } from "./fold";
 import type { FilesPlace } from "./filters";
@@ -17,6 +17,7 @@ import type { FilesPlace } from "./filters";
 const PLACES: ReadonlyArray<{ place: Exclude<FilesPlace, "library">; label: string; icon: ReactElement }> = [
   { place: "desktop", label: "Desktop", icon: <Monitor size={15} aria-hidden /> },
   { place: "materializer", label: "Materializer", icon: <Layers size={15} aria-hidden /> },
+  { place: "shared", label: "Shared with me", icon: <Users size={15} aria-hidden /> },
   { place: "bin", label: "Bin", icon: <Trash2 size={15} aria-hidden /> },
 ];
 

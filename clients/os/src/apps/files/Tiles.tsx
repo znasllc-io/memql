@@ -91,6 +91,8 @@ export function FileTile({
   onPick,
   onOpen,
   onMenu,
+  caption = "",
+  fixed = false,
 }: {
   row: ArtifactRow;
   picked: boolean;
@@ -102,6 +104,10 @@ export function FileTile({
   onPick: () => void;
   onOpen: () => void;
   onMenu: (x: number, y: number) => void;
+  /** A quiet line under the name (who shared a file with you). */
+  caption?: string;
+  /** Not draggable to the Bin: a file shared with you is not yours to archive. */
+  fixed?: boolean;
 }) {
   // DRAGGABLE TO THE BIN (memql#4784). The payload travels with the drag,
   // because the dock holds no Library feed of its own. The listeners go on a
@@ -115,6 +121,7 @@ export function FileTile({
       folder: false,
       deskItemId: "",
     } satisfies BinDropPayload,
+    disabled: fixed,
   });
   const name = artifactName(row);
   const press = useLongPress((x, y) => {
@@ -166,6 +173,7 @@ export function FileTile({
           <FileGlyph label={typeLabel(row)} />
         </span>
         <span className="os-files-tile-name">{name}</span>
+        {caption ? <span className="os-files-tile-meta os-files-tile-from">{caption}</span> : null}
         {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
       </button>
     </div>

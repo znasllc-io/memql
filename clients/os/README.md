@@ -1385,7 +1385,7 @@ affordance is present, inert, and says where the feature went.
 ## Files, the fifth app (memql#4721)
 
 `src/apps/files/` uses the shared local tabs: **Library, Desktop, Materializer,
-Bin**. Library includes every live file, including files filed in folders or
+Shared with me, Bin**. Library includes every live file, including files filed in folders or
 shown by the other tabs. Folders open in the same workspace; Back and breadcrumbs
 preserve the current location. A file opens a full-page detail view with labels,
 clients, compact actions and a plain version list. Neither list uses provenance
@@ -1461,6 +1461,22 @@ Backups use a plus action, a full-page form, a schedule, and a hidden-file switc
   repo-walking gate while its tests stayed green. `uploadResume.ts`'s own
   key separator was the second one to be found this way and is now written
   the same, as the escape for U+0000.
+
+- **SHARING A FILE IS ASKED AT THE FOOT OF THE RAIL** (Nov 2026). One click
+  on a file you own and still have, outside the Bin, shows "Share with" and the
+  engine's share directory (`libraryShareDirectory`, read once); choosing a
+  person asks for 1, 7, 10 or 30 days, or shows Renew and Stop sharing for
+  someone who already has it. The panel is absent for an archived file,
+  somebody else's file, a file shared with you, and without
+  `execute app:files/share` (rule 12). A file's active shares are a live
+  collection on `v1:library:share`, owned by the sharer, so a share, a renewal
+  and a stop arrive as events; Renew is `libraryShareFile` again with the days
+  the share was given. **Shared with me** lists the caller's
+  `v1:library:shareNotice` rows (owned by the recipient, so a new share appears
+  while they look) and never reads their own Library. A shared file offers
+  exactly Download (the same content route and download path) and Save to my
+  Library (`librarySaveSharedCopy`); it cannot be dragged to the Bin. Reads:
+  `src/apps/files/useSharing.ts`; tests: `test/files/sharing.test.tsx`.
 
 - **FILE ACTIONS STAY IN THE FOOTER.** File details and version history scroll
   above the shared `ActionBar`. The current state sits left; Delete (or Restore
