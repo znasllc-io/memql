@@ -241,6 +241,16 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
   opacity pulse. Reveal the destination after a bounded 160ms fade out; reduced
   motion stops the pulse and skips the visual delay. A reconnect never reopens
   this initial loading frame.
+- The first load of a page wears one `BootCurtain` over that frame: the mark is
+  the loading bar. It arrives dark, and each real step (signing you in, reaching
+  your cluster, loading your desktop, ready) lights dots along one walk through
+  the mark, each reached by a line from the dot before; any line whose dots
+  (and any dot it runs straight through) are lit lights too, and the small dot
+  outside lights last. Under the mark the current step reads in ink; finished
+  steps slide down, shrink and turn muted. Then it blooms open with a soft edge
+  onto the destination already drawn beneath, letting clicks through. It never
+  invents progress, never shows again in the same page load, opens by itself
+  after twelve seconds, and reduced motion removes it at once (Jesús, Nov 2026).
 - Keep one contextual information button at the far right of the shared
   `TrailRow`, after Back and breadcrumbs, on desktop and phone. It opens the
   current page's help modal; until documentation exists, say “Documentation is

@@ -3,6 +3,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Button, Rail, type Stop } from "../kit";
 import { EntryLayout } from "../kit/EntryLayout";
 import { EntryPending, useEntryTransition } from "../kit/EntryPending";
+import { bootFinished, bootReached } from "../kit/BootCurtain";
 import { canConfigure } from "../kit/ReadinessStates";
 import { useSetupFacts } from "../apps/setup/context";
 import { InferenceStop } from "../apps/setup/InferenceStop";
@@ -70,6 +71,9 @@ export function CoreGate({ onSignOut, children, waitForReadiness = true }: {
     return () => clearTimeout(timer);
   }, [waiting]);
   const entryTransition = useEntryTransition(waiting || (unconfigured && Object.keys(state.shell.windows).length === 0 && (ladderLoaded !== true || access === null)));
+  // The first load's curtain: the cluster's first facts are in, then the destination is drawn.
+  useEffect(() => { if (!waiting) bootReached(2); }, [waiting]);
+  useEffect(() => { if (!entryTransition.show) bootFinished(); }, [entryTransition.show]);
   if (entryTransition.show) return <EntryPending leaving={entryTransition.leaving} />;
 
   // Only a reported unconfigured verdict holds the desktop after entry.
