@@ -222,7 +222,7 @@ describe("windows and desks (spec K bullets 2-3)", () => {
 });
 
 describe("the empty-desk limit (owner, Nov 2026)", () => {
-  it("hides New desk while two desks are empty and brings it back once one is used", () => {
+  it("greys New desk out while two desks are empty and lights it again once one is used", () => {
     // The first desk holds the seeded Ask widget, so it is in use: a second
     // and a third desk may be added, then no more until one gets something.
     renderShell();
@@ -230,11 +230,15 @@ describe("the empty-desk limit (owner, Nov 2026)", () => {
     fireEvent.click(within(pager).getByRole("button", { name: "New desk" }));
     fireEvent.click(within(pager).getByRole("button", { name: "New desk" }));
     expect(screen.getByText("Desk 3 of 3")).toBeTruthy();
-    expect(within(pager).queryByRole("button", { name: "New desk" })).toBeNull();
+    const plus = within(pager).getByRole("button", { name: "New desk" });
+    expect(plus.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(plus);
+    expect(screen.getByText("Desk 3 of 3")).toBeTruthy();
     openFromLauncher("Files");
+    expect(within(pager).getByRole("button", { name: "New desk" }).hasAttribute("aria-disabled")).toBe(false);
     fireEvent.click(within(pager).getByRole("button", { name: "New desk" }));
     expect(screen.getByText("Desk 4 of 4")).toBeTruthy();
-    expect(within(pager).queryByRole("button", { name: "New desk" })).toBeNull();
+    expect(within(pager).getByRole("button", { name: "New desk" }).getAttribute("aria-disabled")).toBe("true");
   });
 });
 
