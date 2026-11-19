@@ -20,6 +20,7 @@ import {
   setWindowSection,
   swapSides,
   switchDesk,
+  toggleBorderless,
   switchDeskBy,
   throwToDesk,
   windowForApp,
@@ -446,5 +447,50 @@ describe("window rules", () => {
     s = pairWindows(throwToDesk(s, a, "new").state, a, 1, b);
     expect(activeDesk(s).windows).toEqual([b, a]);
     expect(s.windows[b]?.mode).toBe("normal");
+  });
+
+  it("a bar double-click toggles a lone window and borderless, and takes full screen back to a window", () => {
+    let s = openMany(initialShell(), "files");
+    const id = windowForApp(s, "files")!.id;
+    s = toggleBorderless(s, id);
+    expect(s.windows[id]?.mode).toBe("maximized");
+    s = toggleBorderless(s, id);
+    expect(s.windows[id]?.mode).toBe("normal");
+    s = toggleBorderless(cycleWindowMode(cycleWindowMode(s, id), id), id);
+    expect(s.windows[id]?.mode).toBe("normal");
+    expect(s.desks).toHaveLength(1);
+  });
+
+  it("a bar double-click on a dedicated full-screen window makes it a window where it is", () => {
+    let s = openMany(initialShell(), "files", "fleet");
+    const files = windowForApp(s, "files")!.id;
+    s = cycleWindowMode(s, files);
+    const dedicated = s.activeDeskId;
+    s = toggleBorderless(s, files);
+    expect(s.windows[files]?.mode).toBe("normal");
+    expect(s.windows[files]?.expandedReturn).toBeUndefined();
+    expect(s.activeDeskId).toBe(dedicated);
+    expect(activeDesk(s).windows).toEqual([files]);
+  });
+
+  it("a bar double-click on half a pair makes it borderless and moves the other to a new desk next to it", () => {
+    let s = openMany(initialShell(), "logs", "files", "fleet"); // desk1(logs,files) desk2(fleet)
+    s = switchDesk(s, s.desks[0]!.id);
+    const [logs, files] = s.desks[0]!.windows as [string, string];
+    s = toggleBorderless(s, files);
+    expect(s.desks.map(d => d.windows)).toEqual([[files], [logs], [windowForApp(s, "fleet")!.id]]);
+    expect(s.activeDeskId).toBe(s.desks[0]!.id);
+    expect(s.focusedWindowId).toBe(files);
+    expect(s.windows[files]?.mode).toBe("maximized");
+    expect(s.windows[logs]?.mode).toBe("normal");
+  });
+
+  it("a bar double-click next to a minimized partner acts as if alone", () => {
+    let s = openMany(initialShell(), "files", "fleet");
+    const [files, fleet] = activeDesk(s).windows as [string, string];
+    s = toggleBorderless(setWindowMode(s, fleet, "minimized"), files);
+    expect(s.windows[files]?.mode).toBe("maximized");
+    expect(s.windows[fleet]?.mode).toBe("minimized");
+    expect(activeDesk(s).windows).toEqual([files, fleet]);
   });
 });

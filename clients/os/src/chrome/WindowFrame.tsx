@@ -197,7 +197,15 @@ export function WindowFrame({
       aria-label={manifest.name}
       onPointerDown={() => actions.focusWindow(win.id)}
     >
-      <header className="os-window-bar">
+      <header
+        className="os-window-bar"
+        // Double-click the logo or the empty bar (Jesús, Nov 2026): never full
+        // screen (desks.ts toggleBorderless). Buttons and the app picker keep theirs.
+        onDoubleClick={event => {
+          const hit = (event.target as Element).closest("button, select, .os-window-app-selector");
+          if (!hit || hit.classList.contains("os-window-grip")) actions.toggleBorderless(win.id);
+        }}
+      >
         <button
           type="button"
           className="os-window-grip"

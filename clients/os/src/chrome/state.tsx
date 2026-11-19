@@ -29,6 +29,7 @@ import {
   setWindowMode,
   setWindowSection,
   swapSides as swapSidesFn,
+  toggleBorderless as toggleBorderlessFn,
   switchDesk as switchDeskFn,
   switchDeskBy as switchDeskByFn,
   throwToDesk as throwToDeskFn,
@@ -121,6 +122,8 @@ export interface OsActions {
   swapSides: (deskId: DeskId) => void;
   /** A lone window fills the borderless area; a pair stays split. */
   makeBorderless: (id: WindowId) => void;
+  /** Bar double-click: window <-> borderless, full screen -> window; a pair splits up. */
+  toggleBorderless: (id: WindowId) => void;
   /** Bring `bringId` beside the lone `keepId`, which takes `side`. */
   pairWindows: (keepId: WindowId, side: 0 | 1, bringId: WindowId) => void;
   throwToDesk: (id: WindowId, target: DeskId | "new") => ShellEffect;
@@ -625,6 +628,7 @@ export function OsProvider({
       navigateSection: (id, sectionId, origin) => set((s) => ({ ...s, shell: setWindowSection(s.shell, id, sectionId, origin) })),
       swapSides: (deskId) => set((s) => ({ ...s, shell: swapSidesFn(s.shell, deskId) })),
       makeBorderless: (id) => set((s) => ({ ...s, shell: makeBorderlessFn(s.shell, id) })),
+      toggleBorderless: (id) => set((s) => ({ ...s, shell: toggleBorderlessFn(s.shell, id) })),
       pairWindows: (keepId, side, bringId) => set((s) => ({ ...s, shell: pairWindowsFn(s.shell, keepId, side, bringId) })),
       throwToDesk: (id, target) => {
         lastEffect = { kind: "none" };

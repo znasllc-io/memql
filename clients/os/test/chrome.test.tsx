@@ -180,6 +180,38 @@ describe("windows and desks (spec K bullets 2-3)", () => {
     expect(screen.getByText("Desk 1 of 1")).toBeTruthy();
   });
 
+  it("a bar double-click toggles borderless, never full screen, and ignores the bar's buttons", () => {
+    renderShell();
+    openFromLauncher("Files");
+    const files = screen.getByRole("dialog", { name: "Files" });
+    const bar = files.querySelector(".os-window-bar") as HTMLElement;
+    fireEvent.doubleClick(screen.getByRole("button", { name: "Minimize Files" }));
+    fireEvent.doubleClick(within(files).getByRole("button", { name: "Search Files" }));
+    expect(files.hasAttribute("data-maximized")).toBe(false);
+    fireEvent.doubleClick(bar.querySelector(".os-window-drag-space")!);
+    expect(files.hasAttribute("data-maximized")).toBe(true);
+    fireEvent.doubleClick(bar.querySelector(".os-window-grip")!);
+    expect(files.hasAttribute("data-maximized") || files.hasAttribute("data-fullscreen")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Make Files borderless" }));
+    fireEvent.click(screen.getByRole("button", { name: "Make Files full screen" }));
+    fireEvent.doubleClick(bar);
+    expect(files.hasAttribute("data-fullscreen") || files.hasAttribute("data-maximized")).toBe(false);
+  });
+
+  it("a bar double-click on half a pair makes it borderless and moves the other app to its own desk", () => {
+    renderShell();
+    openFromLauncher("Files");
+    openFromLauncher("Fleet");
+    const files = screen.getByRole("dialog", { name: "Files" });
+    fireEvent.doubleClick(files.querySelector(".os-window-drag-space")!);
+    expect(files.hasAttribute("data-maximized")).toBe(true);
+    expect(files.hasAttribute("data-split")).toBe(false);
+    expect(screen.getByText("Desk 1 of 2")).toBeTruthy();
+    const fleet = document.querySelector("[data-os-window='fleet']")!;
+    expect(fleet.getAttribute("data-os-window-desk")).not.toBe(files.getAttribute("data-os-window-desk"));
+    expect(fleet.hasAttribute("hidden")).toBe(true);
+  });
+
   it("splits two apps edge to edge, and a second app joins a lone borderless one", () => {
     renderShell();
     openFromLauncher("Files");
