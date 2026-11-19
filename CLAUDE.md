@@ -71,6 +71,9 @@ PyYAML, naming the interpreter and that fix (`scripts/ci/pyyaml`).
 make up                      # fresh bring-up: cluster + ArgoCD + secrets + images, wait healthy
 make up SERVERS=2 AGENTS=1   # multi-node (cross-node mesh testing)
 make up SWITCH=1             # stop another running local stack first (stopped, not deleted)
+make up MEDIA=0              # skip the local calls media server, which make up starts last
+make media-up                # start it alone: LiveKit, Redis and Caddy beside the cluster (:7443)
+make media-down              # stop it and delete its rendered credentials
 make dev                     # inner-loop: rebuild images -> import -> restart pods
 make dev NODE=bff            # ...one node only (faster)
 make dev PULL_INFRA=1        # ...also refresh infra images (postgres/azurite)
