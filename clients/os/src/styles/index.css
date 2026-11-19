@@ -8064,7 +8064,44 @@ a.os-button {
 .os-entry-layout .os-signin-content,
 .os-entry-layout .os-core-gate-column { animation: os-entry-arrive 140ms ease-out; }
 @keyframes os-entry-arrive { from { opacity: 0; } to { opacity: 1; } }
+/* The first load's curtain (kit/BootCurtain.tsx): the mark is the loading bar. */
+@property --os-boot-r { syntax: "<length>"; inherits: false; initial-value: 3000px; }
+.os-boot-curtain {
+  position: fixed; inset: 0; z-index: 10001; display: grid; place-items: center;
+  background: var(--os-ground);
+  --os-boot-r: 3000px; --os-boot-soft: 160px;
+  -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 calc(var(--os-boot-r) - var(--os-boot-soft)), transparent var(--os-boot-r));
+  mask-image: radial-gradient(circle at 50% 50%, #000 calc(var(--os-boot-r) - var(--os-boot-soft)), transparent var(--os-boot-r));
+  animation: os-entry-arrive 160ms ease-out;
+}
+.os-boot-curtain[data-leaving] {
+  pointer-events: none; --os-boot-r: 0px; opacity: 0;
+  transition: --os-boot-r 650ms cubic-bezier(.6, 0, .4, 1), opacity 260ms ease-in 390ms;
+}
+.os-boot-curtain-content { display: grid; justify-items: center; gap: 14px; }
+.os-boot-mark { overflow: visible; }
+.os-boot-mark line { stroke-width: .78; stroke-linecap: round; fill: none; }
+.os-boot-mark-base line { stroke: color-mix(in srgb, var(--os-ink) 16%, transparent); }
+.os-boot-mark-base circle { fill: color-mix(in srgb, var(--os-ink) 16%, transparent); }
+.os-boot-path { stroke: var(--os-accent); stroke-dasharray: 1; stroke-dashoffset: 1; }
+.os-boot-path[data-on] { stroke-dashoffset: 0; transition: stroke-dashoffset 120ms linear; }
+.os-boot-edge { stroke: var(--os-accent); opacity: 0; }
+.os-boot-edge[data-on] { opacity: 1; transition: opacity 200ms ease 120ms; }
+.os-boot-dot { fill: var(--os-accent); opacity: 0; transform-box: fill-box; transform-origin: center; transform: scale(.4); }
+.os-boot-dot[data-on] { opacity: 1; transform: none; transition: opacity 140ms ease 120ms, transform 200ms cubic-bezier(.3, 1.6, .5, 1) 120ms; }
+.os-boot-steps { position: relative; width: 280px; height: 4.6em; font-size: var(--os-text-sm); }
+.os-boot-step {
+  position: absolute; inset: 0 0 auto; margin: 0; text-align: center; white-space: nowrap;
+  color: var(--os-ink); transform-origin: 50% 0; animation: os-boot-step-in 400ms ease-out;
+  transition: transform 450ms ease, opacity 450ms ease, color 450ms ease;
+}
+.os-boot-step[data-depth="1"] { transform: translateY(1.4em) scale(.82); opacity: .85; color: var(--os-muted); }
+.os-boot-step[data-depth="2"] { transform: translateY(2.5em) scale(.68); opacity: .6; color: var(--os-muted); }
+.os-boot-step[data-depth="3"] { transform: translateY(3.35em) scale(.58); opacity: .4; color: var(--os-muted); }
+@keyframes os-boot-step-in { from { opacity: 0; transform: translateY(-.6em); } }
 @media (prefers-reduced-motion: reduce) {
+  .os-boot-curtain, .os-boot-step { animation: none; }
+  .os-boot-curtain *, .os-boot-curtain[data-leaving] { transition: none; }
   .os-entry-pending-mark { animation: none; opacity: 1; }
   .os-entry-pending, .os-entry-pending[data-leaving] { animation: none; }
   .os-entry-layout .os-signin-content,
