@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { Plus } from "lucide-react";
 
@@ -45,12 +46,46 @@ function NewDeskDrop({ visible }: { visible: boolean }) {
   );
 }
 
+// How near (px, from a dot's centre) the mouse starts to grow it.
+const NEAR_PX = 44;
+
+/** Grows each dot as the mouse comes near it (--os-near, 0 at NEAR_PX, 1 on
+ * top of it), written straight to the dots so a mouse move never re-renders
+ * the shell. Mouse only: touch has no hover to anticipate. */
+function useNearDots(nav: React.RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    let frame = 0;
+    const measure = (x: number, y: number) => {
+      nav.current?.querySelectorAll<HTMLElement>(".os-pager-dot").forEach((dot) => {
+        const r = dot.getBoundingClientRect();
+        const d = Math.hypot(x - (r.left + r.width / 2), y - (r.top + r.height / 2));
+        dot.style.setProperty("--os-near", Math.max(0, 1 - d / NEAR_PX).toFixed(3));
+      });
+    };
+    const move = (event: PointerEvent) => {
+      if (event.pointerType !== "mouse") return;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => measure(event.clientX, event.clientY));
+    };
+    const away = () => measure(-1e5, -1e5);
+    window.addEventListener("pointermove", move);
+    document.documentElement.addEventListener("pointerleave", away);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("pointermove", move);
+      document.documentElement.removeEventListener("pointerleave", away);
+    };
+  }, [nav]);
+}
+
 export function DeskPager({ draggingWindow }: { draggingWindow: boolean }) {
   const { state, actions } = useOs();
+  const navRef = useRef<HTMLElement>(null);
+  useNearDots(navRef);
   const { desks, activeDeskId } = state.shell;
   const addable = canAddDesk(state.shell, (deskId) => surfaceHasContent(state.surfaces[deskId]));
   return (
-    <nav className="os-pager" aria-label="Desks">
+    <nav ref={navRef} className="os-pager" aria-label="Desks">
       {desks.map((desk, index) => (
         <PagerDot
           key={desk.id}

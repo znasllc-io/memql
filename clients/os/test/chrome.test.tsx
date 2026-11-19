@@ -118,6 +118,26 @@ describe("windows and desks (spec K bullets 2-3)", () => {
     expect(pager.compareDocumentPosition(clock) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("grows a desk dot as the mouse comes near it, and only for a mouse", async () => {
+    renderShell();
+    const dot = screen.getByRole("button", { name: /^Desk 1/ });
+    const move = (x: number, pointerType: string) => {
+      const event = new MouseEvent("pointermove", { clientX: x, clientY: 0, bubbles: true });
+      Object.defineProperty(event, "pointerType", { value: pointerType });
+      window.dispatchEvent(event);
+    };
+    const frame = () => act(() => new Promise<void>((done) => requestAnimationFrame(() => done())));
+    // jsdom lays nothing out, so every dot's centre is (0, 0).
+    move(0, "mouse"); await frame();
+    expect(dot.style.getPropertyValue("--os-near")).toBe("1.000");
+    move(22, "mouse"); await frame();
+    expect(dot.style.getPropertyValue("--os-near")).toBe("0.500");
+    move(200, "mouse"); await frame();
+    expect(dot.style.getPropertyValue("--os-near")).toBe("0.000");
+    move(0, "touch"); await frame();
+    expect(dot.style.getPropertyValue("--os-near")).toBe("0.000");
+  });
+
   it("relaunching an open app focuses it instead of duplicating it", () => {
     renderShell();
     openFromLauncher("Files");
