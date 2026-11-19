@@ -5,7 +5,7 @@ import { surfaceHasContent } from "../system/desktop";
 import { DESK_CAP, canAddDesk, type Desk } from "../system/desks";
 import { useOs } from "./state";
 
-// The desk pager (spec A): dots above the dock. Click switches; a window
+// The desk pager (spec A): dots inside the dock, between Ask and the clock. Click switches; a window
 // dragged onto a dot is thrown there; a full dot dims during a window
 // drag; "+" adds a user desk, and is absent while MAX_EMPTY_DESKS desks
 // are empty. The active desk is announced politely by the Desktop

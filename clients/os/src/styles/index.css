@@ -666,6 +666,17 @@ button:not(:disabled):active {
   gap: 12px;
   padding-left: 2px;
 }
+/* The desk dots' place in the dock (Desktop.tsx draws them here), a thin line each side. */
+.os-dock-desks {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 12px;
+  border-left: 1px solid var(--os-line);
+  border-right: 1px solid var(--os-line);
+}
+.os-dock-desks:empty { display: none; }
+.os-dock-desks .os-pager { position: static; transform: none; }
 
 .os-clock {
   font-family: var(--os-font-mono);

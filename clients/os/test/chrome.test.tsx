@@ -108,6 +108,16 @@ describe("windows and desks (spec K bullets 2-3)", () => {
     expect(within(pager).getAllByRole("button", { name: /^Desk \d/ })).toHaveLength(2);
   });
 
+  it("draws the desk dots inside the dock, before the clock", () => {
+    renderShell();
+    const pager = screen.getByRole("navigation", { name: "Desks" });
+    const dock = pager.closest("footer.os-dock");
+    expect(dock).not.toBeNull();
+    expect(pager.parentElement?.classList.contains("os-dock-desks")).toBe(true);
+    const clock = dock!.querySelector(".os-clock")!;
+    expect(pager.compareDocumentPosition(clock) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("relaunching an open app focuses it instead of duplicating it", () => {
     renderShell();
     openFromLauncher("Files");

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useDraggable, useDroppable, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core";
 
 import { newShortId, rowNumber, rowString } from "@znasllc-io/memql-sdk-core/client";
@@ -85,6 +86,13 @@ export function Desktop({
   const [renamingItemId, setRenamingItemId] = useState<string | null>(null);
   const selectedId = state.selectedItemId;
   const [draggingWindow, setDraggingWindow] = useState(false);
+  // The desk dots live INSIDE the dock, between Ask and the clock (Jesús, Nov
+  // 2026: horizontal room is precious, the dock has room to spare). They stay
+  // this desk's own component, drawn into the dock's slot, so a window dragged
+  // onto a dot still lands there. No dock (none mounted yet) draws them above
+  // the dock as before.
+  const [dockDesks, setDockDesks] = useState<HTMLElement | null>(null);
+  useEffect(() => { setDockDesks(document.querySelector<HTMLElement>("[data-os-dock-desks]")); }, []);
   const [noAnswerFor, setNoAnswerFor] = useState<string | null>(null);
   // The desk's own error line (create/rename/move refusals): in-surface, at
   // the bottom of the desk, self-clearing -- the menu that caused it is gone
@@ -557,7 +565,8 @@ export function Desktop({
             {deskError}
           </p>
         ) : null}
-        {!hidePager ? <DeskPager draggingWindow={draggingWindow} /> : null}
+        {hidePager ? null : dockDesks ? createPortal(<DeskPager draggingWindow={draggingWindow} />, dockDesks)
+          : <DeskPager draggingWindow={draggingWindow} />}
         {menu ? (
           <ContextMenu
             x={menu.x}
