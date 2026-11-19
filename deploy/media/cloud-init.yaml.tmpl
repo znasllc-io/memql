@@ -87,8 +87,10 @@ write_files:
 
 # The journal, the containers' logs included, under a week: a file is deleted once its
 # oldest entry is six days old, files rotate daily so that takes at most a day's logs early,
-# and the whole journal is capped so it cannot fill the disk first. runcmd restarts journald
-# so the cap holds from the first boot.
+# and the whole journal is capped so it cannot fill the disk first. Ubuntu 24.04's journald
+# also forwards every entry to rsyslog, whose /var/log/syslog logrotate keeps for about
+# five weeks, so ForwardToSyslog=no makes the journal the only copy. runcmd restarts
+# journald so the settings hold from the first boot.
   - path: /etc/systemd/journald.conf.d/90-memql-media.conf
     permissions: "0644"
     content: |
@@ -96,6 +98,7 @@ write_files:
       [Journal]
       MaxRetentionSec=6day
       MaxFileSec=1day
+      ForwardToSyslog=no
       SystemMaxUse=1G
 
 # LiveKit asks for 16 MiB UDP socket buffers and warns that anything under 5 MB is too

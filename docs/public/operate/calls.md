@@ -774,7 +774,8 @@ All three run on the host's network, as LiveKit's own self-hosting layout runs t
 with `live-restore`, so a restart of the Docker daemon, which Ubuntu's unattended
 security updates make when they update Docker, leaves the containers and their calls
 running. Every container logs to the system journal (Docker's `journald` log driver),
-and the journal keeps nothing past six days and at most 1 GB
+and the journal keeps nothing past six days and at most 1 GB, and does not forward to
+syslog, whose file Ubuntu keeps for about five weeks
 (`/etc/systemd/journald.conf.d/90-memql-media.conf`), so LiveKit's logs, which name
 participants' identities and rooms, live less than a week; `docker logs` and
 `docker compose logs` read them there. A

@@ -626,7 +626,10 @@ func TestTheServerKeepsItsCallsThroughADockerRestart(t *testing.T) {
 // MaxFileSec rotates files daily so a deletion takes at most a day's logs early and never
 // leaves one past the bound, and SystemMaxUse keeps the disk safe. journald is restarted
 // at first boot so the cap holds from the first container on. `docker logs` and `docker
-// compose logs`, which the runbook uses, read the journald driver.
+// compose logs`, which the runbook uses, read the journald driver. ForwardToSyslog=no
+// keeps journald from also handing every entry to rsyslog (Ubuntu 24.04's default), whose
+// /var/log/syslog logrotate keeps for about five weeks: with it, the journal is the only
+// copy, so no copy of a container's log outlives six days.
 func TestTheServerKeepsItsLogsUnderAWeek(t *testing.T) {
 	c := parseCloudInit(t, renderedCloudInit(t))
 	daemon, _ := writtenFile(t, c, "/etc/docker/daemon.json")
@@ -666,6 +669,12 @@ func TestTheServerKeepsItsLogsUnderAWeek(t *testing.T) {
 		if got <= 0 || got > bound {
 			t.Errorf("[Journal] %s is %v, want more than none and at most %v, so no log outlives a week", name, got, bound)
 		}
+	}
+	// Ubuntu 24.04's journald forwards every entry to rsyslog by default, which writes it
+	// to /var/log/syslog, and logrotate keeps that for about five weeks: a copy of every
+	// LiveKit line that outlives the journal's six days.
+	if settings["ForwardToSyslog"] != "no" {
+		t.Errorf("[Journal] ForwardToSyslog is %q, want no: rsyslog would keep a copy of every container's log in /var/log/syslog for about five weeks", settings["ForwardToSyslog"])
 	}
 	if settings["SystemMaxUse"] == "" {
 		t.Error("[Journal] sets no SystemMaxUse, so the journal can fill the disk before it is six days old")

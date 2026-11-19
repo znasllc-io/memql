@@ -32,10 +32,10 @@ concept into the shared version-retirement sweep. The required archive uses
 `MEMQL_AZURE_BLOB_CONTAINER`; `archive="none"` explicitly makes the selected
 history disposable. Unmarked concepts keep their current policies.
 
-Two status rows declare `@retention(ttl="1d", keepLatest=true, archive="none")`:
-`v1:pipelines:run` and `v1:worker:appSession`. Their holders rewrite them on a
+Three status rows declare `@retention(ttl="1d", keepLatest=true, archive="none")`:
+`v1:pipelines:run`, `v1:worker:appSession` and `v1:calls:room`. Their holders rewrite them on a
 heartbeat and after every step, and each write appended a full version (a
-pipeline run's copies its ~14 KB `policySnapshot`); on 2026-11-06 the two
+pipeline run's copies its ~14 KB `policySnapshot`); on 2026-11-06 the first two
 accounted for 1.9 GB in one week. A pipeline run's heartbeat is a current
 observation instead where its observation storage is on (Current liveness
 observations, below). Nothing reads a superseded version: a pipeline
