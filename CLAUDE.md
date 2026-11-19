@@ -58,13 +58,15 @@ and [work context and recovery](docs/public/ai/work-context-and-recovery.md).
 
 ## Quick Start
 
-**Prerequisites:** docker (with Docker Compose v2), k3d, kubectl (`brew install k3d kubectl`), python3, and openssl (the local calls media server).
+**Prerequisites:** docker, k3d, kubectl (`brew install k3d kubectl`), python3.
 `make install-deps` checks them and installs protoc, its Go plugins and PyYAML
 for the `python3` first on PATH; for Homebrew's externally managed Python it
 waits for the owner's PEP 668 opt-in (`PIP_BREAK_SYSTEM_PACKAGES=1`) or an
 activated virtualenv. Tests in `make test` that run `scripts/ci`'s Python or
 the connection gate's (`scripts/deploy/conn-headroom-check.sh`) FAIL without
-PyYAML, naming the interpreter and that fix (`scripts/ci/pyyaml`).
+PyYAML, naming the interpreter and that fix (`scripts/ci/pyyaml`). The local
+calls media server, which `make up` starts last (`MEDIA=0` skips it), also
+needs Docker Compose v2 and openssl; `make install-deps` does not check those.
 
 ```bash
 # --- k3d + ArgoCD: the ONLY supported local run path ---
