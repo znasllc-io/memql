@@ -81,7 +81,7 @@ require (
 	github.com/livekit/mediatransportutil v0.0.0-20260821083140-f234b534b095 // indirect
 	github.com/livekit/protocol v1.51.1-0.20260910121219-271d9cde3897
 	github.com/livekit/psrpc v0.7.6 // indirect
-	github.com/livekit/server-sdk-go/v2 v2.19.0 // indirect
+	github.com/livekit/server-sdk-go/v2 v2.19.0
 	github.com/magefile/mage v1.17.2 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
 	github.com/nats-io/nats.go v1.52.0 // indirect
@@ -109,7 +109,7 @@ require (
 	github.com/pion/stun/v4 v4.0.1 // indirect
 	github.com/pion/transport/v5 v5.1.1 // indirect
 	github.com/pion/turn/v5 v5.1.2 // indirect
-	github.com/pion/webrtc/v4 v4.2.23 // indirect
+	github.com/pion/webrtc/v4 v4.2.23
 	github.com/prometheus/client_golang v1.24.1 // indirect
 	github.com/prometheus/client_model v0.6.3 // indirect
 	github.com/puzpuzpuz/xsync/v4 v4.5.0 // indirect
