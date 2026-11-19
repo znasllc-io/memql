@@ -52,6 +52,16 @@ describe("first-load curtain", () => {
     expect(render(<BootCurtain />).container.querySelector(".os-boot-curtain")).toBeNull();
   });
 
+  it("shows only the steps that really happened on the way to a sign-in screen", async () => {
+    const { container } = render(<BootCurtain />);
+    await tick(200);
+    await act(async () => bootFinished());
+    await act(async () => bootReached(1));
+    await tick(9 * 110);
+    expect(steps(container)).toEqual(["Signing you in@1", "Ready@0"]);
+    expect(lit(container)).toBe(9);
+  });
+
   it("opens by itself if no step ever reports, so it cannot hold the OS", async () => {
     const { container } = render(<BootCurtain />);
     await tick(11_999);
