@@ -812,16 +812,19 @@ func requireCallsLimited(t *testing.T, rec *httptest.ResponseRecorder, wantMs in
 }
 
 // THE BUDGETS, per replica: unlock 10 a minute per (site, address) and 60 per site; join 30
-// and 600; every other route 600 per (site, address), shared. They bound load, not
-// guessing: what stops guessing is the 128 bits of a key and the 160 of a link. Each
-// operation's buckets are its own, so a crowd joining cannot spend what a key holder's
-// unlock needs, a flood of unlocks cannot keep a guest out, and a host's polling spends
-// neither. The address is the right-most X-Forwarded-For entry, the ingress's own record.
+// and 600; a host's controls and the hang-up 120 per (site, address), shared by the two;
+// every other route 600 per (site, address), shared. They bound load, not guessing: what
+// stops guessing is the 128 bits of a key and the 160 of a link. Each operation's buckets
+// are its own, so a crowd joining cannot spend what a key holder's unlock needs, a flood of
+// unlocks cannot keep a guest out, a host's polling spends neither, and no polling or
+// joining can keep a person from hanging up or a host from using the controls. The address
+// is the right-most X-Forwarded-For entry, the ingress's own record.
 func TestCallsRateLimitsUnlockAndJoinSeparately(t *testing.T) {
 	unlock := func(addr string) *http.Request { return callsFrom(http.MethodPost, "/_memql/calls/unlock", addr) }
 	join := func(addr string) *http.Request { return callsFrom(http.MethodPost, "/_memql/calls/join", addr) }
 	poll := func(addr string) *http.Request { return callsFrom(http.MethodGet, "/_memql/calls/session", addr) }
-	others := []string{"session", "start", "schedule", "reschedule", "cancel", "queue", "host", "leave"}
+	others := []string{"session", "start", "schedule", "reschedule", "cancel", "queue"}
+	controls := []string{"host", "leave"}
 
 	t.Run("unlock: ten per address", func(t *testing.T) {
 		up := newAccessUpstream(t)
@@ -896,7 +899,7 @@ func TestCallsRateLimitsUnlockAndJoinSeparately(t *testing.T) {
 		if rec := serveAccess(h, unlock("203.0.113.9")); rec.Code != http.StatusOK {
 			t.Fatalf("an unlock after the join budget was gone = %d, want 200", rec.Code)
 		}
-		for _, name := range others {
+		for _, name := range append(append([]string(nil), others...), controls...) {
 			method, path := callsPair(t, name)
 			if rec := serveAccess(h, callsFrom(method, path, "203.0.113.9")); rec.Code != http.StatusOK {
 				t.Fatalf("%s after the join budget was gone = %d, want 200", name, rec.Code)
@@ -958,6 +961,42 @@ func TestCallsRateLimitsUnlockAndJoinSeparately(t *testing.T) {
 		}
 		if rec := serveAccess(h, join("203.0.113.9")); rec.Code != http.StatusOK {
 			t.Fatalf("a join after the polls = %d, want 200", rec.Code)
+		}
+		// THE POLLS CANNOT SPEND THE HANG-UP OR THE HOST'S CONTROLS (ruling final B-I1):
+		// behind a fronting proxy everybody arriving through one front address shares that
+		// address's budget, and a crowd's polls must not leave a person unable to leave.
+		for _, name := range controls {
+			method, path := callsPair(t, name)
+			if rec := serveAccess(h, callsFrom(method, path, "203.0.113.9")); rec.Code != http.StatusOK {
+				t.Fatalf("%s after the polls spent their budget = %d, want 200: the polls spent the hang-up's budget", name, rec.Code)
+			}
+		}
+	})
+
+	t.Run("the host's controls and the hang-up share a hundred and twenty per address", func(t *testing.T) {
+		up := newAccessUpstream(t)
+		h := callsHandler(t, callsSite(nil), up.server.URL)
+
+		for i := 0; i < 120; i++ {
+			name := controls[i%len(controls)]
+			method, path := callsPair(t, name)
+			if rec := serveAccess(h, callsFrom(method, path, "203.0.113.9")); rec.Code != http.StatusOK {
+				t.Fatalf("request %d (%s) = %d, want 200 inside the 120", i+1, name, rec.Code)
+			}
+		}
+		for _, name := range controls {
+			method, path := callsPair(t, name)
+			requireCallsLimited(t, serveAccess(h, callsFrom(method, path, "203.0.113.9")), 500, "1")
+		}
+		method, path := callsPair(t, "leave")
+		if rec := serveAccess(h, callsFrom(method, path, "203.0.113.10")); rec.Code != http.StatusOK {
+			t.Fatalf("a hang-up from another address = %d, want its own budget", rec.Code)
+		}
+		for _, name := range others {
+			method, path := callsPair(t, name)
+			if rec := serveAccess(h, callsFrom(method, path, "203.0.113.9")); rec.Code != http.StatusOK {
+				t.Fatalf("%s after the controls spent their budget = %d, want 200", name, rec.Code)
+			}
 		}
 	})
 

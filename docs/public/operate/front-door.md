@@ -694,7 +694,11 @@ that forwards anywhere else leaves the binding at `issuing`.
    client address the front sees gets its own budget before anything reaches
    the cluster. It belongs on the front because behind it the edge counts the
    front's addresses rather than the visitor's ([what the edge
-   records](site-hosting.md#what-the-edge-records-about-a-request)).
+   records](site-hosting.md#what-the-edge-records-about-a-request)): every
+   visitor arriving through one front address shares each of the edge's
+   per-address budgets, a calls deployable's included
+   ([calls behind a front](calls.md#a-deployable-on-its-own-domain)), until the
+   edge can learn the visitor's address behind a front it can prove.
 
 Then CNAME the hostname to the endpoint and watch the binding walk from
 `verifying` to `issuing` to `live`.

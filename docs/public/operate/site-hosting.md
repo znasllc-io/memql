@@ -866,10 +866,16 @@ bundle and the generic `/_memql/*` proxy, and forwards each to the bff:
   `reschedule`, which carry a title), rate-limits per replica, and writes the
   site and owner stamp over any copy the client sent. The budgets bound load, not
   guessing: `unlock` takes 10 a minute per address and 60 per site, `join` 30
-  per address and 600 per site, and the other eight routes share 600 a minute
-  per address. A refusal speaks the bff's words (`not_found`, `not_json`,
-  `too_large`, `limited` with `retryAfterMs` and `Retry-After`), and a request
-  from another origin is `403` `forbidden` with the reason `foreign_origin`.
+  per address and 600 per site, `host` and `leave` share 120 a minute per
+  address of their own, so no polling or joining can keep a person from hanging
+  up or a host from using the controls, and the other six routes share 600 a
+  minute per address. Behind a fronting proxy the address the edge counts is the
+  front's, so every visitor arriving through one front address shares each of
+  these budgets ([what the edge records](#what-the-edge-records-about-a-request)).
+  A refusal speaks the bff's words (`not_found`, `invalid` for a body that could
+  not be read, `not_json`, `too_large`, `limited` with `retryAfterMs` and
+  `Retry-After`), and a request from another origin is `403` `forbidden` with
+  the reason `foreign_origin`.
 - **The session cookie stops here.** `__Host-memql_calls` reaches every path of
   the site, as the access cookie does. The ten routes forward it and no other
   credential, and everything else the edge forwards, the access routes and the

@@ -390,6 +390,17 @@ check compares a POST's `Origin` with the request's `Host`, so the front must fo
 `Host` header unchanged, as that section configures it. The media server is never behind
 the front: browsers connect to it directly.
 
+**Behind a front, the edge's budgets are the front's.** The edge counts its calls budgets
+(10 unlocks, 30 joins, 120 host controls and hang-ups and 600 other requests a minute per
+address, on each replica) by the right-most `X-Forwarded-For` address, and behind a front
+that address is the front's, not the visitor's. So every visitor arriving through one
+front address shares those budgets: one of them sending 10 unlocks a minute keeps the rest
+from unlocking, and enough polling pages behind one address use up its 600 between them.
+Hanging up and the host's controls have their own 120, so polling and joining never keep a
+person from leaving or a host from acting. The front's own per-address rate limit
+([Behind Azure Front Door](front-door.md#behind-azure-front-door), step 4) is what bounds
+each visitor until the edge can learn the visitor's address behind a proven front.
+
 ## Production media server
 
 A production media server is one Hetzner Cloud server in a US location (`ash`,

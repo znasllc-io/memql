@@ -161,18 +161,23 @@ const (
 	// trading a credential for a session is the act worth slowing. Join is allowed three
 	// times as many per address, because one address is routinely a household or an office
 	// whose people come into a call at once, and its per-site ceiling is sized for a
-	// deployable whose whole job is calls rather than for one gate on a site. Everything
-	// else is ordinary use -- a host's page polls the session every few seconds -- and
-	// shares one larger budget. There is no environment override, as there is none for the
-	// access surface's, because nothing asks for one yet.
-	callsUnlockPerMinutePerAddress = 10
-	callsUnlockPerMinutePerSite    = 60
-	callsJoinPerMinutePerAddress   = 30
-	callsJoinPerMinutePerSite      = 600
-	callsOtherPerMinutePerAddress  = 600
+	// deployable whose whole job is calls rather than for one gate on a site. A host's
+	// controls and the hang-up have a budget of their own, sized for the acts of a call's
+	// people (a host admitting a line of knockers, a room hanging up at once) rather than
+	// for polling: no amount of polling or joining from an address can keep a person there
+	// from leaving or a host from using the controls. Everything else is ordinary use -- a
+	// page polls its session every few seconds -- and shares one larger budget. There is no
+	// environment override, as there is none for the access surface's, because nothing asks
+	// for one yet.
+	callsUnlockPerMinutePerAddress  = 10
+	callsUnlockPerMinutePerSite     = 60
+	callsJoinPerMinutePerAddress    = 30
+	callsJoinPerMinutePerSite       = 600
+	callsControlPerMinutePerAddress = 120
+	callsOtherPerMinutePerAddress   = 600
 )
 
-// callsLimits are the budgets in front of the surface: five token buckets and the clock they
+// callsLimits are the budgets in front of the surface: six token buckets and the clock they
 // are read against.
 //
 // PER REPLICA, BY DESIGN, for accessLimits' reason: a shared counter would put a database
@@ -186,29 +191,42 @@ const (
 // right-most X-Forwarded-For entry, which the ingress records and a caller cannot choose, an
 // IPv6 address by its /64.
 //
+// BEHIND A FRONTING PROXY THE ADDRESS IS THE FRONT'S. A deployable on its own domain behind
+// a front such as Azure Front Door reaches the ingress from the front's egress addresses, so
+// the right-most entry is the front's, and every visitor arriving through one front address
+// shares each per-address budget below: one of them flooding spends everybody's. KNOWN
+// LIMITATION (ruling final B-I1), carried to launch hardening, before public traffic: the
+// edge keys on the visitor's own address only once the front is proven by a value it adds.
+// What part 1 ships is the minimum: the hang-up and the host's controls have a bucket of
+// their own, so the polls of everybody behind one front address cannot keep a person from
+// hanging up or a host from using the controls.
+//
 // UNLOCK AND JOIN EACH DRAW ON TWO, ADDRESS FIRST, and the order is the point, as it is for
 // the access surface's unlock: one address flooding is stopped by its own bucket before it
-// reaches the site's, so it can take its own share of the site's budget and no more. Each
-// operation's buckets are its own, so a crowd joining cannot spend what a key holder's
-// unlock needs, a flood of unlocks cannot keep a guest out, and a host's polling spends
-// neither.
+// reaches the site's, so it can take its own share of the site's budget and no more (an
+// address standing for a whole front is one address here too). Each operation's buckets are
+// its own, so a crowd joining cannot spend what a key holder's unlock needs, a flood of
+// unlocks cannot keep a guest out, a host's polling spends neither, and neither polling nor
+// joining spends what hanging up or the host's controls need.
 type callsLimits struct {
-	unlockAddress *shopperBucket // (site, address): 10 a minute
-	unlockSite    *shopperBucket // site: 60 a minute
-	joinAddress   *shopperBucket // (site, address): 30 a minute
-	joinSite      *shopperBucket // site: 600 a minute
-	other         *shopperBucket // (site, address): 600 a minute, for the other eight routes
-	now           func() time.Time
+	unlockAddress  *shopperBucket // (site, address): 10 a minute
+	unlockSite     *shopperBucket // site: 60 a minute
+	joinAddress    *shopperBucket // (site, address): 30 a minute
+	joinSite       *shopperBucket // site: 600 a minute
+	controlAddress *shopperBucket // (site, address): 120 a minute, for POST /host and POST /leave
+	other          *shopperBucket // (site, address): 600 a minute, for the other six routes
+	now            func() time.Time
 }
 
 func newCallsLimits() *callsLimits {
 	return &callsLimits{
-		unlockAddress: newShopperBucket(callsUnlockPerMinutePerAddress),
-		unlockSite:    newShopperBucket(callsUnlockPerMinutePerSite),
-		joinAddress:   newShopperBucket(callsJoinPerMinutePerAddress),
-		joinSite:      newShopperBucket(callsJoinPerMinutePerSite),
-		other:         newShopperBucket(callsOtherPerMinutePerAddress),
-		now:           time.Now,
+		unlockAddress:  newShopperBucket(callsUnlockPerMinutePerAddress),
+		unlockSite:     newShopperBucket(callsUnlockPerMinutePerSite),
+		joinAddress:    newShopperBucket(callsJoinPerMinutePerAddress),
+		joinSite:       newShopperBucket(callsJoinPerMinutePerSite),
+		controlAddress: newShopperBucket(callsControlPerMinutePerAddress),
+		other:          newShopperBucket(callsOtherPerMinutePerAddress),
+		now:            time.Now,
 	}
 }
 
@@ -233,6 +251,11 @@ func (l *callsLimits) allow(op, siteID, address string) (bool, time.Duration) {
 		}
 		if !l.joinSite.allow(siteID, now) {
 			return false, callsTokenWait(callsJoinPerMinutePerSite)
+		}
+		return true, 0
+	case callsOpHost, callsOpLeave:
+		if !l.controlAddress.allow(key, now) {
+			return false, callsTokenWait(callsControlPerMinutePerAddress)
 		}
 		return true, 0
 	}
