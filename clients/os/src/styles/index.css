@@ -524,32 +524,45 @@ button:not(:disabled):active {
   transform: translateX(-50%);
   display: flex;
   align-items: center;
-  gap: 10px;
   z-index: 30;
 }
 
+/* Each dot is an 18 x 28 target (the old dot plus its gap), so the mouse can
+   find it; the 8px dot is drawn inside and grows as the pointer comes near
+   (--os-near, 0..1, set by DeskPager). Same 18px pitch, so the dock keeps its
+   width (Jesús, Nov 2026). */
 .os-pager-dot {
-  width: 8px;
-  height: 8px;
+  --os-near: 0;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 28px;
   padding: 0;
   border: 0;
+  background: none;
+  cursor: pointer;
+}
+.os-pager-dot::before {
+  content: "";
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: var(--os-muted);
-  opacity: 0.45;
-  cursor: pointer;
+  opacity: calc(0.45 + 0.4 * var(--os-near));
+  transform: scale(calc(1 + 0.9 * var(--os-near)));
   transition:
-    transform var(--os-duration-fast) var(--os-ease),
+    transform 90ms linear,
     opacity var(--os-duration-fast) var(--os-ease);
 }
-.os-pager-dot[data-active] {
+.os-pager-dot[data-active]::before {
   background: var(--os-accent);
   opacity: 1;
 }
-.os-pager-dot[data-over] {
-  transform: scale(1.6);
+.os-pager-dot[data-over]::before {
+  transform: scale(1.9);
   opacity: 1;
 }
-.os-pager-dot[data-refuses] {
+.os-pager-dot[data-refuses]::before {
   opacity: 0.18;
 }
 
@@ -574,6 +587,8 @@ button:not(:disabled):active {
 .os-pager-add {
   border: 0;
 }
+.os-pager-add,
+.os-pager-new { margin-inline-start: 5px; }
 .os-pager-add:hover,
 .os-pager-add:focus-visible {
   background: var(--os-hover);
