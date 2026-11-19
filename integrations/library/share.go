@@ -366,10 +366,15 @@ func (i *Integration) handleSaveSharedCopy(ctx context.Context, args map[string]
 	if err := libraryfile.NewStore(shareEngine{i.engine}).Create(ctx, create); err != nil {
 		return nil, fmt.Errorf("record the copy in your Library: %w", err)
 	}
-	// The bytes are verified and complete, so the copy is ready now rather
-	// than waiting on an analysis pass nobody starts for it.
-	if err := i.execMutation(ctx, "setLibraryFileStatus", map[string]any{"fileId": fileID, "status": "ready"}); err != nil {
-		return nil, fmt.Errorf("finish the copy: %w", err)
+	// A copy is read like an upload (Jesús, Nov 18: saved copies are searchable
+	// by meaning). An opaque one is finished now, as an opaque upload is in the
+	// upload route's startAnalysis; a readable one goes through the reading pass
+	// once it is promoted, below.
+	readable := firstNonEmpty(file.Format, "other") != "other"
+	if !readable {
+		if err := i.execMutation(ctx, "setLibraryFileStatus", map[string]any{"fileId": fileID, "status": "ready", "embeddingStatus": "none"}); err != nil {
+			return nil, fmt.Errorf("finish the copy: %w", err)
+		}
 	}
 	// PROMOTED HERE, not left to indexFileOnCreate, so the answer can name the
 	// artifact. The id derives from the file reference, so the automation's
@@ -396,7 +401,35 @@ func (i *Integration) handleSaveSharedCopy(ctx context.Context, args map[string]
 			promoted = rows[0]
 		}
 	}
-	return reviewResult(map[string]any{"artifactId": memql.BareShortId(stringField(promoted, "id")), "fileId": fileID})
+	copyID := memql.BareShortId(stringField(promoted, "id"))
+	if readable {
+		i.startCopyAnalysis(ctx, AnalyzeFileParams{
+			FileId: fileID, ArtifactId: copyID, OwnerUserId: caller, Name: name, MimeType: mimeType,
+			BlobUrl: stored.URL, Sha256: digest,
+		})
+	}
+	return reviewResult(map[string]any{"artifactId": copyID, "fileId": fileID})
+}
+
+// startCopyAnalysis runs the reading pass on a saved copy after the answer goes
+// out, detached the way the upload route detaches it (auth.DetachUserWork keeps
+// the recipient's authority). If it cannot start, the copy is marked ready so it
+// never reads as "analysis pending" forever.
+func (i *Integration) startCopyAnalysis(ctx context.Context, params AnalyzeFileParams) {
+	work, cancel, err := auth.DetachUserWork(ctx, params.OwnerUserId)
+	if err != nil {
+		i.log().Warn("library: a saved copy could not be read", "fileId", params.FileId, "error", err)
+		if err := i.execMutation(ctx, "setLibraryFileStatus", map[string]any{"fileId": params.FileId, "status": "ready", "embeddingStatus": "none"}); err != nil {
+			i.log().Warn("library: mark a saved copy ready", "fileId", params.FileId, "error", err)
+		}
+		return
+	}
+	go func() {
+		defer cancel()
+		if err := i.AnalyzeFile(work, params); err != nil {
+			i.log().Warn("library: reading a saved copy failed", "fileId", params.FileId, "error", err)
+		}
+	}()
 }
 
 func (i *Integration) execMutation(ctx context.Context, name string, args map[string]any) error {

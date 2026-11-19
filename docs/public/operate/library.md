@@ -456,7 +456,11 @@ version only: `?version=` is a `404` too.
 own `library/{owner}/` prefix, written through `component/server/libraryfile`
 under the recipient's actor and counted against their storage, then promoted to
 their index at once. It is theirs: it stays after the share ends and the sharer
-cannot see it.
+cannot see it. It is read like an upload: a readable copy goes through the
+`libraryAnalyzeFile` pass (summary, chunks, embeddings) after the answer goes
+out, so `librarySimilarArtifacts` and training find it; an opaque one (`format:
+other`) is ready at once with `embeddingStatus: none`. Saving again makes
+another copy, by design.
 
 ### Ending a share
 

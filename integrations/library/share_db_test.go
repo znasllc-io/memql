@@ -113,6 +113,7 @@ func newShareFixture(t *testing.T, f *revisionDB) *shareFixture {
 	for _, lib := range []*Integration{f.first, f.second} {
 		lib.SetBlobFetcher(x.blob)
 		lib.SetShareCopyStorage(x.blob, shareBucket)
+		lib.SetExtractor(shareText{})
 	}
 	for _, p := range []string{"alice", "vera", "adam", "mike", "bob"} {
 		x.ids[p] = x.prefix + "-" + p
@@ -402,6 +403,22 @@ func testOwnerSharesWithViewer(t *testing.T, x *shareFixture) {
 	if len(x.rows(f.engine, x.mike(), "libraryArtifactById", map[string]any{"artifactId": copyID})) != 0 {
 		t.Fatal("somebody else reads vera's copy")
 	}
+	// The copy is read like an upload (Nov 18), so search by meaning finds it:
+	// pieces of vera's own, and the file ends ready.
+	copyFile := asString(saved["fileId"])
+	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(200 * time.Millisecond) {
+		chunks := x.rows(f.engine, x.vera(), "libraryFileChunksForFile", map[string]any{"fileId": copyFile})
+		file := x.rows(f.engine, x.vera(), "libraryFileById", map[string]any{"fileId": copyFile})
+		if len(chunks) > 0 && len(file) == 1 && file[0]["status"] == "ready" {
+			if !strings.Contains(asString(chunks[0]["text"]), body) {
+				t.Fatalf("vera's copy was read as %q, want its text %q", chunks[0]["text"], body)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("vera's copy was never read like an upload: %d piece(s), file %v", len(chunks), file)
+		}
+	}
 
 	// Stop: access ends at once, on both replicas.
 	stopped := receipt(t)(f.first.handleStopShare(x.alice(), map[string]any{"shareId": shareID}, 0))
@@ -634,4 +651,12 @@ func testArchiveEndsShares(t *testing.T, x *shareFixture) {
 	if len(noticesFor(x.rows(f.engine, x.vera(), "librarySharedWithMe", nil), live)) != 1 {
 		t.Fatal("the cascade touched a live file's share")
 	}
+}
+
+// shareText reads a stored file as the text it holds, so a saved copy's
+// reading pass has pieces to write.
+type shareText struct{}
+
+func (shareText) Extract(_ context.Context, _ string, data []byte) (string, error) {
+	return string(data), nil
 }
