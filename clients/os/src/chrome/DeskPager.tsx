@@ -8,8 +8,8 @@ import { useOs } from "./state";
 
 // The desk pager (spec A): dots inside the dock, between Ask and the clock. Click switches; a window
 // dragged onto a dot is thrown there; a full dot dims during a window
-// drag; "+" adds a user desk, and is absent while MAX_EMPTY_DESKS desks
-// are empty. The active desk is announced politely by the Desktop
+// drag; "+" adds a user desk, and is greyed and inert while MAX_EMPTY_DESKS
+// desks are empty. The active desk is announced politely by the Desktop
 // (aria-live), not here.
 
 function PagerDot({ desk, index, active, draggingWindow }: {
@@ -97,16 +97,20 @@ export function DeskPager({ draggingWindow }: { draggingWindow: boolean }) {
       ))}
       {draggingWindow ? (
         <NewDeskDrop visible />
-      ) : addable ? (
+      ) : (
+        // Always there, so the way to a new desk never disappears (Jesús, Nov
+        // 2026); greyed and inert while MAX_EMPTY_DESKS desks are empty.
         <button
           type="button"
           className="os-pager-add"
           aria-label="New desk"
-          onClick={() => actions.addDesk()}
+          aria-disabled={!addable || undefined}
+          title={addable ? undefined : "Use an empty desk first"}
+          onClick={() => { if (addable) actions.addDesk(); }}
         >
           <Plus size={10} aria-hidden />
         </button>
-      ) : null}
+      )}
     </nav>
   );
 }

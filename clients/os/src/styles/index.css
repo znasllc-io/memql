@@ -602,6 +602,8 @@ button:not(:disabled):active {
   background: var(--os-hover);
   color: var(--os-ink);
 }
+.os-pager-add[aria-disabled="true"] { opacity: 0.35; cursor: default; }
+.os-pager-add[aria-disabled="true"]:hover { background: none; color: var(--os-muted); }
 
 /* ---- dock ---- */
 .os-dock[hidden] { display: none; }
