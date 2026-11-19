@@ -1526,7 +1526,7 @@ func (s *Service) movedSession(err error) error {
 // that finds no slot in time answers memql.ErrWriteGateBusy, exactly as a gate that could
 // not be taken answers: nothing attempted, try again. The slot is given back with the
 // gates. COST: under a burst, calls decisions queue a little longer in the process; the
-// share is per pool and never more than half of it (gateSlotsFor).
+// share is per pool and at most half of a pool of two or more (gateSlotsFor).
 func (s *Service) gates(ctx context.Context, keys ...string) (func(), error) {
 	pool, err := memql.ResolveWriteGatePool(s.gateDB, "calls: a call's admission", "the calls plug-in takes it from PluginContext.GateDB")
 	if err != nil {
@@ -1577,8 +1577,10 @@ const callsGateWait = 6 * time.Second
 var callsGateSlots sync.Map // *sql.DB -> chan struct{}
 
 // gateSlotsFor is the calls share of one gate pool, made the first time the pool is seen:
-// callsGateShare slots, and never more than half the pool, so a pool configured smaller
-// than the bff's keeps a connection for everything else.
+// callsGateShare slots, and at most half the pool, so a pool configured smaller than the
+// bff's keeps a connection for everything else. A pool of one connection
+// (MEMQL_DB_GATE_POOL_SIZE=1) gets one slot: holding its only connection back from calls
+// would refuse every call, so there calls take their turn on it with everything else.
 func gateSlotsFor(pool *sql.DB) chan struct{} {
 	if slots, ok := callsGateSlots.Load(pool); ok {
 		return slots.(chan struct{})
