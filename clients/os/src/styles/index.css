@@ -535,15 +535,15 @@ button:not(:disabled):active {
   z-index: 30;
 }
 
-/* Each dot is an 18 x 28 target (the old dot plus its gap), so the mouse can
-   find it; the 8px dot is drawn inside and grows as the pointer comes near
-   (--os-near, 0..1, set by DeskPager). Same 18px pitch, so the dock keeps its
-   width (Jesús, Nov 2026). */
+/* Each dot is a 22 x 28 target, so the mouse can find it; the 8px dot is drawn
+   inside and grows as the pointer comes near (--os-near, 0..1, set by
+   DeskPager). 22px leaves about 8.5px between two dots grown by a mouse
+   halfway between them, twice what 18px left (Jesús, Nov 2026). */
 .os-pager-dot {
   --os-near: 0;
   display: grid;
   place-items: center;
-  width: 18px;
+  width: 22px;
   height: 28px;
   padding: 0;
   border: 0;
