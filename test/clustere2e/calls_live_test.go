@@ -10,10 +10,14 @@ package clustere2e
 //
 //  1. an operator mints a test key for a deployable (callsTestKeyCreate) and turns its
 //     calls on (callsSiteEnable), both as a person over the stream, as Deployables does;
-//  2. the edge serves the deployable's calls routes only once the switch is on, and
-//     learns of the switch through the change feed, well inside its cache's 30 seconds:
-//     every request after the first success, each on a connection of its own, finds the
-//     calls on, whichever edge replica the front door sends it to;
+//  2. the edge serves the deployable's calls routes only once the switch is on, and each
+//     of the two edge replicas, asked on its own pod with the deployable cached as calls
+//     off just before the switch, serves the switch within 10 seconds of it, a third of
+//     the 30 seconds its cache keeps a copy: the change feed, not the TTL, reached each
+//     one. Each replica learns of a write on its own, through its own subscription, so the
+//     bound is held per replica, not "every replica by the moment the first one has it"
+//     (waitForEveryReplica, whose rule calls_live_wait_test.go proves in the default
+//     build);
 //  3. the key holder unlocks a session and starts a call, and a guest joins it by the
 //     call's link, all at https://<deployable>/_memql/calls/* through the front door;
 //  4. both connect to the media server with the passes the engine handed out, publish a
@@ -29,11 +33,13 @@ package clustere2e
 // deployable is live, owned by the person the token names, and has no bundle: the calls
 // routes are answered before the edge opens one.
 //
-// ASKING ONE REPLICA. The front door load-balances, so it cannot say which bff answered.
-// The roster is asked of each bff pod through a port-forward to its own HTTP port, with
-// the stamp the edge would write (the site and its owner) and the host's session cookie;
-// the bff reads the site again under the stamped owner before it believes the stamp, as
-// for every request the edge forwards. Each pod's own /healthz names it first.
+// ASKING ONE REPLICA. The front door load-balances, so it cannot say which replica
+// answered, nor reach a chosen one. Each edge replica is asked through a port-forward to
+// its own pod (edgePodNames and startPodForward, site_edge_invalidation_test.go), with the
+// deployable's Host. The roster is asked of each bff pod the same way, with the stamp the
+// edge would write (the site and its owner) and the host's session cookie; the bff reads
+// the site again under the stamped owner before it believes the stamp, as for every
+// request the edge forwards. Each pod's own /healthz names it first.
 //
 // IT IS NEVER RUN BY `make test`: the build tag keeps it out, and every prerequisite it
 // does not find is a skip that says what to start.
@@ -46,7 +52,8 @@ package clustere2e
 //     default), for the site's row and the sweep afterwards. Locally:
 //     kubectl port-forward -n memql svc/memql-db-rw 55433:5432, then
 //     postgres://memql:memql_dev@127.0.0.1:55433/memql?sslmode=disable
-//   - kubectl on PATH, with at least two Running bff pods (make up SERVERS=2, make scale N=2).
+//   - kubectl on PATH, with at least two Running bff pods and two Running edge pods
+//     (make up SERVERS=2, make scale N=2).
 //   - The media server (make media-up): the cluster lists an active one, and its public
 //     address answers through TLS this machine trusts (the mkcert root, mkcert -install).
 //   - The front door at https://<deployable>.<MEMQL_E2E_DOMAIN> (default memql.localhost),
@@ -540,6 +547,25 @@ func (s *liveCallsSite) rosterOn(t *testing.T, port int, hostSession string) liv
 	return out
 }
 
+// servesCallsOn asks one edge replica, through its own port-forward, for the deployable's
+// session route with no cookie, as the front door would hand it the request (the
+// deployable's Host), and reads the answer with edgeServesCalls: the edge's 404 while that
+// replica still has calls off, the bff's 401 once it forwards.
+func (s *liveCallsSite) servesCallsOn(pf *podForward) (bool, error) {
+	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d%s/session", pf.port, memql.CallsInboundPath), nil)
+	if err != nil {
+		return false, err
+	}
+	req.Host = s.host
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	return edgeServesCalls(resp.StatusCode, string(body))
+}
+
 // bothInCall reports whether a roster lists exactly the two seats, by their media
 // identities, both in the call.
 func bothInCall(r liveRoster, identities ...string) bool {
@@ -568,6 +594,7 @@ func TestTwoPeopleHoldACallThroughTheFrontDoor(t *testing.T) {
 	liveReachable(t, "the bff's gRPC endpoint (MEMQL_E2E_ENDPOINT)", dial)
 	liveReachable(t, "the front door", net.JoinHostPort("api."+liveCallsDomain(), "443"))
 	pods := liveBFFPods(t)
+	edges := edgePodNames(t)
 	eng, db := liveClusterEngine(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
 	defer cancel()
@@ -581,15 +608,11 @@ func TestTwoPeopleHoldACallThroughTheFrontDoor(t *testing.T) {
 	site := newLiveCallsSite(t, eng, db, qc, memql.BareShortId(userIDFromToken(t, tok)), liveCallsDomain())
 	host, guest := site.browser(t), site.browser(t)
 	t.Logf("the deployable: %s (%s)", site.origin(), site.id)
-	session := memql.CallsInboundPath + "/session"
 
-	// OFF UNTIL IT IS SWITCHED ON: the edge answers the one 404 and forwards nothing. Asked
-	// several times, each on a connection of its own, so each edge replica the front door
-	// reaches holds the deployable, calls off, in its cache before the switch.
-	for i := 0; i < 6; i++ {
-		if status, body := host.send(http.MethodGet, session, nil); status != http.StatusNotFound || strings.TrimSpace(string(body)) != `{"error":"not_found"}` {
-			t.Fatalf("a deployable with calls off answered %d %s, want the edge's 404", status, body)
-		}
+	// Each edge replica on its own pod, named by its own /healthz.
+	edgeOn := map[string]*podForward{}
+	for _, pod := range edges {
+		edgeOn[pod] = startPodForward(t, ctx, pod)
 	}
 
 	// 1. A test key, minted as a person over the stream, shown once.
@@ -602,29 +625,38 @@ func TestTwoPeopleHoldACallThroughTheFrontDoor(t *testing.T) {
 		t.Fatalf("callsTestKeyCreate answered no key: %v", minted.Single())
 	}
 
+	// OFF UNTIL IT IS SWITCHED ON, ON EVERY EDGE REPLICA: each answers its own 404 and
+	// forwards nothing. Asked of each pod just before the switch, so each holds the
+	// deployable, calls off, in its cache, and its 30 s TTL cannot run out inside the
+	// 10 s bound below: only the change feed can explain a replica serving the switch.
+	for _, pod := range edges {
+		served, err := site.servesCallsOn(edgeOn[pod])
+		if err != nil || served {
+			t.Fatalf("pod/%s, asked before the switch, served calls=%v (%v), want the edge's 404", pod, served, err)
+		}
+	}
+
 	// 2. The switch.
 	if _, err := qc.CallsSiteEnable(ctx, memqlclient.CallsSiteEnableArgs{SiteId: site.id, On: true}); err != nil {
 		t.Fatalf("callsSiteEnable: %v", err)
 	}
 	switched := time.Now()
 
-	// 3. THE EDGE HAS THE SWITCH within 10 seconds, a third of the 30 s its cache would keep
-	// the old copy without the change feed: the session route is forwarded now, and the
-	// bff, given no cookie, answers that there is no session. Asked on that route because
-	// it shares the edge's general budget, where an unlock is held to 10 a minute.
-	for {
-		status, body := host.send(http.MethodGet, session, nil)
-		if status == http.StatusUnauthorized && strings.TrimSpace(string(body)) == `{"error":"no_session"}` {
-			break
-		}
-		if status != http.StatusNotFound || time.Since(switched) > 10*time.Second {
-			t.Fatalf("the session route answered %d %s %s after the switch", status, body, time.Since(switched).Round(time.Millisecond))
-		}
-		time.Sleep(250 * time.Millisecond)
+	// 3. EVERY EDGE REPLICA SERVES THE SWITCH WITHIN 10 SECONDS OF IT, a third of the 30 s
+	// its cache would keep the old copy without the change feed. Each replica learns of the
+	// write on its own, so each is waited for against that one bound (waitForEveryReplica),
+	// and none is held to the moment the first one had it. The session route answers the
+	// bff's 401 once a replica forwards: asked on that route because it shares the edge's
+	// general budget, where an unlock is held to 10 a minute.
+	took, err := waitForEveryReplica(time.Now, time.Sleep, switched, 10*time.Second, 250*time.Millisecond, edges,
+		func(pod string) (bool, error) { return site.servesCallsOn(edgeOn[pod]) })
+	if err != nil {
+		t.Fatalf("the calls switch did not reach every edge replica within 10s of it, a third of the 30s TTL its cache "+
+			"would keep the old copy for, so the change feed did not reach the ones named: %v", err)
 	}
-	t.Logf("the edge served the switch %s after it was made", time.Since(switched).Round(time.Millisecond))
+	t.Logf("every edge replica served the switch: %s", took.describe())
 
-	// Unlock, then EVERY EDGE REPLICA HAS THE SWITCH, not only the one that answered first.
+	// Unlock through the front door, which every edge replica now forwards.
 	status, body := host.send(http.MethodPost, memql.CallsInboundPath+"/unlock", map[string]any{"key": key})
 	if status != http.StatusOK {
 		t.Fatalf("unlock answered %d %s", status, body)
@@ -633,12 +665,6 @@ func TestTwoPeopleHoldACallThroughTheFrontDoor(t *testing.T) {
 	liveDecode(t, "the unlock's answer", body, &sess)
 	if sess.Kind != "host" {
 		t.Fatalf("a key opened a %q session, want host", sess.Kind)
-	}
-	for i := 0; i < 6; i++ {
-		if status, body := host.send(http.MethodGet, session, nil); status != http.StatusOK {
-			t.Fatalf("a request %s after the switch answered %d %s: an edge replica still serves the deployable with calls off, "+
-				"so the change feed did not reach it", time.Since(switched).Round(time.Millisecond), status, body)
-		}
 	}
 
 	status, body = host.send(http.MethodPost, memql.CallsInboundPath+"/start", map[string]any{"name": "Host", "confirm": liveCallsConfirm})
