@@ -38,28 +38,31 @@ const BLOOM_MS = 650;
 // A curtain nobody finishes must never hold the OS: past this it opens anyway.
 const SAFETY_MS = 12_000;
 
-let reached = 0;
+// The steps that really happened, in order: a sign-in screen goes from the
+// first straight to Ready, never through steps it did not take.
+let seen: readonly number[] = [0];
 const listeners = new Set<() => void>();
 const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
 
 /** A real step of the first load finished: 1 signed in, 2 cluster reached, 3 ready. */
 export function bootReached(step: number) {
   const next = Math.min(step, 3);
-  if (next <= reached) return;
-  reached = next;
+  if (next <= seen[seen.length - 1]!) return;
+  seen = [...seen, next];
   listeners.forEach((listener) => listener());
 }
 export const bootFinished = () => bootReached(3);
-export function resetBootCurtainForTests() { reached = 0; }
+export function resetBootCurtainForTests() { seen = [0]; }
 
 const order = PATH.reduce<Record<number, number>>((at, dot, index) => ({ ...at, [dot]: index }), {});
 const pathKeys = new Set(PATH.slice(1).map((dot, i) => edgeKey(PATH[i]!, dot)));
 function edgeKey(a: number, b: number) { return `${Math.min(a, b)}-${Math.max(a, b)}`; }
 
 export function BootCurtain() {
-  const step = useSyncExternalStore(subscribe, () => reached);
+  const steps = useSyncExternalStore(subscribe, () => seen);
+  const step = steps[steps.length - 1]!;
   const [reduced] = useState(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches);
-  const [gone, setGone] = useState(() => reached >= 3);
+  const [gone, setGone] = useState(() => step >= 3);
   const [lit, setLit] = useState(0);
   const [leaving, setLeaving] = useState(false);
   const target = LIT_BY_STEP[step]!;
@@ -107,8 +110,8 @@ export function BootCurtain() {
           </g>
         </svg>
         <div className="os-boot-steps">
-          {BOOT_STEPS.slice(0, step + 1).map((label, index) => (
-            <p key={label} className="os-boot-step" data-depth={Math.min(step - index, 3)}>{label}</p>
+          {steps.map((reached, index) => (
+            <p key={reached} className="os-boot-step" data-depth={Math.min(steps.length - 1 - index, 3)}>{BOOT_STEPS[reached]}</p>
           ))}
         </div>
       </div>
