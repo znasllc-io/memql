@@ -225,6 +225,79 @@ describe("empty desks (José and the owner, Nov 2026)", () => {
   });
 });
 
+describe("desk switch motion (owner, Nov 2026)", () => {
+  // Themes write the token in seconds or milliseconds (Graphite: ".26s").
+  it.each(["260ms", ".26s"])("slides the windows with the desks for the whole slide (token %s): the desk left stays drawn and inert", (token) => {
+    document.documentElement.style.setProperty("--os-duration-med", token);
+    try {
+      renderShell();
+      openFromLauncher("Files");
+      openFromLauncher("Fleet");
+      openFromLauncher("Deployables"); // desk 2
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      fireEvent.keyDown(window, { key: "ArrowLeft", ctrlKey: true, shiftKey: true });
+      const leaving = document.querySelector("[data-os-window='deployables']") as HTMLElement;
+      const arriving = document.querySelector("[data-os-window='files']") as HTMLElement;
+      expect(leaving.hasAttribute("hidden")).toBe(false);
+      expect(leaving.getAttribute("data-slide")).toBe("out");
+      expect(leaving.hasAttribute("inert")).toBe(true);
+      expect(arriving.getAttribute("data-slide")).toBe("in");
+      act(() => { vi.advanceTimersByTime(250); });
+      expect(leaving.hasAttribute("hidden")).toBe(false);
+      expect(arriving.getAttribute("data-slide")).toBe("in");
+      act(() => { vi.advanceTimersByTime(10); });
+      expect(leaving.hasAttribute("hidden")).toBe(true);
+      expect(leaving.hasAttribute("data-slide")).toBe(false);
+      expect(arriving.hasAttribute("data-slide")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+      document.documentElement.style.removeProperty("--os-duration-med");
+    }
+  });
+
+  it("keeps one speed: a switch across two desks slides for twice as long", () => {
+    document.documentElement.style.setProperty("--os-duration-med", "260ms");
+    try {
+      renderShell();
+      openFromLauncher("Files");
+      openFromLauncher("Fleet");
+      openFromLauncher("Deployables"); // desk 2: an empty one would delete itself
+      fireEvent.click(screen.getByRole("button", { name: "New desk" }));
+      expect(screen.getByRole("button", { name: /^Desk 3, current/ })).toBeTruthy();
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      fireEvent.click(screen.getByRole("button", { name: /^Desk 1/ }));
+      const arriving = document.querySelector("[data-os-window='files']") as HTMLElement;
+      const desktop = document.querySelector("[data-os-desktop]") as HTMLElement;
+      expect(arriving.getAttribute("data-slide")).toBe("in");
+      expect(desktop.style.getPropertyValue("--os-slide-travel")).toBe("2");
+      act(() => { vi.advanceTimersByTime(510); });
+      expect(arriving.getAttribute("data-slide")).toBe("in");
+      act(() => { vi.advanceTimersByTime(10); });
+      expect(arriving.hasAttribute("data-slide")).toBe(false);
+      expect(desktop.style.getPropertyValue("--os-slide-travel")).toBe("1");
+    } finally {
+      vi.useRealTimers();
+      document.documentElement.style.removeProperty("--os-duration-med");
+    }
+  });
+
+  it("does not slide under reduced motion, where the duration token is 0ms", () => {
+    document.documentElement.style.setProperty("--os-duration-med", "0ms");
+    try {
+      renderShell();
+      openFromLauncher("Files");
+      openFromLauncher("Fleet");
+      openFromLauncher("Deployables");
+      fireEvent.keyDown(window, { key: "ArrowLeft", ctrlKey: true, shiftKey: true });
+      const leaving = document.querySelector("[data-os-window='deployables']") as HTMLElement;
+      expect(leaving.hasAttribute("hidden")).toBe(true);
+      expect(document.querySelector("[data-slide]")).toBeNull();
+    } finally {
+      document.documentElement.style.removeProperty("--os-duration-med");
+    }
+  });
+});
+
 describe("dock pins (spec K bullet 3)", () => {
   it("pins from the context menu and persists across a remount", () => {
     const storage = memStorage();

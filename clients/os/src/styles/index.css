@@ -218,7 +218,8 @@ button:not(:disabled):active {
   position: absolute;
   inset: 0;
   display: flex;
-  transition: transform var(--os-duration-med) var(--os-ease);
+  /* One --os-duration-med per desk crossed (Desktop's useDeskSlide): a constant speed. */
+  transition: transform calc(var(--os-duration-med) * var(--os-slide-travel, 1)) var(--os-ease);
 }
 
 .os-plate {
@@ -373,6 +374,13 @@ button:not(:disabled):active {
     width var(--os-duration-med) var(--os-ease),
     height var(--os-duration-med) var(--os-ease);
 }
+/* Windows ride a desk switch with the plates (Desktop's useDeskSlide): the
+   same distance, duration and easing, as a keyframe so nothing is
+   transformed at rest. Reduced motion makes the duration 0ms. */
+.os-window[data-slide="in"] { animation: os-window-slide-in calc(var(--os-duration-med) * var(--os-slide-travel, 1)) var(--os-ease); }
+.os-window[data-slide="out"] { animation: os-window-slide-out calc(var(--os-duration-med) * var(--os-slide-travel, 1)) var(--os-ease) forwards; }
+@keyframes os-window-slide-in { from { transform: translateX(var(--os-slide-dx, 0px)); } }
+@keyframes os-window-slide-out { to { transform: translateX(calc(-1 * var(--os-slide-dx, 0px))); } }
 .os-window[data-focused] {
   z-index: 20;
   box-shadow: var(--os-shadow-window);

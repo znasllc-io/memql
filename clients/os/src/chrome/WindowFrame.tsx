@@ -50,6 +50,8 @@ export function WindowFrame({
   focused,
   actorRole,
   hidden = false,
+  slide,
+  slideDx = 0,
   deskId,
 }: {
   win: OsWindow;
@@ -58,6 +60,10 @@ export function WindowFrame({
   focused: boolean;
   actorRole: string;
   hidden?: boolean;
+  /** Riding a desk switch (Desktop's useDeskSlide): "in" arrives, "out" leaves and is inert. */
+  slide?: "in" | "out";
+  /** How far the desks travel in this switch, in pixels. */
+  slideDx?: number;
   deskId?: string;
 }) {
   const { actions, state, registry } = useOs();
@@ -155,7 +161,8 @@ export function WindowFrame({
     width: rect.w,
     height: rect.h,
     transform: transform ? `translate(${transform.x}px, ${transform.y}px)` : undefined,
-  };
+    ...(slide ? { "--os-slide-dx": `${slideDx}px` } : null),
+  } as React.CSSProperties;
 
   return (
     <section
@@ -165,6 +172,8 @@ export function WindowFrame({
       data-ask-driving={driving}
       data-os-window-desk={deskId}
       hidden={hidden}
+      data-slide={slide}
+      inert={slide === "out" || undefined}
       data-focused={focused || undefined}
       data-maximized={win.mode === "maximized" || undefined}
       data-fullscreen={win.mode === "fullscreen" || undefined}
