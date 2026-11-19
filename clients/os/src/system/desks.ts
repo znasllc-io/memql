@@ -356,6 +356,26 @@ export function makeBorderless(state: ShellState, windowId: WindowId): ShellStat
 }
 
 /**
+ * Double-click a window's bar (Jesús, Nov 2026): it never makes full screen.
+ * Alone: window <-> borderless. Full screen: a window on the desk it is on.
+ * Half of a pair: borderless here, and the other app moves to a new desk
+ * right after this one, as a window. A minimized partner does not count.
+ */
+export function toggleBorderless(state: ShellState, windowId: WindowId): ShellState {
+  const win = state.windows[windowId];
+  const desk = deskOfWindow(state, windowId);
+  if (!win || !desk || win.mode === "minimized") return state;
+  const done = (s: ShellState): ShellState => ({ ...s, activeDeskId: desk.id, focusedWindowId: windowId });
+  if (win.mode === "fullscreen") return done(withMode(state, windowId, "normal"));
+  const other = desk.windows.find(id => id !== windowId && state.windows[id]?.mode !== "minimized");
+  if (!other) return done(withMode(state, windowId, win.mode === "maximized" ? "normal" : "maximized"));
+  const own: Desk = { id: nextDeskId(state), createdBy: "auto", windows: [other] };
+  const desks = state.desks.map(d => d.id === desk.id ? { ...d, windows: d.windows.filter(id => id !== other) } : d);
+  desks.splice(desks.findIndex(d => d.id === desk.id) + 1, 0, own);
+  return done(withMode(withMode({ ...state, desks }, windowId, "maximized"), other, "normal"));
+}
+
+/**
  * Drag a lone window to a side, then pick a partner (Jesús, Nov 2026):
  * `bringId` leaves its desk for the other half of `keepId`'s, and `keepId`
  * takes `side` (0 left, 1 right). Both leave full screen and any dedicated

@@ -781,6 +781,11 @@ placement is computed, never dragged freehand or resized (`system/placement.ts`,
   → full screen → window, all on the same desk. Sharing a desk: straight to
   full screen on a new desk of its own, and pressed again back to its half if
   that desk still has room. Its label always says what the next press does.
+- **Double-click the title bar** (the app's logo or the empty bar; its buttons
+  and the app picker keep their own job). It never makes full screen: only the
+  size button does, from borderless. Alone: window ↔ borderless. Full screen:
+  back to a window on the desk it is on. Half of a pair: borderless on this
+  desk, and the other app moves to a new desk right after it, as a window.
 - **Drag to a side** (pointer within 24px of the left or right edge) lights
   that half. Dropped there, a window with a partner takes that side; a lone
   window takes that half while the other half darkens and offers, as app
