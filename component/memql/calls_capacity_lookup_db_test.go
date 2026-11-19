@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // THE CALLS CAPACITY READS START FROM THEIR LOOKUP INDEXES. Every join, start and
@@ -107,7 +108,7 @@ func TestTheOpenRoomsReadEnumeratesOnlyRoomsWithAnOpenVersionKept(t *testing.T) 
 	})
 
 	reader := auth.ContextWithInternalOrigin(clusterOwnerCtx("v1:identity:user:calls-open-rooms-reader"))
-	result, scans := capturedScans(t, eng, hook, reader, fmt.Sprintf(`query callsOpenRoomsOnServer(mediaServerId: %q)`, server))
+	result, scans := capturedScans(t, eng, hook, reader, fmt.Sprintf(`query callsOpenRoomsOnServer(mediaServerId: %s)`, langparser.QuoteString(server)))
 	require.Equal(t, []string{open}, pageIDs(t, result), "the read answered a room that is not open")
 	require.NotEmpty(t, scans, "the read issued no concept scan")
 	rows, err := db.QueryContext(ctx, lookupSubquery(t, scans[0]))
