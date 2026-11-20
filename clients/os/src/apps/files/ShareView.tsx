@@ -1,7 +1,8 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
-import { Check, FileText, Trash2, User, Users } from "lucide-react";
+import { Check, Ellipsis, FileText, User, Users } from "lucide-react";
 import { sameEntityId } from "@znasllc-io/memql-sdk-core/client";
 
+import { ContextMenu } from "../../chrome/ContextMenu";
 import { Caption, Head, NextPage, Notice, Select, Button } from "../../kit";
 import { AnchoredPicker } from "../../kit/AnchoredPicker";
 import { CalendarMonth, addDays, dayOf, type CalendarDay } from "../../kit/CalendarMonth";
@@ -36,13 +37,19 @@ import { shareFileCall, timeLeftLabel, useFileShares, useShareDirectory, type Fi
 //                    SharingEditor.tsx): All / Users / Groups, Search, "+" to
 //                    add what is ticked, the list loading more by itself as it
 //                    scrolls, and the people and groups who have the file as
-//                    cards with "Remove sharing". Built from the same kit parts,
+//                    cards. Built from the same kit parts,
 //                    classes and helpers rather than the component itself,
 //                    because that one saves a machine's whole audience at once
 //                    and this saves one share per person or group.
 //
 // Adding someone shares the file with them until the end chosen above. Who
-// already has it is not offered again; to give them longer, remove and add.
+// already has it is not offered again: each card's "⋯" menu (Jesús's pick,
+// draft p18 Option C, Nov 20: "C. I like C.") holds "Renew for <the Expires
+// length>" and, under a hairline in the danger colour, "Remove sharing" (what
+// the card's bin did). Renew is a re-share with that person or group: the
+// engine renews an existing share in place rather than adding a second one,
+// and for a group reaches the people who joined since and drops those who
+// left (integrations/library/share.go).
 
 const LENGTHS = [1, 7, 30] as const;
 const PICK = "date";
@@ -108,6 +115,7 @@ export function ShareView({ file, backLabel, onBack }: { file: ArtifactRow; back
   const [revealKey, setRevealKey] = useState<string>();
   const [pending, setPending] = useState("");
   const [failure, setFailure] = useState("");
+  const [menu, setMenu] = useState<{ share: FileShare; anchor: HTMLElement; x: number; y: number } | null>(null);
   const ready = directory.people !== null;
   const candidates: Candidate[] = ready ? [
     ...directory.groups.map((g): Candidate => ({ kind: "group", id: g.groupId, name: g.displayName, detail: groupSize(g.members) })),
@@ -159,6 +167,49 @@ export function ShareView({ file, backLabel, onBack }: { file: ArtifactRow; back
       setPending("");
     }
   }
+
+  async function renew(share: FileShare) {
+    const query_ = connection?.query ?? null;
+    if (end === null || locked) return;
+    if (query_ === null) {
+      setFailure("Not connected to the cluster, so nothing was renewed.");
+      return;
+    }
+    setPending(`renew:${share.shareId}`);
+    setFailure("");
+    try {
+      await query_.executeNamed("libraryShareFile", shareFileCall(file.id, share.recipientGroupId ? { groupId: share.recipientGroupId } : { userId: share.recipientUserId }, end));
+    } catch (err: unknown) {
+      setFailure(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPending("");
+    }
+  }
+
+  // The card's "⋯" menu, on the shell's one menu (chrome/ContextMenu), opened
+  // under the button as Ask's message menu is. Focus goes back to the button
+  // it came from, and a scroll or resize shuts it rather than leave it behind.
+  const closeMenu = () => {
+    menu?.anchor.focus({ preventScroll: true });
+    setMenu(null);
+  };
+  useEffect(() => {
+    if (!menu) return;
+    const dismiss = () => setMenu(null);
+    window.addEventListener("resize", dismiss);
+    window.addEventListener("scroll", dismiss, true);
+    return () => {
+      window.removeEventListener("resize", dismiss);
+      window.removeEventListener("scroll", dismiss, true);
+    };
+  }, [menu]);
+  function openMenu(share: FileShare, anchor: HTMLElement) {
+    const rect = anchor.getBoundingClientRect();
+    setMenu({ share, anchor, x: rect.right, y: rect.bottom });
+  }
+  /** "Renew for 7 days", or "Renew until Fri, Nov 27" for a picked day. */
+  const renewLabel = end === null ? "Renew: pick the day it ends first" : "days" in end
+    ? `Renew for ${end.days === 1 ? "1 day" : `${end.days} days`}` : `Renew until ${inWords(end.until)}`;
 
   async function remove(share: FileShare) {
     const query_ = connection?.query ?? null;
@@ -298,13 +349,18 @@ export function ShareView({ file, backLabel, onBack }: { file: ArtifactRow; back
                     <span>{share.recipientGroupId ? "Group" : "User"} · {timeLeftLabel(share.expiresAt, now)}</span>
                   </div>
                   <div className="os-editable-card-actions">
-                    <IconButton className="os-card-remove" label={`Remove sharing with ${who}`} disabled={locked} onClick={() => remove(share)}><Trash2 size={15} aria-hidden /></IconButton>
+                    <IconButton label={`Actions for ${who}`} aria-haspopup="menu" aria-expanded={menu?.share.shareId === share.shareId} disabled={locked}
+                      onClick={(event) => { if (menu) closeMenu(); else openMenu(share, event.currentTarget); }}><Ellipsis size={15} aria-hidden /></IconButton>
                   </div>
                 </div>;
               }} /> : !searching && query.trim() && !available.length && ready ? <Caption>No matching users or groups.</Caption> : null}
             {directory.error ? <Notice tone="warn" sentence="Users and groups could not be read." detail={directory.error} /> : null}
           </div>
         </section>
+        {menu ? <ContextMenu x={menu.x} y={menu.y} label={`Actions for ${nameOf(menu.share)}`} anchor={menu.anchor} onClose={closeMenu} entries={[
+          { id: "renew", label: renewLabel, disabled: end === null, onSelect: () => renew(menu.share) },
+          { id: "remove", label: "Remove sharing", separated: true, tone: "danger", onSelect: () => remove(menu.share) },
+        ]} /> : null}
         {failure ? (
           <div className="fleet-share-error">
             <Notice tone="error" sentence="Sharing could not be updated." detail={failure}>
