@@ -13,8 +13,9 @@ import {
 } from "../../src/items/deskFileState";
 
 // No dot on a desk file (José, Nov 19 call; Jesús picked the states Nov 20
-// 2026): uploading or offline is dim and does not open; opening it waits and
-// it opens by itself once it can; a failed upload drops the wait; a finished
+// 2026): uploading or offline is dim and does not open; opening an uploading
+// file waits and it opens by itself once it lands; opening an offline
+// computer's file is refused and never remembered (Jesús, Nov 20); a failed upload drops the wait; a finished
 // upload nobody waited on says "Ready" for about three seconds.
 
 const holds = (entries: Record<string, Hold>) => new Map(Object.entries(entries));
@@ -90,16 +91,29 @@ describe("the desk's file states", () => {
     expect(d.line("a")).toBeNull();
   });
 
-  it("opens a file whose computer is offline once the computer is back", () => {
+  it("never opens a file opened while its computer was offline, even once the computer is back", () => {
     const d = desk({ a: "offline" });
     expect(d.line("a")).toBe("offline");
+    d.ask("a", "open");
     d.ask("a", "open");
     expect(d.release).not.toHaveBeenCalled();
     expect(d.line("a")).toBe("offline");
 
     d.holds({ a: null });
-    expect(d.release).toHaveBeenCalledExactlyOnceWith("a", "open");
+    act(() => vi.advanceTimersByTime(READY_MS * 10));
+    expect(d.release).not.toHaveBeenCalled();
     expect(d.line("a")).toBeNull();
+    // Opening it now that the computer is back works as usual.
+    d.ask("a", "open");
+    expect(d.release).toHaveBeenCalledExactlyOnceWith("a", "open");
+  });
+
+  it("drops a waiting open if the file's computer goes offline before it can open", () => {
+    const d = desk({ a: "uploading" });
+    d.ask("a", "open");
+    d.holds({ a: "offline" });
+    d.holds({ a: null });
+    expect(d.release).not.toHaveBeenCalled();
   });
 
   it("opens at once when nothing holds it, and never for a failed upload", () => {
@@ -136,5 +150,6 @@ describe("settle and ask, without React", () => {
     const h = holds({ a: "uploading" });
     expect(settle(NO_OPENS, h, h).opens).toBe(NO_OPENS);
     expect(ask(NO_OPENS, "a", "failed", "open").opens).toBe(NO_OPENS);
+    expect(ask(NO_OPENS, "a", "offline", "open")).toEqual({ opens: NO_OPENS, now: false });
   });
 });
