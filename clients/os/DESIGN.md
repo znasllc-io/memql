@@ -330,7 +330,9 @@ entity's reported facts and its configuration. Apply this pattern when building
 or revising comparable pages in other apps; keep their existing capabilities
 and permissions. Use the shared `Details`, `DetailsSection` and `SettingRow` kit
 components for this layout. They own the spacing and responsive alignment used
-by Fleet and Cluster; avoid app-specific copies of the same grid.
+by Fleet, Cluster and Files' file Details page (José, Nov 19: "this is how
+details should show up"; its Labels and Client are one short row each); avoid
+app-specific copies of the same grid.
 For a machine, Details follows Equipment and holds what the machine reported:
 connection advisories, System, Hardware, Connection, Features, Registration and
 Reported labels. Settings is the last tab, after Activity, and holds only what
