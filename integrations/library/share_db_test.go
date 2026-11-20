@@ -35,6 +35,7 @@ import (
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
@@ -114,6 +115,8 @@ func newShareFixture(t *testing.T, f *revisionDB) *shareFixture {
 		lib.SetBlobFetcher(x.blob)
 		lib.SetShareCopyStorage(x.blob, shareBucket)
 		lib.SetExtractor(shareText{})
+		// Each replica its own guard, as each node builds one, over one table.
+		lib.SetSaveClaims(automations.NewClusterExecutionGuard(func() *bun.DB { return db }, nil).StrictClaimer())
 	}
 	for _, p := range []string{"alice", "vera", "adam", "mike", "bob"} {
 		x.ids[p] = x.prefix + "-" + p
@@ -286,6 +289,126 @@ func TestFileSharingBetweenRanksDB(t *testing.T) {
 	t.Run("RenewAndShareAgainAfterStop", func(t *testing.T) { x.t = t; testRenewAndShareAgain(t, x) })
 	t.Run("ExpiredShareRefuses", func(t *testing.T) { x.t = t; testExpiredShareRefuses(t, x) })
 	t.Run("ArchiveEndsAccessAndNotice", func(t *testing.T) { x.t = t; testArchiveEndsShares(t, x) })
+	t.Run("ABurstOfSavesMakesOneCopy", func(t *testing.T) { x.t = t; testBurstOfSavesMakesOneCopy(t, x) })
+	t.Run("ABurstOfSharesMakesOneShare", func(t *testing.T) { x.t = t; testBurstOfSharesMakesOneShare(t, x) })
+}
+
+// burst fires n calls at once, alternating the two replicas, and answers how
+// many succeeded and the errors of the rest.
+func burst(n int, libs [2]*Integration, call func(*Integration) error) (int, []error) {
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	ok, refused := 0, []error{}
+	for k := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			err := call(libs[k%2])
+			mu.Lock()
+			defer mu.Unlock()
+			if err == nil {
+				ok++
+			} else {
+				refused = append(refused, err)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	return ok, refused
+}
+
+// José, Nov 19: twenty quick clicks on Save to my Library made eighteen
+// copies; "even at 1,000 clicks a second it should only count as one click".
+// The same save fired at once on both replicas makes one copy; one asked for
+// after it finished is a new copy (no file is remembered).
+func testBurstOfSavesMakesOneCopy(t *testing.T, x *shareFixture) {
+	f := x.f
+	name := "burst-" + x.prefix + ".txt"
+	artifact := x.file(x.alice(), "alice", name, "saved once per click")
+	x.mustShare(f.first, x.alice(), artifact, "vera", 7)
+	copies := func() int {
+		n := 0
+		for _, row := range x.rows(f.other, x.vera(), "libraryArtifacts", nil) {
+			if asString(row["title"]) == name {
+				n++
+			}
+		}
+		return n
+	}
+	save := func(lib *Integration) error {
+		_, err := lib.handleSaveSharedCopy(x.vera(), map[string]any{"artifactId": artifact}, 0)
+		return err
+	}
+	// The copy that wins is held at its write until the other nineteen have
+	// answered, so none of them can arrive after it finished and count as a
+	// later click (which would be a new save, rightly).
+	hold, refusedSoFar := make(chan struct{}), 0
+	var once sync.Once
+	var mu sync.Mutex
+	for _, lib := range []*Integration{f.first, f.second} {
+		lib.SetShareCopyStorage(heldCopies{x.blob, hold}, shareBucket)
+	}
+	ok, refused := burst(20, [2]*Integration{f.first, f.second}, func(lib *Integration) error {
+		err := save(lib)
+		if err != nil {
+			mu.Lock()
+			if refusedSoFar++; refusedSoFar == 19 {
+				once.Do(func() { close(hold) })
+			}
+			mu.Unlock()
+		}
+		return err
+	})
+	for _, lib := range []*Integration{f.first, f.second} {
+		lib.SetShareCopyStorage(x.blob, shareBucket)
+	}
+	if ok != 1 || copies() != 1 {
+		t.Fatalf("twenty saves at once: %d succeeded, %d copies in vera's Library; want 1 and 1 (refusals: %v)", ok, copies(), refused)
+	}
+	for _, err := range refused {
+		if err.Error() != errSaveInFlight.Error() {
+			t.Fatalf("a save refused for another reason than the one running: %v", err)
+		}
+	}
+	// The burst is over, so its claim is given back: the next click is a new save.
+	if err := save(f.second); err != nil || copies() != 2 {
+		t.Fatalf("a save after the burst finished: %v, %d copies; want a second copy", err, copies())
+	}
+	// Another person's save of their own share is not held by vera's.
+	x.mustShare(f.first, x.alice(), artifact, "adam", 7)
+	release, err := f.first.oneSaveAtATime(x.vera(), x.ids["vera"], artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	if _, err := f.second.handleSaveSharedCopy(x.adam(), map[string]any{"artifactId": artifact}, 0); err != nil {
+		t.Fatalf("adam's save was held by vera's: %v", err)
+	}
+}
+
+// libraryShareFile already answers a burst with one share (the file's version
+// gate, then renew-or-new); this holds it to that.
+func testBurstOfSharesMakesOneShare(t *testing.T, x *shareFixture) {
+	f := x.f
+	artifact := x.file(x.alice(), "alice", "burst-share.txt", "shared once")
+	var mu sync.Mutex
+	ids := map[string]bool{}
+	ok, refused := burst(8, [2]*Integration{f.first, f.second}, func(lib *Integration) error {
+		got, err := x.share(lib, x.alice(), artifact, "vera", 7)
+		if err == nil {
+			mu.Lock()
+			ids[memql.BareShortId(asString(got["shareId"]))] = true
+			mu.Unlock()
+		}
+		return err
+	})
+	shares := x.rows(f.other, x.alice(), "librarySharesForArtifact", map[string]any{"artifactId": artifact})
+	if ok != 8 || len(ids) != 1 || len(shares) != 1 {
+		t.Fatalf("eight shares at once: %d answered, %d share ids, %d active shares; want 8, 1, 1 (refusals: %v)", ok, len(ids), len(shares), refused)
+	}
 }
 
 func testOwnerSharesWithViewer(t *testing.T, x *shareFixture) {
@@ -651,6 +774,21 @@ func testArchiveEndsShares(t *testing.T, x *shareFixture) {
 	if len(noticesFor(x.rows(f.engine, x.vera(), "librarySharedWithMe", nil), live)) != 1 {
 		t.Fatal("the cascade touched a live file's share")
 	}
+}
+
+// heldCopies writes a copy only once hold is closed (or ten seconds pass, so a
+// bug that lets two saves through fails the test instead of hanging it).
+type heldCopies struct {
+	*shareBlob
+	hold <-chan struct{}
+}
+
+func (h heldCopies) CreateVerifiedStream(ctx context.Context, bucket, key string, r io.Reader, size int64, digest, mimeType string) (azureblob.VerifiedBlob, error) {
+	select {
+	case <-h.hold:
+	case <-time.After(10 * time.Second):
+	}
+	return h.shareBlob.CreateVerifiedStream(ctx, bucket, key, r, size, digest, mimeType)
 }
 
 // shareText reads a stored file as the text it holds, so a saved copy's

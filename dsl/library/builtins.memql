@@ -599,7 +599,7 @@ builtin libraryShareStop {
 /// Save a copy of a file shared with you into your own Library.
 @sdk
 @executor("integration.library.saveSharedCopy")
-@description("Save a copy of a file someone shared with you into YOUR Library, while the share is active. The copy is yours: it keeps its own bytes and stays after the share ends, the sharer cannot see or change it, and it counts against your storage. Refused when the share has been stopped, has expired or its file was archived, and for anyone the file was not shared with. Returns {artifactId, fileId}.")
+@description("Save a copy of a file someone shared with you into YOUR Library, while the share is active. The copy is yours: it keeps its own bytes and stays after the share ends, the sharer cannot see or change it, and it counts against your storage. Refused when the share has been stopped, has expired or its file was archived, and for anyone the file was not shared with. ONE SAVE AT A TIME: while your save of a file runs, the same save is refused and makes nothing, on every replica, so a burst of calls makes one copy; a save asked for after it finished makes a new copy. Returns {artifactId, fileId}.")
 builtin librarySaveSharedCopy {
   artifactId  string!  @description("The shared file's artifact id, as librarySharedWithMe names it.")
 }

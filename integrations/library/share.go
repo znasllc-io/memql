@@ -23,6 +23,22 @@ package library
 // runs a visitor's call under the site owner's borrowed authority, and an
 // automation acts as the cluster: neither is the person deciding to hand their
 // file to somebody, and sharing is that decision.
+//
+// A BURST OF THE SAME ACT IS ONE ACT (José, Nov 19 call: twenty quick clicks on
+// "Save to my Library" made eighteen copies; "even at 1,000 clicks a second it
+// should only count as one click", "especially now with AI agents"). Each act
+// here answers a burst with one result, in the act itself, so an agent calling
+// the builtin with no button in between is held to it too:
+//
+//	libraryShareFile        the file's version gate plus renew-or-new: a second
+//	                        call finds the first one's share and renews it.
+//	libraryShareStop        stopping a stopped share answers as success.
+//	librarySaveSharedCopy   ONE SAVE AT A TIME per person and file
+//	                        (oneSaveAtATime): while one runs, the same save from
+//	                        the same person is refused and makes nothing. A save
+//	                        asked for AFTER the first has finished is a new copy
+//	                        (José: "just leave the rate limiter", nothing
+//	                        remembers which files were saved).
 
 import (
 	"context"
@@ -35,6 +51,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/automations"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
@@ -63,6 +80,55 @@ type ShareCopyStore interface {
 // blob fetcher (SetBlobFetcher).
 func (i *Integration) SetShareCopyStorage(store ShareCopyStore, bucket string) {
 	i.copyStore, i.copyBucket = store, bucket
+}
+
+// SetSaveClaims wires the cross-replica claim librarySaveSharedCopy takes
+// (oneSaveAtATime): the node's automation cluster guard, strict, so a claim
+// the database cannot record refuses the save instead of running it unguarded.
+func (i *Integration) SetSaveClaims(claims automations.StrictClusterClaimer) {
+	i.saveClaims = &claims
+}
+
+// saveClaimName namespaces the save claims in automation_execution_claims.
+const saveClaimName = "librarySaveSharedCopy"
+
+// saveClaimTTL bounds a save's claim. The claim is given back the moment the
+// save ends, so the TTL only matters for a replica that died mid-save: that
+// person can save the file again once it lapses.
+//
+// ponytail: fixed lease, no heartbeat. A copy that outlasts it (a multi-GiB
+// file) can be started a second time by a call made after the lease lapsed;
+// renew the claim while the copy streams if that ever matters.
+const saveClaimTTL = 2 * time.Minute
+
+// errSaveInFlight is the answer to the same save asked for while one runs.
+var errSaveInFlight = fmt.Errorf("a copy of this file is already being saved to your Library; this request saved nothing more")
+
+// oneSaveAtATime claims the save of artifactID by caller on every replica, or
+// says why it cannot: the same save is running (errSaveInFlight), or no claim
+// is wired.
+//
+// The claim is a row in automation_execution_claims whose primary key admits
+// one insert, the same table the automation cluster guard makes events
+// exactly-once with, so it holds across replicas and holds no connection while
+// the copy streams. release gives it back, also when the caller's request was
+// cancelled under it. A claim the database could not record also answers
+// errSaveInFlight (the strict claimer reports only won or not, and logs the
+// storage failure); with the database unreachable the copy could not have been
+// recorded either, and either way nothing was made.
+func (i *Integration) oneSaveAtATime(ctx context.Context, caller, artifactID string) (release func(), err error) {
+	if i.saveClaims == nil {
+		return nil, fmt.Errorf("saving a shared file is unavailable on this node; no copy was made")
+	}
+	key := caller + "/" + memql.BareShortId(artifactID)
+	if !i.saveClaims.ClaimWithTTL(ctx, saveClaimName, key, saveClaimTTL) {
+		return nil, errSaveInFlight
+	}
+	return func() {
+		done, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		i.saveClaims.Release(done, saveClaimName, key)
+	}, nil
 }
 
 // sharingPerson is the caller when they are a signed-in person acting for
@@ -303,6 +369,12 @@ func (i *Integration) handleSaveSharedCopy(ctx context.Context, args map[string]
 	if i.copyStore == nil || i.copyBucket == "" || i.blobFetcher == nil {
 		return nil, fmt.Errorf("Library storage is unavailable on this node; no copy was made")
 	}
+	// Before anything is read: the same save while one runs makes nothing.
+	release, err := i.oneSaveAtATime(ctx, caller, artifactID)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	ctx = memql.ContextWithFreshRead(ctx)
 	store := i.shareStore()
 	artifact, file, err := store.SharedFile(ctx, artifactID)
