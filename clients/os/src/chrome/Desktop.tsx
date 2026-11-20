@@ -13,6 +13,7 @@ import { downloadArtifact } from "../apps/files/actions/download";
 import { useAuthSource } from "../auth/context";
 import { FileIcon } from "../items/FileIcon";
 import { FolderIcon } from "../items/FolderIcon";
+import { holdOf, useDeskFileStates, type DeskLine, type Hold } from "../items/deskFileState";
 import type { UploadProvider } from "../items/upload";
 import { accessAdmits, widgetById, widgetsFor } from "../system/registry";
 import { borderlessArea, halvesOf, placeWindows, type PlacementTokens, type Rect } from "../system/placement";
@@ -110,6 +111,7 @@ export function Desktop({
   // by the time the server answers, and a toast is not the house's way.
   const [deskError, setDeskError] = useState<string | null>(null);
   const pendingFiles = useRef(new Map<string, File>());
+  const stopUpload = useRef(new Map<string, () => void>());
   const cancelHandoff = useRef<(() => void) | null>(null);
 
 
@@ -143,6 +145,27 @@ export function Desktop({
     },
     [config.domain, connection, handoffPorts, authSource],
   );
+
+  // ---- what each file icon says (no dot: items/deskFileState.ts) ----
+  // Machine presence is asked for only while a file made on a machine is on a
+  // desk: it is what "Computer offline" reads.
+  const fileItems = useMemo(
+    () => Object.values(state.surfaces).flatMap((surface) =>
+      Object.values(surface?.items ?? {}).flatMap((i) => (i.kind === "file" ? [i] : []))),
+    [state.surfaces],
+  );
+  const { presence } = useMachinePresence(fileItems.some((i) => !!i.producedByWorkerId));
+  const holds = useMemo(
+    () => new Map(fileItems.map((i) => [i.id, holdOf(i, i.producedByWorkerId ? presence(i.producedByWorkerId) : null)] as const)),
+    [fileItems, presence],
+  );
+  const fileStates = useDeskFileStates(holds, (id, wait) => {
+    const item = fileItems.find((i) => i.id === id);
+    if (!item) return;
+    if (wait === "open") openFile(item);
+    else void fileIntoFolder(item, wait.folderId);
+  });
+  const fileLook = (id: string) => ({ hold: holds.get(id) ?? null, line: fileStates.line(id) });
 
   // The desktop is a strip of plates that only the pager moves. Anything that
   // scrolls it (a focus call, a reveal) is undone at once.
@@ -266,10 +289,12 @@ export function Desktop({
         }
         pendingFiles.current.set(itemId, file);
       }
-      uploads
-        .upload(file, opts?.folderId ? { folderId: opts.folderId } : undefined)
-        .done.then((result) => {
+      const handle = uploads.upload(file, opts?.folderId ? { folderId: opts.folderId } : undefined);
+      if (!intoFolder) stopUpload.current.set(itemId, handle.abort);
+      handle.done
+        .then((result) => {
           if (intoFolder) return;
+          stopUpload.current.delete(itemId);
           pendingFiles.current.delete(itemId);
           actions.updateFileItem(itemId, {
             artifactId: result.artifactId,
@@ -284,6 +309,9 @@ export function Desktop({
             setDeskError(describe(err));
             return;
           }
+          stopUpload.current.delete(itemId);
+          // Thrown in the Bin while it uploaded (discardUpload): already gone.
+          if (!pendingFiles.current.has(itemId)) return;
           actions.updateFileItem(itemId, { uploadState: "failed" });
           // The server's own sentence, beside the icon's retry chip -- the
           // desk used to swallow the reason, which is what made a broken
@@ -292,6 +320,19 @@ export function Desktop({
         });
     },
     [actions, uploads],
+  );
+
+  // An upload thrown in the Bin before it landed: nothing of it is in the
+  // Library, so there is nothing for the Bin to keep. The upload stops and
+  // the icon goes; the file is still wherever it was dropped from.
+  const discardUpload = useCallback(
+    (itemId: string) => {
+      pendingFiles.current.delete(itemId);
+      stopUpload.current.get(itemId)?.();
+      stopUpload.current.delete(itemId);
+      actions.removeSurfaceItem(itemId);
+    },
+    [actions],
   );
 
   // A dropped DIRECTORY becomes a Library folder tree with a desk shortcut
@@ -438,19 +479,25 @@ export function Desktop({
       // The Bin owns this drop (epic memql#4784). It is the dock's droppable,
       // reachable now that one DndContext spans the shell, and the desk
       // deliberately does not act: archiving is a write with a confirm and a
-      // refusal to render, and both live where the gesture ended.
-      if (overId === BIN_DROPPABLE_ID) return;
+      // refusal to render, and both live where the gesture ended. A file
+      // whose upload has not landed has no artifact to archive; the desk
+      // throws that one away itself.
+      const dragged = surface?.items[itemId];
+      if (overId === BIN_DROPPABLE_ID) {
+        if (dragged?.kind === "file" && !dragged.artifactId) discardUpload(itemId);
+        return;
+      }
       if (overId?.startsWith("folder:")) {
         const folderItemId = overId.slice("folder:".length);
         const folderItem = surface?.items[folderItemId];
-        const fileItem = surface?.items[itemId];
+        // Still uploading, it goes into the folder once it lands.
         if (
           folderItemId !== itemId &&
           folderItem?.kind === "folder" &&
-          fileItem?.kind === "file" &&
-          !fileItem.uploadState
+          dragged?.kind === "file" &&
+          dragged.uploadState !== "failed"
         ) {
-          void fileIntoFolder(fileItem, folderItem.folderId);
+          fileStates.ask(itemId, { folderId: folderItem.folderId });
           return;
         }
       }
@@ -529,8 +576,8 @@ export function Desktop({
         {
           id: "open",
           label: "Open in VS Code",
-          disabled: !item.artifactId || !!item.uploadState,
-          onSelect: () => openFile(item),
+          disabled: item.uploadState === "failed",
+          onSelect: () => fileStates.ask(item.id, "open"),
         },
         {
           id: "remove",
@@ -581,8 +628,9 @@ export function Desktop({
               selectedId={selectedId}
               renamingItemId={renamingItemId}
               noAnswerFor={noAnswerFor}
+              fileLook={fileLook}
               onSelect={actions.selectSurfaceItem}
-              onOpenFile={openFile}
+              onOpenFile={(item) => fileStates.ask(item.id, "open")}
               onOpenFolder={openFolderInFiles}
               onRetryUpload={(itemId) => {
                 const file = pendingFiles.current.get(itemId);
@@ -704,6 +752,7 @@ function DeskPlate({
   selectedId,
   renamingItemId,
   noAnswerFor,
+  fileLook,
   onSelect,
   onOpenFile,
   onOpenFolder,
@@ -722,6 +771,7 @@ function DeskPlate({
   selectedId: string | null;
   renamingItemId: string | null;
   noAnswerFor: string | null;
+  fileLook: (id: string) => FileLook;
   onSelect: (id: string | null) => void;
   onOpenFile: (item: Extract<DesktopItem, { kind: "file" }>) => void;
   onOpenFolder: (folderId: string) => void;
@@ -792,6 +842,7 @@ function DeskPlate({
           selected={selectedId === id}
           renaming={renamingItemId === id}
           noAnswerFor={noAnswerFor}
+          look={fileLook(id)}
           onSelect={() => onSelect(id)}
           onOpenFile={onOpenFile}
           onOpenFolder={onOpenFolder}
@@ -809,12 +860,18 @@ function DeskPlate({
   );
 }
 
+interface FileLook {
+  hold: Hold;
+  line: DeskLine;
+}
+
 function SurfaceItem({
   item,
   pos,
   selected,
   renaming,
   noAnswerFor,
+  look,
   onSelect,
   onOpenFile,
   onOpenFolder,
@@ -829,6 +886,7 @@ function SurfaceItem({
   selected: boolean;
   renaming: boolean;
   noAnswerFor: string | null;
+  look: FileLook;
   onSelect: () => void;
   onOpenFile: (item: Extract<DesktopItem, { kind: "file" }>) => void;
   onOpenFolder: (folderId: string) => void;
@@ -839,7 +897,6 @@ function SurfaceItem({
   onMenu: (x: number, y: number) => void;
 }) {
   const { actions, registry } = useOs();
-  const { presence } = useMachinePresence();
   // The drag carries what the Bin needs to name and archive this, because the
   // dock holds neither the Library feed nor the desktop document (memql#4784).
   const draggable = useDraggable({
@@ -909,7 +966,8 @@ function SurfaceItem({
       {item.kind === "file" ? (
         <FileIcon
           entry={item}
-          machine={item.producedByWorkerId ? presence(item.producedByWorkerId) : null}
+          hold={look.hold}
+          line={look.line}
           selected={selected}
           noAnswerMessage={noAnswerFor === item.id ? VSCODE_NO_ANSWER_MESSAGE : null}
           onOpen={() => onOpenFile(item)}
