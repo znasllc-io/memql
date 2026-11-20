@@ -1,6 +1,9 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import { borderlessArea, deskArea, placeWindows, type PlacementTokens } from "../../src/system/placement";
+import { borderlessArea, DEFAULT_PLACEMENT, DOCK_GAP, deskArea, placeWindows, type PlacementTokens } from "../../src/system/placement";
 import { newWindow, type OsWindow } from "../../src/system/windows";
 
 const T: PlacementTokens = { margin: 20, dockReserve: 80, maxSoloWidth: 900 };
@@ -70,5 +73,35 @@ describe("placement", () => {
       expect(r.w).toBeGreaterThanOrEqual(0);
       expect(r.h).toBeGreaterThanOrEqual(0);
     }
+  });
+
+  // Draft B (Jesús, Nov 20 2026): every window reaches down to DOCK_GAP (16px)
+  // above the dock's top edge; full screen still covers the dock.
+  describe("down to the dock", () => {
+    const css = (file: string) => readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../src/styles", file), "utf8");
+    const dockH = Number(/--os-dock-h:\s*(\d+)px/.exec(css("tokens.css"))![1]);
+    const dockBottom = Number(/\.os-dock \{[^}]*?\bbottom:\s*(\d+)px/.exec(css("index.css"))![1]);
+
+    it("reserves exactly the dock's band plus the gap", () => {
+      expect(DOCK_GAP).toBe(16);
+      expect(DEFAULT_PLACEMENT.dockReserve).toBe(dockBottom + dockH + DOCK_GAP);
+    });
+
+    it.each([
+      ["a window", [win("a")]],
+      ["a borderless window", [win("a", "maximized")]],
+      ["a split pair", [win("a"), win("b")]],
+    ] as const)("%s stops 16px above the dock, on every screen", (_, wins) => {
+      for (const view of [VIEW, { w: 1920, h: 1080 }, { w: 2560, h: 1440 }]) {
+        const dockTop = view.h - dockBottom - dockH;
+        for (const r of Object.values(placeWindows([...wins], view))) {
+          expect(r!.y + r!.h).toBe(dockTop - 16);
+        }
+      }
+    });
+
+    it("leaves full screen over the dock", () => {
+      expect(placeWindows([win("a", "fullscreen")], VIEW).a).toEqual({ x: 0, y: 0, w: VIEW.w, h: VIEW.h });
+    });
   });
 });

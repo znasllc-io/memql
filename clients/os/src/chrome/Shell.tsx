@@ -42,7 +42,7 @@ import type { ProfileAccess } from "../modules/profile/access";
 import { useResolvedAccess } from "../modules/profile/useResolvedAccess";
 import { useRoleLadder } from "../modules/profile/useRoleLadder";
 import { useEffectiveAccess } from "../modules/profile/useEffectiveAccess";
-import type { PlacementTokens } from "../system/placement";
+import { DEFAULT_PLACEMENT, type PlacementTokens } from "../system/placement";
 import { activeDesk } from "../system/desks";
 import { GraphDesktopStore } from "../system/graphStore";
 import { LocalDesktopStore, type DesktopStore } from "../system/store";
@@ -400,8 +400,9 @@ function DesktopChrome({
   const [themesOpen, setThemesOpen] = useState(false);
 
   const [storageWarningHeight, setStorageWarningHeight] = useState(0);
+  // The storage warning sits just above the dock, so windows stop above it too.
   const placement = useMemo<PlacementTokens>(
-    () => ({ margin: 28, dockReserve: 118 + storageWarningHeight, maxSoloWidth: 1280 }),
+    () => ({ ...DEFAULT_PLACEMENT, dockReserve: DEFAULT_PLACEMENT.dockReserve + storageWarningHeight }),
     [storageWarningHeight],
   );
 
