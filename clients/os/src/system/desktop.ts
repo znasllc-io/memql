@@ -230,9 +230,10 @@ export function fitSurface(surface: DeskSurface, grid: GridSize): DeskSurface {
   // Placed against the items that stay, so a moved item never covers one.
   for (const [id] of outside) delete fitted.positions[id];
   for (const [id, item] of outside) {
-    const to = nearestFreeCell(fitted, item, surface.positions[id]!, grid);
-    // ponytail: a full grid leaves the item unplaced (not drawn) until room frees up.
-    if (to) fitted = { ...fitted, positions: { ...fitted.positions, [id]: to } };
+    // No room at all (a widget taller than a short window, or a full grid):
+    // keep the saved spot, so the item is clipped at the edge rather than gone.
+    const to = nearestFreeCell(fitted, item, surface.positions[id]!, grid) ?? surface.positions[id]!;
+    fitted = { ...fitted, positions: { ...fitted.positions, [id]: to } };
   }
   return fitted;
 }

@@ -197,4 +197,9 @@ describe("fitSurface", () => {
     };
     expect(cells("ask").filter((c) => cells("setup").includes(c))).toEqual([]);
   });
+
+  it("keeps the saved spot of an item no spot on the grid can hold", () => {
+    const fitted = fitSurface(saved(), { cols: 14, rows: 2 });
+    expect(fitted.positions.setup).toEqual({ col: 14, row: 2 });
+  });
 });
