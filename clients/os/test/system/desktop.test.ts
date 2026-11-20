@@ -99,6 +99,12 @@ describe("a file dragged out of Files onto the desk (Jesús, Nov 20 2026)", () =
     expect(landed?.surface.positions.a).toEqual({ col: 5, row: 2 });
   });
 
+  it("never lands under a window or the dock: covered cells count as taken", () => {
+    const hidden = [{ col: 5, row: 2 }, { col: 4, row: 2 }, { col: 6, row: 2 }];
+    const landed = placeFileAt(emptySurface(), entry, { col: 5, row: 2 }, GRID, hidden);
+    expect(hidden).not.toContainEqual(landed?.surface.positions.new);
+  });
+
   it("refuses a new icon on a full desk", () => {
     let full = emptySurface();
     for (let i = 0; i < GRID.cols * GRID.rows; i += 1) full = place(full, file(`f${i}`), i % GRID.cols, Math.floor(i / GRID.cols));

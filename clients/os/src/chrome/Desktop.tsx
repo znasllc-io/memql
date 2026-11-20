@@ -869,14 +869,27 @@ function DeskFileDrop() {
   const [landing, setLanding] = useState<{ pos: GridPos; plate: HTMLElement } | null>(null);
 
   // The active desk's cell under the pointer, or null when anything but the
-  // bare desk (or an icon on it) is there.
-  const deskCellAt = (x: number, y: number): { cell: GridPos; plate: HTMLElement } | null => {
+  // bare desk (or an icon or widget on it) is there. `hidden` are the cells a
+  // window or the dock covers: an icon placed there would land out of sight.
+  const deskCellAt = (x: number, y: number) => {
     const plate = document.querySelector<HTMLElement>(`[data-os-desk="${CSS.escape(state.shell.activeDeskId)}"]`);
     const hit = document.elementsFromPoint(x, y).find((el) => !el.closest(".os-desk-ghost"));
     if (!plate || !hit || !plate.contains(hit) || hit.closest(".os-window")) return null;
     const rect = plate.getBoundingClientRect();
+    const covers = [...document.querySelectorAll(".os-window, [data-os-dock]")].map((el) => el.getBoundingClientRect());
+    const hidden: GridPos[] = [];
+    for (let col = 0; col < grid.cols; col += 1) {
+      for (let row = 0; row < grid.rows; row += 1) {
+        const left = rect.left + SURFACE_PAD + col * CELL_W;
+        const top = rect.top + SURFACE_PAD + row * CELL_H;
+        if (covers.some((c) => c.width > 0 && left < c.right && left + CELL_W > c.left && top < c.bottom && top + CELL_H > c.top)) {
+          hidden.push({ col, row });
+        }
+      }
+    }
     return {
       plate,
+      hidden,
       cell: {
         col: Math.max(0, Math.min(grid.cols - 1, Math.floor((x - rect.left - SURFACE_PAD) / CELL_W))),
         row: Math.max(0, Math.min(grid.rows - 1, Math.floor((y - rect.top - SURFACE_PAD) / CELL_H))),
@@ -885,15 +898,16 @@ function DeskFileDrop() {
   };
 
   // Where the icon would land: the very function the drop runs, so the spot
-  // and the result cannot disagree (an occupied cell yields to the nearest
-  // free one; a file already here shows its own icon's new place).
+  // and the result cannot disagree (an occupied or covered cell yields to the
+  // nearest free one in view; a file already here shows its own icon's new
+  // place).
   const landingAt = (drag: DeskFileDrag | undefined, x: number, y: number) => {
     const at = drag?.desk ? deskCellAt(x, y) : null;
     if (!at || !drag?.desk) return null;
     const surface = state.surfaces[state.shell.activeDeskId] ?? emptySurface();
-    const landed = placeFileAt(surface, { id: "landing", ...drag.desk.entry }, at.cell, grid);
+    const landed = placeFileAt(surface, { id: "landing", ...drag.desk.entry }, at.cell, grid, at.hidden);
     const pos = landed?.surface.positions[landed.itemId];
-    return pos ? { pos, plate: at.plate, cell: at.cell } : null;
+    return pos ? { pos, plate: at.plate, cell: at.cell, hidden: at.hidden } : null;
   };
   const latest = useRef(landingAt);
   latest.current = landingAt;
@@ -915,7 +929,7 @@ function DeskFileDrop() {
       const drag = event.active.data.current as DeskFileDrag | undefined;
       const at = pointerOf(event);
       const land = at ? landingAt(drag, at.x, at.y) : null;
-      if (land && drag?.desk) actions.dropFileOnDesk(drag.desk.entry, land.cell);
+      if (land && drag?.desk) actions.dropFileOnDesk(drag.desk.entry, land.cell, land.hidden);
     },
   });
 
