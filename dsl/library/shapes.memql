@@ -321,8 +321,11 @@ shape share libraryShareFull {
   row.id
   ownerUserId
   recipientUserId
+  recipientGroupId
+  memberUserIds
   recipientDisplayName
   artifactId
+  title
   days
   expiresAt
   revokedAt

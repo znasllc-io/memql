@@ -3791,18 +3791,20 @@
         "artifactId",
         "days",
         "expiresAt",
+        "memberUserIds",
         "ownerUserId",
         "recipientDisplayName",
+        "recipientGroupId",
         "recipientUserId",
-        "revokedAt"
+        "revokedAt",
+        "title"
       ],
       "required": [
         "artifactId",
         "days",
         "expiresAt",
         "ownerUserId",
-        "recipientDisplayName",
-        "recipientUserId"
+        "recipientDisplayName"
       ]
     },
     {

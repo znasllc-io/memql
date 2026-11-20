@@ -4592,38 +4592,60 @@ a.os-button {
   .os-files .os-files-grid,
   .os-files .os-files-files .os-livelist-rows { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
 }
-/* WHO THE PICKED FILE IS SHARED WITH, at the foot of the rail's column
- * (Files: sharing.tsx). The rail and the list are placed explicitly so this
- * can share the rail's cell; sticky to the window's bottom edge, so a long
- * list never scrolls it away. On a narrow window it sits between the rail and
- * the list instead. */
+/* The rail and the main column are placed explicitly: the share view's
+ * column and the hidden tiles' column take the same cell. */
 .os-files-browse > .os-files-rail { grid-column: 1; grid-row: 1; }
 .os-files-browse > .os-files-main { grid-column: 2; grid-row: 1; }
-.os-files-sharing { grid-column: 1; grid-row: 1; align-self: end; position: sticky; bottom: 0; margin-right: 10px; padding: 12px 0 8px; border-top: 1px solid var(--os-line); background: var(--os-glass-solid); }
-.os-files-sharing-head { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; font-size: var(--os-text-sm); font-weight: 500; color: var(--os-muted); }
-.os-files-sharing-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
-.os-files-sharing-list { max-height: calc(40vh / var(--os-scale, 1)); overflow-y: auto; }
-.os-files-sharing-list button { appearance: none; display: flex; align-items: center; gap: 10px; width: 100%; min-height: var(--os-control-h); padding: 0 8px; border: 0; border-radius: var(--os-selection-radius); background: transparent; color: var(--os-ink); font: inherit; text-align: left; cursor: pointer; }
-.os-files-sharing-list button:hover { background: var(--os-hover); }
-.os-files-sharing-list button[aria-pressed="true"] { background: color-mix(in srgb, var(--os-accent) 12%, transparent); box-shadow: inset 2px 0 0 var(--os-accent); }
-.os-files-sharing-list button:focus-visible { outline: 2px solid var(--os-accent); outline-offset: -2px; }
-.os-files-sharing-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.os-files-sharing-tag { margin-left: auto; font-size: var(--os-text-sm); color: var(--os-muted); }
-/* The panel a chosen person opens, ABOVE the names (Jesus, Nov 18 2026). */
-.os-files-share-ask { display: grid; gap: 8px; margin: 0 0 8px; padding: 0 0 10px; border-bottom: 1px solid var(--os-line); }
-.os-files-share-days { display: flex; align-items: center; gap: 8px; font-size: var(--os-text-sm); color: var(--os-muted); }
-.os-files-share-days .os-choice-row { flex: 1; gap: 4px; margin: 0; }
-.os-files-share-days .os-choice { flex: 1; justify-content: center; padding: 0; }
-.os-files-share-acts { display: flex; gap: 8px; }
-.os-files-share-acts > * { flex: 1; justify-content: center; }
-.os-files-share-state, .os-files-share-empty { margin: 0; font-size: var(--os-text-sm); color: var(--os-muted); }
-.os-files-share-error { margin: 0; font-size: var(--os-text-sm); color: var(--os-error); }
-.os-files-sharing-ava { display: inline-grid; place-items: center; flex: none; width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--os-line); font-size: 10.5px; color: var(--os-muted); }
+/* THE SHARING PLACE (Nov 19 2026): the caller's shares as record rows. The
+ * column names ride the record row's own grid, quiet and once, so "Shared
+ * with" and "Time left" stand over their columns; the Stop placeholder holds
+ * the actions column's width. On a narrow list the rows fold to two lines
+ * and the names would point at nothing, so they go. */
+.os-files-outgoing { display: grid; gap: 0; }
+.os-files-outgoing-columns .os-row.os-record-row { padding-block: 4px 0; }
+.os-files-outgoing-columns .os-row-name,
+.os-files-outgoing-columns .os-record-summary,
+.os-files-outgoing-columns .os-record-state { font-size: var(--os-text-sm); font-weight: 400; color: var(--os-muted); }
+.os-files-outgoing-columns .os-record-actions { padding-block: 0; }
+.os-files-outgoing-ghost { visibility: hidden; }
+/* "Shared by" on the Sharing page's Head, for someone who oversees others'
+ * shares: the words, then the drop-down, on the control line. */
+.os-files-sharedby { display: inline-flex; align-items: center; gap: 8px; color: var(--os-muted); font-size: var(--os-text-sm); white-space: nowrap; }
+@container os-record-list (max-width: 600px) { .os-files-outgoing-columns .os-record-entry { display: none; } }
+.os-files-outgoing-who,
+.os-files-outgoing-left { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; color: var(--os-muted); }
+/* THE SHARE VIEW (Nov 20 2026): in place of the tiles, on Fleet's setting
+ * rows. Its calendar opens under the Expires drop-down and floats over what
+ * follows, like the drop-down's own list. */
+.os-files-main[hidden] { display: none; }
+.os-files-share { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.os-files-share-body { display: flex; flex-direction: column; gap: 8px; min-width: 0; container: machine-details / inline-size; }
+.os-files-share-file { display: inline-flex; align-items: center; gap: 6px; }
+.os-files-share-expiry { position: relative; display: flex; align-items: center; gap: 12px; min-width: 0; }
+.os-files-share-expiry .os-select { min-width: 9rem; }
+.os-files-share-until { color: var(--os-muted); font-size: var(--os-text-sm); white-space: nowrap; }
+.os-files-share-calendar { position: absolute; top: calc(100% + 4px); left: 0; z-index: 40; padding: 10px; border: 1px solid var(--os-line); border-radius: var(--os-radius-xs); background: var(--os-glass-solid); box-shadow: var(--os-shadow-float); }
+.os-files-share-card .os-editable-card-open { cursor: default; }
+.os-files-share-card .os-editable-card-open > strong { display: inline-flex; align-items: center; gap: 6px; }
+
+/* THE KIT CALENDAR (kit/CalendarMonth): a month of days on the control line's
+ * text scale, the picked day in the accent, today ringed, days that cannot be
+ * picked greyed out. Straight selection edges, as every choice in the OS. */
+.os-calendar { display: grid; gap: 6px; width: max-content; }
+.os-calendar-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.os-calendar-title { font-size: var(--os-text-sm); font-weight: 500; }
+.os-calendar-grid { display: grid; gap: 2px; }
+.os-calendar-week { display: grid; grid-template-columns: repeat(7, 2rem); gap: 2px; }
+.os-calendar-weekday { display: grid; place-items: center; height: 1.5rem; color: var(--os-muted); font-size: var(--os-text-xs); }
+.os-calendar-day { width: 2rem; height: 2rem; border: 1px solid transparent; border-radius: var(--os-selection-radius); background: transparent; color: var(--os-ink); font: inherit; font-size: var(--os-text-sm); font-variant-numeric: tabular-nums; cursor: pointer; }
+.os-calendar-day[data-outside] { color: var(--os-muted); }
+.os-calendar-day:hover:not(:disabled) { background: var(--os-hover); }
+.os-calendar-day:focus-visible { outline: 2px solid var(--os-accent); outline-offset: -2px; }
+.os-calendar-day[data-today] { border-color: var(--os-line); }
+.os-calendar-day[data-picked] { background: var(--os-accent); border-color: var(--os-accent); color: var(--os-accent-fg); }
+.os-calendar-day:disabled { color: var(--os-muted); opacity: .4; cursor: default; }
 @container os-files (max-width: 560px) {
   .os-files-browse > .os-files-main { grid-column: 1; grid-row: 2; }
-  .os-files-browse:has(> .os-files-sharing) { grid-template-rows: auto auto minmax(0, 1fr); }
-  .os-files-browse:has(> .os-files-sharing) > .os-files-main { grid-row: 3; }
-  .os-files-sharing { grid-row: 2; align-self: start; position: static; margin: 0; padding: 10px 0; border-top: 0; border-bottom: 1px solid var(--os-line); }
 }
 
 /* Folder tiles, then the notices, uploads and file tiles below them. The

@@ -2,7 +2,7 @@ import { LoadMore } from "../../kit/LoadMore";
 import type { LibraryArtifactsFeed } from "./useLibrary";
 import { usePageScroll } from "../../kit/pageNavigation";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { ArrowUpDown, Download, FilePlus, FileText, FolderInput, FolderPlus, Import, Layers, Monitor, RotateCcw, Search, SquareArrowOutUpRight, Trash2, Upload } from "lucide-react";
+import { ArrowUpDown, Download, FilePlus, FileText, FolderInput, FolderPlus, Import, Layers, Monitor, RotateCcw, Search, Share2, SquareArrowOutUpRight, Trash2, Upload } from "lucide-react";
 import { CardCollectionSearch } from "../../kit/CardCollectionEditor";
 import { IconButton } from "../../kit/IconButton";
 import { Mark } from "../../chrome/Mark";
@@ -32,8 +32,11 @@ import { AddButton } from "../../kit/AddButton";
 import { InPlaceAsk } from "../../kit/pressHold";
 import { FileFolders } from "./FileFolders";
 import { FilesRail } from "./Rail";
-import { ShareFoot } from "./sharing";
-import { noticeFromRow, useCanShareFiles, useFileShares, useShareDirectory, useSharedWithMe, type SharedNotice } from "./useSharing";
+import { noticeFromRow, outgoingFromRow, overseenSharers, shareStands, useCanShareFiles, useSharedWithMe, useSharesOverseen, useSharing, useShareTitles, type OutgoingShare, type SharedNotice } from "./useSharing";
+import { roleAdmits } from "../../system/roles";
+import { AutoRefresh } from "../../kit/AutoRefresh";
+import { SharingPlace } from "./SharingPlace";
+import { ShareView } from "./ShareView";
 import { useLiveView } from "../../live/liveView";
 import { FileTile } from "./Tiles";
 import {
@@ -104,7 +107,11 @@ const PLACE_TITLE: Record<FilesPlace, string> = {
   bin: "Bin",
   materializer: "Materializer",
   shared: "Shared with me",
+  sharing: "Sharing",
 };
+
+/** The rail's "Shared" folder, which the Head's trail names above its two places. */
+const SHARED_FOLDER = "Shared";
 
 export function BrowseSection({
   list,
@@ -214,6 +221,10 @@ export function BrowseSection({
   // The grid's selection: which file a click picked. It opens nothing; it only
   // marks the file a right-click, Enter or double-click is about.
   const [picked, setPicked] = useState("");
+  // THE SHARE VIEW (Nov 20 2026): the file whose Share was pressed. It takes
+  // the place of the tiles, the rail beside it, until its back arrow.
+  const [shareTarget, setShareTarget] = useState<ArtifactRow | null>(null);
+  const canShare = useCanShareFiles();
 
   // Every heavy verb the row menu offers is the inspector's verb, reached by
   // the SAME function -- the download decision is shared in actions/download,
@@ -427,7 +438,7 @@ export function BrowseSection({
   // being looked at, so the root takes them -- and the Bin is nowhere to
   // upload TO, so it hands them to the Library root.
   const destinationFolderId =
-    filter.search.trim() !== "" || filter.place === "bin" || filter.place === "materializer" || filter.place === "shared"
+    filter.search.trim() !== "" || filter.place === "bin" || filter.place === "materializer" || filter.place === "shared" || filter.place === "sharing"
       ? ""
       : (filter.folderId ?? "");
 
@@ -512,11 +523,16 @@ export function BrowseSection({
     }
     // The owner's order: Open and Download first, Delete last. Rename,
     // which he also asked for, is absent until the engine can do it (rule 12:
-    // absent, never disabled). Share with is not a menu entry: one click on a
-    // file opens it at the foot of the rail (sharing.tsx), as he chose.
+    // absent, never disabled). Share opens the share view in place of the
+    // tiles (José, Nov 19: "another screen here in the middle"), only on a
+    // file of the caller's own and only with the share part.
+    const share = canShare && access !== null && row.ownerUserId === access.userId
+      ? [{ id: "share", label: "Share", onSelect: () => { setRowMenu(null); setShareTarget(row); } }]
+      : [];
     return [
       ...(!isZipArtifact(row) ? [{ id: "open", label: "Open", onSelect: () => openVsCodeFor(row) }] : []),
       download,
+      ...share,
       details,
       { id: "desk", label: "Send to desktop", onSelect: () => sendRowToDesk(row) },
       {
@@ -596,15 +612,8 @@ export function BrowseSection({
   ];
   const [noticeMenu, setNoticeMenu] = useState<{ x: number; y: number; notice: SharedNotice } | null>(null);
 
-  // The Share panel's acts. ShareFoot renders a thrown sentence in place, and
-  // the share rows arrive on their own events, so nothing is patched here.
-  // Renew is the same call: sharing again with someone who holds an active
-  // share restarts it for the days it was given.
-  const shareFile = async (artifactId: string, recipientUserId: string, days: number) => {
-    const query = connection?.query ?? null;
-    if (query === null) throw new Error("Not connected to the cluster, so nothing was shared.");
-    await query.libraryShareFile({ artifactId, recipientUserId, days });
-  };
+  // The Sharing place's Stop. The share row leaves on its own event, so
+  // nothing is patched here.
   const stopShare = async (shareId: string) => {
     const query = connection?.query ?? null;
     if (query === null) throw new Error("Not connected to the cluster, so the share was not stopped.");
@@ -618,20 +627,11 @@ export function BrowseSection({
   // nobody can see.
   const pickedRow = picked === "" ? null : list?.snapshot.rows.find((r) => r.id === picked) ?? null;
 
-  // SHARING (the engine's library sharing, Nov 2026). The Share panel sits at
-  // the foot of the rail for a picked file the caller owns and still has --
-  // never in the Bin, never for a file shared WITH them, never without the
-  // part -- and is absent otherwise (rule 12). Shared with me is a place of its
-  // own, fed by the caller's share notices rather than their Library.
+  // SHARING (the engine's library sharing, Nov 2026). Share is a verb on the
+  // caller's own live files (rowMenuEntries) and opens the share view.
+  // Shared with me is a place of its own, fed by the caller's share notices
+  // rather than their Library.
   const shared = filter.place === "shared";
-  const canShare = useCanShareFiles();
-  const sharing =
-    canShare && selected === null && filter.place !== "bin" && !shared &&
-    pickedRow !== null && !pickedRow.archived && access !== null && pickedRow.ownerUserId === access.userId
-      ? pickedRow
-      : null;
-  const directory = useShareDirectory(sharing !== null);
-  const fileShares = useFileShares(sharing?.id ?? "");
   const notices = useSharedWithMe(shared);
   // The search panel asks Shared with me the same questions, over its notices.
   const noticeList = useLiveView<Row, SharedNotice>(notices.source, `files:shared:${filter.search}|${filter.type}|${filter.added}|${filter.sort}`, (rows) => {
@@ -644,6 +644,32 @@ export function BrowseSection({
       .flatMap((tile) => byId.get(tile.id) ?? []);
   });
   const pickedNotice = shared && picked !== "" ? noticeList?.snapshot.rows.find((n) => n.id === picked) ?? null : null;
+  // SHARING: the caller's own shares, across every file (Nov 19 2026). Its
+  // rows are shares, not files, so nothing here is picked; each row carries
+  // its one act, Stop. A share that runs out while the page is open leaves at
+  // the next tick of the list's clock (SharingPlace), with no event behind it.
+  const sharingPlace = filter.place === "sharing";
+  const outgoing = useSharing(sharingPlace);
+  // The search panel asks Sharing the same questions it asks Shared with
+  // me: the file's name (or who has it), its kind, when it was shared.
+  const outgoingList = useLiveView<Row, OutgoingShare>(outgoing.source, `files:sharing:${filter.search}|${filter.type}|${filter.added}|${filter.sort}`,
+    (rows) => askOfShares(rows.map(outgoingFromRow).filter((share) => share.id !== "" && shareStands(share)), filter));
+  const shareTitles = useShareTitles(sharingPlace ? outgoingList?.snapshot.rows ?? [] : []);
+  // SHARED BY (item 13; Jesús's pick, Nov 20, draft B): someone at admin rank
+  // or above may look past their own shares -- "Me", "Everyone", or one
+  // person -- and Stop what the engine lets them. It starts on "Me", which is
+  // the live list above; the rest is librarySharesOverseen, which the engine
+  // already narrows to the shares this person may stop (owners: everyone's;
+  // developers and admins: those ranked below them). The drop-down is only
+  // the way in; the engine decides, on the list and on every Stop.
+  const overseer = sharingPlace && roleAdmits(access?.role ?? "", { min: "admin" });
+  const [sharedBy, setSharedBy] = useState("me");
+  const overseen = useSharesOverseen(overseer);
+  const overseenList = useLiveView<Row, OutgoingShare>(overseen.source, `files:overseen:${sharedBy}:${filter.search}|${filter.type}|${filter.added}|${filter.sort}`,
+    (rows) => askOfShares(rows.map(outgoingFromRow).filter((share) => share.id !== "" && shareStands(share) &&
+      (sharedBy === "everyone" || share.ownerUserId === sharedBy)), filter));
+  const sharers = overseenSharers(overseen.snapshot.rows);
+  const byOthers = overseer && sharedBy !== "me";
   const pickedActs = selected !== null ? null
     : pickedNotice !== null ? { name: pickedNotice.title, entries: noticeMenuEntries(pickedNotice) }
     : pickedRow !== null ? { name: artifactName(pickedRow), entries: rowMenuEntries(pickedRow) }
@@ -666,7 +692,7 @@ export function BrowseSection({
   // Empty and filtered-to-empty are DIFFERENT answers: one is about the
   // place, the other about the question just asked of it.
   const asked = searching || filter.type !== "all" || filter.added !== "any";
-  const narrowed = asked || (!shared && (
+  const narrowed = asked || (!shared && !sharingPlace && (
     filter.kind !== "all" ||
     filter.source !== "all" ||
     filter.accountId !== ACCOUNT_ANY ||
@@ -676,11 +702,13 @@ export function BrowseSection({
   const foldersOnly = filter.type === "folders";
   // While the whole place is still being read for an order or filter the
   // pages cannot answer (useLibrary.ts), an empty list is not yet an answer.
-  const draining = !shared && !foldersOnly && needsWholePlace(filter) && artifacts.hasMore;
+  const draining = !shared && !sharingPlace && !foldersOnly && needsWholePlace(filter) && artifacts.hasMore;
   const emptyText = narrowed
     ? "Nothing matches. Clear the search or filters to see your files."
     : shared
     ? "Nothing has been shared with you."
+    : sharingPlace
+    ? "You are not sharing any files."
     : filter.place === "desktop"
       ? "Nothing on your desks. Send a file to the desk from the Library, or drop one onto the desk."
       : filter.place === "bin"
@@ -706,6 +734,10 @@ export function BrowseSection({
   // The walk is BOUNDED and remembers what it has seen. `parentFolderId` is
   // data, and a cycle in it must cost a short trail rather than a hung page.
   const headTrail = ((): Breadcrumb[] | undefined => {
+    // Shared with me and Sharing sit inside the rail's "Shared" folder, and the
+    // trail says so. "Shared" is a folder with no page of its own, so it is a
+    // name here, not a way back.
+    if (shared || sharingPlace) return [{ label: SHARED_FOLDER }, { label: PLACE_TITLE[filter.place] }];
     if (searching || filter.folderId === "" || filter.folderId === null) return undefined;
     const chain: string[] = [];
     const seen = new Set<string>();
@@ -724,7 +756,7 @@ export function BrowseSection({
   const placeFolders = filter.place === "library" ? tree.roots.map(node => node.folder)
     : filter.place === "desktop" ? deskFolders.flatMap(shortcut => { const node = tree.byId.get(shortcut.folderId); return node ? [node.folder] : []; })
     : filter.place === "bin" ? archivedFolders
-    : shared ? []
+    : shared || sharingPlace ? []
     : materializedRail.folders.map(entry => entry.folder);
   // A search looks at the whole place, as it does for files: every folder in
   // the Library's tree, or the place's own folders elsewhere, by name.
@@ -741,7 +773,7 @@ export function BrowseSection({
   // The Head's meta is what the LIST is showing right now -- scoped folder,
   // facets and search included -- never a different population's number
   // beside the scope's name. Showing Folders, that is the folders.
-  const listedSnapshot = shared ? noticeList?.snapshot : list?.snapshot;
+  const listedSnapshot = shared ? noticeList?.snapshot : sharingPlace ? (byOthers ? overseenList : outgoingList)?.snapshot : list?.snapshot;
   const listedCount = foldersOnly ? visibleFolders.length : listedSnapshot?.rows.length ?? 0;
   const pageRoot = usePageScroll(`${filter.place}:${filter.folderId ?? ""}:${selectedId}`);
 
@@ -790,23 +822,19 @@ export function BrowseSection({
         tree={tree}
         place={filter.place}
         folderId={filter.folderId ?? ""}
-        onPlace={(place) => { onSelect(""); setPicked(""); patch({ place, folderId: "", search: "" }); }}
-        onFolder={(folderId) => { onSelect(""); setPicked(""); patch({ place: "library", folderId, search: "" }); }}
+        onPlace={(place) => { onSelect(""); setPicked(""); setShareTarget(null); setSharedBy("me"); patch({ place, folderId: "", search: "" }); }}
+        onFolder={(folderId) => { onSelect(""); setPicked(""); setShareTarget(null); patch({ place: "library", folderId, search: "" }); }}
         onFolderMenu={(x, y, node) => setFolderMenu({ x, y, node })}
       />
-      {sharing !== null && directory.people !== null ? (
-        <ShareFoot
-          key={sharing.id}
-          people={directory.people}
-          peopleError={directory.error}
-          shares={fileShares}
-          onShare={(recipientUserId, days) => shareFile(sharing.id, recipientUserId, days)}
-          onRenew={(share) => shareFile(sharing.id, share.recipientUserId, share.days)}
-          onStop={(share) => stopShare(share.shareId)}
-        />
+      {shareTarget !== null ? (
+        <div className="os-files-main">
+          <ShareView key={shareTarget.id} file={shareTarget} backLabel={headTitle} onBack={() => setShareTarget(null)} />
+        </div>
       ) : null}
-      <div className="os-files-main" ref={mainRef}>
-      <Head navigationKey={`browse:${filter.place}:${filter.folderId ?? ""}`} title={headTitle} breadcrumbs={headTrail} navigation={selected === null} back={filter.folderId ? {label: PLACE_TITLE[filter.place], onSelect: () => patch({folderId: tree.byId.get(filter.folderId!)?.folder.parentFolderId ?? ""})} : undefined} meta={listCount(listedSnapshot, listedCount) === undefined ? undefined : `${listedCount}${!shared && artifacts.hasMore ? "+" : ""}`}>
+      {/* Hidden, not unmounted, while the share view stands in its place, so
+          the way back finds the files where they were. */}
+      <div className="os-files-main" ref={mainRef} hidden={shareTarget !== null}>
+      <Head navigationKey={`browse:${filter.place}:${filter.folderId ?? ""}`} title={headTitle} breadcrumbs={headTrail} navigation={selected === null && shareTarget === null} back={filter.folderId ? {label: PLACE_TITLE[filter.place], onSelect: () => patch({folderId: tree.byId.get(filter.folderId!)?.folder.parentFolderId ?? ""})} : undefined} meta={listCount(listedSnapshot, listedCount) === undefined ? undefined : `${listedCount}${!shared && !sharingPlace && artifacts.hasMore ? "+" : ""}`}>
         {/* ONE ROW, THREE AREAS (José, Nov 19 2026; Jesús picked Draft A): the
             picked file's icons beside the title, one search button on the
             right, and Add apart at the far right.
@@ -831,6 +859,16 @@ export function BrowseSection({
                 {PICKED_ICON[entry.id]}
               </IconButton>
             ))}
+          </span>
+        ) : null}
+        {overseer ? (
+          <span className="os-files-sharedby">
+            <span aria-hidden="true">Shared by</span>
+            <Select id="files-shared-by" label="Shared by" value={sharedBy} onChange={setSharedBy}>
+              <option value="me">Me</option>
+              <option value="everyone">Everyone</option>
+              {sharers.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+            </Select>
           </span>
         ) : null}
         <IconButton
@@ -978,6 +1016,29 @@ export function BrowseSection({
           {tasks.map((task) => (
             <UploadPlaceholder key={task.id} task={task} />
           ))}
+          {sharingPlace && !foldersOnly ? (
+            <>
+              {byOthers ? <AutoRefresh onRefresh={() => overseen.reseed({ ifIdle: true })} /> : null}
+              <SharingPlace
+                key={byOthers ? "others" : "mine"}
+                source={byOthers ? overseenList : outgoingList}
+                label={headTitle}
+                emptyText={byOthers ? (sharedBy === "everyone" ? "Nobody is sharing a file you can stop." : "They are not sharing a file you can stop.") : emptyText}
+                showSharer={byOthers}
+                titleOf={(share) => shareTitles.get(share.artifactId) ?? content.find((row) => row.id === share.artifactId)?.title ?? "Untitled file"}
+                onStop={async (share) => {
+                  setRowNote(null);
+                  try {
+                    await stopShare(share.id);
+                  } catch (err: unknown) {
+                    refuse("Sharing did not stop.", "The file is still shared.", err);
+                  }
+                  // Somebody else's share sends no event here: read again.
+                  if (overseer) overseen.reseed();
+                }}
+              />
+            </>
+          ) : (
           <div className="os-files-files">
           {foldersOnly ? (
             visibleFolders.length === 0 && foldersState !== "seeding" ? <Caption>{emptyText}</Caption> : null
@@ -1043,7 +1104,8 @@ export function BrowseSection({
           />
           )}
           </div>
-          {shared || foldersOnly ? null : <LoadMore feed={artifacts} />}
+          )}
+          {shared || sharingPlace || foldersOnly ? null : <LoadMore feed={artifacts} />}
           {facetsError ? <Caption>Folder counts could not be updated. {facetsError}</Caption> : null}
           {/* THE EMPTY STATE OFFERS THE WAY OUT (DESIGN.md rule 4's shape:
               an empty list that does not explain itself is the failure).
@@ -1387,6 +1449,7 @@ const PICKED_ICON: Record<string, ReactNode> = {
   open: <SquareArrowOutUpRight size={16} aria-hidden />,
   download: <Download size={16} aria-hidden />,
   details: <FileText size={16} aria-hidden />,
+  share: <Share2 size={16} aria-hidden />,
   desk: <Monitor size={16} aria-hidden />,
   move: <FolderInput size={16} aria-hidden />,
   materializer: <Layers size={16} aria-hidden />,
@@ -1395,6 +1458,19 @@ const PICKED_ICON: Record<string, ReactNode> = {
   restore: <RotateCcw size={16} aria-hidden />,
   save: <Import size={16} aria-hidden />,
 };
+
+/** The search panel's questions, asked of the caller's shares (Sharing). */
+function askOfShares(shares: OutgoingShare[], filter: FilesFilter): OutgoingShare[] {
+  const now = Date.now();
+  const needle = filter.search.trim().toLowerCase();
+  const byId = new Map(shares
+    .filter((share) => !needle || share.title.toLowerCase().includes(needle) || share.recipientDisplayName.toLowerCase().includes(needle))
+    .map((share) => [share.id, share]));
+  return [...byId.values()].map((share) => artifactFromRow({ id: share.id, kind: "file", title: share.title, createdAt: share.createdAt }))
+    .filter((tile) => (filter.type === "all" || fileKindOf(tile) === filter.type) && addedWithin(tile.createdAt, filter.added, now))
+    .sort(compareRows(filter.sort))
+    .flatMap((tile) => byId.get(tile.id) ?? []);
+}
 
 /** What a file tile needs of a shared file: its name, its type and when it was shared. */
 function noticeTile(notice: SharedNotice): ArtifactRow {

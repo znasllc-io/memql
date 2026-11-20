@@ -13,7 +13,7 @@ vi.mock("../../src/live/connection", () => ({
 }));
 
 import { chooseOption } from "../selectControl";
-import { artifactRow, click, fakeConnection, folderRow, renderFiles, openDetails, shareRow } from "./harness";
+import { artifactRow, click, fakeConnection, folderRow, renderFiles, openDetails } from "./harness";
 
 // The rail's disclosures, the one Add control, and the row's menu.
 //
@@ -75,6 +75,7 @@ describe("the row's right-click menu", () => {
     expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
       "Open",
       "Download",
+      "Share",
       "Details",
       "Send to desktop",
       "Move to folder",
@@ -145,7 +146,7 @@ describe("Files workspace navigation", () => {
   h.connection = fakeConnection({folders:[folderRow({id:"research",name:"Research"})],artifacts:[artifactRow({id:"paper",title:"paper.md",folderId:"research"})]});
   await renderFiles();
   const rail=screen.getByRole("navigation",{name:"File locations"});
-  expect(placesIn(rail)).toEqual(["Library","Research","Desktop","Materializer","Shared with me","Bin"]);
+  expect(placesIn(rail)).toEqual(["Library","Research","Desktop","Materializer","Shared","Shared with me","Sharing","Bin"]);
   expect(within(rail).getByRole("button",{name:"Library"}).getAttribute("aria-current")).toBe("page");
   expect(screen.getByRole("button",{name:/paper.md/})).toBeTruthy();
   await click(within(rail).getByRole("button",{name:"Research"}));
@@ -242,38 +243,5 @@ describe("the picked file's icons on the Head", () => {
     await click(screen.getByRole("button", { name: /brief\.pdf/ }));
     await click(within(screen.getByRole("group", { name: "Selected: brief.pdf" })).getByRole("button", { name: "Details" }));
     expect(screen.getByRole("region", { name: "File details" })).toBeTruthy();
-  });
-});
-
-// The Share panel at the foot of the rail (Jesús, Nov 18 2026): there for a
-// picked file the caller owns and still has, and absent everywhere else
-// (DESIGN.md rule 12). test/files/sharing.test.tsx drives its acts.
-describe("Share with, at the foot of the rail", () => {
-  const people = [{ userId: "u-sam", displayName: "Sam Lee" }, { userId: "u-dana", displayName: "Dana Cole" }];
-  const twoFiles = () => fakeConnection({
-    artifacts: [artifactRow({ id: "a-1", title: "brief.pdf" }), artifactRow({ id: "a-2", title: "notes.md" })],
-    shareDirectory: people,
-    shares: [shareRow({ id: "s-1", artifactId: "a-1", recipientUserId: "u-sam", recipientDisplayName: "Sam Lee" })],
-  });
-
-  it("offers the people only while one of your files is picked, marking who already has it", async () => {
-    h.connection = twoFiles();
-    await renderFiles();
-    expect(screen.queryByRole("region", { name: "Share with" })).toBeNull();
-
-    await click(screen.getByRole("button", { name: /brief\.pdf/ }));
-    const foot = await screen.findByRole("region", { name: "Share with" });
-    expect(within(foot).getAllByRole("button").map((b) => b.textContent)).toEqual(["SLSam Leesharing", "DCDana Cole"]);
-
-    await click(screen.getByRole("button", { name: /notes\.md/ }));
-    expect(within(screen.getByRole("region", { name: "Share with" })).getAllByRole("button").map((b) => b.textContent))
-      .toEqual(["SLSam Lee", "DCDana Cole"]);
-  });
-
-  it("is absent for somebody else's file", async () => {
-    h.connection = fakeConnection({ artifacts: [artifactRow({ id: "a-1", title: "theirs.pdf", ownerUserId: "u-other" })], shareDirectory: people });
-    await renderFiles();
-    await click(screen.getByRole("button", { name: /theirs\.pdf/ }));
-    expect(screen.queryByRole("region", { name: "Share with" })).toBeNull();
   });
 });

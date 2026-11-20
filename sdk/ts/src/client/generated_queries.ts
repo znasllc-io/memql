@@ -5977,7 +5977,7 @@ QueryClient.prototype.librarySharedWithMe = function (this: QueryClient, args: L
   return this.executeNamed("librarySharedWithMe", buildLibrarySharedWithMe(args), opts);
 };
 
-/** The caller's ACTIVE shares of one of their files -- who has it now, and until when. Backs the Share panel: `id` is the shareId libraryShareStop takes, `days` is what Renew sends back to libraryShareFile. Stopped and expired shares are not listed. */
+/** The caller's ACTIVE shares of one of their files -- who has it now, and until when. Backs the share view: `id` is the shareId libraryShareStop takes, `days` is what Renew sends back to libraryShareFile. Stopped and expired shares are not listed. */
 // Bound concept: v1:library:share (machine-readable: BoundConcepts["librarySharesForArtifact"] in generated_concepts.ts).
 export interface LibrarySharesForArtifactArgs {
   artifactId: string;
@@ -5997,6 +5997,26 @@ declare module "./query.js" {
 
 QueryClient.prototype.librarySharesForArtifact = function (this: QueryClient, args: LibrarySharesForArtifactArgs = {} as LibrarySharesForArtifactArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("librarySharesForArtifact", buildLibrarySharesForArtifact(args), opts);
+};
+
+/** Every file the caller is sharing right now: one row per ACTIVE share, across all their files -- the Files app's "Sharing" page (Jesús, Nov 19 2026: "Shared" opens into "Shared with me" and "Sharing"). `title` names the file, `recipientDisplayName` who has it, `expiresAt` how long is left, and `id` is the shareId libraryShareStop takes. Stopped and expired shares are not listed: they stay as the record (revokedAt / expiresAt), read by nothing here yet. Live through the share rows' own graph events, which reach the sharer's stream because the sharer owns them. */
+// Bound concept: v1:library:share (machine-readable: BoundConcepts["librarySharing"] in generated_concepts.ts).
+export interface LibrarySharingArgs {
+}
+
+export function buildLibrarySharing(args: LibrarySharingArgs): string {
+  void args;
+  return "query librarySharing()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    librarySharing(args?: LibrarySharingArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.librarySharing = function (this: QueryClient, args: LibrarySharingArgs = {} as LibrarySharingArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("librarySharing", buildLibrarySharing(args), opts);
 };
 
 /** The caller's watched folders, live (epic memql#4783, the cockpit half memql#4841).

@@ -2,6 +2,9 @@ package library
 
 // FILE SHARING (owner-approved 2026-11-18): one Library file, one person, 1, 7,
 // 10 or 30 days. The recipient views, downloads and saves a copy; nothing else.
+// Since Nov 20 2026: one GROUP instead of one person, and a picked end date up
+// to 90 days away instead of a length (see the concept's comment in
+// dsl/library/concepts.memql for how a group share follows membership).
 //
 // THE ACTS, AND WHO EACH RUNS AS
 //
@@ -9,7 +12,9 @@ package library
 //	                        on a file they own. Writes the share under the
 //	                        sharer and the recipient's notice under the
 //	                        recipient, borrowed for that one write.
-//	libraryShareStop        the sharer, on a share read back as theirs.
+//	libraryShareStop        the sharer, on a share read back as theirs -- or
+//	                        someone overseeing it (librarySharesOverseen's
+//	                        rule), on a share read back under its sharer.
 //	librarySaveSharedCopy   the recipient, through the one shared-file resolver
 //	                        (component/server EngineLibraryStore.SharedFile).
 //	libraryEndSharesForArtifact  the engine's endSharesOnArtifactArchive
@@ -160,27 +165,35 @@ func (i *Integration) shareStore() *server.EngineLibraryStore {
 // handleShareFile is libraryShareFile: share, or renew an active share.
 //
 // RENEW OR NEW, decided under the file's version gate. When the caller already
-// holds an ACTIVE share of this file with this person, the same row gets a new
-// expiry (now plus days) and its notice the same: one share, never two. When
+// holds an ACTIVE share of this file with this person (or this group), the same
+// row gets the new end and its notices the same: one share, never two. When
 // there is none -- never shared, stopped, or expired -- a FRESH share is made
 // at a new id, and the ended one stays as the record of who had it and when.
 // A fresh row rather than a reactivated one because a write is a read-merge:
 // reusing an ended row would carry its revokedAt into the new share, and the
 // engine has no spelling that clears a field. The gate is what keeps two
 // clicks on two replicas from both finding no active share and making two.
+//
+// A GROUP SHARE reaches the group's active members other than the sharer, as
+// the directory names them NOW (memberUserIds), each told by a notice of their
+// own. A renewal re-reads them: newcomers are told, and the notices of members
+// who left are ended -- they were already refused, because every access also
+// checks the caller is still in the group (component/server SharedFile).
 func (i *Integration) handleShareFile(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	sharer := sharingPerson(ctx)
 	if sharer == "" {
 		return nil, fmt.Errorf("sign in to share a file")
 	}
-	days, _ := intArg(args["days"])
-	if !shareLifetimes[days] {
-		return nil, fmt.Errorf("a share lasts 1, 7, 10 or 30 days")
+	now := time.Now().UTC()
+	expires, days, err := shareEnd(args, now)
+	if err != nil {
+		return nil, err
 	}
 	artifactID := memql.BareShortId(strings.TrimSpace(asString(args["artifactId"])))
 	recipient := memql.BareShortId(strings.TrimSpace(asString(args["recipientUserId"])))
-	if artifactID == "" || recipient == "" {
-		return nil, fmt.Errorf("choose a file and a person to share it with")
+	group := memql.BareShortId(strings.TrimSpace(asString(args["recipientGroupId"])))
+	if artifactID == "" || (recipient == "") == (group == "") {
+		return nil, fmt.Errorf("choose a file, and one person or one group to share it with")
 	}
 	if recipient == sharer {
 		return nil, fmt.Errorf("you cannot share a file with yourself")
@@ -211,19 +224,41 @@ func (i *Integration) handleShareFile(ctx context.Context, args map[string]any, 
 	// THE RECIPIENT IS ONE THE SHARER MAY PICK: the same answer the dialog
 	// was given, asked of the same builtin. One sentence for "nobody by that
 	// id" and "not yours to pick", so the write is not an oracle for who is on
-	// the cluster.
+	// the cluster. A group's members are asked of it too, so a group share
+	// reaches exactly the people the dialog said it would.
 	recipientName := ""
 	raw, err := i.engine.Execute(ctx, "builtin libraryShareDirectory()")
 	if err != nil {
 		return nil, err
 	}
-	for _, person := range extractRows(raw) {
-		if memql.BareShortId(stringField(person, "userId")) == recipient {
-			recipientName = stringField(person, "displayName")
+	for _, entry := range extractRows(raw) {
+		if (recipient != "" && memql.BareShortId(stringField(entry, "userId")) == recipient) ||
+			(group != "" && memql.BareShortId(stringField(entry, "groupId")) == group) {
+			recipientName = stringField(entry, "displayName")
 		}
 	}
 	if recipientName == "" {
-		return nil, fmt.Errorf("choose someone from the people offered to share with")
+		return nil, fmt.Errorf("choose someone from the people and groups offered to share with")
+	}
+	reached := []string{recipient}
+	if group != "" {
+		call, err := langparser.RenderCall("libraryShareDirectory", map[string]any{"groupId": group})
+		if err != nil {
+			return nil, err
+		}
+		raw, err := i.engine.Execute(ctx, "builtin "+call)
+		if err != nil {
+			return nil, err
+		}
+		reached = nil
+		for _, person := range extractRows(raw) {
+			if member := memql.BareShortId(stringField(person, "userId")); member != "" && member != sharer {
+				reached = append(reached, member)
+			}
+		}
+		if len(reached) == 0 {
+			return nil, fmt.Errorf("nobody but you is in that group yet, so there is nobody to share with")
+		}
 	}
 	sharerName := "Unnamed person"
 	if me, err := i.revisionRow(ctx, "userDisplayById", map[string]any{"userId": sharer}); err == nil && me != nil {
@@ -242,22 +277,33 @@ func (i *Integration) handleShareFile(ctx context.Context, args map[string]any, 
 		return nil, err
 	}
 	shareID := "share-" + id.NewShortId()
+	var renewed map[string]any
 	for _, share := range active {
-		if memql.BareShortId(stringField(share, "recipientUserId")) == recipient {
-			shareID = memql.BareShortId(stringField(share, "id"))
+		same := recipient != "" && memql.BareShortId(stringField(share, "recipientUserId")) == recipient
+		if group != "" {
+			same = memql.BareShortId(stringField(share, "recipientGroupId")) == group
+		}
+		if same {
+			shareID, renewed = memql.BareShortId(stringField(share, "id")), share
 		}
 	}
-	expiresAt := time.Now().UTC().Add(time.Duration(days) * 24 * time.Hour).Format(time.RFC3339Nano)
-	if err := sharestore.Write(ctx, i.engine, "putLibraryShare", map[string]any{
-		"shareId": shareID, "recipientUserId": recipient, "recipientDisplayName": recipientName,
-		"artifactId": artifactID, "days": days, "expiresAt": expiresAt,
-	}); err != nil {
+	expiresAt := expires.Format(time.RFC3339Nano)
+	title := firstNonEmpty(stringField(file, "name"), stringField(artifact, "title"), "Untitled file")
+	write := map[string]any{
+		"shareId": shareID, "recipientDisplayName": recipientName,
+		"artifactId": artifactID, "title": title, "days": days, "expiresAt": expiresAt,
+	}
+	if group != "" {
+		write["recipientGroupId"], write["memberUserIds"] = group, reached
+	} else {
+		write["recipientUserId"] = recipient
+	}
+	if err := sharestore.Write(ctx, i.engine, "putLibraryShare", write); err != nil {
 		return nil, err
 	}
 	notice := map[string]any{
 		"shareId": shareID, "artifactId": artifactID, "sharerUserId": sharer, "sharerDisplayName": sharerName,
-		"title":    firstNonEmpty(stringField(file, "name"), stringField(artifact, "title"), "Untitled file"),
-		"mimeType": stringField(file, "mimeType"), "expiresAt": expiresAt,
+		"title": title, "mimeType": stringField(file, "mimeType"), "expiresAt": expiresAt,
 	}
 	if format := stringField(file, "format"); format != "" {
 		notice["format"] = format
@@ -265,12 +311,83 @@ func (i *Integration) handleShareFile(ctx context.Context, args map[string]any, 
 	if size, ok := intArg(file["size"]); ok {
 		notice["size"] = size
 	}
-	// The recipient's own row, so it is written as them: borrowed for this one
-	// write, which is what stamps them its owner.
-	if err := sharestore.Write(auth.ContextWithUserActor(ctx, recipient), i.engine, "putLibraryShareNotice", notice); err != nil {
-		return nil, err
+	// Each recipient's own row, so it is written as them: borrowed for this
+	// one write, which is what stamps them its owner.
+	// ponytail: one notice write per member, in this request; a group of
+	// hundreds is hundreds of writes -- batch them if groups grow that large.
+	for _, person := range reached {
+		notice["noticeId"] = noticeID(shareID, group, person)
+		if err := sharestore.Write(auth.ContextWithUserActor(ctx, person), i.engine, "putLibraryShareNotice", notice); err != nil {
+			return nil, err
+		}
+	}
+	// A renewal ends the notices of members who have left the group since.
+	if renewed != nil && group != "" {
+		still := map[string]bool{}
+		for _, person := range reached {
+			still[person] = true
+		}
+		for _, person := range stringSliceField(renewed, "memberUserIds") {
+			if person = memql.BareShortId(person); person != "" && !still[person] {
+				i.endNotice(ctx, shareID, group, person)
+			}
+		}
 	}
 	return reviewResult(map[string]any{"shareId": shareID, "expiresAt": expiresAt, "days": days})
+}
+
+// shareMaxDays is the furthest a share may end: 90 days, for a length or a
+// picked date alike (Nov 20 2026). A quarter covers the longest real hand-off
+// the team described -- a client's assets for a campaign -- and keeps every
+// share, and the lists that compare against the clock, short-lived.
+const shareMaxDays = 90
+
+// shareEnd decides when a share ends, from exactly one of `days` (one of the
+// four lengths) or `until` (an RFC 3339 instant after now, at most
+// shareMaxDays away), and the whole days that makes, rounded up.
+func shareEnd(args map[string]any, now time.Time) (time.Time, int, error) {
+	until := strings.TrimSpace(asString(args["until"]))
+	days, hasDays := intArg(args["days"])
+	switch {
+	case until != "" && hasDays:
+		return time.Time{}, 0, fmt.Errorf("choose a length or an end date for the share, not both")
+	case until != "":
+		end, err := time.Parse(time.RFC3339Nano, until)
+		if err != nil {
+			return time.Time{}, 0, fmt.Errorf("the end date could not be read; pick it again")
+		}
+		end = end.UTC()
+		if !end.After(now) {
+			return time.Time{}, 0, fmt.Errorf("that end date has passed; pick a later one")
+		}
+		if end.After(now.Add(shareMaxDays * 24 * time.Hour)) {
+			return time.Time{}, 0, fmt.Errorf("a share can last at most %d days; pick an earlier end date", shareMaxDays)
+		}
+		whole := int((end.Sub(now) + 24*time.Hour - 1) / (24 * time.Hour))
+		return end, whole, nil
+	case shareLifetimes[days]:
+		return now.Add(time.Duration(days) * 24 * time.Hour), days, nil
+	}
+	return time.Time{}, 0, fmt.Errorf("a share lasts 1, 7, 10 or 30 days, or until a date at most %d days away", shareMaxDays)
+}
+
+// noticeID is where a recipient's notice of a share lives: at the share's own
+// short id for a share with one person, and at `<share>-<member>` for each
+// member a group share reaches, so every member's notice has its own row.
+func noticeID(shareID, group, person string) string {
+	if group == "" {
+		return shareID
+	}
+	return shareID + "-" + person
+}
+
+// endNotice ends one recipient's notice. The notice is display, so one that
+// cannot be ended is logged rather than failing an act that has already closed
+// the door (the share decides every access).
+func (i *Integration) endNotice(ctx context.Context, shareID, group, person string) {
+	if err := sharestore.Write(auth.ContextWithUserActor(ctx, person), i.engine, "endLibraryShareNotice", map[string]any{"noticeId": noticeID(shareID, group, person)}); err != nil {
+		i.log().Warn("library: a recipient's share notice could not be ended", "shareId", shareID, "error", err)
+	}
 }
 
 // handleStopShare is libraryShareStop.
@@ -286,24 +403,58 @@ func (i *Integration) handleStopShare(ctx context.Context, args map[string]any, 
 	ctx = memql.ContextWithFreshRead(ctx)
 	// READ BACK AS THE CALLER'S OWN before writing: the end runs at internal
 	// origin, which skips the write guard's owner check, so this read is the
-	// whole of "only the sharer stops their share".
+	// whole of "the sharer stops their share".
 	share, err := i.revisionRow(ctx, "libraryShareById", map[string]any{"shareId": shareID})
 	if err != nil {
 		return nil, err
 	}
-	if share == nil || memql.BareShortId(stringField(share, "ownerUserId")) != sharer {
-		return nil, fmt.Errorf("that share is not one of yours")
+	if share != nil && memql.BareShortId(stringField(share, "ownerUserId")) == sharer {
+		if err := i.endShare(ctx, share); err != nil {
+			return nil, err
+		}
+		return reviewResult(map[string]any{"shareId": memql.BareShortId(shareID), "stopped": true})
 	}
-	if err := i.endShare(ctx, share); err != nil {
+
+	// SOMEBODY ELSE'S SHARE (item 13, Nov 20 2026): only one the caller's own
+	// oversight list names -- the same builtin the Sharing page lists, asked
+	// fresh, so the act is held to exactly the rule the list shows
+	// (component/memql/library_share_oversight.go). The list names the sharer;
+	// the share is then read back UNDER THEM, as the archive cascade does, and
+	// ended under them. One sentence for "no such share" and "not yours to
+	// stop", so the act is not an oracle for which shares exist.
+	refused := fmt.Errorf("that share is not one you can stop")
+	raw, err := i.engine.Execute(ctx, "builtin librarySharesOverseen()")
+	if err != nil {
 		return nil, err
 	}
+	owner := ""
+	for _, row := range extractRows(raw) {
+		if memql.BareShortId(stringField(row, "id")) == memql.BareShortId(shareID) {
+			owner = memql.BareShortId(stringField(row, "ownerUserId"))
+		}
+	}
+	if owner == "" || owner == sharer {
+		return nil, refused
+	}
+	asOwner := auth.ContextWithUserActor(ctx, owner)
+	theirs, err := i.revisionRow(asOwner, "libraryShareById", map[string]any{"shareId": shareID})
+	if err != nil {
+		return nil, err
+	}
+	if theirs == nil || memql.BareShortId(stringField(theirs, "ownerUserId")) != owner {
+		return nil, refused
+	}
+	if err := i.endShare(asOwner, theirs); err != nil {
+		return nil, err
+	}
+	i.log().Info("library: a share was stopped by someone overseeing it", "shareId", memql.BareShortId(shareID), "sharer", owner, "stoppedBy", sharer)
 	return reviewResult(map[string]any{"shareId": memql.BareShortId(shareID), "stopped": true})
 }
 
 // endShare revokes one share, read under its sharer and passed in, and ends
-// its notice. The share is what access reads, so its end must land; the
-// notice is display, so a notice that cannot be ended is logged rather than
-// failing an act that has already closed the door.
+// its notices -- the one recipient's, or every member's a group share reached.
+// The share is what access reads, so its end must land; a notice is display
+// (endNotice).
 func (i *Integration) endShare(sharerCtx context.Context, share map[string]any) error {
 	shareID := memql.BareShortId(stringField(share, "id"))
 	if stringField(share, "revokedAt") == "" {
@@ -311,9 +462,15 @@ func (i *Integration) endShare(sharerCtx context.Context, share map[string]any) 
 			return err
 		}
 	}
-	recipient := memql.BareShortId(stringField(share, "recipientUserId"))
-	if err := sharestore.Write(auth.ContextWithUserActor(sharerCtx, recipient), i.engine, "endLibraryShareNotice", map[string]any{"shareId": shareID}); err != nil {
-		i.log().Warn("library: a share ended but its recipient's notice could not be ended", "shareId", shareID, "error", err)
+	group := memql.BareShortId(stringField(share, "recipientGroupId"))
+	reached := []string{stringField(share, "recipientUserId")}
+	if group != "" {
+		reached = stringSliceField(share, "memberUserIds")
+	}
+	for _, person := range reached {
+		if person = memql.BareShortId(person); person != "" {
+			i.endNotice(sharerCtx, shareID, group, person)
+		}
 	}
 	return nil
 }

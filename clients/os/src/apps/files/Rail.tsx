@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties, type ReactElement } from "react";
-import { ChevronDown, ChevronRight, Folder, Layers, Library, Monitor, Trash2, Users } from "lucide-react";
+import { ChevronDown, ChevronRight, Folder, Inbox, Layers, Library, Monitor, Send, Trash2, Users } from "lucide-react";
 
 import type { FolderTree, TreeNode } from "./fold";
 import type { FilesPlace } from "./filters";
@@ -14,12 +14,29 @@ import type { FilesPlace } from "./filters";
 // right-click menu. It carries no counts either (rule 7, say it once): the
 // Head names the scope and counts what is listed.
 
-const PLACES: ReadonlyArray<{ place: Exclude<FilesPlace, "library">; label: string; icon: ReactElement }> = [
+type Place = { place: Exclude<FilesPlace, "library">; label: string; icon: ReactElement };
+
+const PLACES_BEFORE: readonly Place[] = [
   { place: "desktop", label: "Desktop", icon: <Monitor size={15} aria-hidden /> },
   { place: "materializer", label: "Materializer", icon: <Layers size={15} aria-hidden /> },
-  { place: "shared", label: "Shared with me", icon: <Users size={15} aria-hidden /> },
+];
+
+// "SHARED" OPENS AND CLOSES LIKE A FOLDER (Jesús, Nov 19 2026, draft A; José:
+// not "Shared with me" but just "Shared", "because you can also share
+// yourself"). Its two entries are places of their own: what other people sent
+// you, and what you are sending. "Shared" itself is not a place -- there is no
+// page that is both -- so pressing its name opens or shuts it, like its arrow.
+const SHARED: readonly Place[] = [
+  { place: "shared", label: "Shared with me", icon: <Inbox size={15} aria-hidden /> },
+  { place: "sharing", label: "Sharing", icon: <Send size={15} aria-hidden /> },
+];
+
+const PLACES_AFTER: readonly Place[] = [
   { place: "bin", label: "Bin", icon: <Trash2 size={15} aria-hidden /> },
 ];
+
+/** The disclosure key for "Shared"; no folder id is ever this. */
+const SHARED_BRANCH = "~shared";
 
 /** The folder ids from a root down to `folderId`, bounded against a cycle in the data. */
 function ancestry(tree: FolderTree, folderId: string): string[] {
@@ -53,8 +70,16 @@ export function FilesRail({
   // that folder itself, are opened on arrival, so arriving somewhere by the
   // trail, a tile or the desk never leaves it hidden inside a shut branch, and
   // what it holds shows beneath it. A branch shut by hand stays shut.
-  const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set(["library"]));
+  // "Shared" starts open, like the Library: its two entries were one click
+  // away before it became a folder, and a person who shuts it keeps it shut.
+  const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set(["library", SHARED_BRANCH]));
   const libraryFolder = place === "library" ? folderId : "";
+  // Arriving in one of Shared's places by any other way (an intent, a link)
+  // opens it, as arriving in a folder opens the way down to it.
+  const inShared = SHARED.some((entry) => entry.place === place);
+  useEffect(() => {
+    if (inShared) setOpen((prev) => (prev.has(SHARED_BRANCH) ? prev : new Set([...prev, SHARED_BRANCH])));
+  }, [inShared]);
   useEffect(() => {
     if (libraryFolder === "") return;
     const chain = ancestry(tree, libraryFolder);
@@ -67,6 +92,18 @@ export function FilesRail({
       else next.add(id);
       return next;
     });
+
+  const placeRow = (entry: Place, depth = 0): ReactElement => (
+    <li key={entry.place}>
+      <RailRow
+        depth={depth}
+        label={entry.label}
+        icon={entry.icon}
+        current={place === entry.place}
+        onSelect={() => onPlace(entry.place)}
+      />
+    </li>
+  );
 
   const branch = (nodes: readonly TreeNode[], depth: number): ReactElement => (
     <ul className="os-files-rail-list">
@@ -109,17 +146,21 @@ export function FilesRail({
         </li>
       </ul>
       <ul className="os-files-rail-list">
-        {PLACES.map((entry) => (
-          <li key={entry.place}>
-            <RailRow
-              depth={0}
-              label={entry.label}
-              icon={entry.icon}
-              current={place === entry.place}
-              onSelect={() => onPlace(entry.place)}
-            />
-          </li>
-        ))}
+        {PLACES_BEFORE.map(placeRow)}
+        <li>
+          <RailRow
+            depth={0}
+            label="Shared"
+            icon={<Users size={15} aria-hidden />}
+            current={false}
+            expanded={open.has(SHARED_BRANCH)}
+            onToggle={() => toggle(SHARED_BRANCH)}
+            onSelect={() => toggle(SHARED_BRANCH)}
+            toggleLabel={open.has(SHARED_BRANCH) ? "Hide Shared with me and Sharing" : "Show Shared with me and Sharing"}
+          />
+          {open.has(SHARED_BRANCH) ? <ul className="os-files-rail-list">{SHARED.map((entry) => placeRow(entry, 1))}</ul> : null}
+        </li>
+        {PLACES_AFTER.map((entry) => placeRow(entry))}
       </ul>
     </nav>
   );
@@ -134,6 +175,7 @@ function RailRow({
   onToggle,
   onSelect,
   onMenu,
+  toggleLabel,
 }: {
   depth: number;
   label: string;
@@ -144,6 +186,8 @@ function RailRow({
   onToggle?: () => void;
   onSelect: () => void;
   onMenu?: (x: number, y: number) => void;
+  /** What the disclosure says it does; a folder's own sentence by default. */
+  toggleLabel?: string;
 }) {
   return (
     <div
@@ -169,7 +213,7 @@ function RailRow({
           type="button"
           className="os-files-rail-twist"
           aria-expanded={expanded}
-          aria-label={`${expanded ? "Hide" : "Show"} folders in ${label}`}
+          aria-label={toggleLabel ?? `${expanded ? "Hide" : "Show"} folders in ${label}`}
           onClick={onToggle}
         >
           {expanded ? <ChevronDown size={12} aria-hidden /> : <ChevronRight size={12} aria-hidden />}

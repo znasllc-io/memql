@@ -6417,7 +6417,7 @@ func LibrarySharedWithMeBuild(args LibrarySharedWithMeArgs) string {
 	return b.String()
 }
 
-// LibrarySharesForArtifact -- The caller's ACTIVE shares of one of their files -- who has it now, and until when. Backs the Share panel: `id` is the shareId libraryShareStop takes, `days` is what Renew sends back to libraryShareFile. Stopped and expired shares are not listed.
+// LibrarySharesForArtifact -- The caller's ACTIVE shares of one of their files -- who has it now, and until when. Backs the share view: `id` is the shareId libraryShareStop takes, `days` is what Renew sends back to libraryShareFile. Stopped and expired shares are not listed.
 //
 // Bound concept: v1:library:share (machine-readable: BoundConcepts["librarySharesForArtifact"] in generated_concepts.go).
 type LibrarySharesForArtifactArgs struct {
@@ -6437,6 +6437,23 @@ func LibrarySharesForArtifactBuild(args LibrarySharesForArtifactArgs) string {
 	b.WriteString(quoteMemQL(args.ArtifactId))
 	b.WriteString(")")
 	return b.String()
+}
+
+// LibrarySharing -- Every file the caller is sharing right now: one row per ACTIVE share, across all their files -- the Files app's "Sharing" page (Jesús, Nov 19 2026: "Shared" opens into "Shared with me" and "Sharing"). `title` names the file, `recipientDisplayName` who has it, `expiresAt` how long is left, and `id` is the shareId libraryShareStop takes. Stopped and expired shares are not listed: they stay as the record (revokedAt / expiresAt), read by nothing here yet. Live through the share rows' own graph events, which reach the sharer's stream because the sharer owns them.
+//
+// Bound concept: v1:library:share (machine-readable: BoundConcepts["librarySharing"] in generated_concepts.go).
+type LibrarySharingArgs struct {
+}
+
+// LibrarySharing calls the engine query librarySharing.
+func (qc *QueryClient) LibrarySharing(ctx context.Context, args LibrarySharingArgs) (*Result, error) {
+	call := LibrarySharingBuild(args)
+	return qc.executeNamed(ctx, "librarySharing", call)
+}
+
+func LibrarySharingBuild(args LibrarySharingArgs) string {
+	_ = args
+	return "query librarySharing()"
 }
 
 // LibraryWatchedFolders -- The caller's watched folders, live (epic memql#4783, the cockpit half memql#4841).

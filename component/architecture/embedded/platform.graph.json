@@ -1352,6 +1352,7 @@
 {"from":"concept:v1:library:generatedOutput","to":"concept:v1:worker:registration","kind":"relates","attrs":{"direction":"outgoing","field":"producedByWorkerId","type":"references"}},
 {"from":"concept:v1:library:memory","to":"concept:v1:agents:agent","kind":"relates","attrs":{"direction":"outgoing","field":"agentId","type":"references"}},
 {"from":"concept:v1:library:memory","to":"concept:v1:identity:user","kind":"relates","attrs":{"direction":"outgoing","field":"ownerUserId","type":"parent"}},
+{"from":"concept:v1:library:share","to":"concept:v1:identity:group","kind":"relates","attrs":{"as":"sharedWithGroup","direction":"outgoing","field":"recipientGroupId","type":"references"}},
 {"from":"concept:v1:library:share","to":"concept:v1:identity:user","kind":"relates","attrs":{"as":"sharedWith","direction":"outgoing","field":"recipientUserId","type":"references"}},
 {"from":"concept:v1:library:share","to":"concept:v1:identity:user","kind":"relates","attrs":{"direction":"outgoing","field":"ownerUserId","type":"parent"}},
 {"from":"concept:v1:library:share","to":"concept:v1:library:artifact","kind":"relates","attrs":{"as":"shares","direction":"outgoing","field":"artifactId","type":"references"}},

@@ -5722,8 +5722,10 @@ func LibrarySaveTrainingLessonBuild(args LibrarySaveTrainingLessonArgs) string {
 	return b.String()
 }
 
-// LibraryShareDirectory -- Who you may share a Library file with.
+// LibraryShareDirectory -- Who you may share a Library file with: people and groups.
 type LibraryShareDirectoryArgs struct {
+	// A group from this directory: answer the people a share with it would reach, rather than the whole directory.
+	GroupId string
 }
 
 // LibraryShareDirectory calls the engine builtin libraryShareDirectory.
@@ -5733,18 +5735,28 @@ func (qc *QueryClient) LibraryShareDirectory(ctx context.Context, args LibrarySh
 }
 
 func LibraryShareDirectoryBuild(args LibraryShareDirectoryArgs) string {
-	_ = args
-	return "builtin libraryShareDirectory()"
+	var b strings.Builder
+	b.WriteString("builtin libraryShareDirectory(")
+	if args.GroupId != "" {
+		b.WriteString("groupId: ")
+		b.WriteString(quoteMemQL(args.GroupId))
+	}
+	b.WriteString(")")
+	return b.String()
 }
 
-// LibraryShareFile -- Share one of your Library files with one person, for 1, 7, 10 or 30 days -- or renew a share.
+// LibraryShareFile -- Share one of your Library files with one person or one group, for a length or until a date -- or renew a share.
 type LibraryShareFileArgs struct {
 	// The v1:library:artifact (a file) to share. Must be yours.
 	ArtifactId string
-	// The person to share it with, as libraryShareDirectory names them.
+	// The person to share it with, as libraryShareDirectory names them. Give this or recipientGroupId.
 	RecipientUserId string
-	// How long the share lasts: 1, 7, 10 or 30.
+	// The group to share it with, as libraryShareDirectory names it. Give this or recipientUserId.
+	RecipientGroupId string
+	// How long the share lasts: 1, 7, 10 or 30. Give this or until.
 	Days int
+	// When the share ends, as an RFC 3339 instant (the Files app sends the end of the picked day in the sharer's own time zone): after now, and at most 90 days away. Give this or days.
+	Until string
 }
 
 // LibraryShareFile calls the engine builtin libraryShareFile.
@@ -5758,21 +5770,39 @@ func LibraryShareFileBuild(args LibraryShareFileArgs) string {
 	b.WriteString("builtin libraryShareFile(")
 	b.WriteString("artifactId: ")
 	b.WriteString(quoteMemQL(args.ArtifactId))
-	if b.Len() > 25 {
-		b.WriteString(", ")
+	if args.RecipientUserId != "" {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("recipientUserId: ")
+		b.WriteString(quoteMemQL(args.RecipientUserId))
 	}
-	b.WriteString("recipientUserId: ")
-	b.WriteString(quoteMemQL(args.RecipientUserId))
-	if b.Len() > 25 {
-		b.WriteString(", ")
+	if args.RecipientGroupId != "" {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("recipientGroupId: ")
+		b.WriteString(quoteMemQL(args.RecipientGroupId))
 	}
-	b.WriteString("days: ")
-	b.WriteString(fmt.Sprintf("%v", args.Days))
+	if args.Days != 0 {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("days: ")
+		b.WriteString(fmt.Sprintf("%v", args.Days))
+	}
+	if args.Until != "" {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("until: ")
+		b.WriteString(quoteMemQL(args.Until))
+	}
 	b.WriteString(")")
 	return b.String()
 }
 
-// LibraryShareStop -- Stop sharing a file with one person, at once.
+// LibraryShareStop -- Stop sharing a file with one person or group, at once.
 type LibraryShareStopArgs struct {
 	// The share to stop -- the `id` librarySharesForArtifact lists.
 	ShareId string
@@ -5791,6 +5821,21 @@ func LibraryShareStopBuild(args LibraryShareStopArgs) string {
 	b.WriteString(quoteMemQL(args.ShareId))
 	b.WriteString(")")
 	return b.String()
+}
+
+// LibrarySharesOverseen -- Every active file share you may see and stop: your own, and other people's by rank.
+type LibrarySharesOverseenArgs struct {
+}
+
+// LibrarySharesOverseen calls the engine builtin librarySharesOverseen.
+func (qc *QueryClient) LibrarySharesOverseen(ctx context.Context, args LibrarySharesOverseenArgs) (*Result, error) {
+	call := LibrarySharesOverseenBuild(args)
+	return qc.executeNamed(ctx, "librarySharesOverseen", call)
+}
+
+func LibrarySharesOverseenBuild(args LibrarySharesOverseenArgs) string {
+	_ = args
+	return "builtin librarySharesOverseen()"
 }
 
 // LibrarySimilarArtifacts -- Search the caller's Library by meaning and get whole artifacts back, best match first.
