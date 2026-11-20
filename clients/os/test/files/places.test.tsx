@@ -161,7 +161,7 @@ describe("the Head line and its hidden search panel (José, Nov 19 2026)", () =>
     expect(screen.getByRole("heading", { name: "Library" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^Sort order/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "Refine files" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Add to this folder" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add" })).toBeTruthy();
     // Hidden until asked: nothing of the panel stands in the surface.
     const toggle = screen.getByRole("button", { name: "Search" });
     expect(toggle.getAttribute("aria-expanded")).toBe("false");

@@ -305,6 +305,11 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
   state and retain the saved value on failure with an explicit retry. Keep routine success
   receipts, usage summaries and empty-directory explanations out of this flow;
   describe draining calls and overlapping grants in the page's single help.
+- An icon button's name is the browser's own tooltip, which the browser holds
+  back for a second or more. Where a row of icons is read by hovering along
+  it (the Files Head's picked-file icons), `IconButton tip="above"` draws the
+  same name at once, above the icon, out of the pointer's way (Jesús, Nov 20
+  2026). Other icon buttons keep the browser's tooltip.
 - Build with the kit pieces; a surface needing a control the kit lacks
   promotes it on second use (`src/kit/controls.tsx` header) rather than
   respelling it locally.
