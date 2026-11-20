@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useDraggable, useDroppable, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { DragOverlay, useDndMonitor, useDraggable, useDroppable, type DragEndEvent, type DragMoveEvent, type DragStartEvent } from "@dnd-kit/core";
 
 import { newShortId, rowNumber, rowString } from "@znasllc-io/memql-sdk-core/client";
 
@@ -15,7 +16,8 @@ import { FolderIcon } from "../items/FolderIcon";
 import type { UploadProvider } from "../items/upload";
 import { accessAdmits, widgetById, widgetsFor } from "../system/registry";
 import { placeWindows, type PlacementTokens } from "../system/placement";
-import type { DeskSurface, DesktopItem, GridPos } from "../system/desktop";
+import { emptySurface, placeFileAt, type DeskSurface, type DesktopItem, type FileEntry, type GridPos } from "../system/desktop";
+import { FileGlyph } from "../apps/files/Tiles";
 import type { Desk } from "../system/desks";
 import { DeskNumeral, FoldWallpaper } from "../wallpaper/FoldWallpaper";
 import { WidgetHost } from "../widgets/WidgetFrame";
@@ -564,6 +566,7 @@ export function Desktop({
           />
         ) : null}
       </div>
+      <DeskFileDrop />
     </>
   );
 }
@@ -832,5 +835,122 @@ function SurfaceItem({
         })()
       )}
     </div>
+  );
+}
+
+// ---- a file dragged out of Files onto the desk ----
+//
+// José asked for it on the Nov 19 call; Jesús picked the look (Draft A, Nov 20
+// 2026). A Files tile is already a shell draggable (`artifact:`, for the Bin).
+// Let go over the VISIBLE desk -- not over a window, not over the dock -- and
+// the file becomes a desk shortcut at that cell: the same act as "Send to
+// desktop", never a copy, the file stays in the Library once. A file that
+// already has an icon on this desk moves that icon there instead of getting a
+// second one. While it travels, a see-through copy of the tile follows the
+// pointer and a dashed spot marks the cell it will land on; letting go over a
+// window, or Escape, does nothing.
+
+const FILE_DRAG_PREFIXES = ["artifact:"] as const;
+
+/** What a Files tile carries: the Bin's fields, plus the desk shortcut. */
+export interface DeskFileDrag extends BinDropPayload {
+  desk?: { entry: Omit<FileEntry, "id">; glyph: string };
+}
+
+function pointerOf(event: DragMoveEvent | DragEndEvent): { x: number; y: number } | null {
+  const activator = event.activatorEvent as PointerEvent | undefined;
+  if (!activator || typeof activator.clientX !== "number") return null;
+  return { x: activator.clientX + event.delta.x, y: activator.clientY + event.delta.y };
+}
+
+function DeskFileDrop() {
+  const { state, actions, grid } = useOs();
+  const [ghost, setGhost] = useState<{ name: string; glyph: string } | null>(null);
+  const [landing, setLanding] = useState<{ pos: GridPos; plate: HTMLElement } | null>(null);
+
+  // The active desk's cell under the pointer, or null when anything but the
+  // bare desk (or an icon on it) is there.
+  const deskCellAt = (x: number, y: number): { cell: GridPos; plate: HTMLElement } | null => {
+    const plate = document.querySelector<HTMLElement>(`[data-os-desk="${CSS.escape(state.shell.activeDeskId)}"]`);
+    const hit = document.elementsFromPoint(x, y).find((el) => !el.closest(".os-desk-ghost"));
+    if (!plate || !hit || !plate.contains(hit) || hit.closest(".os-window")) return null;
+    const rect = plate.getBoundingClientRect();
+    return {
+      plate,
+      cell: {
+        col: Math.max(0, Math.min(grid.cols - 1, Math.floor((x - rect.left - SURFACE_PAD) / CELL_W))),
+        row: Math.max(0, Math.min(grid.rows - 1, Math.floor((y - rect.top - SURFACE_PAD) / CELL_H))),
+      },
+    };
+  };
+
+  // Where the icon would land: the very function the drop runs, so the spot
+  // and the result cannot disagree (an occupied cell yields to the nearest
+  // free one; a file already here shows its own icon's new place).
+  const landingAt = (drag: DeskFileDrag | undefined, x: number, y: number) => {
+    const at = drag?.desk ? deskCellAt(x, y) : null;
+    if (!at || !drag?.desk) return null;
+    const surface = state.surfaces[state.shell.activeDeskId] ?? emptySurface();
+    const landed = placeFileAt(surface, { id: "landing", ...drag.desk.entry }, at.cell, grid);
+    const pos = landed?.surface.positions[landed.itemId];
+    return pos ? { pos, plate: at.plate, cell: at.cell } : null;
+  };
+  const latest = useRef(landingAt);
+  latest.current = landingAt;
+
+  const clear = () => {
+    setGhost(null);
+    setLanding(null);
+  };
+
+  useShellDragClaim(FILE_DRAG_PREFIXES, {
+    onDragStart: (event: DragStartEvent) => {
+      const drag = event.active.data.current as DeskFileDrag | undefined;
+      setGhost(drag?.desk ? { name: drag.name, glyph: drag.desk.glyph } : null);
+    },
+    onDragEnd: (event: DragEndEvent) => {
+      clear();
+      // The Bin owns a drop on itself.
+      if (event.over && String(event.over.id) === BIN_DROPPABLE_ID) return;
+      const drag = event.active.data.current as DeskFileDrag | undefined;
+      const at = pointerOf(event);
+      const land = at ? landingAt(drag, at.x, at.y) : null;
+      if (land && drag?.desk) actions.dropFileOnDesk(drag.desk.entry, land.cell);
+    },
+  });
+
+  useDndMonitor(
+    useMemo(
+      () => ({
+        onDragMove: (event: DragMoveEvent) => {
+          if (!String(event.active.id).startsWith("artifact:")) return;
+          const at = pointerOf(event);
+          const next = at ? latest.current(event.active.data.current as DeskFileDrag | undefined, at.x, at.y) : null;
+          setLanding((prev) =>
+            prev?.plate === next?.plate && prev?.pos.col === next?.pos.col && prev?.pos.row === next?.pos.row
+              ? prev
+              : next && { pos: next.pos, plate: next.plate },
+          );
+        },
+        onDragCancel: () => clear(),
+      }),
+      [],
+    ),
+  );
+
+  return (
+    <>
+      <DragOverlay dropAnimation={null} className="os-desk-ghost">
+        {ghost ? (
+          <div className="os-files-tile">
+            <span className="os-files-tile-icon">
+              <FileGlyph label={ghost.glyph} />
+            </span>
+            <span className="os-files-tile-name">{ghost.name}</span>
+          </div>
+        ) : null}
+      </DragOverlay>
+      {landing ? createPortal(<div className="os-desk-landing" style={cellToPx(landing.pos)} aria-hidden />, landing.plate) : null}
+    </>
   );
 }

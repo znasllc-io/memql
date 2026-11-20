@@ -147,6 +147,27 @@ export function moveItem(
   return { ...surface, positions: { ...surface.positions, [id]: pos } };
 }
 
+/**
+ * A Library file dropped on this desk at `cell` (dragged out of Files). A desk
+ * icon is a shortcut, so a file that already has one here is never given a
+ * second: that icon moves to the drop instead (Jesús, Nov 20 2026). Otherwise
+ * a new icon takes the nearest free cell. Null = the grid is full. The drag's
+ * landing spot reads the same answer, so the spot is where the icon lands.
+ */
+export function placeFileAt(
+  surface: DeskSurface,
+  entry: FileEntry,
+  cell: GridPos,
+  grid: GridSize,
+): { surface: DeskSurface; itemId: ItemId } | null {
+  const existing = Object.values(surface.items).find(
+    (i) => i.kind === "file" && entry.artifactId !== "" && i.artifactId === entry.artifactId,
+  );
+  if (existing) return { surface: moveItem(surface, existing.id, cell, grid), itemId: existing.id };
+  const placed = addItem(surface, { kind: "file", ...entry }, cell, grid);
+  return placed ? { surface: placed, itemId: entry.id } : null;
+}
+
 export function removeItem(surface: DeskSurface, id: ItemId): DeskSurface {
   if (!surface.items[id]) return surface;
   const items = { ...surface.items };

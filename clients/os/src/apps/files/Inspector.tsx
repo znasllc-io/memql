@@ -30,7 +30,7 @@ import {
   runBufferedDownload,
 } from "./actions/download";
 import { downloadWorkerRegistration, runWorkerDownload } from "./actions/downloadWorker";
-import { artifactName, fileStory, type ArtifactRow, type CompositionRow } from "./rows";
+import { artifactName, deskEntryOf, fileStory, type ArtifactRow, type CompositionRow } from "./rows";
 
 // File details occupy the page. Origin belongs with the other facts;
 // labels, clients and version history scroll above the pinned action footer.
@@ -131,13 +131,7 @@ export function Inspector({
   }, [config.domain, row.id, row.title]);
 
   const sendToDesk = useCallback(() => {
-    const outcome = actions.sendFileToDesk({
-      artifactId: row.id,
-      title: name,
-      fileKind: row.kind,
-      source: row.source,
-      ...(row.producedByWorkerId ? { producedByWorkerId: row.producedByWorkerId } : {}),
-    });
+    const outcome = actions.sendFileToDesk(deskEntryOf(row));
     setDeskNote(
       outcome === "full"
         ? "The desk is full -- remove something from it first."

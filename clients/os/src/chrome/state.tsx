@@ -38,6 +38,7 @@ import {
   addItem,
   emptySurface,
   moveItem as moveItemFn,
+  placeFileAt,
   removeItem as removeItemFn,
   sortSurface,
   surfaceHasContent,
@@ -136,6 +137,9 @@ export interface OsActions {
    * can live now that apps can send too.
    */
   sendFileToDesk: (entry: Omit<FileEntry, "id">) => "placed" | "focused" | "full";
+  /** A Library file dragged out of Files and dropped at `cell` on the active
+   *  desk: placed there, or its existing icon moved there. False = desk full. */
+  dropFileOnDesk: (entry: Omit<FileEntry, "id">, cell: GridPos) => boolean;
   /** The folder-shortcut sibling of sendFileToDesk, deduped by folderId. */
   sendFolderToDesk: (folderId: string, name: string) => "placed" | "focused" | "full";
   /** Place a folder shortcut at a cell (desk create-folder, after the
@@ -681,6 +685,15 @@ export function OsProvider({
         if (!placed) return "full";
         set((cur) => ({ ...withSurface(cur, deskId, placed), selectedItemId: id }));
         return "placed";
+      },
+      dropFileOnDesk: (entry, cell) => {
+        const s = stateRef.current;
+        if (!s) return false;
+        const deskId = s.shell.activeDeskId;
+        const landed = placeFileAt(surfaceOf(s, deskId), { id: mintItemId(s), ...entry }, cell, gridRef.current);
+        if (!landed) return false;
+        set((cur) => ({ ...withSurface(cur, deskId, landed.surface), selectedItemId: landed.itemId }));
+        return true;
       },
       sendFolderToDesk: (folderId, name) => {
         const s = stateRef.current;
