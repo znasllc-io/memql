@@ -77,7 +77,9 @@ export interface MenuEntry {
   id: string;
   label: string;
   disabled?: boolean;
-  onSelect: () => void;
+  /** May return the act's promise: an entry drawn as a kit button elsewhere
+   *  (Files' Head icons) then takes no second press until it settles. */
+  onSelect: () => unknown;
 }
 
 export function ContextMenu({

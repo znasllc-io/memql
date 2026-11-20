@@ -102,6 +102,17 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    between the Library tree and the Desktop place it still read as a folder
    you could open.
 
+   **An act runs once per press, however fast the presses come** (José, Nov
+   19: twenty clicks on Save made eighteen copies). A kit `Button`,
+   `IconButton`, `ActionBar` act or `Wizard` act whose handler returns the
+   act's promise takes no further press until it settles (`kit/oneAtATime`):
+   a labelled button says its busy word ("Saving…"), then, given a
+   `doneLabel`, its done word with a tick ("Saved ✓") for two seconds, still
+   taking no press; an icon-only button just dims. Resolve `false` when the act
+   did not happen, so the button never says it did. Hand the promise back
+   (`onClick={() => save(file)}`, not `void save(file)`); the engine refuses
+   the same save while one runs, for agents with no button.
+
 7. **Say it once.** A scope is named in one place. The rail highlights it,
    the Head names it, the list does not re-caption it, placeholders stay
    generic ("Search", not "Search your Library"). Keep every app page minimal:

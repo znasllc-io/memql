@@ -258,7 +258,7 @@ export function BinApp({
             presence={presence}
             restoring={restoring === selected.id}
             restoreError={restoreError}
-            onRestore={() => void restore(selected)}
+            onRestore={() => restore(selected)}
             onClose={() => setSelectedId("")}
           />
         )}

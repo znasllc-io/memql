@@ -65,14 +65,19 @@ export function ShareFoot({
   const person = listed.find((entry) => entry.userId === chosen);
   const active = person ? shareOf.get(person.userId) : undefined;
 
-  const run = async (act: () => Promise<void>, close: boolean) => {
+  // The act's button holds itself while it runs and then says it is done
+  // (kit/oneAtATime), so run answers whether it happened; `busy` only keeps
+  // the OTHER buttons of the question still meanwhile.
+  const run = async (act: () => Promise<void>, close: boolean): Promise<boolean> => {
     setBusy(true);
     setError("");
     try {
       await act();
       if (close) setChosen("");
+      return true;
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -97,8 +102,8 @@ export function ShareFoot({
                 Sharing until {untilLabel(active.expiresAt)} · {leftLabel(active.expiresAt, now())}
               </p>
               <div className="os-files-share-acts">
-                <Button busy={busy} busyLabel="Renewing" onClick={() => void run(() => onRenew(active), false)}>Renew</Button>
-                <Button tone="danger" disabled={busy} onClick={() => void run(() => onStop(active), true)}>Stop sharing</Button>
+                <Button disabled={busy} busyLabel="Renewing…" doneLabel="Renewed" onClick={() => run(() => onRenew(active), false)}>Renew</Button>
+                <Button tone="danger" disabled={busy} busyLabel="Stopping…" onClick={() => run(() => onStop(active), true)}>Stop sharing</Button>
               </div>
             </>
           ) : (
@@ -113,7 +118,7 @@ export function ShareFoot({
                 <span aria-hidden>days</span>
               </div>
               <div className="os-files-share-acts">
-                <Button tone="primary" busy={busy} busyLabel="Sharing" onClick={() => void run(() => onShare(person.userId, Number(days)), false)}>Share</Button>
+                <Button tone="primary" disabled={busy} busyLabel="Sharing…" doneLabel="Shared" onClick={() => run(() => onShare(person.userId, Number(days)), false)}>Share</Button>
                 <Button disabled={busy} onClick={() => setChosen("")}>Cancel</Button>
               </div>
             </>

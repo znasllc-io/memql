@@ -2,6 +2,7 @@ import { osScale } from "../system/scale";
 import { Breadcrumbs, type Breadcrumb } from "./Breadcrumbs";
 import { usePageNavigation } from "./pageNavigation";
 import { IconButton } from "./IconButton";
+import { useOneAtATime } from "./oneAtATime";
 import {
   Children,
   Fragment,
@@ -56,6 +57,13 @@ export type ButtonTone = "quiet" | "primary" | "danger";
  * surface is FOR, `danger` is a thing that cannot be undone, `quiet` is
  * everything else. A surface with two primaries has not decided what it is
  * for.
+ *
+ * ONE PRESS AT A TIME (kit/oneAtATime): an `onClick` that returns a promise
+ * holds the button until it settles -- further presses are ignored, the button
+ * reads `busyLabel` ("Saving…") or just dims, and with a `doneLabel` it then
+ * reads that word with a tick ("Saved ✓") for two seconds before it is itself
+ * again. Resolve `false` (or reject) when the act did not happen, so the button
+ * never says it did.
  */
 export function Button({
   children,
@@ -65,40 +73,48 @@ export function Button({
   disabled = false,
   busy = false,
   busyLabel,
+  doneLabel,
   ariaLabel,
   ariaExpanded,
   title,
   className = "",
 }: {
   children: ReactNode;
-  onClick?: () => void;
+  onClick?: () => unknown;
   tone?: ButtonTone;
   type?: "button" | "submit";
   disabled?: boolean;
   busy?: boolean;
   busyLabel?: string;
+  /** Said with a tick for two seconds after the act's promise resolves. */
+  doneLabel?: string;
   ariaLabel?: string;
   ariaExpanded?: boolean;
   title?: string;
   className?: string;
 }) {
+  const guard = useOneAtATime();
+  const working = busy || guard.phase === "busy";
+  const done = guard.phase === "done" && doneLabel !== undefined;
   return (
     <button
       type={type}
       className={`os-button ${className}`.trim()}
       data-tone={tone}
+      data-state={done ? "done" : undefined}
       // A busy control is disabled for its duration. Writes in this shell are
       // non-idempotent from the person's side -- a second revoke is a second
       // audit row, a second mint is a second credential -- so a double click
-      // must not become two calls.
-      disabled={disabled || busy}
-      aria-busy={busy || undefined}
+      // must not become two calls. A done word takes no press either (the
+      // guard holds it), but is not dimmed: it is news, not a refusal.
+      disabled={disabled || working}
+      aria-busy={working || undefined}
       aria-label={ariaLabel}
       aria-expanded={ariaExpanded}
       title={title}
-      onClick={onClick}
+      onClick={onClick === undefined ? undefined : () => guard.press(onClick, doneLabel !== undefined)}
     >
-      {busy && busyLabel ? busyLabel : children}
+      {working && busyLabel ? busyLabel : done ? <>{doneLabel}<CheckGlyph size={14} aria-hidden /></> : children}
     </button>
   );
 }

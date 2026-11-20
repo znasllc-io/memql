@@ -80,6 +80,30 @@ describe("the share panel at the foot of the rail", () => {
     expect(screen.getByRole("alert").textContent).toBe("Lee Park is not in your organization.");
   });
 
+  // José, Nov 19 (item 7, draft B): a burst of presses is one share; the
+  // button says "Sharing…", then "Shared" with a tick.
+  it("counts a burst of Share presses as one and says it is shared", async () => {
+    let answer = () => {};
+    const onShare = vi.fn<ShareAct>(() => new Promise<void>((resolve) => { answer = resolve; }));
+    renderFoot([], { onShare });
+    await click(screen.getByRole("button", { name: /Lee Park/ }));
+    const share = screen.getByRole("button", { name: "Share" });
+    await act(async () => { for (let i = 0; i < 20; i++) fireEvent.click(share); });
+    expect(onShare).toHaveBeenCalledOnce();
+    expect(share.textContent).toBe("Sharing…");
+    await act(async () => { answer(); });
+    expect(share.textContent).toBe("Shared");
+    expect(share.getAttribute("data-state")).toBe("done");
+  });
+
+  it("never says Shared when the engine refused", async () => {
+    renderFoot([], { onShare: vi.fn<ShareAct>(async () => { throw new Error("No."); }) });
+    await click(screen.getByRole("button", { name: /Lee Park/ }));
+    await click(screen.getByRole("button", { name: "Share" }));
+    expect(screen.getByRole("button", { name: "Share" }).textContent).toBe("Share");
+    expect(screen.getByRole("alert").textContent).toBe("No.");
+  });
+
   it("keeps listing someone who still has the file after leaving the organization", () => {
     renderFoot([{ ...danaShare, recipientUserId: "u-gone", recipientDisplayName: "Ana Gone" }]);
     expect(screen.getByRole("button", { name: /Ana Gone/ }).textContent).toContain("sharing");

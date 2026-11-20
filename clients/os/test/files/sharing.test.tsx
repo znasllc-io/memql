@@ -174,6 +174,29 @@ describe("Shared with me", () => {
     expect(screen.getByText('Saved "Budget 2027.xlsx" to your Library.')).toBeTruthy();
   });
 
+  // José, Nov 19: twenty quick clicks on Save made eighteen copies; "it
+  // should only count as one click". The Head's icon takes no second press
+  // until the save has answered, and dims meanwhile; once it has, a click is a
+  // new save.
+  it("Save to my Library counts a burst of clicks as one, then saves again once it has finished", async () => {
+    let answer = () => {};
+    const connection = connect({ hold: { librarySaveSharedCopy: new Promise<void>((resolve) => { answer = resolve; }) } });
+    await renderFiles();
+    await click(within(rail()).getByRole("button", { name: "Shared with me" }));
+    await click(await screen.findByRole("button", { name: /Budget 2027\.xlsx/ }));
+    const save = within(screen.getByRole("group", { name: "Selected: Budget 2027.xlsx" })).getByRole("button", { name: "Save to my Library" });
+    await act(async () => { for (let i = 0; i < 20; i++) fireEvent.click(save); });
+    expect(connection.callsNamed("librarySaveSharedCopy")).toHaveLength(1);
+    expect(save.getAttribute("aria-busy")).toBe("true");
+    expect(save.hasAttribute("data-busy")).toBe(true);
+
+    await act(async () => { answer(); });
+    expect(screen.getByText('Saved "Budget 2027.xlsx" to your Library.')).toBeTruthy();
+    expect(save.hasAttribute("data-busy")).toBe(false);
+    await click(save);
+    expect(connection.callsNamed("librarySaveSharedCopy")).toHaveLength(2);
+  });
+
   it("says in place when the engine refuses the copy", async () => {
     connect({ refuse: { librarySaveSharedCopy: "This share has ended." } });
     await renderFiles();
