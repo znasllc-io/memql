@@ -147,8 +147,9 @@ export interface OsActions {
    */
   sendFileToDesk: (entry: Omit<FileEntry, "id">) => "placed" | "focused" | "full";
   /** A Library file dragged out of Files and dropped at `cell` on the active
-   *  desk: placed there, or its existing icon moved there. False = desk full. */
-  dropFileOnDesk: (entry: Omit<FileEntry, "id">, cell: GridPos) => boolean;
+   *  desk: placed there, or its existing icon moved there, never on a `hidden`
+   *  cell (under a window or the dock). False = no free cell in view. */
+  dropFileOnDesk: (entry: Omit<FileEntry, "id">, cell: GridPos, hidden: readonly GridPos[]) => boolean;
   /** The folder-shortcut sibling of sendFileToDesk, deduped by folderId. */
   sendFolderToDesk: (folderId: string, name: string) => "placed" | "focused" | "full";
   /** Place a folder shortcut at a cell (desk create-folder, after the
@@ -700,11 +701,11 @@ export function OsProvider({
         set((cur) => ({ ...withSurface(cur, deskId, placed), selectedItemId: id }));
         return "placed";
       },
-      dropFileOnDesk: (entry, cell) => {
+      dropFileOnDesk: (entry, cell, hidden) => {
         const s = stateRef.current;
         if (!s) return false;
         const deskId = s.shell.activeDeskId;
-        const landed = placeFileAt(surfaceOf(s, deskId), { id: mintItemId(s), ...entry }, cell, gridRef.current);
+        const landed = placeFileAt(surfaceOf(s, deskId), { id: mintItemId(s), ...entry }, cell, gridRef.current, hidden);
         if (!landed) return false;
         set((cur) => ({ ...withSurface(cur, deskId, landed.surface), selectedItemId: landed.itemId }));
         return true;

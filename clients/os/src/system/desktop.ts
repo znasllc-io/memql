@@ -98,8 +98,10 @@ export function nearestFreeCell(
   preferred: GridPos,
   grid: GridSize,
   except?: ItemId,
+  blocked: readonly GridPos[] = [],
 ): GridPos | null {
   const occupied = occupiedCells(surface, except);
+  for (const cell of blocked) occupied.add(keyOf(cell));
   const clamp = (pos: GridPos): GridPos => ({
     col: Math.max(0, Math.min(grid.cols - spanOf(item).w, pos.col)),
     row: Math.max(0, Math.min(grid.rows - spanOf(item).h, pos.row)),
@@ -151,21 +153,28 @@ export function moveItem(
  * A Library file dropped on this desk at `cell` (dragged out of Files). A desk
  * icon is a shortcut, so a file that already has one here is never given a
  * second: that icon moves to the drop instead (Jesús, Nov 20 2026). Otherwise
- * a new icon takes the nearest free cell. Null = the grid is full. The drag's
- * landing spot reads the same answer, so the spot is where the icon lands.
+ * a new icon takes the nearest free cell. `hidden` are cells a window or the
+ * dock covers right now: an icon is never dropped where nobody can see it
+ * land. Null = no free cell in view. The drag's landing spot reads the same
+ * answer, so the spot is where the icon lands.
  */
 export function placeFileAt(
   surface: DeskSurface,
   entry: FileEntry,
   cell: GridPos,
   grid: GridSize,
+  hidden: readonly GridPos[] = [],
 ): { surface: DeskSurface; itemId: ItemId } | null {
   const existing = Object.values(surface.items).find(
     (i) => i.kind === "file" && entry.artifactId !== "" && i.artifactId === entry.artifactId,
   );
-  if (existing) return { surface: moveItem(surface, existing.id, cell, grid), itemId: existing.id };
-  const placed = addItem(surface, { kind: "file", ...entry }, cell, grid);
-  return placed ? { surface: placed, itemId: entry.id } : null;
+  const item: DesktopItem = existing ?? { kind: "file", ...entry };
+  const pos = nearestFreeCell(surface, item, cell, grid, item.id, hidden);
+  if (!pos) return null;
+  return {
+    surface: { items: { ...surface.items, [item.id]: item }, positions: { ...surface.positions, [item.id]: pos } },
+    itemId: item.id,
+  };
 }
 
 export function removeItem(surface: DeskSurface, id: ItemId): DeskSurface {
