@@ -1122,9 +1122,13 @@ function DeskFileDrop() {
     const hidden: GridPos[] = [];
     for (let col = 0; col < grid.cols; col += 1) {
       for (let row = 0; row < grid.rows; row += 1) {
-        const left = rect.left + (SURFACE_PAD + col * CELL_W) * s;
-        const top = rect.top + (SURFACE_PAD + row * CELL_H) * s;
-        if (covers.some((c) => c.width > 0 && left < c.right && left + CELL_W * s > c.left && top < c.bottom && top + CELL_H * s > c.top)) {
+        // Hidden when a window or the dock covers the cell's MIDDLE: a cell
+        // only clipped at its edge still shows most of the icon. Counting any
+        // overlap left no cell at all beside a default-size window on a
+        // 1440-wide desk (80px margins, 96px cells; found live, Nov 20 2026).
+        const cx = rect.left + (SURFACE_PAD + col * CELL_W + CELL_W / 2) * s;
+        const cy = rect.top + (SURFACE_PAD + row * CELL_H + CELL_H / 2) * s;
+        if (covers.some((c) => c.width > 0 && cx > c.left && cx < c.right && cy > c.top && cy < c.bottom)) {
           hidden.push({ col, row });
         }
       }
