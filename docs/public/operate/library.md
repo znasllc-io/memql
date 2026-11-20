@@ -437,7 +437,8 @@ the directory and the ownership check.
 |---|---|---|
 | `libraryShareDirectory(groupId?)` | holder of `execute app:files/share` | rows `{userId, displayName}`, then `{groupId, displayName, members}`; with `groupId`, the people that group's share would reach |
 | `libraryShareFile(artifactId, recipientUserId \| recipientGroupId, days \| until)` | holder of the part, a signed-in person, on their own non-archived file | `{shareId, expiresAt, days}` |
-| `libraryShareStop(shareId)` | the sharer | `{shareId, stopped}` |
+| `libraryShareStop(shareId)` | the sharer, or someone overseeing the share (below) | `{shareId, stopped}` |
+| `librarySharesOverseen()` | any signed-in person | every ACTIVE share they may see and stop, their own included, with `ownerDisplayName` and `mine` |
 | `librarySaveSharedCopy(artifactId)` | the recipient, while the share is active | `{artifactId, fileId}` of the new copy |
 | `librarySharesForArtifact(artifactId)` | the sharer | the file's ACTIVE shares (`id` is the shareId) |
 | `librarySharing()` | the sharer | every ACTIVE share of theirs, across all their files: the Files app's *Sharing* page |
@@ -500,6 +501,26 @@ another copy, by design.
   end runs at internal origin, which skips the write guard's owner check), sets
   `revokedAt`, and sets the notice's `endedAt`. The next access on any replica
   is refused.
+- **Stop by someone overseeing it** (Nov 20 2026, item 13 of the Nov 19 call):
+  a share that is not the caller's is stopped only when
+  `librarySharesOverseen()` -- asked fresh, the same list the Files app's
+  Sharing page shows under "Shared by" -- names it; the share is then read back
+  and ended **under its sharer**, as the archive cascade does. Anything else
+  is refused with one sentence whether or not it exists. The rule
+  (`component/memql/library_share_oversight.go`), by the cluster's role ladder:
+
+  | Caller | Sees and may stop |
+  |---|---|
+  | owner (there can be several) | everyone's shares, other owners' included |
+  | developer | their own, and those of anyone ranked below them: admins' and everyone else's -- not owners' or other developers' |
+  | admin | their own, and those of anyone ranked below them -- not owners', developers' or other admins'. A guess: José said only "And then admins, same, whatever." |
+  | anyone else | only their own |
+
+  Developers and admins are shown only the shares they can stop (Jesús, Nov
+  20). A custom role oversees the people ranked strictly below it from admin
+  rank up. A borrowed, synthetic or client-account caller oversees nobody. The
+  sharer's rank is read off their user row (`role`), as the row-authz rank tier
+  reads it. Tested in `TestFileSharingBetweenRanksDB` (`OversightFollowsRank`).
 - **Expiry** writes nothing: every access compares `expiresAt`, and both lists
   filter it out.
 - **Archive**: every access refuses an archived artifact as soon as it is

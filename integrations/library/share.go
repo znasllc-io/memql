@@ -12,7 +12,9 @@ package library
 //	                        on a file they own. Writes the share under the
 //	                        sharer and the recipient's notice under the
 //	                        recipient, borrowed for that one write.
-//	libraryShareStop        the sharer, on a share read back as theirs.
+//	libraryShareStop        the sharer, on a share read back as theirs -- or
+//	                        someone overseeing it (librarySharesOverseen's
+//	                        rule), on a share read back under its sharer.
 //	librarySaveSharedCopy   the recipient, through the one shared-file resolver
 //	                        (component/server EngineLibraryStore.SharedFile).
 //	libraryEndSharesForArtifact  the engine's endSharesOnArtifactArchive
@@ -401,17 +403,51 @@ func (i *Integration) handleStopShare(ctx context.Context, args map[string]any, 
 	ctx = memql.ContextWithFreshRead(ctx)
 	// READ BACK AS THE CALLER'S OWN before writing: the end runs at internal
 	// origin, which skips the write guard's owner check, so this read is the
-	// whole of "only the sharer stops their share".
+	// whole of "the sharer stops their share".
 	share, err := i.revisionRow(ctx, "libraryShareById", map[string]any{"shareId": shareID})
 	if err != nil {
 		return nil, err
 	}
-	if share == nil || memql.BareShortId(stringField(share, "ownerUserId")) != sharer {
-		return nil, fmt.Errorf("that share is not one of yours")
+	if share != nil && memql.BareShortId(stringField(share, "ownerUserId")) == sharer {
+		if err := i.endShare(ctx, share); err != nil {
+			return nil, err
+		}
+		return reviewResult(map[string]any{"shareId": memql.BareShortId(shareID), "stopped": true})
 	}
-	if err := i.endShare(ctx, share); err != nil {
+
+	// SOMEBODY ELSE'S SHARE (item 13, Nov 20 2026): only one the caller's own
+	// oversight list names -- the same builtin the Sharing page lists, asked
+	// fresh, so the act is held to exactly the rule the list shows
+	// (component/memql/library_share_oversight.go). The list names the sharer;
+	// the share is then read back UNDER THEM, as the archive cascade does, and
+	// ended under them. One sentence for "no such share" and "not yours to
+	// stop", so the act is not an oracle for which shares exist.
+	refused := fmt.Errorf("that share is not one you can stop")
+	raw, err := i.engine.Execute(ctx, "builtin librarySharesOverseen()")
+	if err != nil {
 		return nil, err
 	}
+	owner := ""
+	for _, row := range extractRows(raw) {
+		if memql.BareShortId(stringField(row, "id")) == memql.BareShortId(shareID) {
+			owner = memql.BareShortId(stringField(row, "ownerUserId"))
+		}
+	}
+	if owner == "" || owner == sharer {
+		return nil, refused
+	}
+	asOwner := auth.ContextWithUserActor(ctx, owner)
+	theirs, err := i.revisionRow(asOwner, "libraryShareById", map[string]any{"shareId": shareID})
+	if err != nil {
+		return nil, err
+	}
+	if theirs == nil || memql.BareShortId(stringField(theirs, "ownerUserId")) != owner {
+		return nil, refused
+	}
+	if err := i.endShare(asOwner, theirs); err != nil {
+		return nil, err
+	}
+	i.log().Info("library: a share was stopped by someone overseeing it", "shareId", memql.BareShortId(shareID), "sharer", owner, "stoppedBy", sharer)
 	return reviewResult(map[string]any{"shareId": memql.BareShortId(shareID), "stopped": true})
 }
 

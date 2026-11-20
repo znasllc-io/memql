@@ -4373,7 +4373,7 @@ QueryClient.prototype.libraryShareFile = function (this: QueryClient, args: Libr
   return this.executeNamed("libraryShareFile", buildLibraryShareFile(args), opts);
 };
 
-/** Stop sharing a file with one person, at once. */
+/** Stop sharing a file with one person or group, at once. */
 export interface LibraryShareStopArgs {
   /** The share to stop -- the `id` librarySharesForArtifact lists. */
   shareId: string;
@@ -4393,6 +4393,25 @@ declare module "./query.js" {
 
 QueryClient.prototype.libraryShareStop = function (this: QueryClient, args: LibraryShareStopArgs = {} as LibraryShareStopArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("libraryShareStop", buildLibraryShareStop(args), opts);
+};
+
+/** Every active file share you may see and stop: your own, and other people's by rank. */
+export interface LibrarySharesOverseenArgs {
+}
+
+export function buildLibrarySharesOverseen(args: LibrarySharesOverseenArgs): string {
+  void args;
+  return "builtin librarySharesOverseen()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    librarySharesOverseen(args?: LibrarySharesOverseenArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.librarySharesOverseen = function (this: QueryClient, args: LibrarySharesOverseenArgs = {} as LibrarySharesOverseenArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("librarySharesOverseen", buildLibrarySharesOverseen(args), opts);
 };
 
 /** Search the caller's Library by meaning and get whole artifacts back, best match first. */

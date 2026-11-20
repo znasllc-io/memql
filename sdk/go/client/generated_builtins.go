@@ -5802,7 +5802,7 @@ func LibraryShareFileBuild(args LibraryShareFileArgs) string {
 	return b.String()
 }
 
-// LibraryShareStop -- Stop sharing a file with one person, at once.
+// LibraryShareStop -- Stop sharing a file with one person or group, at once.
 type LibraryShareStopArgs struct {
 	// The share to stop -- the `id` librarySharesForArtifact lists.
 	ShareId string
@@ -5821,6 +5821,21 @@ func LibraryShareStopBuild(args LibraryShareStopArgs) string {
 	b.WriteString(quoteMemQL(args.ShareId))
 	b.WriteString(")")
 	return b.String()
+}
+
+// LibrarySharesOverseen -- Every active file share you may see and stop: your own, and other people's by rank.
+type LibrarySharesOverseenArgs struct {
+}
+
+// LibrarySharesOverseen calls the engine builtin librarySharesOverseen.
+func (qc *QueryClient) LibrarySharesOverseen(ctx context.Context, args LibrarySharesOverseenArgs) (*Result, error) {
+	call := LibrarySharesOverseenBuild(args)
+	return qc.executeNamed(ctx, "librarySharesOverseen", call)
+}
+
+func LibrarySharesOverseenBuild(args LibrarySharesOverseenArgs) string {
+	_ = args
+	return "builtin librarySharesOverseen()"
 }
 
 // LibrarySimilarArtifacts -- Search the caller's Library by meaning and get whole artifacts back, best match first.

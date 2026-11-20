@@ -182,6 +182,9 @@ func (e *MemQLEngine) initBuiltinExecutorHandlers() error {
 		BuiltinExecutorLibraryShareDirectory: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			return e.evaluateLibraryShareDirectoryExpression(ctx, args)
 		},
+		BuiltinExecutorLibrarySharesOverseen: func(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+			return e.evaluateLibrarySharesOverseenExpression(ctx)
+		},
 		BuiltinExecutorModuleReadiness: func(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			return e.evaluateModuleReadinessExpression(ctx)
 		},

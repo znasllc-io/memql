@@ -129,10 +129,13 @@ func newShareFixture(t *testing.T, f *revisionDB) *shareFixture {
 		// Each replica its own guard, as each node builds one, over one table.
 		lib.SetSaveClaims(automations.NewClusterExecutionGuard(func() *bun.DB { return db }, nil).StrictClaimer())
 	}
-	for _, p := range []string{"alice", "vera", "adam", "mike", "bob"} {
+	// Each person's row carries the role their calls run with, because the
+	// oversight rule ranks a SHARER by their row (library_share_oversight.go).
+	// olga, dev, devi and ada belong to no group: they exist for the rule.
+	for _, p := range []string{"alice", "vera", "adam", "mike", "bob", "olga", "dev", "devi", "ada"} {
 		x.ids[p] = x.prefix + "-" + p
 		x.insert("v1:identity:user", "v1:identity:user:"+x.ids[p], map[string]any{
-			"active": true, "displayName": x.name(p), "primaryEmail": x.ids[p] + "@example.test", "role": "writer",
+			"active": true, "displayName": x.name(p), "primaryEmail": x.ids[p] + "@example.test", "role": string(shareRoles[p]),
 		})
 	}
 	orgA, orgB, custom := x.group("orga", "account"), x.group("orgb", "account"), x.group("mixed", "custom")
@@ -147,6 +150,15 @@ func newShareFixture(t *testing.T, f *revisionDB) *shareFixture {
 }
 
 func (x *shareFixture) name(p string) string { return strings.ToUpper(p[:1]) + p[1:] + " " + x.prefix }
+
+// shareRoles is each fixture person's role, on their row and on their calls.
+var shareRoles = map[string]auth.Role{
+	"alice": auth.RoleOwner, "olga": auth.RoleOwner,
+	"dev": auth.RoleDeveloper, "devi": auth.RoleDeveloper,
+	"adam": auth.RoleAdmin, "ada": auth.RoleAdmin,
+	"mike": auth.RoleWriter, "bob": auth.RoleWriter,
+	"vera": auth.RoleReader,
+}
 
 func (x *shareFixture) insert(concept, id string, payload map[string]any) {
 	x.t.Helper()
@@ -314,6 +326,7 @@ func TestFileSharingBetweenRanksDB(t *testing.T) {
 	t.Run("GroupShareFollowsMembership", func(t *testing.T) { x.t = t; testGroupShare(t, x) })
 	t.Run("GroupsOffered", func(t *testing.T) { x.t = t; testGroupsOffered(t, x) })
 	t.Run("PickedEndDate", func(t *testing.T) { x.t = t; testPickedEndDate(t, x) })
+	t.Run("OversightFollowsRank", func(t *testing.T) { x.t = t; testShareOversight(t, x) })
 }
 
 // burst fires n calls at once, alternating the two replicas, and answers how
@@ -1054,5 +1067,110 @@ func testPickedEndDate(t *testing.T, x *shareFixture) {
 		if memql.BareShortId(asString(s["recipientUserId"])) == x.ids["mike"] {
 			t.Fatalf("a refused dated share wrote a row: %v", s)
 		}
+	}
+}
+
+// Who may see and stop whose shares (item 13, Nov 20 2026): an owner,
+// everyone's; a developer or an admin, those of people ranked strictly below
+// them; everybody, their own. The list and the stop follow one rule.
+func testShareOversight(t *testing.T, x *shareFixture) {
+	f := x.f
+	sharers := []string{"alice", "olga", "dev", "devi", "adam", "ada", "mike", "vera"}
+	shareOf := map[string]string{} // sharer -> share id
+	artifactOf := map[string]string{}
+	for _, p := range sharers {
+		ctx := x.as(p, shareRoles[p])
+		artifact := x.file(ctx, p, p+"-report.txt", "shared by "+p)
+		to := "vera"
+		if p == "vera" {
+			to = "adam"
+		}
+		shareOf[p] = asString(x.mustShare(f.first, ctx, artifact, to, 7)["shareId"])
+		artifactOf[artifact] = p
+	}
+	// listed answers whose shares (of this run's files) a caller is shown.
+	listed := func(ctx context.Context, viewer string) map[string]bool {
+		t.Helper()
+		raw, err := f.other.Execute(ctx, "builtin librarySharesOverseen()")
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]bool{}
+		for _, row := range extractRows(raw) {
+			p, ours := artifactOf[memql.BareShortId(asString(row["artifactId"]))]
+			if !ours {
+				continue
+			}
+			if asString(row["ownerDisplayName"]) != x.name(p) || asString(row["title"]) != p+"-report.txt" ||
+				row["mine"] != (memql.BareShortId(asString(row["ownerUserId"])) == x.ids[viewer]) {
+				t.Fatalf("an oversight row: %v", row)
+			}
+			out[p] = true
+		}
+		return out
+	}
+	want := func(names ...string) map[string]bool {
+		m := map[string]bool{}
+		for _, n := range names {
+			m[n] = true
+		}
+		return m
+	}
+	for viewer, expect := range map[string]map[string]bool{
+		"alice": want(sharers...),
+		"dev":   want("dev", "adam", "ada", "mike", "vera"),
+		"adam":  want("adam", "mike", "vera"),
+		"mike":  want("mike"),
+		"vera":  want("vera"),
+	} {
+		got := listed(x.as(viewer, shareRoles[viewer]), viewer)
+		if fmt.Sprint(got) != fmt.Sprint(expect) {
+			t.Fatalf("%s (%s) is shown the shares of %v, want %v", viewer, shareRoles[viewer], got, expect)
+		}
+	}
+	// Borrowed authority is not a person's seniority: only their own.
+	if got := listed(auth.ContextWithUserActor(context.Background(), x.ids["alice"]), "alice"); fmt.Sprint(got) != fmt.Sprint(want("alice")) {
+		t.Fatalf("alice's borrowed authority is shown %v, want only her own", got)
+	}
+
+	stop := func(by, sharer string) error {
+		_, err := f.second.handleStopShare(x.as(by, shareRoles[by]), map[string]any{"shareId": shareOf[sharer]}, 0)
+		return err
+	}
+	for _, refused := range [][2]string{{"dev", "alice"}, {"dev", "devi"}, {"adam", "ada"}, {"adam", "dev"}, {"mike", "vera"}, {"vera", "mike"}} {
+		if err := stop(refused[0], refused[1]); err == nil || !strings.Contains(err.Error(), "not one you can stop") {
+			t.Fatalf("%s stopped %s's share: %v", refused[0], refused[1], err)
+		}
+	}
+	if got := listed(x.alice(), "alice"); fmt.Sprint(got) != fmt.Sprint(want(sharers...)) {
+		t.Fatalf("a refused stop ended a share: %v", got)
+	}
+	// Allowed: a developer stops a member's, an admin a viewer's, an owner
+	// another owner's -- and each ends access and the recipient's notice.
+	for _, allowed := range [][2]string{{"dev", "mike"}, {"adam", "vera"}, {"alice", "olga"}} {
+		if err := stop(allowed[0], allowed[1]); err != nil {
+			t.Fatalf("%s could not stop %s's share: %v", allowed[0], allowed[1], err)
+		}
+	}
+	for artifact, p := range artifactOf {
+		recipient := "vera"
+		if p == "vera" {
+			recipient = "adam"
+		}
+		code, _ := x.download(f.other, x.as(recipient, shareRoles[recipient]), artifact, "")
+		stopped := p == "mike" || p == "vera" || p == "olga"
+		if stopped != (code == http.StatusNotFound) {
+			t.Fatalf("after the oversight stops, %s's file answers %s with %d", p, recipient, code)
+		}
+		if stopped && len(noticesFor(x.rows(f.other, x.as(recipient, shareRoles[recipient]), "librarySharedWithMe", nil), artifact)) != 0 {
+			t.Fatalf("%s's stopped share is still on %s's list", p, recipient)
+		}
+	}
+	if got := listed(x.alice(), "alice"); fmt.Sprint(got) != fmt.Sprint(want("alice", "dev", "devi", "adam", "ada")) {
+		t.Fatalf("after three stops alice is shown %v", got)
+	}
+	// The sharer keeps the stopped share as the record, stopped.
+	if old := x.rows(f.other, x.as("mike", auth.RoleWriter), "libraryShareById", map[string]any{"shareId": shareOf["mike"]}); len(old) != 1 || asString(old[0]["revokedAt"]) == "" {
+		t.Fatalf("mike's share, stopped by a developer, is not kept as stopped: %v", old)
 	}
 }
