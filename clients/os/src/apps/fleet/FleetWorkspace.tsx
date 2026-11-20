@@ -122,8 +122,8 @@ export function FleetWorkspace({ flow, showRevoked, selection, select, navigate,
         {/* ON THE LIST the search narrows the rows beneath it (DESIGN.md rule 2:
             a filter is a question asked of the content). Inside a machine it
             keeps its results, which are the quick way across to another.
-            ALWAYS RENDERED, machines or none: it is the target the window's own
-            Search Fleet control focuses, and that control is there either way. */}
+            ALWAYS RENDERED, machines or none: it is Fleet's one search, and the
+            window's title bar no longer carries one (José, Nov 19 2026). */}
         {!machine && !machineSearch ? <span className="os-caption">Recent</span> : null}
         {machine ? <Refine iconOnly label="Find machines" placeholder="Search machines" search={machineSearch} onSearch={setMachineSearch}>
           <div className="fleet-machine-results">{shown.map(m => <button type="button" className="fleet-reading-link" key={m.id} onClick={() => select({ machineId: m.id, view: "equipment" })}>{machineName(m)}<ChevronRight size={14} aria-hidden /></button>)}

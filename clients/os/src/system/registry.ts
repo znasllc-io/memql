@@ -92,9 +92,12 @@ export interface OsAppProps {
   /** Navigate the window to another of the app's sections. */
   navigate: (sectionId: string, options?: { fromContent?: boolean }) => void;
   /**
-   * Note what the person is looking at, for the window's Ask ("app:<id>" is
-   * always present). It NEVER opens Ask: selecting a run or a file is not
-   * asking about it, and opening Ask over the app is in the person's way.
+   * Note what the person is looking at, for an Ask opened from this app
+   * ("app:<id>" is always present). The phone's Ask orb reads it; on the
+   * desktop nothing does since the title bar lost its Ask button (José, Nov
+   * 19 2026; Ask lives in the dock). It NEVER opens Ask: selecting a run or a
+   * file is not asking about it, and opening Ask over the app is in the
+   * person's way.
    */
   askContext: (tag: string) => void;
   /**
@@ -126,8 +129,6 @@ export interface OsRecordDestination {
 
 export interface OsAppManifest {
   records?: readonly OsRecordDestination[];
-  /** Landing section for record search when a nested page has no search field. */
-  searchSection?: string;
   id: string;
   name: string;
   /** Lucide icon component (kept as a plain component type -- no coupling). */

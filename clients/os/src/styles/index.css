@@ -14680,10 +14680,6 @@ button.os-cluster-mesh-peer:focus-visible {
 
 .os-window-control-group { display:flex; align-items:center; gap:2px; }
 .os-window-control-group + .os-window-control-group { border-left:1px solid var(--os-line); margin-left:6px; padding-left:6px; }
-.os-window-search { color:var(--os-ink); background:var(--os-glass-solid); border:1px solid var(--os-line); border-radius:12px; padding:18px; width:min(420px,calc(100vw - 32px)); }
-.os-window-search header { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
-.os-window-search nav { display:flex; flex-direction:column; margin-top:12px; }
-.os-window-search::backdrop { background:#0005; }
 @container os-window (max-width:430px) { .os-window-bar { flex-wrap:wrap; height:auto; min-height:40px; padding-block:4px; } .os-window-controls { margin-left:auto; } .os-window-app-selector { max-width:100px; } }
 
 .fleet-session-link { display:flex; justify-content:space-between; width:100%; gap:12px; border:0; border-bottom:1px solid var(--os-line); background:transparent; padding:12px 0; color:var(--os-ink); text-align:left; overflow-wrap:anywhere; }

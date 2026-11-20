@@ -11,8 +11,8 @@ import { StubAskTransport } from "../ask/stubTransport";
 // `askContext` notes what the person is looking at. It used to OPEN Ask: the
 // frame wired it to openAsk, so opening a run, a goal or a procedure in Nexus,
 // a Bin item, a Materializer composition or a Training upload threw the Ask
-// window over the app the person was using. It now only remembers, and the
-// window's own Ask button carries what it remembered. `askAbout` is the one
+// window over the app the person was using. It now only remembers, and
+// `contextTag` carries what it remembered (the phone's Ask orb reads it). `askAbout` is the one
 // that opens -- for an explicit "Ask about this" the person chose.
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -32,7 +32,7 @@ describe("an app's Ask props", () => {
     expect(result.current.ask.sheet.open).toBe(false);
   });
 
-  it("the window's Ask carries the context the app noted", () => {
+  it("contextTag carries the context the app noted", () => {
     const { result } = renderHook(useHarness, { wrapper });
     act(() => result.current.windowAsk.askContext("nexus run:abc123"));
     expect(result.current.windowAsk.contextTag()).toBe("app:nexus section:runs nexus run:abc123");

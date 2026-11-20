@@ -120,7 +120,7 @@ it.each(["desktop", "phone"] as const)("hides Ask from %s chrome and keeps Profi
     if (!screen.queryByRole("dialog", { name: "Launcher" })) fireEvent.click(screen.getByRole("button", { name: "Launcher" }));
     fireEvent.click(within(screen.getByRole("dialog", { name: "Launcher" })).getByRole("button", { name: appTileName("Files") }));
     expect(screen.queryByRole("button", { name: "Ask about Files" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Search Files" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Minimize Files" })).toBeTruthy();
   }
   expect(screen.queryByRole("dialog", { name: "Ask" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Open Profile" }));

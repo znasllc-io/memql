@@ -186,7 +186,7 @@ describe("windows and desks (spec K bullets 2-3)", () => {
     const files = screen.getByRole("dialog", { name: "Files" });
     const bar = files.querySelector(".os-window-bar") as HTMLElement;
     fireEvent.doubleClick(screen.getByRole("button", { name: "Minimize Files" }));
-    fireEvent.doubleClick(within(files).getByRole("button", { name: "Search Files" }));
+    fireEvent.doubleClick(within(files).getByRole("button", { name: /^Files settings/ }));
     expect(files.hasAttribute("data-maximized")).toBe(false);
     fireEvent.doubleClick(bar.querySelector(".os-window-drag-space")!);
     expect(files.hasAttribute("data-maximized")).toBe(true);
@@ -564,7 +564,8 @@ describe("the one trail row", () => {
 });
 
 describe("Ask (spec K bullet 5)", () => {
-  it("the orb, the widget and the title bar open the same surface", () => {
+  // Ask lives in the dock, not in each window's title bar (José, Nov 19 2026).
+  it("the orb and the widget open the same surface; no title bar carries Ask or search", () => {
     renderShell();
     fireEvent.click(screen.getByRole("button", { name: "Ask" }));
     const sheet = screen.getByRole("dialog", { name: "Ask" });
@@ -573,9 +574,10 @@ describe("Ask (spec K bullet 5)", () => {
     expect(screen.queryByRole("dialog", { name: "Ask" })).toBeNull();
 
     openFromLauncher("Files");
-    fireEvent.click(screen.getByRole("button", { name: "Ask about Files" }));
-    const sheet2 = screen.getByRole("dialog", { name: "Ask" });
-    expect(within(sheet2).getByText(/Files \/ /)).toBeTruthy();
+    const bar = screen.getByRole("dialog", { name: "Files" }).querySelector(".os-window-bar") as HTMLElement;
+    expect(within(bar).queryByRole("button", { name: "Ask about Files" })).toBeNull();
+    expect(within(bar).queryByRole("button", { name: "Search Files" })).toBeNull();
+    expect(within(bar).getByRole("button", { name: "Close Files" })).toBeTruthy();
 
     const widget = document.querySelector("[data-os-widget='ask']") as HTMLElement;
     expect(within(widget).getByRole("textbox", { name: "Ask" })).toBeTruthy();
@@ -752,14 +754,15 @@ it("switches through registry apps without remounting the prior window or losing
   expect(within(original as HTMLElement).getByRole("button", { name: "Model library" }).getAttribute("aria-current")).toBe("page");
 });
 
-it('the Fleet window search focuses machine search without a duplicate app trigger',async()=>{
+// Search lives in the page, not the title bar (José, Nov 19 2026).
+it('Fleet searches machines from its own page button, not the title bar',async()=>{
  renderShell();openFromLauncher('Fleet');
  const fleet=within(screen.getByRole('dialog',{name:'Fleet'}));
- expect(fleet.queryByRole('button',{name:'Find machines'})).toBeNull();
- fireEvent.click(fleet.getByRole('button',{name:'Search Fleet'}));
+ expect(fleet.queryByRole('button',{name:'Search Fleet'})).toBeNull();
+ fireEvent.click(fleet.getByRole('button',{name:'Machines'}));
+ fireEvent.click(await fleet.findByRole('button',{name:'Find machines'}));
  const search = await fleet.findByPlaceholderText('Search machines');
  await waitFor(() => expect(search).toBe(document.activeElement));
- expect(fleet.queryByRole('dialog',{name:'Search Fleet destinations'})).toBeNull();
 });
 
 
