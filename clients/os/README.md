@@ -119,10 +119,15 @@ or client-visible session authority.
   a third app spills onto a new desk. Windows minimize to the dock,
   full-screen, close; apps navigate sections inside their one window. The
   rules are in DESIGN.md, "Windows on a desk".
-- **Desktop items**: files are Library artifact shortcuts with the
-  provenance dot (green = reachable, amber = not), drawn with the Library
-  tile's glyphs at the one size both surfaces share (the "ONE SIZE" block in
-  `styles/index.css`). Every icon behaves like
+- **Desktop items**: files are Library artifact shortcuts, with no dot,
+  drawn with the Library tile's glyphs at the one size both surfaces share
+  (the "ONE SIZE" block in `styles/index.css`). A file that cannot open yet
+  (still uploading, or made on a computer that is offline) is drawn dim and
+  still selects, moves and files; opening it waits and it opens once it can.
+  One line under the name says the rest: "Opening when done", "Upload failed
+  -- retry", "Computer offline", or "Ready" for about three seconds after an
+  upload nobody opened (`items/deskFileState.ts`).
+  Every icon behaves like
   a desktop icon (epic memql#4842): single click SELECTS, double-click or
   Enter OPENS -- a file hands off to VS Code, a folder opens the Files app
   scoped to it under the Desktop place. A desk folder is a SHORTCUT to a

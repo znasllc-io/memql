@@ -284,21 +284,11 @@ button:not(:disabled):active {
   background: var(--os-accent-soft);
 }
 
-/* The Library tile's glyph box (.os-files-tile-icon, with the files below):
- * the desk adds only what is its own -- the dot's anchor and the states. */
-.os-file-glyph {
-  position: relative;
-}
-.os-file-glyph[data-uploading] {
-  opacity: 0.55;
-}
-.os-file-glyph .os-dot {
-  position: absolute;
-  right: -3px;
-  bottom: -3px;
-  border: 2px solid var(--os-ground);
-  width: 11px;
-  height: 11px;
+/* No dot on a desk file (Nov 19 item 10): a file that cannot open yet --
+ * uploading, or its computer offline -- is a dimmer grey, glyph and name. */
+.os-file[data-dim] .os-file-button {
+  opacity: 0.45;
+  filter: grayscale(1);
 }
 
 .os-file-title {
@@ -318,6 +308,23 @@ button:not(:disabled):active {
   color: var(--os-warn);
   font-size: var(--os-text-xs);
   cursor: pointer;
+}
+
+/* The one line where the retry line goes: "Opening when done" in the ink,
+ * "Ready" in the accent green, "Computer offline" quiet. One line, centred on
+ * the icon even when a little wider than it. */
+.os-file-line {
+  display: flex;
+  justify-content: center;
+  white-space: nowrap;
+  font-size: var(--os-text-xs);
+  color: var(--os-ink);
+}
+.os-file-line[data-line="ready"] {
+  color: var(--os-accent);
+}
+.os-file-line[data-line="offline"] {
+  color: var(--os-muted);
 }
 
 .os-file-noanswer {
