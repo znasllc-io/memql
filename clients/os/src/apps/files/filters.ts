@@ -66,6 +66,13 @@ export const EMPTY_DESK: DeskMembership = {
   folderIds: new Set(),
 };
 
+/**
+ * NO CONTROL SETS `kind`, `source`, `accountId` OR `label` NOW. They were
+ * Refine's facets, and Refine left the Files Head when the search panel
+ * replaced it (José, Nov 19 2026), so they stay at their defaults. The
+ * fields, their server arguments and their folds stay, so a facet can come
+ * back as one more control on the panel's second line.
+ */
 export interface FilesFilter {
   /** Which of the rail's places is being looked at. */
   place: FilesPlace;
@@ -116,8 +123,12 @@ export interface FilesFilter {
    */
   label: string;
   search: string;
-  /** false = newest first, the default. */
-  sortAscending: boolean;
+  /** The search panel's kind of file (see FILE_TYPES). */
+  type: FileType;
+  /** The search panel's Added menu. */
+  added: AddedWithin;
+  /** "newest" is the default; Settings may start a window on "oldest". */
+  sort: FilesSort;
 }
 
 /** No label constraint. */
@@ -131,8 +142,140 @@ export const DEFAULT_FILTER: FilesFilter = {
   accountId: ACCOUNT_ANY,
   label: LABEL_ANY,
   search: "",
-  sortAscending: false,
+  type: "all",
+  added: "any",
+  sort: "newest",
 };
+
+// ===========================================================================
+// THE SEARCH PANEL'S QUESTIONS (José, Nov 19 2026; Jesús's picks, Nov 20)
+// ===========================================================================
+// A kind of file, when it was added, and an order. The kind is read off the
+// file's NAME first (its extension), then its MIME type, then the format the
+// index recorded -- the order the tile's glyph reads a name in (Tiles.tsx
+// `typeLabel`), so a tile that says PDF is never filed under Misc. This table
+// is the ONE place the mapping lives.
+
+export const FILE_TYPES = [
+  ["all", "All"],
+  ["folders", "Folders"],
+  ["documents", "Documents"],
+  ["images", "Images"],
+  ["media", "Media"],
+  ["sheets", "Sheets"],
+  ["archives", "Archives"],
+  ["misc", "Misc"],
+] as const;
+export type FileType = (typeof FILE_TYPES)[number][0];
+/** What one file is: every FileType except the two that are not a file's own. */
+export type FileKind = Exclude<FileType, "all" | "folders">;
+
+const EXTENSIONS: Record<Exclude<FileKind, "misc">, readonly string[]> = {
+  // Slides count as documents: a deck is something you read, and Misc is for
+  // files nothing else claims.
+  documents: ["pdf", "doc", "docx", "txt", "md", "markdown", "rtf", "odt", "pages", "epub", "ppt", "pptx", "key", "odp"],
+  images: ["jpg", "jpeg", "png", "gif", "webp", "svg", "heic", "heif", "bmp", "tif", "tiff", "avif", "ico"],
+  media: ["mp3", "wav", "m4a", "aac", "flac", "ogg", "oga", "opus", "aiff", "mp4", "m4v", "mov", "webm", "mkv", "avi", "wmv", "mpg", "mpeg"],
+  sheets: ["xlsx", "xls", "csv", "tsv", "ods", "numbers"],
+  // A .tar.gz reads as "gz", its last extension, as the tile's glyph does.
+  archives: ["zip", "tar", "gz", "tgz", "7z", "rar", "bz2", "xz"],
+};
+const KIND_OF_EXTENSION = new Map<string, FileKind>(
+  Object.entries(EXTENSIONS).flatMap(([kind, exts]) => exts.map((ext) => [ext, kind as FileKind] as const)),
+);
+
+function kindOfMime(mime: string): FileKind | null {
+  const m = mime.toLowerCase().split(";")[0]?.trim() ?? "";
+  if (m === "") return null;
+  // Sheets and archives first: text/csv is a sheet, not text, and
+  // application/x-zip-compressed is an archive whatever else it says.
+  if (/spreadsheet|excel|csv|tab-separated|numbers/.test(m)) return "sheets";
+  if (/zip|x-tar|gzip|x-7z|x-rar|rar-compressed|bzip|x-xz/.test(m)) return "archives";
+  if (m.startsWith("image/")) return "images";
+  if (m.startsWith("audio/") || m.startsWith("video/")) return "media";
+  if (m === "text/plain" || m === "text/markdown" || /pdf|msword|wordprocessing|opendocument\.text|rtf|presentation|powerpoint|epub/.test(m)) {
+    return "documents";
+  }
+  return null;
+}
+
+const KIND_OF_FORMAT: Record<string, FileKind> = {
+  markdown: "documents",
+  document: "documents",
+  pdf: "documents",
+  text: "documents",
+  spreadsheet: "sheets",
+  image: "images",
+};
+
+/** Which kind of file a row is; "misc" when neither its name, its MIME type nor its format says. */
+export function fileKindOf(row: Pick<ArtifactRow, "title" | "mimeType" | "format">): FileKind {
+  const name = row.title.trim().toLowerCase();
+  const dot = name.lastIndexOf(".");
+  const ext = dot > 0 ? name.slice(dot + 1) : "";
+  return KIND_OF_EXTENSION.get(ext) ?? kindOfMime(row.mimeType) ?? KIND_OF_FORMAT[row.format] ?? "misc";
+}
+
+export const ADDED_WITHIN = [
+  ["any", "Any time"],
+  ["today", "Today"],
+  ["7d", "Last 7 days"],
+  ["30d", "Last 30 days"],
+] as const;
+export type AddedWithin = (typeof ADDED_WITHIN)[number][0];
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Whether a creation time falls in the Added window; Today starts at local midnight, and an unreadable time never does. */
+export function addedWithin(createdAt: string | undefined, added: AddedWithin, now: number): boolean {
+  if (added === "any") return true;
+  const day = new Date(now);
+  const since = added === "today"
+    ? new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime()
+    : now - (added === "7d" ? 7 : 30) * DAY_MS;
+  return Date.parse(createdAt ?? "") >= since;
+}
+
+export const FILES_SORTS = [
+  ["name", "Name"],
+  ["newest", "Newest first"],
+  ["oldest", "Oldest first"],
+  ["size", "Size"],
+  ["kind", "Kind"],
+] as const;
+export type FilesSort = (typeof FILES_SORTS)[number][0];
+
+const KIND_ORDER: readonly FileType[] = FILE_TYPES.map(([type]) => type);
+const byName = (a: ArtifactRow, b: ArtifactRow) =>
+  artifactName(a).localeCompare(artifactName(b), undefined, { numeric: true, sensitivity: "base" }) || a.id.localeCompare(b.id);
+
+/**
+ * The order a sort names. Newest and Oldest keep the server's own page order
+ * (created-at, then id). Size is largest first, and a file whose size is not
+ * known (a document or generated output with no stored bytes) goes last.
+ */
+export function compareRows(sort: FilesSort, sizeOf: (row: ArtifactRow) => number | undefined = () => undefined) {
+  return (a: ArtifactRow, b: ArtifactRow): number => {
+    if (sort === "newest" || sort === "oldest") {
+      return (sort === "oldest" ? 1 : -1) * (a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+    }
+    if (sort === "size") return (sizeOf(b) ?? -1) - (sizeOf(a) ?? -1) || byName(a, b);
+    if (sort === "kind") return KIND_ORDER.indexOf(fileKindOf(a)) - KIND_ORDER.indexOf(fileKindOf(b)) || byName(a, b);
+    return byName(a, b);
+  };
+}
+
+/**
+ * Whether the view needs the place's WHOLE population rather than the pages
+ * scrolled so far. The server pages newest (or oldest) first and narrows only
+ * by what `libraryBrowseArgs` sends, so a name, size or kind order, a kind of
+ * file and an Added window are answered here, over every page.
+ */
+export function needsWholePlace(filter: Pick<FilesFilter, "sort" | "type" | "added">): boolean {
+  return (filter.sort !== "newest" && filter.sort !== "oldest") ||
+    (filter.type !== "all" && filter.type !== "folders") ||
+    filter.added !== "any";
+}
 
 function matchesSearch(row: ArtifactRow, needle: string): boolean {
   const q = needle.trim().toLowerCase();
@@ -169,8 +312,12 @@ export function applyFilters(
   filter: FilesFilter,
   desk: DeskMembership = EMPTY_DESK,
   materialized: MaterializedSet = NOTHING_MATERIALIZED,
+  sizeOf?: (row: ArtifactRow) => number | undefined,
+  now: number = Date.now(),
 ): ArtifactRow[] {
   const searching = filter.search.trim() !== "";
+  // Folders is a question about folders: no file answers it.
+  if (filter.type === "folders") return [];
   const kept = rows.filter((row) => {
     // The records lens never renders here, under ANY combination (design D2).
     if (!isContentKind(row.kind)) return false;
@@ -220,6 +367,8 @@ export function applyFilters(
     // inside labels -- so the two questions stay separable.
     if (filter.label !== LABEL_ANY && !row.labels.includes(filter.label)) return false;
     if (!matchesSearch(row, filter.search)) return false;
+    if (filter.type !== "all" && fileKindOf(row) !== filter.type) return false;
+    if (!addedWithin(row.createdAt, filter.added, now)) return false;
     // THE CLIENT SCOPE READS ABSENCE AND THE EMPTY LIST AS ONE ANSWER, and it
     // has to: every row promoted before `accountIds` existed carries no key at
     // all, so a filter that distinguished them would hide the entire
@@ -235,10 +384,7 @@ export function applyFilters(
     }
     return true;
   });
-  const direction = filter.sortAscending ? 1 : -1;
-  return kept.sort(
-    (a, b) => direction * (a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)),
-  );
+  return kept.sort(compareRows(filter.sort, sizeOf));
 }
 
 /**

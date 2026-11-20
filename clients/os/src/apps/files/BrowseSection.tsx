@@ -1,8 +1,10 @@
 import { LoadMore } from "../../kit/LoadMore";
 import type { LibraryArtifactsFeed } from "./useLibrary";
 import { usePageScroll } from "../../kit/pageNavigation";
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Download, FilePlus, FileText, FolderInput, FolderPlus, Import, Layers, Monitor, RotateCcw, SquareArrowOutUpRight, Trash2, Upload } from "lucide-react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { ArrowUpDown, Download, FilePlus, FileText, FolderInput, FolderPlus, Import, Layers, Monitor, RotateCcw, Search, SquareArrowOutUpRight, Trash2, Upload } from "lucide-react";
+import { CardCollectionSearch } from "../../kit/CardCollectionEditor";
+import { useWindowSearchTarget } from "../../kit/windowSearch";
 import { IconButton } from "../../kit/IconButton";
 import { Mark } from "../../chrome/Mark";
 import {
@@ -42,17 +44,26 @@ import {
   Head,
   LiveList,
   Notice,
-  Refine,
   listCount,
   Select,
-  SortControl,
-  type RefineChip,
 } from "../../kit";
 import type { Breadcrumb } from "../../kit/Breadcrumbs";
 import { useMachinePresence } from "../../live/machines";
 import type { LiveView } from "../../live/liveView";
-import { SOURCE_VALUES } from "./concepts";
-import type { FilesFilter, FilesPlace, KindFilter } from "./filters";
+import {
+  ADDED_WITHIN,
+  addedWithin,
+  compareRows,
+  FILE_TYPES,
+  FILES_SORTS,
+  fileKindOf,
+  needsWholePlace,
+  type AddedWithin,
+  type FilesFilter,
+  type FilesPlace,
+  type FilesSort,
+  type FileType,
+} from "./filters";
 import type { FolderRow } from "./rows";
 import type { FolderTree, MaterializedRail, TreeNode } from "./fold";
 import { binItemFromArtifact } from "../bin/rows";
@@ -66,28 +77,21 @@ import {
   type ArtifactRow,
   type CompositionRow,
 } from "./rows";
-import { accountIsArchived, accountName } from "../accounts/rows";
-import { useAccountOptions } from "../accounts/tie";
-import { ACCOUNT_ANY, ACCOUNT_NONE, LABEL_ANY } from "./filters";
+import { ACCOUNT_ANY, LABEL_ANY } from "./filters";
 import { Inspector } from "./Inspector";
 import type { UploadTask, UploadTasksApi } from "./useUploadTasks";
 
 // The browse (design D1, reshaped by epic memql#4842, then the "Places"
 // redesign of Nov 2026): a rail of places and the Library's folder tree on the
-// left, and on the right a Head (quiet sort, one Refine affordance, the one Add
-// control -- DESIGN.md rules 1-3) over a grid of folders and files.
+// left, and on the right a Head (the picked file's icons, one search button,
+// the one Add control) over a grid of folders and files. The search button
+// opens a panel under the Head that holds search, kind, sort and Added (José,
+// Nov 19 2026: "the point is that it's hidden").
 //
 // A CLICK ON A FILE ONLY SELECTS IT. The owner asked for no panel popping up on
 // a click: double-click or Enter opens the file, and right-click holds its
 // verbs, among them Details, which replaces the grid with the file's page (the
 // Inspector -- labels, client, versions), so nothing that page offers is lost.
-
-const KIND_TABS: Array<{ value: KindFilter; label: string }> = [
-  { value: "all", label: "All" },
-  { value: "file", label: "Files" },
-  { value: "document", label: "Documents" },
-  { value: "generated_output", label: "Generated" },
-];
 
 /** A desk folder shortcut, folded from shell state by the app root. */
 export interface DeskFolderShortcut {
@@ -107,7 +111,6 @@ export function BrowseSection({
   list,
   artifacts,
   counts,
-  labelOptions,
   facetsError,
   files,
   foldersState,
@@ -133,7 +136,6 @@ export function BrowseSection({
   list: LiveView<ArtifactRow> | null;
   artifacts: LibraryArtifactsFeed;
   counts: ReadonlyMap<string, number> | null;
-  labelOptions: readonly string[];
   facetsError: string;
   files: readonly Row[];
   foldersState: LiveState;
@@ -615,7 +617,7 @@ export function BrowseSection({
   // The picked file, for the Head's icons. Absent once it leaves the list --
   // deleted, moved away, or filtered out -- so the icons never act on a file
   // nobody can see.
-  const pickedRow = picked === "" ? null : content.find((r) => r.id === picked) ?? null;
+  const pickedRow = picked === "" ? null : list?.snapshot.rows.find((r) => r.id === picked) ?? null;
 
   // SHARING (the engine's library sharing, Nov 2026). The Share panel sits at
   // the foot of the rail for a picked file the caller owns and still has --
@@ -632,10 +634,15 @@ export function BrowseSection({
   const directory = useShareDirectory(sharing !== null);
   const fileShares = useFileShares(sharing?.id ?? "");
   const notices = useSharedWithMe(shared);
-  const noticeList = useLiveView<Row, SharedNotice>(notices.source, `files:shared:${filter.sortAscending ? "asc" : "desc"}`, (rows) => {
-    const direction = filter.sortAscending ? 1 : -1;
-    return rows.map(noticeFromRow).filter((n) => n.id !== "")
-      .sort((a, b) => direction * (a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)));
+  // The search panel asks Shared with me the same questions, over its notices.
+  const noticeList = useLiveView<Row, SharedNotice>(notices.source, `files:shared:${filter.search}|${filter.type}|${filter.added}|${filter.sort}`, (rows) => {
+    const now = Date.now();
+    const needle = filter.search.trim().toLowerCase();
+    const byId = new Map(rows.map(noticeFromRow).filter((n) => n.id !== "" && n.title.toLowerCase().includes(needle)).map((n) => [n.id, n]));
+    return [...byId.values()].map(noticeTile)
+      .filter((tile) => (filter.type === "all" || fileKindOf(tile) === filter.type) && addedWithin(tile.createdAt, filter.added, now))
+      .sort(compareRows(filter.sort, (tile) => byId.get(tile.id)?.size))
+      .flatMap((tile) => byId.get(tile.id) ?? []);
   });
   const pickedNotice = shared && picked !== "" ? noticeList?.snapshot.rows.find((n) => n.id === picked) ?? null : null;
   const pickedActs = selected !== null ? null
@@ -644,7 +651,6 @@ export function BrowseSection({
     : null;
   const archivedFolderIdSet = new Set(archivedFolders.map((f) => f.id));
   const searching = filter.search.trim() !== "";
-  const accountOptions = useAccountOptions();
 
   const folderNameOf = (folderId: string): string => {
     if (folderId === "") return "Library";
@@ -660,22 +666,22 @@ export function BrowseSection({
 
   // Empty and filtered-to-empty are DIFFERENT answers: one is about the
   // place, the other about the question just asked of it.
-  const narrowed = !shared && (
-    searching ||
+  const asked = searching || filter.type !== "all" || filter.added !== "any";
+  const narrowed = asked || (!shared && (
     filter.kind !== "all" ||
     filter.source !== "all" ||
     filter.accountId !== ACCOUNT_ANY ||
     filter.label !== LABEL_ANY ||
-    filter.folderId !== "");
-  // The Head's meta is what the LIST is showing right now -- scoped folder,
-  // facets and search included -- never a different population's number
-  // beside the scope's name.
-  const listedSnapshot = shared ? noticeList?.snapshot : list?.snapshot;
-  const listedCount = listedSnapshot?.rows.length ?? 0;
-  const emptyText = shared
-    ? "Nothing has been shared with you."
-    : narrowed
+    filter.folderId !== ""));
+  // Folders is a question only folders answer: the file list steps aside.
+  const foldersOnly = filter.type === "folders";
+  // While the whole place is still being read for an order or filter the
+  // pages cannot answer (useLibrary.ts), an empty list is not yet an answer.
+  const draining = !shared && !foldersOnly && needsWholePlace(filter) && artifacts.hasMore;
+  const emptyText = narrowed
     ? "Nothing matches. Clear the search or filters to see your files."
+    : shared
+    ? "Nothing has been shared with you."
     : filter.place === "desktop"
       ? "Nothing on your desks. Send a file to the desk from the Library, or drop one onto the desk."
       : filter.place === "bin"
@@ -716,42 +722,28 @@ export function BrowseSection({
     ];
   })();
 
-  // The Refine chips: every active facet, removable in place (rule 2).
-  const refineChips: RefineChip[] = [];
-  if (filter.kind !== "all") {
-    refineChips.push({
-      id: "kind",
-      label: KIND_TABS.find((t) => t.value === filter.kind)?.label ?? filter.kind,
-      onRemove: () => patch({ kind: "all" }),
-    });
-  }
-  if (filter.source !== "all") {
-    refineChips.push({ id: "source", label: filter.source, onRemove: () => patch({ source: "all" }) });
-  }
-  if (filter.accountId !== ACCOUNT_ANY) {
-    const account = accountOptions.find((a) => a.id === filter.accountId);
-    refineChips.push({
-      id: "client",
-      label: filter.accountId === ACCOUNT_NONE ? "No client" : account ? accountName(account) : "Client",
-      onRemove: () => patch({ accountId: ACCOUNT_ANY }),
-    });
-  }
-  if (filter.label !== LABEL_ANY) {
-    refineChips.push({
-      id: "label",
-      label: filter.label,
-      onRemove: () => patch({ label: LABEL_ANY }),
-    });
-  }
-
-  /** Back to the place, with every facet and the search dropped. */
-  const visibleFolders = searching ? [] : filter.folderId
-    ? (tree.byId.get(filter.folderId)?.children.map(node => node.folder) ?? [])
-    : filter.place === "library" ? tree.roots.map(node => node.folder)
+  const placeFolders = filter.place === "library" ? tree.roots.map(node => node.folder)
     : filter.place === "desktop" ? deskFolders.flatMap(shortcut => { const node = tree.byId.get(shortcut.folderId); return node ? [node.folder] : []; })
     : filter.place === "bin" ? archivedFolders
     : shared ? []
     : materializedRail.folders.map(entry => entry.folder);
+  // A search looks at the whole place, as it does for files: every folder in
+  // the Library's tree, or the place's own folders elsewhere, by name.
+  const needle = filter.search.trim().toLowerCase();
+  const browsedFolders = searching
+    ? (filter.place === "library" ? [...tree.byId.values()].map(node => node.folder).sort((a, b) => a.name.localeCompare(b.name)) : placeFolders)
+      .filter(folder => folder.name.toLowerCase().includes(needle))
+    : filter.folderId ? (tree.byId.get(filter.folderId)?.children.map(node => node.folder) ?? [])
+    : placeFolders;
+  // A kind of file hides the folders; Added asks of them what it asks of files.
+  const now = Date.now();
+  const visibleFolders = filter.type !== "all" && !foldersOnly ? []
+    : browsedFolders.filter(folder => addedWithin(folder.createdAt, filter.added, now));
+  // The Head's meta is what the LIST is showing right now -- scoped folder,
+  // facets and search included -- never a different population's number
+  // beside the scope's name. Showing Folders, that is the folders.
+  const listedSnapshot = shared ? noticeList?.snapshot : list?.snapshot;
+  const listedCount = foldersOnly ? visibleFolders.length : listedSnapshot?.rows.length ?? 0;
   const pageRoot = usePageScroll(`${filter.place}:${filter.folderId ?? ""}:${selectedId}`);
 
   const clearFilters = () =>
@@ -761,8 +753,29 @@ export function BrowseSection({
       accountId: ACCOUNT_ANY,
       label: LABEL_ANY,
       search: "",
+      type: "all",
+      added: "any",
       folderId: "",
     });
+
+  // THE HIDDEN SEARCH PANEL (José, Nov 19 2026; Jesús picked two lines, with
+  // Fleet's search bar reused as it is). One button on the Head opens it under
+  // the Head, pushing the tiles down rather than covering them, and closes it.
+  // CLOSING ENDS THE SEARCH: a kind or Added window left on while the panel is
+  // hidden would narrow the files with nothing on screen saying so. The order
+  // stays, since it hides nothing.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchInput = useRef<HTMLInputElement | null>(null);
+  const mainRef = useRef<HTMLDivElement | null>(null);
+  const searchPanelId = useId();
+  useEffect(() => { if (searchOpen) searchInput.current?.focus(); }, [searchOpen]);
+  // The window's own search (its title-bar button) opens this panel, as it
+  // opened Refine before it.
+  useWindowSearchTarget(mainRef, () => { setSearchOpen(true); searchInput.current?.focus(); });
+  const toggleSearch = () => {
+    if (searchOpen) patch({ search: "", type: "all", added: "any" });
+    setSearchOpen(!searchOpen);
+  };
 
   return (
     <div
@@ -796,22 +809,23 @@ export function BrowseSection({
           onStop={(share) => stopShare(share.shareId)}
         />
       ) : null}
-      <div className="os-files-main">
+      <div className="os-files-main" ref={mainRef}>
       <Head navigationKey={`browse:${filter.place}:${filter.folderId ?? ""}`} title={headTitle} breadcrumbs={headTrail} navigation={selected === null} back={filter.folderId ? {label: PLACE_TITLE[filter.place], onSelect: () => patch({folderId: tree.byId.get(filter.folderId!)?.folder.parentFolderId ?? ""})} : undefined} meta={listCount(listedSnapshot, listedCount) === undefined ? undefined : `${listedCount}${!shared && artifacts.hasMore ? "+" : ""}`}>
-        {/* ONE WAY TO ADD SOMETHING (DESIGN.md rule 1: at most one primary
+        {/* ONE ROW, THREE AREAS (José, Nov 19 2026; Jesús picked Draft A): the
+            picked file's icons beside the title, one search button on the
+            right, and Add apart at the far right.
+            ONE WAY TO ADD SOMETHING (DESIGN.md rule 1: at most one primary
             action). Uploading a file and making a folder are the same
             question -- "put something here" -- and they were answered in two
             places: a primary button up here and a rail ACTION wedged between
             the Library tree and the Desktop place, where it read as a folder
             you could open. The rail action is gone; the answers live on this
-            button, and each lands in the folder currently being looked at.
-            Sort and Refine stand beside it on the Head's line now that there
-            are no location tabs to carry them (rules 2 and 3). */}
+            button, and each lands in the folder currently being looked at. */}
         {/* THE PICKED FILE'S ACTS, AS ICONS (owner, Nov 18 2026), the way a
             deployable's page carries its own. The same entries as the file's
             right-click menu, so the two can never disagree; an entry the menu
             would show disabled is absent here (rule 12). A hairline keeps
-            them apart from Sort, Refine and Add, which are about the folder. */}
+            them apart from the title. */}
         {pickedActs !== null ? (
           <span className="os-files-picked-acts" role="group" aria-label={`Selected: ${pickedActs.name}`}>
             {pickedActs.entries.filter((entry) => !entry.disabled).map((entry) => (
@@ -821,91 +835,15 @@ export function BrowseSection({
             ))}
           </span>
         ) : null}
-        <SortControl
-          ascending={filter.sortAscending}
-          onToggle={() => patch({ sortAscending: !filter.sortAscending })}
-        />
-        {/* Refine asks about the caller's own Library; Shared with me is a
-            short list of other people's files it cannot narrow. */}
-        {shared ? null : <Refine
-          search={filter.search}
-          onSearch={(search) => patch({ search })}
-          chips={refineChips}
-          label="Refine files"
+        <IconButton
+          label="Search"
+          className="os-files-search-toggle"
+          aria-expanded={searchOpen}
+          aria-controls={searchOpen ? searchPanelId : undefined}
+          onClick={toggleSearch}
         >
-          <div className="os-files-kinds" role="radiogroup" aria-label="Kind">
-            {KIND_TABS.map((tab) => (
-              <button
-                key={tab.value}
-                type="button"
-                role="radio"
-                aria-checked={filter.kind === tab.value}
-                className="os-files-kind"
-                onClick={() => patch({ kind: tab.value })}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-          <Select
-            id="files-source"
-            label="Source"
-            value={filter.source}
-            onChange={(source) => patch({ source: source as FilesFilter["source"] })}
-          >
-            <option value="all">Any source</option>
-            {SOURCE_VALUES.map((source) => (
-              <option key={source} value={source}>
-                {source}
-              </option>
-            ))}
-          </Select>
-          {/* THE CLIENT FILTER (epic memql#4800, D5). Client-side over the
-              seeded snapshot like every other facet here -- a row promoted
-              before `accountIds` existed has no key at all, and only the fold
-              reads absence and the empty list as one answer. "No client" is a
-              first-class option because "what still needs filing" is the one
-              question the other two cannot express. */}
-          <Select
-            id="files-account"
-            label="Client"
-            value={filter.accountId}
-            onChange={(accountId) => patch({ accountId })}
-          >
-            <option value={ACCOUNT_ANY}>Any client</option>
-            <option value={ACCOUNT_NONE}>No client</option>
-            {accountOptions.map((account) => (
-              <option key={account.id} value={account.id}>
-                {accountIsArchived(account) ? `${accountName(account)} (archived)` : accountName(account)}
-              </option>
-            ))}
-          </Select>
-          {/* THE LABEL FACET (epic memql#5009). A FACET BEHIND THIS ONE
-              AFFORDANCE, never a standing rail: DESIGN.md rule 2 puts every
-              filter control here, and the Files rail is the app's place
-              language -- a label is not a place, so a second navigational
-              axis beside the folder tree would make a rail click ambiguous.
-              See the `label` field in filters.ts for the full reasoning.
-
-              ABSENT WHEN NOTHING IS LABELLED, rather than an empty select: a
-              control offering only "Any label" is a question with no answers,
-              which is the same furniture the rule removes. */}
-          {labelOptions.length === 0 && filter.label === LABEL_ANY ? null : (
-            <Select
-              id="files-label"
-              label="Label"
-              value={filter.label}
-              onChange={(label) => patch({ label })}
-            >
-              <option value={LABEL_ANY}>Any label</option>
-              {labelOptions.map((label) => (
-                <option key={label} value={label}>
-                  {label}
-                </option>
-              ))}
-            </Select>
-          )}
-        </Refine>}
+          <Search size={16} aria-hidden />
+        </IconButton>
         <AddMenu
           disabled={connection === null}
           destinationName={destinationFolderId === "" ? "Library" : folderNameOf(destinationFolderId)}
@@ -920,6 +858,29 @@ export function BrowseSection({
           onNewFolder={() => void newFolderIn(destinationFolderId)}
         />
       </Head>
+      {searchOpen ? (
+        <div id={searchPanelId} className="os-files-search">
+          <div className="os-files-search-lines">
+            <CardCollectionSearch
+              label="Search files"
+              query={filter.search}
+              onQueryChange={(search) => patch({ search })}
+              inputRef={searchInput}
+              inputProps={{ "aria-label": "Search" }}
+              clearLabel="Clear the search"
+              mode={{ label: "Kind of file", value: filter.type, options: FILE_TYPES, onChange: (type) => patch({ type: type as FileType }) }}
+            />
+            <div className="os-files-search-order">
+              <Select id={`${searchPanelId}-sort`} label="Sort" icon={<ArrowUpDown size={13} aria-hidden />} value={filter.sort} onChange={(sort) => patch({ sort: sort as FilesSort })}>
+                {FILES_SORTS.map(([value, name]) => <option key={value} value={value}>{name}</option>)}
+              </Select>
+              <Select id={`${searchPanelId}-added`} label="Added" value={filter.added} onChange={(added) => patch({ added: added as AddedWithin })}>
+                {ADDED_WITHIN.map(([value, name]) => <option key={value} value={value}>{name}</option>)}
+              </Select>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <input
         ref={pickRef}
         type="file"
@@ -935,7 +896,7 @@ export function BrowseSection({
 
       {railNote ? <Caption>{railNote}</Caption> : null}
       <div className="os-files-body">
-        <FileFolders folders={visibleFolders} counts={counts} loading={foldersState === "seeding"}
+        <FileFolders folders={visibleFolders} counts={searching ? null : counts} loading={foldersState === "seeding"}
           renamingId={renamingFolderId} onOpen={folderId => patch({ folderId, search: "" })}
           onRename={(folderId, name) => void renameFolder(folderId, name)} onCancelRename={() => setRenamingFolderId("")}
           onMenu={(x, y, folder) => folder.archived ? setArchivedFolderMenu({x,y,folder}) : setFolderMenu({x,y,node:tree.byId.get(folder.id)!})} />
@@ -1020,9 +981,11 @@ export function BrowseSection({
             <UploadPlaceholder key={task.id} task={task} />
           ))}
           <div className="os-files-files">
-          {shared ? (
+          {foldersOnly ? (
+            visibleFolders.length === 0 && foldersState !== "seeding" ? <Caption>{emptyText}</Caption> : null
+          ) : shared ? (
             <LiveList<SharedNotice>
-              key={`shared|${filter.sortAscending ? "asc" : "desc"}`}
+              key={`shared|${filter.search}|${filter.type}|${filter.added}|${filter.sort}`}
               source={noticeList}
               rowId={(n) => n.id}
               // A renewal moves expiresAt: the file is shared with you for longer.
@@ -1046,12 +1009,12 @@ export function BrowseSection({
             />
           ) : (
           <LiveList<ArtifactRow>
-            key={`${filter.place}|${filter.folderId ?? "~"}|${filter.kind}|${filter.source}|${filter.accountId}|${filter.label}|${filter.search}`}
+            key={`${filter.place}|${filter.folderId ?? "~"}|${filter.kind}|${filter.source}|${filter.accountId}|${filter.label}|${filter.search}|${filter.type}|${filter.added}|${filter.sort}`}
             source={list}
             rowId={(r) => r.id}
             fingerprint={artifactFingerprint}
             label={headTitle}
-            emptyText={emptyText}
+            emptyText={draining ? undefined : emptyText}
             renderRow={(row, tick) => {
               // What the list row used to print beside the name -- where the
               // file came from, its folder while searching, its desk -- now
@@ -1082,15 +1045,15 @@ export function BrowseSection({
           />
           )}
           </div>
-          {shared ? null : <LoadMore feed={artifacts} />}
-          {facetsError ? <Caption>Folder counts and label options could not be updated. {facetsError}</Caption> : null}
+          {shared || foldersOnly ? null : <LoadMore feed={artifacts} />}
+          {facetsError ? <Caption>Folder counts could not be updated. {facetsError}</Caption> : null}
           {/* THE EMPTY STATE OFFERS THE WAY OUT (DESIGN.md rule 4's shape:
               an empty list that does not explain itself is the failure).
               `emptyText` says a filter is why; this is the act that undoes
               it, and it exists only while there IS something to undo -- a
               standing Clear control over a full list would be exactly the
               furniture rule 2 removes. */}
-          {narrowed && listedCount === 0 && tasks.length === 0 ? (
+          {narrowed && listedCount === 0 && tasks.length === 0 && !draining ? (
             <div className="os-files-clear">
               <Button onClick={clearFilters}>Clear the search and filters</Button>
             </div>
@@ -1432,7 +1395,7 @@ const PICKED_ICON: Record<string, ReactNode> = {
   save: <Import size={16} aria-hidden />,
 };
 
-/** What a file tile needs of a shared file: its name and its type. */
+/** What a file tile needs of a shared file: its name, its type and when it was shared. */
 function noticeTile(notice: SharedNotice): ArtifactRow {
-  return artifactFromRow({ id: notice.id, kind: "file", title: notice.title, format: notice.format, mimeType: notice.mimeType });
+  return artifactFromRow({ id: notice.id, kind: "file", title: notice.title, format: notice.format, mimeType: notice.mimeType, createdAt: notice.createdAt });
 }

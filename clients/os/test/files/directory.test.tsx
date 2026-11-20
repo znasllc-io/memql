@@ -54,7 +54,7 @@ describe("Files bounded directory", () => {
     h.connection = connection;
     await renderFiles();
     await scrollNextPage();
-    await click(screen.getByRole("button", { name: "Refine files" }));
+    await click(screen.getByRole("button", { name: "Search" }));
     const search = screen.getByRole("textbox", { name: "Search" });
     fireEvent.change(search, { target: { value: "ANCIENT" } });
     await screen.findByRole("button", { name: /Ancient needle/ });

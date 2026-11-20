@@ -90,9 +90,9 @@ describe("the live list and its cue", () => {
     await renderFiles();
     expect(screen.getByText(/Nothing in your Library yet/)).toBeTruthy();
 
-    // The search lives behind the Refine affordance now (DESIGN.md rule 2):
+    // The search lives in the hidden panel the Head's search button opens:
     // collapsed over an empty library, one click away when asked for.
-    await click(screen.getByRole("button", { name: "Refine files" }));
+    await click(screen.getByRole("button", { name: "Search" }));
     const search = screen.getByPlaceholderText("Search") as HTMLInputElement;
     fireEvent.change(search, { target: { value: "nope" } });
     expect(screen.getByText(/Nothing matches/)).toBeTruthy();

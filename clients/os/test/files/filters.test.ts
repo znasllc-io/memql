@@ -2,8 +2,12 @@ import { describe, expect, it } from "vitest";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import {
+  addedWithin,
   applyFilters,
+  compareRows,
   DEFAULT_FILTER,
+  fileKindOf,
+  needsWholePlace,
   labelsOf,
   LABEL_ANY,
   type FilesFilter,
@@ -110,9 +114,9 @@ describe("applyFilters", () => {
     expect(ids({ search: "nothing-matches" })).toEqual([]);
   });
 
-  it("sorts newest first by default with the ascending toggle honoured", () => {
+  it("sorts newest first by default with Oldest first honoured", () => {
     expect(ids({ folderId: null })).toEqual(["a-report", "a-video", "a-doc", "a-made"]);
-    expect(ids({ folderId: null, sortAscending: true })).toEqual([
+    expect(ids({ folderId: null, sort: "oldest" })).toEqual([
       "a-made",
       "a-doc",
       "a-video",
@@ -158,5 +162,68 @@ describe("the label facet", () => {
   it("collects the labels in a population, de-duplicated, alphabetical, blanks dropped", () => {
     expect(labelsOf([TAGGED, ALSO, BLANKS])).toEqual(["Client-Acme", "kept", "urgent"]);
     expect(labelsOf([])).toEqual([]);
+  });
+});
+
+// The search panel's questions (José, Nov 19 2026): kind of file, Added, sort.
+describe("the search panel's kind of file, Added window and sorts", () => {
+  const kind = (title: string, mimeType = "", format = "") => fileKindOf({ title, mimeType, format });
+
+  it("reads the name's extension first, then the MIME type, then the recorded format", () => {
+    expect(kind("Report.PDF")).toBe("documents");
+    expect(kind("deck.pptx")).toBe("documents");
+    expect(kind("Site visit 03.jpg")).toBe("images");
+    expect(kind("clip.MOV")).toBe("media");
+    expect(kind("jingle.m4a")).toBe("media");
+    expect(kind("Pricing model.xlsx")).toBe("sheets");
+    expect(kind("site.tar.gz")).toBe("archives");
+    // The extension wins over a MIME type that says something else.
+    expect(kind("table.csv", "text/plain")).toBe("sheets");
+    expect(kind("scan", "application/pdf")).toBe("documents");
+    expect(kind("export", "text/csv")).toBe("sheets");
+    expect(kind("bundle", "application/x-zip-compressed")).toBe("archives");
+    expect(kind("voice memo", "audio/mpeg")).toBe("media");
+    expect(kind("Q3 figures", "", "spreadsheet")).toBe("sheets");
+    expect(kind("export.json", "application/json")).toBe("misc");
+    expect(kind("Makefile")).toBe("misc");
+    expect(kind(".env")).toBe("misc");
+  });
+
+  it("filters a population by kind, and Folders keeps no file at all", () => {
+    expect(ids({ type: "documents" })).toEqual(["a-report", "a-doc", "a-made"]);
+    expect(ids({ type: "media" })).toEqual(["a-video"]);
+    expect(ids({ type: "folders" })).toEqual([]);
+  });
+
+  it("keeps what was added inside the window: Today from local midnight, the others rolling", () => {
+    const now = new Date(2026, 10, 20, 9, 30).getTime();
+    const at = (y: number, m: number, d: number, h = 0) => new Date(y, m, d, h).toISOString();
+    expect(addedWithin(at(2026, 10, 20, 0), "today", now)).toBe(true);
+    expect(addedWithin(at(2026, 10, 19, 23), "today", now)).toBe(false);
+    expect(addedWithin(at(2026, 10, 14, 10), "7d", now)).toBe(true);
+    expect(addedWithin(at(2026, 10, 13, 9), "7d", now)).toBe(false);
+    expect(addedWithin(at(2026, 9, 22, 10), "30d", now)).toBe(true);
+    expect(addedWithin("", "30d", now)).toBe(false);
+    expect(addedWithin("", "any", now)).toBe(true);
+  });
+
+  it("sorts by name, by size largest first with unknown sizes last, and by kind", () => {
+    const rows = [VIDEO, REPORT, DOC, MADE];
+    const sizes = new Map([["a-video", 900], ["a-report", 4000]]);
+    const order = (sort: Parameters<typeof compareRows>[0]) =>
+      [...rows].sort(compareRows(sort, (row) => sizes.get(row.id))).map((row) => row.id);
+    expect(order("name")).toEqual(["a-video", "a-doc", "a-report", "a-made"]);
+    expect(order("size")).toEqual(["a-report", "a-video", "a-doc", "a-made"]);
+    // Documents before Media, as the Kind menu lists them; names break ties.
+    expect(order("kind")).toEqual(["a-doc", "a-report", "a-made", "a-video"]);
+  });
+
+  it("asks for the whole place only for what the server's pages cannot answer", () => {
+    expect(needsWholePlace(DEFAULT_FILTER)).toBe(false);
+    expect(needsWholePlace({ ...DEFAULT_FILTER, sort: "oldest" })).toBe(false);
+    expect(needsWholePlace({ ...DEFAULT_FILTER, type: "folders" })).toBe(false);
+    expect(needsWholePlace({ ...DEFAULT_FILTER, sort: "name" })).toBe(true);
+    expect(needsWholePlace({ ...DEFAULT_FILTER, type: "images" })).toBe(true);
+    expect(needsWholePlace({ ...DEFAULT_FILTER, added: "7d" })).toBe(true);
   });
 });
