@@ -1227,6 +1227,18 @@ concept guards. Setting `simulatedFunding: 0` prevents further simulated funding
 and hosting; it does not disguise stored simulated credit as real funds or erase
 receipts. Existing room deadlines continue to apply.
 
+The Go convenience builder omits zero-valued optional integers. To disable the
+simulation explicitly for the local `callkey` site, use the supported raw call:
+
+```go
+qc.ExecuteNamed(ctx, "callsPolicySet", `builtin callsPolicySet(siteId: "callkey", simulatedFunding: 0)`)
+```
+
+For another site, encode its identifier as a MemQL string rather than concatenating
+untrusted text. The TypeScript builder also preserves an explicit
+`simulatedFunding: 0`. Do not rely on `CallsPolicySetArgs{SimulatedFunding: 0}`
+to send a change.
+
 The account capability `simulatedFunding` exposes that switch. Authenticated
 snapshots include `fundingMode` (`unfunded`, `simulation`, or `legacy`), integer
 `balanceCents`, and an optional unexpired `activePass` with its fixed grant,
