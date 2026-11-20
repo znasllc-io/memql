@@ -16,6 +16,41 @@ type historyHTTPService struct {
 	requests []calls.HistoryRequest
 	actions  []calls.HistoryActionRequest
 	renames  int
+	joins    []calls.JoinBody
+}
+
+func (s *historyHTTPService) Join(ctx context.Context, site calls.SiteRef, sess *calls.Session, req calls.JoinBody) (calls.JoinResult, calls.Session, error) {
+	s.joins = append(s.joins, req)
+	if sess == nil {
+		return calls.JoinResult{}, calls.Session{}, calls.ErrNoSession
+	}
+	resolved, err := s.Session(ctx, site, sess.Token)
+	if err != nil {
+		return calls.JoinResult{}, calls.Session{}, err
+	}
+	return s.admission(true), resolved, nil
+}
+
+func TestCallsHistoryJoinRequiresCookieAndForwardsOnlyClosedJoinBody(t *testing.T) {
+	r, svc := historyHTTPRig(t)
+	id := strings.Repeat("a", 64)
+	body := callsJSON(t, map[string]any{"historyId": id, "name": "Returned", "confirm": map[string]any{"adult": true, "noMinors": true, "terms": "preview"}})
+	require.Equal(t, http.StatusUnauthorized, r.post("/calls/join", body, "").Code)
+	require.Empty(t, svc.joins, "a private history id without a cookie never reaches the service")
+	require.Equal(t, http.StatusOK, r.post("/calls/join", body, r.secrets.hostSession).Code)
+	require.Len(t, svc.joins, 1)
+	require.Equal(t, id, svc.joins[0].HistoryID)
+	require.Empty(t, svc.joins[0].Token)
+	require.Empty(t, svc.joins[0].HostToken)
+	require.Equal(t, "Returned", svc.joins[0].Name)
+	for _, extra := range []string{"keyId", "roomId", "host"} {
+		bad := callsJSON(t, map[string]any{"historyId": id, "name": "Returned", extra: "forged"})
+		require.Equal(t, http.StatusBadRequest, r.post("/calls/join", bad, r.secrets.hostSession).Code)
+	}
+	require.Len(t, svc.joins, 1)
+	r.stamp[CallsStampOwnerHeader] = callsTestStranger
+	require.Equal(t, http.StatusNotFound, r.post("/calls/join", body, r.secrets.hostSession).Code)
+	require.Len(t, svc.joins, 1)
 }
 
 func (s *historyHTTPService) History(ctx context.Context, sess calls.Session, req calls.HistoryRequest) (calls.HistoryPage, error) {

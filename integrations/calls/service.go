@@ -679,6 +679,9 @@ func (s *Service) Join(ctx context.Context, site callrules.SiteRef, sess *callru
 		return callrules.JoinResult{}, none, err
 	}
 	guestLink, hostLink := strings.TrimSpace(body.Token), strings.TrimSpace(body.HostToken)
+	if body.HistoryID != "" && (!historyIDValid(body.HistoryID) || guestLink != "" || hostLink != "") {
+		return callrules.JoinResult{}, none, callrules.ErrInvalid
+	}
 	if guestLink != "" && hostLink != "" {
 		return callrules.JoinResult{}, none, fmt.Errorf("%w: a join presents one link, not both", callrules.ErrInvalid)
 	}
@@ -687,6 +690,9 @@ func (s *Service) Join(ctx context.Context, site callrules.SiteRef, sess *callru
 		link, asHost = hostLink, true
 	}
 	presented := sess != nil && strings.TrimSpace(sess.Token) != ""
+	if body.HistoryID != "" && !presented {
+		return callrules.JoinResult{}, none, callrules.ErrNoSession
+	}
 	if link == "" && !presented {
 		return callrules.JoinResult{}, none, fmt.Errorf("%w: a join names its call, with a link or a session seated in it", callrules.ErrInvalid)
 	}
@@ -730,11 +736,19 @@ func (s *Service) Join(ctx context.Context, site callrules.SiteRef, sess *callru
 	if policy.RequirePasskeys && (held == nil || held.CredentialID == "") {
 		return callrules.JoinResult{}, none, callrules.Refuse(callrules.ErrNoSession, "passkey_required", "sign in before joining")
 	}
-	ask := joinAsk{name: name, confirm: confirm, asHost: asHost, pepper: pepper, link: link}
+	ask := joinAsk{name: name, confirm: confirm, asHost: asHost, pepper: pepper, link: link, historyID: body.HistoryID}
 	if presented {
 		ask.token = strings.TrimSpace(sess.Token)
 	}
-	room, err := s.roomFor(ctx, site, pepper, link, asHost, held)
+	var room *roomRow
+	if ask.historyID != "" {
+		room, err = s.roomFromHistory(ctx, site, held, ask.historyID)
+		if held != nil {
+			ask.historyKeyID = held.KeyID
+		}
+	} else {
+		room, err = s.roomFor(ctx, site, pepper, link, asHost, held)
+	}
 	if errors.Is(err, errLinkOpensNoRoom) {
 		// A LINK THAT FINDS NO ROOM MAY BE A BOOKED CALL'S, whose room its first join
 		// opens (schedule.go).
@@ -847,6 +861,9 @@ type joinAsk struct {
 	link    string // the link presented, guest or host, or "" for a join by session
 	token   string // the presented session's token, when one was presented
 	pepper  []byte
+	// Recovery carries only an account-scoped lookup. Recheck it after acquiring
+	// the admission gates; a projection's remembered role is never authority.
+	historyID, historyKeyID string
 }
 
 // errLinkOpensNoRoom is a link that finds no room on the deployable: no call of this
@@ -903,6 +920,17 @@ func (s *Service) roomFor(ctx context.Context, site callrules.SiteRef, pepper []
 func (s *Service) joinGated(ctx context.Context, site callrules.SiteRef, room roomRow, server MediaServer, policy callrules.Policy, held *sessionRow, ask joinAsk) (callrules.JoinResult, callrules.Session, seatRow, error) {
 	gateKeys := fundingAdmissionGates(room)
 	if held != nil && held.KeyID != "" {
+		if ask.historyID != "" {
+			// Recovery also checks the attendee key. Multiple key locks must be
+			// ordered before the room/server locks even when attendee and payer
+			// differ, or two accounts recovering each other's calls could deadlock.
+			keys := []string{keyGate(held.KeyID)}
+			if room.FundingPassID != "" && room.KeyID != held.KeyID {
+				keys = append(keys, keyGate(room.KeyID))
+			}
+			sort.Strings(keys)
+			gateKeys = append(keys, roomGate(room.ID), serverGate(room.MediaServerID))
+		}
 		gateKeys = append([]string{accountGate(held.KeyID)}, gateKeys...)
 	}
 	release, err := s.gates(ctx, gateKeys...)
@@ -963,6 +991,23 @@ func (s *Service) joinGated(ctx context.Context, site callrules.SiteRef, room ro
 		if seat, err = s.store.seatByID(fresh, owner, held.SeatID); err != nil {
 			return callrules.JoinResult{}, held.stateOf(ask.token, site), seatRow{}, err
 		}
+	}
+	if ask.historyID != "" {
+		if held == nil || held.KeyID != ask.historyKeyID {
+			return callrules.JoinResult{}, callrules.Session{}, seatRow{}, callrules.ErrNoSession
+		}
+		resolved, e := s.roomFromHistory(fresh, site, held, ask.historyID)
+		if e != nil {
+			return refuseJoin(callrules.ReasonOf(e)), held.stateOf(ask.token, site), seatRow{}, e
+		}
+		if resolved.ID != current.ID {
+			return callrules.JoinResult{}, held.stateOf(ask.token, site), seatRow{}, callrules.ErrNotFound
+		}
+		seat, e = s.recoverHistorySeat(fresh, site, *current, held, seat, now)
+		if e != nil {
+			return refuseJoin(callrules.ReasonOf(e)), held.stateOf(ask.token, site), seatRow{}, e
+		}
+		ask.asHost = current.KeyID == held.KeyID
 	}
 	out := held.stateOf(ask.token, site)
 

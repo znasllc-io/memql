@@ -636,10 +636,14 @@ func (h *callsHandler) serveJoin(w http.ResponseWriter, r *http.Request, c calls
 	var body struct {
 		Token     string           `json:"token"`
 		HostToken string           `json:"hostToken"`
+		HistoryID string           `json:"historyId"`
 		Name      string           `json:"name"`
 		Confirm   callsConfirmBody `json:"confirm"`
 	}
 	if !h.decode(w, r, c, &body) {
+		return
+	}
+	if body.HistoryID != "" && !h.requireSession(w, c) {
 		return
 	}
 	guest, host := strings.TrimSpace(body.Token), strings.TrimSpace(body.HostToken)
@@ -665,7 +669,7 @@ func (h *callsHandler) serveJoin(w http.ResponseWriter, r *http.Request, c calls
 		held = &sess
 	}
 	result, out, err := h.svc.Join(r.Context(), c.site, held, calls.JoinBody{
-		Token: body.Token, HostToken: body.HostToken, Name: body.Name, Confirm: body.Confirm.confirmation(),
+		Token: body.Token, HostToken: body.HostToken, HistoryID: body.HistoryID, Name: body.Name, Confirm: body.Confirm.confirmation(),
 	})
 	// THE SESSION THE JOINER NOW HOLDS is handed over whenever it is not the one they
 	// brought, whatever else the answer says: the service has written it, and the person's

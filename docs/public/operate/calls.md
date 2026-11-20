@@ -498,7 +498,7 @@ all, so a page must not assume a JSON body on a `5xx`.
 | `POST /schedule` | `{"start", "minutes", "title"}` | the booking: `id`, `start`, `end`, `title`, `guestToken`, `hostToken`, `guestLink`, `hostLink`, `ics` |
 | `POST /reschedule` | `{"id", "start", "minutes", "title"}` | the booking, with new links |
 | `POST /cancel` | `{"id"}` | `204` |
-| `POST /join` | `{"token"}` or `{"hostToken"}`, with `"name"` and `"confirm"`; neither token, to rejoin on the session | a join, and the cookie of a new session |
+| `POST /join` | one of `{"token"}`, `{"hostToken"}` or authenticated `{"historyId"}`, with `"name"` and `"confirm"`; none, to rejoin on the session's current seat | a join, and the cookie of a new session |
 | `GET /queue` | nothing | a join: a waiter's poll, or a fresh pass for a seat already in |
 | `POST /host` | `{"action", "seat"}` | `204` |
 | `POST /leave` | `{}` | `204`: the hang-up |
@@ -571,6 +571,24 @@ It is not a deployable-wide roster: another key cannot read, rename, archive or 
 its rows, even when both keys joined the same call. `accountId` is the opaque key id;
 neither key text, invitation tokens nor participant names are returned. A frozen key
 may read its history; expired or revoked session authority is refused.
+
+An active history entry can reopen its **existing** call through
+`POST /join {"historyId":"<history id>","name":"Returned","confirm":...}`.
+It requires the current account cookie; `historyId` is mutually exclusive with
+either invitation token. The server resolves the private entry to its current
+room, or an already-opened booking's room, and repeats ownership and live-state
+checks under account/key/admission gates. It never exposes an invitation or
+opens a new room from history. An unopened booking still needs its invitation.
+
+Recovery reuses that key's current or most recently updated seat, preserving its
+media identity and waiting-room position across a new sign-in or another replica.
+The room's owning key or the seat's current host authority determines controls;
+the history role grants nothing. Removed seats, inactive keys, archived/deleted
+entries, ended rooms and sessions in another active call are refused. Repeated
+recovery requests share the existing seat and the usual join-rate budget.
+Regression coverage: `TestHistoryJoin*` in `integrations/calls` and
+`TestCallsHistoryJoinRequiresCookieAndForwardsOnlyClosedJoinBody` in
+`component/server`.
 
 `GET /history` accepts only `archive=0|1`, `limit=1..50` (default 20),
 `period=7|30|90` (default 30), `search` (at most 256 UTF-8 bytes), `role=host|guest`,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	callrules "github.com/znasllc-io/memql/component/calls"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
@@ -11,6 +12,9 @@ import (
 
 // Each immutable entry is both a historical receipt and the complete resulting
 // simulated state. A key's strictly increasing version stamp selects its head.
+// The server-only calls below stamp their named-construct boundary, as the
+// credential/history stores do; readAs/writeAs also bind the site owner's
+// internal context before execution. No client-origin graph access is added.
 type simulationWalletEntry struct {
 	ID, SiteID, KeyID, Kind, Plan, RequestDigest string
 	Version                                      time.Time
@@ -55,7 +59,7 @@ func simulationWalletFrom(row map[string]any) (*simulationWalletEntry, error) {
 
 func (s *Service) simulatedWallet(ctx context.Context, owner, siteID, keyID string) (*simulationWalletEntry, error) {
 	call, err := langparser.RenderCall("callsSimulatedWalletLatest", map[string]any{"siteId": siteID, "keyId": keyID})
-	rows, err := s.store.readAs(ctx, owner, "the simulated wallet", call, err)
+	rows, err := s.store.readAs(auth.ContextWithInternalOrigin(ctx), owner, "the simulated wallet", call, err)
 	if err != nil || len(rows) == 0 {
 		return nil, err
 	}
@@ -71,7 +75,7 @@ func (s *Service) simulatedWallet(ctx context.Context, owner, siteID, keyID stri
 
 func (s *Store) simulatedWalletEntryByID(ctx context.Context, owner, id string) (*simulationWalletEntry, error) {
 	call, err := langparser.RenderCall("callsSimulatedWalletEntryById", map[string]any{"id": id})
-	rows, err := s.readAs(ctx, owner, "the simulated funding receipt", call, err)
+	rows, err := s.readAs(auth.ContextWithInternalOrigin(ctx), owner, "the simulated funding receipt", call, err)
 	if err != nil || len(rows) == 0 {
 		return nil, err
 	}
@@ -89,5 +93,5 @@ func (s *Store) createSimulatedWalletEntry(ctx context.Context, owner string, e 
 		args["passTotalSeconds"], args["passDailySeconds"], args["passMaxPeople"] = p.TotalSeconds, p.DailySeconds, p.MaxPeople
 	}
 	call, err := langparser.RenderCall("createCallsSimulatedWalletEntry", args)
-	return s.writeAs(ctx, owner, absent(simulationWalletConcept, e.ID), "the simulated funding receipt", call, err)
+	return s.writeAs(auth.ContextWithInternalOrigin(ctx), owner, absent(simulationWalletConcept, e.ID), "the simulated funding receipt", call, err)
 }

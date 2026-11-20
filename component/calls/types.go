@@ -153,11 +153,11 @@ type Confirmation struct {
 	Terms           string
 }
 
-// JoinBody is one join request: at most one of the two links, the name the
-// person shows in this call, and their confirmation.
+// JoinBody names a call by one invitation, an account-owned history entry, or
+// the session's current seat. HistoryID is a lookup, never a bearer capability.
 type JoinBody struct {
-	Token, HostToken, Name string
-	Confirm                Confirmation
+	Token, HostToken, HistoryID, Name string
+	Confirm                           Confirmation
 }
 
 // JoinResult answers a join, a start's host seat or a poll. An admit carries
