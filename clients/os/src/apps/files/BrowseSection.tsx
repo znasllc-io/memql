@@ -655,14 +655,17 @@ export function BrowseSection({
   const outgoingList = useLiveView<Row, OutgoingShare>(outgoing.source, `files:sharing:${filter.search}|${filter.type}|${filter.added}|${filter.sort}`,
     (rows) => askOfShares(rows.map(outgoingFromRow).filter((share) => share.id !== "" && shareStands(share)), filter));
   const shareTitles = useShareTitles(sharingPlace ? outgoingList?.snapshot.rows ?? [] : []);
-  // SHARED BY (item 13; Jesús's pick, Nov 20, draft B): someone at admin rank
+  // SHARED BY (item 13; Jesús's pick, Nov 20, draft B): someone at member rank
   // or above may look past their own shares -- "Me", "Everyone", or one
   // person -- and Stop what the engine lets them. It starts on "Me", which is
   // the live list above; the rest is librarySharesOverseen, which the engine
-  // already narrows to the shares this person may stop (owners: everyone's;
-  // developers and admins: those ranked below them). The drop-down is only
+  // already narrows to the shares this person may stop. The rule (Jesús, Nov 20
+  // checklist item 14): your own plus everyone ranked strictly below you;
+  // owners and admins never see their equals, developers do see each other,
+  // members see viewers', viewers only their own -- so the floor here is the
+  // member rung, the lowest rank with anyone below it. The drop-down is only
   // the way in; the engine decides, on the list and on every Stop.
-  const overseer = sharingPlace && roleAdmits(access?.role ?? "", { min: "admin" });
+  const overseer = sharingPlace && roleAdmits(access?.role ?? "", { min: "user" });
   const [sharedBy, setSharedBy] = useState("me");
   const overseen = useSharesOverseen(overseer);
   const overseenList = useLiveView<Row, OutgoingShare>(overseen.source, `files:overseen:${sharedBy}:${filter.search}|${filter.type}|${filter.added}|${filter.sort}`,

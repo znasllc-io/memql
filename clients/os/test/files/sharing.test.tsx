@@ -481,9 +481,17 @@ describe("Shared by, for someone who oversees others' shares (item 13, Nov 20 20
     expect(connection.callsNamed("librarySharesOverseen").length).toBeGreaterThan(reads);
   });
 
-  it("is absent for someone below admin rank", async () => {
-    const connection = connect({ shares: [mine], overseen });
+  it("is offered to a member, who oversees viewers (Nov 20 rule)", async () => {
+    connect({ shares: [mine], overseen });
     await renderFiles({ role: "writer" });
+    await click(within(rail()).getByRole("button", { name: "Sharing" }));
+    await screen.findByRole("list", { name: "Sharing" });
+    expect(await screen.findByLabelText("Shared by", { selector: "button" })).toBeTruthy();
+  });
+
+  it("is absent for a viewer, who oversees no one", async () => {
+    const connection = connect({ shares: [mine], overseen });
+    await renderFiles({ role: "reader" });
     await click(within(rail()).getByRole("button", { name: "Sharing" }));
     await screen.findByRole("list", { name: "Sharing" });
     expect(screen.queryByLabelText("Shared by", { selector: "button" })).toBeNull();
