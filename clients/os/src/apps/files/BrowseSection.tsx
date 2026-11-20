@@ -28,6 +28,7 @@ import { planArchive, readArchiveMembers, runArchiveWalk, subtreeHoldsArtifact }
 
 import { composeIntent, MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION, MATERIALIZER_MADE_SECTION } from "../../items/materialize";
 import { AddButton } from "../../kit/AddButton";
+import { Submenu } from "../../kit/Submenu";
 import { InPlaceAsk } from "../../kit/pressHold";
 import { FileFolders } from "./FileFolders";
 import { FilesRail } from "./Rail";
@@ -905,15 +906,17 @@ export function BrowseSection({
         </Refine>}
         <AddMenu
           disabled={connection === null}
-          destinationName={destinationFolderId === "" ? "Library" : folderNameOf(destinationFolderId)}
           onUpload={() => pickRef.current?.click()}
-          onNewMarkdown={canOpen(registry, MATERIALIZER_APP_ID) ? () => actions.openApp(
-            MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION, composeIntent({
-              format: "markdown",
-              ...(destinationFolderId ? { folderId: destinationFolderId } : {}),
-              returnTo: { appId: "files", sectionId: "browse" },
-            }),
-          ) : undefined}
+          newFileKinds={canOpen(registry, MATERIALIZER_APP_ID) ? [{
+            label: "Markdown file",
+            run: () => actions.openApp(
+              MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION, composeIntent({
+                format: "markdown",
+                ...(destinationFolderId ? { folderId: destinationFolderId } : {}),
+                returnTo: { appId: "files", sectionId: "browse" },
+              }),
+            ),
+          }] : []}
           onNewFolder={() => void newFolderIn(destinationFolderId)}
         />
       </Head>
@@ -1271,27 +1274,29 @@ export function BrowseSection({
   );
 }
 
+/** One kind of file "New file" can make. Add an entry to offer another kind. */
+type NewFileKind = { label: string; run: () => void };
+
 /**
- * The Add menu: one primary control, two ways to put something in the place
- * being looked at.
+ * The Add menu: one primary control, three ways to put something in the
+ * place being looked at, in Jesús's order (Nov 20 2026): Upload files, New
+ * folder, New file. "New file" is not an action of its own: it opens a side
+ * menu of the kinds of file that can be made (today only Markdown), so more
+ * kinds are one more entry in `newFileKinds`.
  *
- * IT NAMES THE DESTINATION. Both actions land in the folder currently
- * scoped, which is invisible from the button -- so the menu says where,
- * rather than leaving somebody to find out by doing it. Searching or
- * standing in Archive resolves to the Library root upstream, and the label
- * follows that same value rather than guessing at it separately.
+ * NO HEADING. The menu once named the destination ("Into Library"); Jesús
+ * removed it ("Remove it. I don't like it."). Everything still lands in the
+ * folder being looked at (the Library root while searching or in Archive).
  */
 function AddMenu({
   disabled,
-  destinationName,
   onUpload,
-  onNewMarkdown,
+  newFileKinds,
   onNewFolder,
 }: {
   disabled: boolean;
-  destinationName: string;
   onUpload: () => void;
-  onNewMarkdown?: () => void;
+  newFileKinds: NewFileKind[];
   onNewFolder: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -1316,8 +1321,7 @@ function AddMenu({
   return (
     <div className="os-files-add" ref={wrap}>
       {/* A bare "+" in the accent's outline, no word (José: "make it more
-          noticeable"; Jesús's pick, Nov 20 2026). Its tooltip says Add; the
-          menu still names the folder the new things land in. */}
+          noticeable"; Jesús's pick, Nov 20 2026). Its tooltip says Add. */}
       <AddButton label="Add" outlined aria-expanded={open} onClick={() => setOpen(!open)} />
       {open ? (
         <div
@@ -1331,7 +1335,6 @@ function AddMenu({
             }
           }}
         >
-          <p className="os-menu-head">Into {destinationName}</p>
           <button
             type="button"
             role="menuitem"
@@ -1340,11 +1343,6 @@ function AddMenu({
           >
             <Upload size={13} aria-hidden /> Upload files
           </button>
-          {onNewMarkdown ? (
-            <button type="button" role="menuitem" className="os-menu-item" onClick={() => choose(onNewMarkdown)}>
-              <FilePlus size={13} aria-hidden /> New Markdown file
-            </button>
-          ) : null}
           <button
             type="button"
             role="menuitem"
@@ -1354,6 +1352,15 @@ function AddMenu({
           >
             <FolderPlus size={13} aria-hidden /> New folder
           </button>
+          {newFileKinds.length > 0 ? (
+            <Submenu label="New file" icon={<FilePlus size={13} aria-hidden />}>
+              {newFileKinds.map((kind) => (
+                <button key={kind.label} type="button" role="menuitem" className="os-menu-item" onClick={() => choose(kind.run)}>
+                  <FileText size={13} aria-hidden /> {kind.label}
+                </button>
+              ))}
+            </Submenu>
+          ) : null}
         </div>
       ) : null}
     </div>

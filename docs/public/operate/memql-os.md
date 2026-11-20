@@ -319,7 +319,7 @@ file, kind and name, with an optional description and organization. A recipe
 keeps a reusable request: save one from an eligible made file, then open it in
 Recipes to inspect its inputs and **Run it again**.
 
-Files' **Add to this folder** menu offers **New Markdown file**. It opens Make a
+Files' **Add to this folder** menu offers **New file > Markdown file**. It opens Make a
 file on Name, with Markdown and the current folder answered and a way back to
 Files. Another app can supply the same starting setup, including sources and an
 organization requirement. A setup is for one file and starts no work by itself.

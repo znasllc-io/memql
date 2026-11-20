@@ -4727,6 +4727,37 @@ a.os-button {
   gap: 8px;
 }
 
+/* Kit Submenu (src/kit/Submenu.tsx): a row that opens the same .os-menu
+ * beside it. It sits level with its row, past the outer menu's 6px padding,
+ * and flips to the left when the right has no room (data-side). */
+.os-submenu {
+  position: relative;
+  display: grid;
+}
+.os-submenu-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.os-submenu-row[aria-expanded="true"] {
+  background: var(--os-raised);
+}
+.os-submenu-label { flex: 1; }
+.os-submenu-menu {
+  position: absolute;
+  top: -6px;
+  left: calc(100% + 6px);
+}
+.os-submenu-menu[data-side="left"] {
+  left: auto;
+  right: calc(100% + 6px);
+}
+.os-submenu-menu .os-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .os-files-list {
   flex: none;
   min-width: 0;

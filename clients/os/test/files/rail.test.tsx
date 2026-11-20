@@ -42,9 +42,8 @@ describe("the Add control", () => {
     await click(screen.getByRole("button", { name: /Add/ }));
     expect(screen.getByRole("menuitem", { name: /Upload files/ })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: /New folder/ })).toBeTruthy();
-    // Both actions land in the folder being looked at, which is invisible
-    // from the button, so the menu says it.
-    expect(screen.getByText("Into Library")).toBeTruthy();
+    // No heading naming the folder (Jesús, Nov 20 2026: "Remove it.").
+    expect(screen.queryByText("Into Library")).toBeNull();
   });
 
   it("creates the folder inside the folder being looked at", async () => {
@@ -54,7 +53,6 @@ describe("the Add control", () => {
 
     await click(screen.getByRole("button", { name: /Open folder Contracts/ }));
     await click(screen.getByRole("button", { name: /Add/ }));
-    expect(screen.getByText("Into Contracts")).toBeTruthy();
     await click(screen.getByRole("menuitem", { name: /New folder/ }));
 
     const calls = connection.callsNamed("createLibraryFolder");
