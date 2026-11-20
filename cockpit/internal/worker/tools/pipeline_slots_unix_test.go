@@ -426,18 +426,33 @@ func barrierCommand(name string) string {
 	return `touch "$BARRIER/` + name + `"; i=0; while [ ! -f "$BARRIER/finish" ]; do i=$((i+1)); [ "$i" -lt 1200 ] || exit 3; sleep 0.05; done; echo ` + name + `-done`
 }
 
-func waitForFiles(t *testing.T, paths ...string) {
+func waitForSlotFiles(t *testing.T, steps map[string]<-chan slotStepResult) {
 	t.Helper()
-	deadline := time.Now().Add(60 * time.Second)
-	for _, path := range paths {
-		for {
-			if _, err := os.Stat(path); err == nil {
-				break
+	deadline := time.NewTimer(60 * time.Second)
+	defer deadline.Stop()
+	tick := time.NewTicker(20 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		var missing []string
+		for path, done := range steps {
+			select {
+			case result := <-done:
+				t.Fatalf("step for %s ended before the concurrent barrier: failure=%v success=%v", path, result.failure, result.success)
+			default:
 			}
-			if time.Now().After(deadline) {
-				t.Fatalf("%s never appeared: the steps did not run at once", path)
+			if _, err := os.Stat(path); os.IsNotExist(err) {
+				missing = append(missing, path)
+			} else if err != nil {
+				t.Fatalf("inspect the concurrent barrier %s: %v", path, err)
 			}
-			time.Sleep(20 * time.Millisecond)
+		}
+		if len(missing) == 0 {
+			return
+		}
+		select {
+		case <-deadline.C:
+			t.Fatalf("%v never appeared: the steps did not run at once", missing)
+		case <-tick.C:
 		}
 	}
 }
@@ -449,10 +464,26 @@ type slotStepResult struct {
 
 func startSlotStep(t *testing.T, ctx context.Context, args map[string]any, policy *Policy) <-chan slotStepResult {
 	t.Helper()
+	ctx, cancel := context.WithCancel(ctx)
 	done := make(chan slotStepResult, 1)
+	exited := make(chan struct{})
+	// An assertion can fail before the barrier is released. Stop and join the
+	// step before fixture cleanup restores the capacity hooks or removes files.
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-exited:
+		case <-time.After(pipelineStopGrace + 2*pipelineOutputDrain + time.Second):
+			t.Error("pipeline step did not finish after test cancellation")
+		}
+	})
 	go func() {
+		defer close(exited)
 		out := &recordedOutput{}
 		success, failure := runPipelineStep(ctx, "", args, policy, out.emit, out.artifact)
+		if failure != nil {
+			t.Logf("pipeline step %q returned %s: %s; output: %s", pipelineStepOf(ctx), failure.GetErrorCode(), failure.GetErrorMessage(), out.all())
+		}
 		done <- slotStepResult{success, failure}
 	}()
 	return done
@@ -471,7 +502,7 @@ func TestPipelineStepsRunSideBySideUpToTheMachinesSlots(t *testing.T) {
 	ctxB, argsB := step("b", barrierCommand("b"))
 	doneA := startSlotStep(t, ctxA, argsA, policy)
 	doneB := startSlotStep(t, ctxB, argsB, policy)
-	waitForFiles(t, filepath.Join(barrier, "a"), filepath.Join(barrier, "b"))
+	waitForSlotFiles(t, map[string]<-chan slotStepResult{filepath.Join(barrier, "a"): doneA, filepath.Join(barrier, "b"): doneB})
 
 	// Both slots are taken: a third step is refused before it clones, and
 	// so is another attempt of a running step.
@@ -515,7 +546,7 @@ func TestASecondAttemptOfARunningStepIsRefusedWhileASlotIsFree(t *testing.T) {
 	barrier := t.TempDir()
 	env := map[string]any{"env": map[string]any{"BARRIER": barrier}}
 	running := startSlotStep(t, withPipelineStep(context.Background(), "run-1", "tests.db"), stepArgs(t, fx, barrierCommand("first"), env), policy)
-	waitForFiles(t, filepath.Join(barrier, "first"))
+	waitForSlotFiles(t, map[string]<-chan slotStepResult{filepath.Join(barrier, "first"): running})
 
 	out := &recordedOutput{}
 	_, failed := runPipelineStep(withPipelineStep(context.Background(), "run-1", "tests.db"), "", stepArgs(t, fx, `touch "$BARRIER/second"`, env), policy, out.emit, out.artifact)
@@ -547,7 +578,7 @@ func TestAMachineNamingNoSlotsRunsOneStepAtATime(t *testing.T) {
 	barrier := t.TempDir()
 	env := map[string]any{"env": map[string]any{"BARRIER": barrier}}
 	running := startSlotStep(t, withPipelineStep(context.Background(), "run-1", "a"), stepArgs(t, fx, barrierCommand("a"), env), policy)
-	waitForFiles(t, filepath.Join(barrier, "a"))
+	waitForSlotFiles(t, map[string]<-chan slotStepResult{filepath.Join(barrier, "a"): running})
 	out := &recordedOutput{}
 	_, failed := runPipelineStep(withPipelineStep(context.Background(), "run-1", "b"), "", stepArgs(t, fx, `touch "$BARRIER/b"`, env), policy, out.emit, out.artifact)
 	if failed.GetErrorCode() != "pipeline_capacity_busy" || failed.GetErrorMessage() != errPipelineBusy.Error() || out.all() != "" {
