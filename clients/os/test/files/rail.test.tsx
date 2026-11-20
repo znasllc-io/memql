@@ -224,6 +224,18 @@ describe("the picked file's icons on the Head", () => {
       .toEqual(within(menu).getAllByRole("menuitem").map((item) => item.textContent));
   });
 
+  it("name themselves at once, above the icon, not with the browser's slow tooltip", async () => {
+    h.connection = fakeConnection({ artifacts: [artifactRow({ id: "a-1", title: "brief.pdf" })] });
+    await renderFiles();
+    await click(screen.getByRole("button", { name: /brief\.pdf/ }));
+    const download = within(screen.getByRole("group", { name: "Selected: brief.pdf" })).getByRole("button", { name: "Download" });
+    expect(download.hasAttribute("title")).toBe(false);
+    fireEvent.pointerEnter(download);
+    expect(document.body.querySelector(".os-tip")?.textContent).toBe("Download");
+    fireEvent.pointerLeave(download);
+    expect(document.body.querySelector(".os-tip")).toBeNull();
+  });
+
   it("act on the picked file: Details opens its page", async () => {
     h.connection = fakeConnection({ artifacts: [artifactRow({ id: "a-1", title: "brief.pdf" })] });
     await renderFiles();

@@ -812,7 +812,9 @@ export function BrowseSection({
         {pickedActs !== null ? (
           <span className="os-files-picked-acts" role="group" aria-label={`Selected: ${pickedActs.name}`}>
             {pickedActs.entries.filter((entry) => !entry.disabled).map((entry) => (
-              <IconButton key={entry.id} label={entry.label} onClick={entry.onSelect}>
+              // Named at once and above the icon, out of the pointer's way: the
+              // browser's own tooltip waited about two seconds (Jesús, Nov 20 2026).
+              <IconButton key={entry.id} label={entry.label} tip="above" onClick={entry.onSelect}>
                 {PICKED_ICON[entry.id]}
               </IconButton>
             ))}

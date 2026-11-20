@@ -495,6 +495,22 @@ button:not(:disabled):active {
   background: var(--os-hover);
   color: var(--os-ink);
 }
+/* An icon's name at once, above it (kit IconButton tip="above"). Fixed and
+ * drawn on the body, so no window or scroller clips it; the page's ink
+ * turned over, a small light label on a dark window and the reverse. */
+.os-tip {
+  position: fixed;
+  z-index: 96;
+  transform: translate(-50%, calc(-100% - 6px));
+  padding: 4px 8px;
+  border-radius: var(--os-radius-xs);
+  background: var(--os-ink);
+  color: var(--os-ground);
+  font: 500 var(--os-text-sm) / 1.2 var(--os-font);
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: var(--os-shadow-item);
+}
 /* Creation uses the same borderless, theme-aware treatment as other icons. */
 .os-icon-button.os-add-button,
 .os-button.os-add-button {
