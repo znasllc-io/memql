@@ -46,7 +46,7 @@ func TestCallsAccountChecksStampAndCapsBeforeCeremony(t *testing.T) {
 				body = `{"action":"register_finish","credential":"` + strings.Repeat("x", 65*1024) + `"}`
 				status = http.StatusRequestEntityTooLarge
 			case "unknown_field":
-				body = `{"action":"register_begin","accountId":"other"}`
+				body = `{"action":"register_begin","tenantId":"other"}`
 				status = http.StatusBadRequest
 			case "not_json_object":
 				body = `null`
@@ -57,6 +57,22 @@ func TestCallsAccountChecksStampAndCapsBeforeCeremony(t *testing.T) {
 			require.Zero(t, svc.calls)
 			require.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
 		})
+	}
+}
+
+func TestCallsAccountFundingDecodesOnlyIntegerCentsAndExpectedAccount(t *testing.T) {
+	rig, svc := accountHandlerRig(t)
+	body := `{"action":"simulate_topup","accountId":"expected-account","amountCents":1000,"idempotencyKey":"operation-00000001"}`
+	rec := rig.send(http.MethodPost, "/calls/account", body, rig.secrets.guestSession)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "expected-account", svc.request.AccountID)
+	require.EqualValues(t, 1000, svc.request.AmountCents)
+	require.Equal(t, "operation-00000001", svc.request.IdempotencyKey)
+	for _, amount := range []string{`1000.5`, `"1000"`, `1000000000000000000000000`} {
+		rig, svc := accountHandlerRig(t)
+		rec := rig.send(http.MethodPost, "/calls/account", strings.Replace(body, `1000`, amount, 1), rig.secrets.guestSession)
+		require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+		require.Zero(t, svc.calls)
 	}
 }
 func TestCallsAccountCookieIsHttpOnlyAndNeverInJSON(t *testing.T) {

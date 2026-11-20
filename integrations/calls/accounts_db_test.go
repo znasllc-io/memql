@@ -328,6 +328,38 @@ func TestAccountsReverificationCannotSwitchAccount(t *testing.T) {
 	require.Equal(t, first.result.Account.KeyID, before.Account.KeyID)
 }
 
+func TestAccountsAddPasskeyRefusesChangedExpectedAccountBeforeChallenge(t *testing.T) {
+	cw := newCallWorld(t, "accounts-add-expected", 20)
+	if cw == nil {
+		return
+	}
+	first := accountRegister(t, cw, newSoftwareAuthenticator(t))
+	second := accountRegister(t, cw, newSoftwareAuthenticator(t))
+	ctx := context.Background()
+	challengeCount := func() int {
+		var n int
+		require.NoError(t, cw.svc.gateDB().QueryRowContext(ctx, "SELECT count(*) FROM identity_webauthn_challenges").Scan(&n))
+		return n
+	}
+	before := challengeCount()
+	// Both accounts have recent UV. A stale tab for A must not enroll into B
+	// merely because another tab replaced its shared calls cookie with B's.
+	out, err := cw.svc.Account(ctx, cw.ref, second.result.Session.Token, &callrules.AccountRequest{Action: "add_begin", AccountID: first.result.Account.AccountID})
+	require.ErrorIs(t, err, callrules.ErrConflict)
+	require.Equal(t, "account_changed", callrules.ReasonOf(err))
+	require.Empty(t, out.ChallengeID)
+	require.Empty(t, out.CreationOptions)
+	require.Equal(t, before, challengeCount(), "a refused stale screen must not allocate a challenge")
+	current, err := cw.svc.Account(ctx, cw.ref, second.result.Session.Token, nil)
+	require.NoError(t, err)
+	require.Len(t, current.Credentials, 1)
+	begin, err := cw.svc.Account(ctx, cw.ref, second.result.Session.Token, &callrules.AccountRequest{Action: "add_begin", AccountID: second.result.Account.AccountID})
+	require.NoError(t, err)
+	_, _, handle := accountCreation(t, begin)
+	require.Equal(t, second.handle, handle)
+	require.Equal(t, before+1, challengeCount())
+}
+
 func TestAccountsSecuredHostStartPreservesKeyAndCredential(t *testing.T) {
 	cw := newCallWorld(t, "accounts-secured-host", 20)
 	if cw == nil {

@@ -183,7 +183,7 @@ One screen share at a time: a new one stops every other participant's share in t
 
 ### How a call ends
 
-A call ends in one of three ways, and its room records which (`endReason`):
+A call's room records why it ended (`endReason`):
 
 - **`ended`**: a host ended it.
 - **`host_left`**: nobody hosting it has been in it for `hostLeftGrace` (5 minutes). A key
@@ -196,6 +196,9 @@ A call ends in one of three ways, and its room records which (`endReason`):
   host abandons the queue, requeueing or repeatedly leaving cannot restart the grace:
   the host must actually be admitted again to clear it.
 - **`empty`**: the last person in it left with nobody waiting to come in.
+- **`allowance_exhausted`**: a simulated-funded room reached its persisted time
+  ceiling. The original sponsor stays fixed; an unrelated key holder does not
+  automatically take over that room or reset its allowance.
 
 **A booked call is its host's until its booked end.** A host who opens it early to check
 it and leaves is counted from the booked start, so the call never ends before it begins.
@@ -205,7 +208,8 @@ late is let in by the host link and runs the call. After the booked end a call w
 never came is counted from the end: it ends `host_left` the grace later if somebody still
 waits in it, and `empty` if nobody does. **It ends empty only after its booked end**:
 before that, a booked call that empties stays open for the people still to come. A call
-that runs past its booked end is never cut off.
+that runs past its booked end is not cut off merely because the booking ended;
+a simulated pass's expiry and room-time allowance still apply.
 
 **Every seat is told the countdown.** While it runs, every seat's session says when the
 call ends unless a host is back first (`countdownEndsAt`, below), the instant the
@@ -238,6 +242,48 @@ links, so the old ones open nothing, and hands out a calendar file with the firs
 UID. A booking can be cancelled (`POST /cancel`) only before its
 room opens; its links then answer `cancelled`, and those of a booking whose end passed
 unopened answer `call_ended`.
+
+### Simulated room-time allowance
+
+When an operator enables simulated funding for a site, a secured key with a
+simulated wallet needs an active pass to open or book a call. Disabling the switch
+does not convert that wallet into an unlimited legacy key. Existing operator-minted
+test and paid keys keep their previous behavior. This local testing mode does not
+charge a card or settle real funds.
+
+Each funded room snapshots its original pass, participant cap and time ceiling.
+Only one room may be open per sponsored key, including a scheduled room first
+opened by a guest. The pass admits at most eight total participants, including the
+host and any agents using participant invitations; separate machine seats add no
+extra capacity. A top-up does not replace an active pass or extend an existing room.
+
+Time begins at the first admitted media seat, not at booking or while everybody
+is queued or in the waiting room. It then counts elapsed room time, including
+host-left grace, once per room. Ending early caps usage at the saved end time.
+Reconnecting, changing sessions, archiving history or joining through a different
+host link cannot reset it. Interrupted admission is repaired from the original
+persisted seat time. Private history is never the allowance's source.
+
+The daily limit resets at midnight **UTC**, independently of the pass's total
+limit. A room can continue through midnight when its remaining allowance reaches
+that boundary and the next day's allowance, total budget and expiry permit it.
+There is no unconditional midnight disconnect. Booking or moving a call requires
+its full planned span to fit the current pass and known allowance. A booking does
+not reserve time: opening checks again after any intervening usage.
+
+At the persisted ceiling, joins and token renewals are refused. Reconciliation
+deletes the media room before marking it ended; a failed provider deletion is
+retried and the still-open room blocks replacement-pass activation. Cleanup runs
+periodically, so provider outages cannot promise exact real-time disconnection.
+Its recorded usage stops at the authorized ceiling even when cleanup is delayed.
+New media tokens are limited to that ceiling as well.
+
+The simulation reads at most 1,000 operational room records for one pass. An
+incomplete or invalid usage read fails closed with `allowance_unavailable`; it
+never assumes missing usage is zero. This bounded simulation is not a production
+financial metering ledger. Missing or expired passes return `pass_required`,
+exhausted time returns `allowance_exhausted`, and another open sponsored room
+returns `key_in_call`. An unexpired exhausted pass remains visible until expiry.
 
 ### What the media server reports, and the reconcile pass
 
@@ -471,6 +517,10 @@ reconnects, so elapsed call time uses this start and the server clock rather tha
 browser's join time. Waiting, departed and removed seats, ended rooms and sessions
 without a seat omit it. This is elapsed room time, not a billing counter. A placed
 seat in an open room also receives its plain-text `title`, including while waiting.
+For a simulated-funded room it also receives `allowanceEndsAt`, its persisted
+RFC 3339 ceiling, independently of `countdownEndsAt`. Before the first admission
+this ceiling is the pass expiry; admission fixes the room's available-time ceiling.
+Use the same server clock for both countdowns. Unfunded or ended rooms omit it.
 Titles collapse whitespace and control characters to spaces; invalid UTF-8 is
 refused. Instant start, schedule and rename all enforce 80 grapheme clusters and
 2,048 UTF-8 bytes. A blank title becomes `Call · 20 Nov 2026`, using the room's opening
@@ -1137,8 +1187,9 @@ Account snapshots include `authenticated`, `capabilities`, `account`, and
 unfunded guest key; it has no passkey or hosting entitlement. Legacy operator
 keys remain explicitly marked and retain their existing unlock path. A known
 legacy key at `login_begin` answers `legacy_key`; passkey-bound and guest keys
-are always refused by raw-key unlock. No payment or credit is created here:
-`payments` is false, guest balances are zero, and legacy balances are unknown.
+are always refused by raw-key unlock. Registration creates no payment or credit:
+`payments` is false, new guest balances are zero, and legacy balances are unknown.
+Only the explicit local simulation described below can add simulated credit.
 
 Logout and account replacement refuse an occupying or waiting seat with
 `in_another_call`; leave first. Successful replacement retires the previous
@@ -1164,3 +1215,50 @@ Regression evidence is in `integrations/calls/accounts_db_test.go` (real signed
 WebAuthn ceremonies, shared challenges, account isolation, first-claim races,
 revocation/media cleanup), `component/server/calls_account_handler_test.go`
 (stamps, body caps, cookie secrecy), and the account lookup/migration tests.
+
+## Persistent local funding simulation
+
+This is a local review facility, not a payment processor or real-money balance.
+It is off by default. An authenticated human site operator opts in with
+`callsPolicySet(siteId: "<site id>", simulatedFunding: 1)`; that builtin merges
+only the named field into the current policy under its write gate. Use it only
+on the intended local site after all application nodes have the updated private
+concept guards. Setting `simulatedFunding: 0` prevents further simulated funding
+and hosting; it does not disguise stored simulated credit as real funds or erase
+receipts. Existing room deadlines continue to apply.
+
+The account capability `simulatedFunding` exposes that switch. Authenticated
+snapshots include `fundingMode` (`unfunded`, `simulation`, or `legacy`), integer
+`balanceCents`, and an optional unexpired `activePass` with its fixed grant,
+expiry, total/day remaining seconds and UTC daily reset. `canHost` is the server's
+current decision. A pass remains visible until expiry even when exhausted.
+
+Two bounded `POST /_memql/calls/account` actions are available only to a current
+credential-backed, claimed guest key; legacy operator keys cannot mix in this
+simulated ledger. Both require `accountId` matching the authenticated cookie,
+plus a 16–128 character `idempotencyKey` containing only letters, digits, `_`,
+or `-`. The expected account is a stale-tab guard, never authority to choose a
+different key. `simulate_topup` takes integer `amountCents` of at least 1000;
+the resulting balance cannot exceed 50000. `activate_pass` takes only the
+server-catalog `plan`: `day` costs 150 cents for 24 hours and three room-hours;
+`month` costs 800 cents for thirty days, twenty room-hours total and three per
+UTC day. Both allow eight total participants, including the host and AI guests.
+No recurring billing, overage, referral award or discount is simulated.
+
+Top-ups preserve the current pass and its deadlines. Activation debits once and
+refuses an unexpired pass or any still-open hosted room. One immutable, private
+entry contains both the resulting wallet state and its receipt. Account/key
+gates serialize concurrent requests across replicas; the version-fenced operation
+identity makes retries durable across restart or a lost response. Repeating the
+same operation and payload returns its original receipt with `replayed: true`
+and the **latest** account snapshot, whose balance can differ from the historical
+receipt. Reusing an operation for changed payload returns `idempotency_conflict`.
+
+Clients retain the same operation after an uncertain network/server response.
+Receipt lookup precedes `active_pass`, `insufficient_balance`, `balance_limit`
+and `hosted_room_open`, so those refusals prove the requested operation was not
+applied. Prechecks such as `account_changed`, `simulation_disabled` and lost
+authentication do not prove that an earlier attempt failed. Local credit has no
+cash value and cannot become real payment credit. Stripe and financial compliance
+remain separate work. Funding regression tests cover receipt replay, lost replies,
+concurrent caps/debits, account isolation, expiry and logout/sign-in persistence.

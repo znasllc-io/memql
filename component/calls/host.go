@@ -60,6 +60,7 @@ type SeatCall struct {
 	Host            bool
 	OpenedAt        time.Time
 	CountdownEndsAt time.Time
+	AllowanceEndsAt time.Time
 	Roster          *Roster
 }
 

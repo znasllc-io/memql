@@ -682,8 +682,10 @@ QueryClient.prototype.callsMediaServers = function (this: QueryClient, args: Cal
 /** Set any of a deployable's calls limits (v1:calls:policy).
 PER SITE: the limits are the site's, on a row its owner owns, because a package deployable's name is unique only together with its package. ONLY WHAT IS NAMED CHANGES: a limit left out keeps the value it had, and one nobody ever set is the shipped default (calls.DefaultPolicy). Counts are whole numbers and DURATIONS ARE WHOLE SECONDS. Every value is held to the CLUSTER'S bounds (a room of 1 to 1000 people, a pass of 10 to 900 seconds, a waiter that polls at least once a minute and whose place outlives a poll), so no site claims more than the cluster allows; what a deployable allows inside those bounds is its operator's to choose. Judged in the site's organization, and refused for a deployable the caller cannot read, one with no owner, a caller who is not a person and any call inside a run. Returns the effective limits: {policyId, siteId} and one field per limit. */
 export interface CallsPolicySetArgs {
-  /** Require persistent passkey accounts at join: 0 legacy, 1 required. */
+  /** Require a currently credential-backed session at join: 0 optional guest access, 1 required. */
   requirePasskeys?: number;
+  /** Operator-only local funding simulation: 0 disabled by default, 1 enables simulated wallet credit and bounded hosting passes. Never enables real payments. */
+  simulatedFunding?: number;
   /** The deployable the limits are for. */
   siteId: string;
   /** People allowed in one room, 1 to 1000. */
@@ -711,6 +713,7 @@ export interface CallsPolicySetArgs {
 export function buildCallsPolicySet(args: CallsPolicySetArgs): string {
   const parts: string[] = [];
   if (args.requirePasskeys !== undefined) parts.push("requirePasskeys: " + renderMemQLValue(args.requirePasskeys));
+  if (args.simulatedFunding !== undefined) parts.push("simulatedFunding: " + renderMemQLValue(args.simulatedFunding));
   parts.push("siteId: " + renderMemQLValue(args.siteId));
   if (args.maxPeople !== undefined) parts.push("maxPeople: " + renderMemQLValue(args.maxPeople));
   if (args.maxAgents !== undefined) parts.push("maxAgents: " + renderMemQLValue(args.maxAgents));

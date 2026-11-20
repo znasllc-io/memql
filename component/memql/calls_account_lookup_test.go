@@ -10,6 +10,8 @@ import (
 func TestCallsAccountLookupsDoNotEnumerateOtherKeys(t *testing.T) {
 	for _, tc := range []struct{ concept, field, value string }{
 		{"v1:calls:credential", "credentialDigest", "digest"},
+		{"v1:calls:simulatedWalletEntry", "keyId", "v1:calls:key:one"},
+		{"v1:calls:room", "fundingPassId", "simulated-pass"},
 		{"v1:calls:credential", "keyId", "v1:calls:key:one"},
 		{"v1:calls:seat", "credentialId", "one-credential"},
 		{"v1:calls:seat", "keyId", "v1:calls:key:one"},

@@ -31,7 +31,7 @@ func TestTheIndexMigrationsAreGoRegisteredOnceUnderTheirFileNames(t *testing.T) 
 		workRunOwnerWalkMigrationName, workRunSignatureLookupMigrationName, workRunRevisionLookupMigrationName,
 		authSessionHashLookupMigrationName, inboundFailedLookupMigrationName, accountIndexMigrationName,
 		callsServerLookupMigrationName, callsOpenRoomLookupMigrationName,
-		callsCredentialLookupMigrationName, callsHistoryLookupMigrationName,
+		callsCredentialLookupMigrationName, callsHistoryLookupMigrationName, callsSimulationLookupMigrationName,
 	} {
 		version, comment, _ := strings.Cut(name, "_")
 		got := byVersion[version]

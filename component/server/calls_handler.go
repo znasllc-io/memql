@@ -968,6 +968,9 @@ type callsSessionReply struct {
 	// its host-left countdown runs (and once it has run out, until a pass ends the call), for
 	// any seat of the call; absent otherwise.
 	CountdownEndsAt string `json:"countdownEndsAt,omitempty"`
+	// AllowanceEndsAt is independent of host presence: returning to the room
+	// cannot extend its admitted simulated pass budget.
+	AllowanceEndsAt string `json:"allowanceEndsAt,omitempty"`
 	// Roster is there for a host seat in an open call and absent for every other session.
 	Roster *callsRosterReply `json:"roster,omitempty"`
 }
@@ -1013,6 +1016,9 @@ func (h *callsHandler) sessionReply(sess calls.Session, call calls.SeatCall) cal
 	}
 	if !call.CountdownEndsAt.IsZero() {
 		reply.CountdownEndsAt = call.CountdownEndsAt.UTC().Format(time.RFC3339Nano)
+	}
+	if !call.AllowanceEndsAt.IsZero() {
+		reply.AllowanceEndsAt = call.AllowanceEndsAt.UTC().Format(time.RFC3339Nano)
 	}
 	reply.Title = call.Title
 	if !call.OpenedAt.IsZero() {

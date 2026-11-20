@@ -214,6 +214,9 @@ type reconcilePlan struct {
 // reconcileRoom reconciles one call: its participant list read outside the gates, its
 // rows repaired under them, and the media calls their decisions need made after them.
 func (s *Service) reconcileRoom(ctx context.Context, server MediaServer, backend MediaBackend, hint roomRow, tally *reconcileTally) error {
+	if handled, err := s.reconcileFunding(ctx, hint, backend, tally); handled || err != nil {
+		return err
+	}
 	var present []MediaParticipant
 	if err := bounded(ctx, func(ctx context.Context) error {
 		var err error

@@ -47,6 +47,12 @@ type policyField struct {
 // person (the rules refuse a room of agents); a pass lives long enough to connect with
 // and no longer than MintPass mints; a waiter polls at least once a minute.
 var policyFields = []policyField{
+	{"simulatedFunding", false, 0, 1, func(p callrules.Policy) int {
+		if p.SimulatedFunding {
+			return 1
+		}
+		return 0
+	}, func(p *callrules.Policy, v int) { p.SimulatedFunding = v == 1 }},
 	{"requirePasskeys", false, 0, 1, func(p callrules.Policy) int {
 		if p.RequirePasskeys {
 			return 1

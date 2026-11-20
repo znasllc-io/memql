@@ -84,7 +84,7 @@ import (
 //
 // # Ending a call
 //
-// A call ends three ways, each recorded on the room (endReason): a host ends it (ended);
+// A legacy call ends three ways, each recorded on the room (endReason): a host ends it (ended);
 // the last person in it leaves with nobody waiting to come in (empty), which a booked
 // call does only after its booked end; or nobody hosting it has been in it for the
 // policy's HostLeftGrace and no key holder in it took over (host_left). EVERY WAY WRITES
@@ -96,6 +96,9 @@ import (
 // is still open holds no slot and is joined through its room. Marking the booking ended
 // is what keeps a key's bookings read (callsScheduledCallsForKey) to the key's open calls
 // and upcoming bookings (schedule.go's file note).
+// A simulated-funded room additionally ends at its persisted allowance deadline
+// (allowance_exhausted). Its payer key gate precedes these gates, its original sponsor
+// remains fixed, and automatic host takeover by an unrelated key is disabled.
 //
 // WHERE THE MEDIA ROOM IS DELETED. A call that ends with people in it -- a host ending it,
 // or the countdown running out -- has its media room deleted BEFORE its rows are written,
@@ -313,6 +316,7 @@ func (s *Service) SessionCall(ctx context.Context, sess callrules.Session) (call
 	}
 	var out callrules.SeatCall
 	out.Title = callTitle(room.Title, room.OpenedAt)
+	out.AllowanceEndsAt = room.FundingDeadline
 	if seat.occupying() {
 		out.OpenedAt = room.OpenedAt
 	}
@@ -728,6 +732,9 @@ func (v roomView) hostComing(now time.Time) bool {
 // before the gates are taken.
 func endGates(room roomRow) []string {
 	var keys []string
+	if room.FundingPassID != "" {
+		keys = append(keys, keyGate(room.KeyID))
+	}
 	if room.ScheduledCallID != "" {
 		keys = append(keys, bookingGate(room.ScheduledCallID))
 	}
@@ -915,6 +922,12 @@ func (s *Service) recordAbandonedHost(ctx context.Context, room roomRow, load se
 // the call, not a host, whose holder unlocked a key that is the deployable's and active --
 // the earliest let in, ties by id, so every replica picks the same one. Nil is none.
 func (s *Service) keyHolderIn(ctx context.Context, v roomView) (*seatRow, error) {
+	// A simulated pass sponsors this room under its original key and deadline.
+	// Merely attending with another key is not consent to become its payer or
+	// extend that sponsorship. Explicit host links keep their usual controls.
+	if v.room.FundingPassID != "" {
+		return nil, nil
+	}
 	site := callrules.SiteRef{SiteID: v.room.SiteID, OwnerUserID: v.room.OwnerUserID}
 	var to *seatRow
 	for i := range v.seats {

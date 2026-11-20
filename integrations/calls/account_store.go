@@ -2,8 +2,6 @@ package calls
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -23,12 +21,9 @@ type credentialRow struct {
 	AddedAt, LastUsedAt, RevokedAt, Version time.Time
 }
 
-func credentialDigest(raw []byte) string {
-	sum := sha256.Sum256(raw)
-	return hex.EncodeToString(sum[:])
-}
-func credentialGate(raw []byte) string { return "calls.credential." + credentialDigest(raw) }
-func accountGate(key string) string    { return "calls.account." + memql.BareShortId(key) }
+func credentialDigest(raw []byte) string { return callrules.CredentialDigest(raw) }
+func credentialGate(raw []byte) string   { return "calls.credential." + credentialDigest(raw) }
+func accountGate(key string) string      { return "calls.account." + memql.BareShortId(key) }
 
 func credentialFromRow(r map[string]any) (*credentialRow, error) {
 	out := &credentialRow{ID: memql.BareShortId(rowString(r, "id")), SiteID: memql.BareShortId(rowString(r, "siteId")), KeyID: memql.BareShortId(rowString(r, "keyId")), Label: rowString(r, "label"), AddedAt: rowTime(r, "addedAt"), LastUsedAt: rowTime(r, "lastUsedAt"), RevokedAt: rowTime(r, "revokedAt"), Version: rowTime(r, "createdAt")}

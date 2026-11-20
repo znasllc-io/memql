@@ -26,6 +26,7 @@ const (
 // so a deployment can override it and a test can pin it.
 type Policy struct {
 	RequirePasskeys      bool
+	SimulatedFunding     bool
 	MaxPeople            int
 	MaxAgents            int
 	RoomJoinsPerMinute   int

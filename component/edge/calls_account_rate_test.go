@@ -40,7 +40,7 @@ func TestCallsAccountReadsCannotSpendAuthenticationBudget(t *testing.T) {
 }
 
 func TestCallsAccountAuthenticationActionsKeepExistingLimits(t *testing.T) {
-	for _, action := range []string{"register_begin", "register_finish", "login_begin", "login_finish", "verify_begin", "verify_finish", "add_begin", "add_finish", "claim_begin", "claim_finish", "revoke"} {
+	for _, action := range []string{"register_begin", "register_finish", "login_begin", "login_finish", "verify_begin", "verify_finish", "add_begin", "add_finish", "claim_begin", "claim_finish", "revoke", "simulate_topup", "activate_pass"} {
 		t.Run(action, func(t *testing.T) {
 			up := newAccessUpstream(t)
 			h := callsHandler(t, callsSite(nil), up.server.URL)

@@ -1,0 +1,344 @@
+package calls
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/znasllc-io/memql/component/auth"
+	callrules "github.com/znasllc-io/memql/component/calls"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/memql"
+)
+
+// Simulated funding is deliberately bounded, not a production financial
+// ledger. Its authoritative usage is operational room time; private history
+// can be archived or purged without returning a second of allowance.
+const fundingRoomScanLimit = 1000
+const endReasonAllowance = "allowance_exhausted"
+
+type roomFunding struct {
+	FundingPassID                     string
+	FundingStartedAt, FundingDeadline time.Time
+	FundingMaxPeople                  int
+}
+
+func fundingFromRow(r map[string]any) roomFunding {
+	return roomFunding{FundingPassID: memql.BareShortId(rowString(r, "fundingPassId")), FundingStartedAt: rowTime(r, "fundingStartedAt"), FundingDeadline: rowTime(r, "fundingDeadline"), FundingMaxPeople: rowInt(r, "fundingMaxPeople")}
+}
+
+func allowanceUnavailable() error {
+	return callrules.Refuse(callrules.ErrConflict, "allowance_unavailable", "the complete pass usage could not be verified")
+}
+
+// passAllowance reads one bounded, owner/site/key/pass-scoped page, including
+// continuation metadata. A full scan is required: truncation never grants time.
+// There is no raw SQL, client cursor or query interpolation at this seam.
+func (s *Service) passAllowance(ctx context.Context, owner, siteID, keyID string, pass callrules.AccountPass, atTime time.Time) (callrules.KeyAllowance, error) {
+	call, err := langparser.RenderCall("callsRoomsForFundingPass", map[string]any{"siteId": siteID, "keyId": keyID, "passId": pass.ID})
+	if err != nil {
+		return callrules.KeyAllowance{}, allowanceUnavailable()
+	}
+	owned, ok := rowsAs(auth.ContextWithInternalOrigin(ctx), owner)
+	if !ok {
+		return callrules.KeyAllowance{}, allowanceUnavailable()
+	}
+	result, err := s.store.engine.Execute(memql.ContextWithRootsOnlyRead(memql.ContextWithFreshRead(owned)), "query "+call)
+	if err != nil {
+		return callrules.KeyAllowance{}, allowanceUnavailable()
+	}
+	executed, ok := result.(*memql.ExecuteResult)
+	if !ok || executed == nil || (executed.GetMeta() != nil && (executed.GetMeta().Cursor != "" || executed.GetMeta().HasMore)) {
+		return callrules.KeyAllowance{}, allowanceUnavailable()
+	}
+	rows := memql.MaterializeRows(executed.OutputPayload())
+	if len(rows) > fundingRoomScanLimit || (len(rows) == fundingRoomScanLimit && executed.GetMeta() == nil) {
+		return callrules.KeyAllowance{}, allowanceUnavailable()
+	}
+	intervals := make([]callrules.FundedRoomTime, 0, len(rows))
+	for _, raw := range rows {
+		room := roomFromRow(raw)
+		if room.SiteID != siteID || room.KeyID != keyID || room.OwnerUserID != owner || room.FundingPassID != pass.ID || (!room.open() && room.EndedAt.IsZero()) {
+			return callrules.KeyAllowance{}, allowanceUnavailable()
+		}
+		intervals = append(intervals, callrules.FundedRoomTime{Start: room.FundingStartedAt, End: room.EndedAt, Deadline: room.FundingDeadline})
+	}
+	allowance, err := callrules.PassAllowance(pass, intervals, atTime)
+	if err != nil {
+		return callrules.KeyAllowance{}, allowanceUnavailable()
+	}
+	return allowance, nil
+}
+
+// fundingForOpening runs under the payer key gate. A wallet's existence is
+// permanent provenance: disabling the operator switch or exhausting a pass
+// must never turn that key into a legacy unlimited operator key.
+func (s *Service) fundingForOpening(ctx context.Context, site callrules.SiteRef, keyID string, now time.Time) (roomFunding, callrules.KeyAllowance, error) {
+	wallet, err := s.simulatedWallet(ctx, site.OwnerUserID, site.SiteID, keyID)
+	if err != nil || wallet == nil {
+		return roomFunding{}, callrules.KeyAllowance{}, err
+	}
+	policy, err := s.store.PolicyFor(ctx, site.OwnerUserID, site.SiteID)
+	if err != nil {
+		return roomFunding{}, callrules.KeyAllowance{}, err
+	}
+	if !policy.SimulatedFunding {
+		return roomFunding{}, callrules.KeyAllowance{}, callrules.Refuse(callrules.ErrForbidden, "simulation_disabled", "simulated funding is disabled for this site")
+	}
+	if wallet.Pass == nil || now.Before(wallet.Pass.ActivatedAt) || !now.Before(wallet.Pass.ExpiresAt) {
+		return roomFunding{}, callrules.KeyAllowance{}, callrules.Refuse(callrules.ErrConflict, "pass_required", "an active simulated pass is required")
+	}
+	rooms, err := s.store.openRoomsForKey(ctx, site.OwnerUserID, keyID)
+	if err != nil {
+		return roomFunding{}, callrules.KeyAllowance{}, err
+	}
+	if len(rooms) > 0 {
+		return roomFunding{}, callrules.KeyAllowance{}, callrules.Refuse(callrules.ErrConflict, callrules.ReasonKeyInCall, "one simulated pass covers one open room")
+	}
+	allowance, err := s.passAllowance(ctx, site.OwnerUserID, site.SiteID, keyID, *wallet.Pass, now)
+	if err != nil {
+		return roomFunding{}, callrules.KeyAllowance{}, err
+	}
+	if !allowance.AvailableUntil.After(now) {
+		return roomFunding{}, callrules.KeyAllowance{}, callrules.Refuse(callrules.ErrConflict, endReasonAllowance, "the pass has no room time available now")
+	}
+	return roomFunding{FundingPassID: wallet.Pass.ID, FundingDeadline: wallet.Pass.ExpiresAt, FundingMaxPeople: wallet.Pass.MaxPeople}, allowance, nil
+}
+
+// A booking is an intention, not a reserved financial balance. It must fit
+// within the existing pass and per-day/total allowance; opening rechecks the
+// actual usage because other calls may consume time after the booking is made.
+// Cancellation deliberately does not call this: expiry cannot prevent cleanup.
+func (s *Service) checkFundingBooking(ctx context.Context, h keyHolder, start, end time.Time) error {
+	wallet, err := s.simulatedWallet(ctx, h.site.OwnerUserID, h.site.SiteID, h.row.KeyID)
+	if err != nil || wallet == nil {
+		return err
+	}
+	policy, err := s.store.PolicyFor(ctx, h.site.OwnerUserID, h.site.SiteID)
+	if err != nil {
+		return err
+	}
+	if !policy.SimulatedFunding {
+		return callrules.Refuse(callrules.ErrForbidden, "simulation_disabled", "simulated funding is disabled for this site")
+	}
+	if wallet.Pass == nil || !s.now().Before(wallet.Pass.ExpiresAt) || start.Before(wallet.Pass.ActivatedAt) || end.After(wallet.Pass.ExpiresAt) {
+		return callrules.Refuse(callrules.ErrConflict, "pass_required", "the scheduled call must fit within the current simulated pass")
+	}
+	allowance, err := s.passAllowance(ctx, h.site.OwnerUserID, h.site.SiteID, h.row.KeyID, *wallet.Pass, start)
+	if err != nil {
+		return err
+	}
+	if end.After(allowance.AvailableUntil) {
+		return callrules.Refuse(callrules.ErrConflict, endReasonAllowance, "the scheduled call exceeds the pass allowance")
+	}
+	return nil
+}
+
+// Explain a valid account's unavailable entitlement without changing the
+// stronger frozen/banned-key refusal or revealing another site's key.
+func (s *Service) fundingKeyRefusal(ctx context.Context, site callrules.SiteRef, keyID string) error {
+	key, err := s.store.keyByID(ctx, site.OwnerUserID, keyID)
+	if err != nil || key == nil || key.SiteID != site.SiteID || !keyActive(key.Status) {
+		return err
+	}
+	wallet, err := s.simulatedWallet(ctx, site.OwnerUserID, site.SiteID, keyID)
+	if err != nil || wallet == nil {
+		return err
+	}
+	policy, err := s.store.PolicyFor(ctx, site.OwnerUserID, site.SiteID)
+	if err != nil {
+		return err
+	}
+	if !policy.SimulatedFunding {
+		return callrules.Refuse(callrules.ErrForbidden, "simulation_disabled", "simulated funding is disabled for this site")
+	}
+	return callrules.Refuse(callrules.ErrConflict, "pass_required", "an active simulated pass is required")
+}
+
+// Spending entitlement and cancellation authority are separate. A pass that
+// expired, or a simulation the operator disabled, still owns its bookings.
+func (s *Service) heldKeyForCancellation(ctx context.Context, h keyHolder, now time.Time) error {
+	current, err := s.store.sessionByID(ctx, h.site.OwnerUserID, h.row.ID)
+	if err != nil {
+		return err
+	}
+	if !current.usable(now) || current.KeyID != h.row.KeyID {
+		return callrules.ErrNoSession
+	}
+	key, err := s.store.keyByID(ctx, h.site.OwnerUserID, current.KeyID)
+	if err != nil {
+		return err
+	}
+	if key == nil || key.SiteID != h.site.SiteID || !keyActive(key.Status) {
+		return callrules.Refuse(callrules.ErrForbidden, callrules.ReasonKeyNotActive, "the key may not cancel this booking")
+	}
+	return nil
+}
+
+func fundedPolicy(policy callrules.Policy, funding roomFunding) callrules.Policy {
+	if funding.FundingPassID != "" {
+		policy.MaxPeople = min(policy.MaxPeople, max(0, funding.FundingMaxPeople))
+		// Current invitations all enter as person seats, including external
+		// agents. A separate machine seat must not add capacity above this pass.
+		policy.MaxAgents = 0
+	}
+	return policy
+}
+
+func fundingRoomAllowed(room roomRow, now time.Time) error {
+	if room.FundingPassID == "" {
+		return nil
+	}
+	if room.FundingDeadline.IsZero() || room.FundingMaxPeople <= 0 {
+		return allowanceUnavailable()
+	}
+	if !now.Before(room.FundingDeadline) {
+		return callrules.Refuse(callrules.ErrEnded, endReasonAllowance, "the room's admitted allowance has ended")
+	}
+	return nil
+}
+
+// beginRoomFunding follows the successful seat write and precedes issuing a
+// media token. A crash between those writes is repaired from the earliest
+// persisted admission, never from the retry's clock. All callers hold the
+// payer key and room gates in the same acquisition; no nested pool reservation.
+func (s *Service) beginRoomFunding(ctx context.Context, room roomRow, now time.Time) (roomRow, error) {
+	if room.FundingPassID == "" || !room.FundingStartedAt.IsZero() {
+		return room, fundingRoomAllowed(room, now)
+	}
+	seats, err := s.store.seatsForRoom(ctx, room.OwnerUserID, room.ID)
+	if err != nil {
+		return room, err
+	}
+	var began time.Time
+	for _, seat := range seats {
+		if !seat.JoinedAt.IsZero() && (began.IsZero() || seat.JoinedAt.Before(began)) {
+			began = seat.JoinedAt
+		}
+	}
+	if began.IsZero() {
+		return room, fundingRoomAllowed(room, now)
+	}
+	wallet, err := s.simulatedWallet(ctx, room.OwnerUserID, room.SiteID, room.KeyID)
+	if err != nil || wallet == nil || wallet.Pass == nil || wallet.Pass.ID != room.FundingPassID {
+		return room, allowanceUnavailable()
+	}
+	allowance, err := s.passAllowance(ctx, room.OwnerUserID, room.SiteID, room.KeyID, *wallet.Pass, began)
+	if err != nil {
+		return room, err
+	}
+	if !allowance.AvailableUntil.After(began) {
+		return room, callrules.Refuse(callrules.ErrEnded, endReasonAllowance, "the pass has no room time available")
+	}
+	version := memql.VersionTimeAfter(room.Version, now)
+	if err := s.store.updateRoom(ctx, room.OwnerUserID, room, map[string]any{"fundingStartedAt": began, "fundingDeadline": allowance.AvailableUntil}, version); err != nil {
+		return room, err
+	}
+	room.FundingStartedAt, room.FundingDeadline, room.Version = began, allowance.AvailableUntil, version
+	return room, fundingRoomAllowed(room, now)
+}
+
+// Admission gates take the payer lock before room/server locks. Authentication
+// may prepend its own account gate; the payer is immutable for a room.
+func fundingAdmissionGates(room roomRow) []string {
+	keys := []string{}
+	if room.FundingPassID != "" {
+		keys = append(keys, keyGate(room.KeyID))
+	}
+	return append(keys, roomGate(room.ID), serverGate(room.MediaServerID))
+}
+
+// reconcileFunding reaches a known time ceiling before asking the media
+// participant list. A failed list read must not postpone a deadline whose
+// authority comes entirely from persisted rows. Network deletion stays outside
+// all write gates; a failure keeps the room open and blocks a new sponsored room
+// until the next reconciliation retries. This is a bounded periodic cleanup,
+// not a claim of hard real-time media disconnection during provider outages.
+func (s *Service) reconcileFunding(ctx context.Context, hint roomRow, backend MediaBackend, tally *reconcileTally) (bool, error) {
+	if hint.FundingPassID == "" {
+		return false, nil
+	}
+	if !hint.FundingStartedAt.IsZero() && s.now().Before(hint.FundingDeadline) {
+		return false, nil
+	}
+	due, room, err := s.fundingEndState(ctx, hint)
+	if err != nil || !due {
+		return false, err
+	}
+	if err := bounded(ctx, func(ctx context.Context) error { return backend.DeleteRoom(ctx, room.MediaRoom) }); err != nil {
+		return true, err
+	}
+	release, err := s.gates(ctx, endGates(room)...)
+	if err != nil {
+		return true, err
+	}
+	defer release()
+	fresh := memql.ContextWithFreshRead(ctx)
+	current, err := s.store.roomByID(fresh, room.OwnerUserID, room.ID)
+	if err != nil || current == nil || !current.open() {
+		return true, err
+	}
+	if current.FundingPassID == "" || s.now().Before(current.FundingDeadline) {
+		return true, nil
+	}
+	v, err := s.viewRoom(fresh, *current)
+	if err != nil {
+		return true, err
+	}
+	endedAt := current.FundingDeadline
+	if endedAt.IsZero() {
+		endedAt = s.now()
+	}
+	if err := s.endRows(fresh, v, endReasonAllowance, endedAt); err != nil {
+		return true, err
+	}
+	tally.ended++
+	return true, nil
+}
+
+func (s *Service) fundingEndState(ctx context.Context, hint roomRow) (bool, roomRow, error) {
+	release, err := s.gates(ctx, endGates(hint)...)
+	if err != nil {
+		return false, hint, err
+	}
+	defer release()
+	fresh := memql.ContextWithFreshRead(ctx)
+	room, err := s.store.roomByID(fresh, hint.OwnerUserID, hint.ID)
+	if err != nil || room == nil || !room.open() || room.FundingPassID == "" {
+		return false, hint, err
+	}
+	now := s.now()
+	if now.Before(room.FundingDeadline) && room.FundingStartedAt.IsZero() {
+		// Repair a seat admission whose process stopped before recording the
+		// funding start. The original joinedAt determines the same deadline.
+		repaired, err := s.beginRoomFunding(fresh, *room, now)
+		if err != nil && callrules.ReasonOf(err) != endReasonAllowance {
+			return false, *room, err
+		}
+		*room = repaired
+	}
+	return !now.Before(room.FundingDeadline), *room, nil
+}
+
+// Clamp newly minted tokens to the room's immutable ceiling. JWT expiry alone
+// does not disconnect existing LiveKit participants; reconciliation separately
+// deletes the room, but an old token cannot reopen it beyond this deadline.
+func (s *Service) admittedWithFunding(ctx context.Context, owner string, server MediaServer, credential MediaCredential, roomID string, seat seatRow, policy callrules.Policy) (callrules.JoinResult, error) {
+	room, err := s.store.roomByID(memql.ContextWithFreshRead(ctx), owner, roomID)
+	if err != nil {
+		return callrules.JoinResult{}, err
+	}
+	if room == nil || !room.open() {
+		return refuseJoin(callrules.ReasonCallEnded), fmt.Errorf("%w: the call has ended", callrules.ErrEnded)
+	}
+	if err := fundingRoomAllowed(*room, s.now()); err != nil {
+		return refuseJoin(callrules.ReasonOf(err)), err
+	}
+	if room.FundingPassID != "" {
+		policy.PassTTL = min(policy.PassTTL, room.FundingDeadline.Sub(s.now()))
+		if policy.PassTTL < time.Second {
+			return refuseJoin(endReasonAllowance), callrules.Refuse(callrules.ErrEnded, endReasonAllowance, "the room's allowance has ended")
+		}
+	}
+	return admitted(server, credential, room.MediaRoom, seat, policy)
+}

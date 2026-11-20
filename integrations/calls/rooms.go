@@ -270,6 +270,7 @@ func (s *Store) keyByID(ctx context.Context, owner, keyID string) (*Key, error) 
 // ShareSeatID and ShareStartedAt are the newest screen share the media server reported
 // (events.go), the zero time before any.
 type roomRow struct {
+	roomFunding
 	HistoryPending                                                               bool
 	ID, SiteID, OwnerUserID, KeyID, MediaServerID, MediaRoom, Status, HostSeatID string
 	ScheduledCallID, EndReason, ShareSeatID, Title                               string
@@ -284,6 +285,7 @@ func (r roomRow) open() bool { return r.Status != "ended" }
 
 func roomFromRow(r map[string]any) roomRow {
 	return roomRow{
+		roomFunding:     fundingFromRow(r),
 		HistoryPending:  rowBool(r, "historyPending"),
 		ID:              memql.BareShortId(rowString(r, "id")),
 		SiteID:          memql.BareShortId(rowString(r, "siteId")),
@@ -357,6 +359,7 @@ func (s *Store) openRoomsForKey(ctx context.Context, owner, keyID string) ([]roo
 // call's room names its booking and opens locked, and has no host seat when a guest
 // opened it.
 type newRoom struct {
+	roomFunding
 	ID, SiteID, Deployable, KeyID, MediaServerID, MediaRoom, HostSeatID string
 	GuestDigest, HostDigest, ScheduledCallID, Title                     string
 	Locked                                                              bool
@@ -388,6 +391,14 @@ func (s *Store) createRoom(ctx context.Context, owner string, n newRoom, version
 	}
 	if n.Locked {
 		args["locked"] = true
+	}
+	if n.FundingPassID != "" {
+		args["fundingPassId"] = n.FundingPassID
+		args["fundingDeadline"] = versionStamp(n.FundingDeadline)
+		args["fundingMaxPeople"] = n.FundingMaxPeople
+		if !n.FundingStartedAt.IsZero() {
+			args["fundingStartedAt"] = versionStamp(n.FundingStartedAt)
+		}
 	}
 	call, err := langparser.RenderCall("createCallsRoom", args)
 	return s.writeAs(ctx, owner, absent(roomConcept, n.ID), "the room", call, err)

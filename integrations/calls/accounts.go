@@ -27,9 +27,9 @@ func accountRefusal(reason string) error {
 	return callrules.Refuse(callrules.ErrForbidden, reason, "the account operation was refused")
 }
 
-// Account owns the protocol and authority boundary, not funding or product
-// workflow. Newly registered keys are persistent zero-balance guests. Payment
-// activation is intentionally unavailable; none of these acts grants hosting.
+// Account owns the protocol and authority boundary. Newly registered keys are
+// persistent zero-balance guests. Real payments remain unavailable; a separate,
+// operator-enabled local simulation can fund and activate bounded hosting passes.
 func (s *Service) Account(ctx context.Context, site callrules.SiteRef, token string, request *callrules.AccountRequest) (callrules.AccountResult, error) {
 	site, err := checkSite(site)
 	if err != nil {
@@ -41,6 +41,9 @@ func (s *Service) Account(ctx context.Context, site callrules.SiteRef, token str
 	req := *request
 	if !validAccountRequest(req) {
 		return callrules.AccountResult{}, callrules.ErrInvalid
+	}
+	if req.Action == "simulate_topup" || req.Action == "activate_pass" {
+		return s.accountFunding(ctx, site, token, req)
 	}
 	if req.Action == "logout" {
 		return s.accountLogout(ctx, site, token)
@@ -71,6 +74,12 @@ func (s *Service) Account(ctx context.Context, site callrules.SiteRef, token str
 }
 
 func validAccountRequest(r callrules.AccountRequest) bool {
+	if r.Action == "simulate_topup" || r.Action == "activate_pass" {
+		return validFundingRequest(r)
+	}
+	if (r.AccountID != "" && r.Action != "add_begin") || len(r.AccountID) > 128 || r.AmountCents != 0 || r.Plan != "" || r.IdempotencyKey != "" {
+		return false
+	}
 	if len(r.Key) > 128 || len(r.ChallengeID) > 128 || len(r.CredentialID) > 128 || len(r.Credential) > 60*1024 || utf8.RuneCountInString(r.Label) > 64 || !utf8.ValidString(r.Label) {
 		return false
 	}
@@ -96,7 +105,7 @@ func validAccountRequest(r callrules.AccountRequest) bool {
 
 func (s *Service) accountBase(ctx context.Context, site callrules.SiteRef) (callrules.AccountResult, error) {
 	policy, err := s.store.PolicyFor(ctx, site.OwnerUserID, site.SiteID)
-	return callrules.AccountResult{Capabilities: callrules.AccountCapabilities{Passkeys: true, RequirePasskeys: policy.RequirePasskeys, Payments: false}, Credentials: []callrules.AccountCredential{}}, err
+	return callrules.AccountResult{Capabilities: callrules.AccountCapabilities{Passkeys: true, RequirePasskeys: policy.RequirePasskeys, Payments: false, SimulatedFunding: policy.SimulatedFunding}, Credentials: []callrules.AccountCredential{}}, err
 }
 func (s *Service) accountSnapshot(ctx context.Context, site callrules.SiteRef, token string) (callrules.AccountResult, error) {
 	out, err := s.accountBase(ctx, site)
@@ -159,6 +168,9 @@ func (s *Service) accountSnapshot(ctx context.Context, site callrules.SiteRef, t
 	if key.Kind == "guest" {
 		zero := int64(0)
 		out.Account.BalanceCents = &zero
+	}
+	if err := s.fundingSnapshot(ctx, site, &out, key); err != nil {
+		return out, err
 	}
 	return out, nil
 }
@@ -247,6 +259,24 @@ func (s *Service) accountRegisterBegin(ctx context.Context, site callrules.SiteR
 		h, k, rows, e := s.recentlyVerified(ctx, site, token)
 		if e != nil {
 			return out, e
+		}
+		// Expected identity binds a newer client's already verified screen to
+		// the cookie arriving now. Older bundles can omit it; the challenge is
+		// still bound to the actual key and session, never chosen by the input.
+		if req.AccountID != "" && req.AccountID != k.ID {
+			return out, callrules.Refuse(callrules.ErrConflict, "account_changed", "the active account changed")
+		}
+		release, e := s.gates(ctx, accountGate(k.ID))
+		if e != nil {
+			return out, e
+		}
+		defer release()
+		h, k, rows, e = s.recentlyVerified(memql.ContextWithFreshRead(ctx), site, token)
+		if e != nil {
+			return out, e
+		}
+		if req.AccountID != "" && req.AccountID != k.ID {
+			return out, callrules.Refuse(callrules.ErrConflict, "account_changed", "the active account changed")
 		}
 		if len(rows) >= maxAccountCredentials {
 			return out, accountRefusal("credential_limit")

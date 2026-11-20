@@ -69,6 +69,8 @@ var payloadLookups = []payloadLookup{
 	{index: "memory_nodes_calls_history_key_lookup_idx", field: "keyId", concepts: []string{"v1:calls:history", "v1:calls:seat"}},
 	{index: "memory_nodes_calls_seat_credential_lookup_idx", field: "credentialId", concepts: []string{"v1:calls:seat"}},
 	{index: "memory_nodes_calls_credential_digest_lookup_idx", field: "credentialDigest", concepts: []string{"v1:calls:credential"}},
+	{index: "memory_nodes_calls_simulation_key_lookup_idx", field: "keyId", concepts: []string{"v1:calls:simulatedWalletEntry"}},
+	{index: "memory_nodes_calls_funding_pass_lookup_idx", field: "fundingPassId", concepts: []string{"v1:calls:room"}},
 	{index: "memory_nodes_calls_credential_key_lookup_idx", field: "keyId", concepts: []string{"v1:calls:credential"}},
 	{index: "memory_nodes_calls_key_digest_lookup_idx", field: "digest", concepts: []string{"v1:calls:key"}},
 	{index: "memory_nodes_calls_session_digest_lookup_idx", field: "tokenDigest", concepts: []string{"v1:calls:session"}},

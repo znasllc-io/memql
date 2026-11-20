@@ -38,9 +38,37 @@ shape session callsSessionFull {
   accountId
 }
 
+/// The immutable simulated balance/receipt state. Its request digest contains no credentials.
+@row
+shape simulatedWalletEntry callsSimulatedWalletEntryFull {
+  row.id
+  row.createdAt
+  siteId
+  ownerUserId
+  keyId
+  kind
+  requestDigest
+  balanceCents
+  creditedCents
+  debitedCents
+  plan
+  passId
+  passPlan
+  passActivatedAt
+  passExpiresAt
+  passTotalSeconds
+  passDailySeconds
+  passMaxPeople
+  accountId
+}
+
 /// The room row as the calls integration reads it. No digest is projected.
 @row
 shape room callsRoomFull {
+  fundingPassId
+  fundingStartedAt
+  fundingDeadline
+  fundingMaxPeople
   historyPending
   row.id
   row.createdAt
@@ -157,6 +185,7 @@ shape mediaServer callsMediaServerFull {
 /// The policy row as the calls integration reads it. No digest is projected.
 @row
 shape policy callsPolicyFull {
+  simulatedFunding
   row.id
   row.createdAt
   siteId

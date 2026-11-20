@@ -7,6 +7,48 @@
 
 use common.traits.{ isOpen }
 
+/// The newest complete simulated state, not an aggregate. actor.userId scoping is not the fix: only internal-origin calls reach this construct.
+@serverOnly
+@actor
+@cache(0)
+query simulatedWalletEntry callsSimulatedWalletLatest {
+  args {
+    siteId string!
+    keyId string!
+  }
+  filter row => row.siteId == args.siteId && row.keyId == args.keyId && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  sort "row.createdAt", "desc"
+  paginate 1
+  shape callsSimulatedWalletEntryFull
+}
+
+/// One immutable idempotency receipt. actor.userId scoping is not the fix: only internal-origin calls reach this construct.
+@serverOnly
+@actor
+@cache(0)
+query simulatedWalletEntry callsSimulatedWalletEntryById {
+  args { id string! }
+  filter row => row.id == args.id && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  paginate 1
+  shape callsSimulatedWalletEntryFull
+}
+
+/// Authoritative room-time sources for one pass. Native aggregation refuses an incomplete page rather than undercounting. actor.userId scoping is not the fix: only internal-origin calls reach this construct.
+@serverOnly
+@actor
+@cache(0)
+query room callsRoomsForFundingPass {
+  args {
+    siteId string!
+    keyId string!
+    passId string!
+  }
+  filter row => row.siteId == args.siteId && row.keyId == args.keyId && row.fundingPassId == args.passId && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  sort "row.id", "asc"
+  paginate 1000
+  shape callsRoomFull
+}
+
 /// One key row by its own id. The calls integration reads it before it writes, and to answer a request that names it. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
 @serverOnly
 @unbounded("key by id -- bounded to a single row (id is the row's own primary key)")

@@ -69,6 +69,10 @@ import (
 // A BOOKED OPENING DOES NOT LOOK AT THE KEY'S OPEN ROOMS because a back-to-back booking must
 // be able to open while the previous call runs: that is the core use, one interview per
 // candidate, each ending as the next begins. What an overlap costs comes with payments.
+// This legacy exception does not apply to simulated passes: fundingForOpening checks
+// the payer's open rooms under its key gate for both instant and scheduled openings.
+// Booking a simulated call also checks its span against the existing pass, without
+// reserving time; opening rechecks actual consumption since the booking was made.
 //
 // # Links and the calendar file
 //
@@ -207,6 +211,9 @@ func (s *Service) bookGated(ctx context.Context, h keyHolder, policy callrules.P
 	if err := s.heldKey(fresh, h, now); err != nil {
 		return now, err
 	}
+	if err := s.checkFundingBooking(fresh, h, n.Start, n.End); err != nil {
+		return now, err
+	}
 	upcoming, err := s.upcoming(fresh, h.site.OwnerUserID, h.row.KeyID, now, "")
 	if err != nil {
 		return now, err
@@ -303,6 +310,9 @@ func (s *Service) moveGated(ctx context.Context, h keyHolder, callID string, pol
 	if err := callrules.ValidateSchedule(now, span, policy, upcoming); err != nil {
 		return bookingRow{}, now, callrules.BookingRefusal(err)
 	}
+	if err := s.checkFundingBooking(fresh, h, span.Start, span.End); err != nil {
+		return bookingRow{}, now, err
+	}
 	fields := map[string]any{
 		"start": span.Start, "end": span.End,
 		"guestDigest": callrules.Digest(h.pepper, []byte(links.GuestToken)),
@@ -344,7 +354,7 @@ func (s *Service) Cancel(ctx context.Context, sess callrules.Session, callID str
 	fresh := memql.ContextWithFreshRead(ctx)
 	owner := h.site.OwnerUserID
 	now := s.now()
-	if err := s.heldKey(fresh, h, now); err != nil {
+	if err := s.heldKeyForCancellation(fresh, h, now); err != nil {
 		return err
 	}
 	current, err := s.bookingOf(fresh, h, b.ID)
@@ -381,6 +391,9 @@ func (s *Service) heldKey(ctx context.Context, h keyHolder, now time.Time) error
 		return err
 	}
 	if !opens {
+		if err := s.fundingKeyRefusal(ctx, h.site, h.row.KeyID); err != nil {
+			return err
+		}
 		return callrules.Refuse(callrules.ErrForbidden, callrules.ReasonKeyNotActive, "the key books, moves and cancels no call")
 	}
 	return nil
@@ -630,7 +643,8 @@ func (s *Service) joinBooking(ctx context.Context, site callrules.SiteRef, sess 
 	}
 	// A BOOKED CALL'S FIRST JOIN DOES NOT ASK THE KEY'S OPEN ROOMS (oneCallPerKey false):
 	// a back-to-back booking must be able to open while the previous call runs. So it opens
-	// whatever else the key has open (the file note's "one call per key").
+	// whatever else a legacy key has open. Simulated funding enforces one room in
+	// openRoom under the payer key gate (the file note's exception).
 	if refused, err := s.openRefusal(ctx, site, b.KeyID, held, false); err != nil {
 		return refused, held.state(sess, site), err
 	}
@@ -656,7 +670,7 @@ func (s *Service) joinBooking(ctx context.Context, site callrules.SiteRef, sess 
 	if opened.result.Outcome != callrules.OutcomeAdmit {
 		return opened.result, opened.out, nil
 	}
-	result, err := admitted(placed.server, placed.credential, placed.roomID, opened.seat, policy)
+	result, err := s.admittedWithFunding(ctx, site.OwnerUserID, placed.server, placed.credential, placed.roomID, opened.seat, policy)
 	if err != nil {
 		return callrules.JoinResult{}, opened.out, err
 	}
@@ -705,7 +719,7 @@ type opening struct {
 // host link, carrying the booking's id and digests, and the booking marked started just
 // before the room is written.
 func (s *Service) openGated(ctx context.Context, site callrules.SiteRef, b bookingRow, server MediaServer, policy callrules.Policy, held *sessionRow, ask joinAsk, roomID, identity string) (opening, error) {
-	gateKeys := []string{bookingGate(b.ID), roomGate(roomID), serverGate(server.ID)}
+	gateKeys := []string{keyGate(b.KeyID), bookingGate(b.ID), roomGate(roomID), serverGate(server.ID)}
 	if held != nil && held.KeyID != "" {
 		gateKeys = append([]string{accountGate(held.KeyID)}, gateKeys...)
 	}

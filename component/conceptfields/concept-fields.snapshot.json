@@ -963,6 +963,7 @@
         "requirePasskeys",
         "roomJoinsPerMinute",
         "scheduleHorizon",
+        "simulatedFunding",
         "siteId"
       ],
       "required": [
@@ -1011,6 +1012,10 @@
         "deployable",
         "endReason",
         "endedAt",
+        "fundingDeadline",
+        "fundingMaxPeople",
+        "fundingPassId",
+        "fundingStartedAt",
         "guestDigest",
         "historyPending",
         "hostDigest",
@@ -1146,6 +1151,53 @@
         "kind": [
           "guest",
           "host"
+        ]
+      }
+    },
+    {
+      "concept": "v1:calls:simulatedWalletEntry",
+      "file": "calls/concepts.memql",
+      "fields": [
+        "accountId",
+        "balanceCents",
+        "creditedCents",
+        "debitedCents",
+        "keyId",
+        "kind",
+        "ownerUserId",
+        "passActivatedAt",
+        "passDailySeconds",
+        "passExpiresAt",
+        "passId",
+        "passMaxPeople",
+        "passPlan",
+        "passTotalSeconds",
+        "plan",
+        "requestDigest",
+        "siteId"
+      ],
+      "required": [
+        "balanceCents",
+        "creditedCents",
+        "debitedCents",
+        "keyId",
+        "kind",
+        "ownerUserId",
+        "requestDigest",
+        "siteId"
+      ],
+      "enums": {
+        "kind": [
+          "activation",
+          "topup"
+        ],
+        "passPlan": [
+          "day",
+          "month"
+        ],
+        "plan": [
+          "day",
+          "month"
         ]
       }
     },

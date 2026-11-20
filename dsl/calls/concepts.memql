@@ -34,6 +34,37 @@ concept key {
   @relationship(type="references", as="siteOwner", field="ownerUserId", target=user, direction="outgoing")
 }
 
+/// One immutable LOCAL SIMULATION effect and the complete wallet state after it.
+/// Not real money: no payment provider, production ledger, or cash-out consumes these rows.
+/// The key gate serializes writes; one insert atomically commits state and receipt.
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@displayCard(primary="kind", secondary="keyId")
+@belongsTo(account, via="siteId", stays="signin")
+concept simulatedWalletEntry {
+  siteId string! @description("The v1:platform:site whose operator explicitly enables this local simulation.")
+  ownerUserId string! @description("The owning v1:identity:user, stamped from the internal actor; never caller-supplied.")
+  keyId string! @description("The authenticated v1:calls:key that owns this simulated balance.")
+  kind enum("topup", "activation")!
+  requestDigest string! @maxLength(64) @pattern("^[0-9a-f]{64}$") @description("Canonical non-secret request digest. The row id separately binds site, key and idempotency nonce, independent of session-secret rotation.")
+  balanceCents int! @description("Complete resulting simulated USD balance, bounded by the native invariant to 0..50000 cents.")
+  creditedCents int! @description("Simulated cents credited by this immutable receipt; zero for activation.")
+  debitedCents int! @description("Simulated cents debited by this immutable receipt; zero for top-up.")
+  plan enum("day", "month") @description("The activated catalog plan on an activation receipt, absent on top-ups.")
+  passId string @description("The v1:calls:simulatedWalletEntry activation that created the current pass, retained unchanged by top-ups.")
+  passPlan enum("day", "month")
+  passActivatedAt datetime
+  passExpiresAt datetime
+  passTotalSeconds int
+  passDailySeconds int
+  passMaxPeople int
+  accountId string @description("Organization account assignment, filled by @belongsTo and never visitor authority.")
+  @relationship(type="references", as="walletKey", field="keyId", target=key, direction="outgoing")
+  @relationship(type="references", as="activeSimulationPass", field="passId", target=simulatedWalletEntry, direction="outgoing")
+  @relationship(type="references", as="forSite", field="siteId", target=site, direction="outgoing")
+  @relationship(type="references", as="siteOwner", field="ownerUserId", target=user, direction="outgoing")
+}
+
 /// A CALLS SESSION: one short-lived pass a host or a guest holds to join one room. Only the digest of
 /// the plain token is stored (`tokenDigest`). THE ROW EXPIRES: @retention(ttl="30d", keepLatest=false,
 /// archive="none") deletes the whole row thirty days after it was written, with no copy in object
@@ -90,6 +121,11 @@ concept session {
 @displayCard(primary="mediaRoom", secondary="siteId", status="status")
 @belongsTo(account, via="siteId")
 concept room {
+  @relationship(type="references", as="simulationPass", field="fundingPassId", target=simulatedWalletEntry, direction="outgoing")
+  fundingPassId string @description("The v1:calls:simulatedWalletEntry activation whose simulated allowance pays for this room; fixed at creation.")
+  fundingStartedAt datetime @description("First actual media admission for this funded room. Waiting without an admitted participant consumes no room time.")
+  fundingDeadline datetime @description("Server-enforced latest end for the room's simulated allowance; fixed on first admission and never extended by top-up or handover.")
+  fundingMaxPeople int @description("Total participant ceiling including the host and invited AI callers, snapshotted from the simulated pass.")
   historyPending bool @description("Atomically marks source changes not yet durably projected into private history; only a version-fenced successful projection clears it.")
   siteId  string!  @description("The v1:platform:site (deployable) this row belongs to.")
   ownerUserId  string!  @description("The v1:identity:user who owns the site -- the row-authz key. STAMPED from the actor the write runs as and never an argument: the calls integration writes as the site's owner (borrowed authority), so this is the site's owner and never a visitor.")
@@ -251,7 +287,8 @@ concept mediaServer {
 concept policy {
   siteId  string!  @description("The v1:platform:site (deployable) these limits apply to. One policy per site.")
   ownerUserId  string!  @description("The v1:identity:user who owns the site -- the row-authz key. STAMPED from the actor the write runs as and never an argument: the calls integration writes as the site's owner (borrowed authority), so this is the site's owner and never the operator who set the limits.")
-  requirePasskeys int @description("0 preserves legacy link access; 1 requires persistent authenticated keys at join.")
+  requirePasskeys int @description("0 preserves optional guest access; 1 requires a currently credential-backed session at join.")
+  simulatedFunding int @description("Operator-only opt-in for local simulated wallet funding and hosting passes. 0/absent disables it. Never enables real payments.")
   maxPeople  int  @description("calls.Policy.MaxPeople: people allowed in one room.")
   maxAgents  int  @description("calls.Policy.MaxAgents: agents allowed in one room.")
   roomJoinsPerMinute  int  @description("calls.Policy.RoomJoinsPerMinute: join attempts allowed per room per minute.")
