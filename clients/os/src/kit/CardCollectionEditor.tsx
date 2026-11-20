@@ -7,7 +7,8 @@ import { IconButton } from "./IconButton";
 /** The same search, filter and add line for small editable card collections. */
 export function CardCollectionSearch({ label, mode, query, onQueryChange, inputRef, inputProps, disabled = false, add, clearLabel }: {
   label: string;
-  mode: { label: string; value: string; options: readonly (readonly [string, string])[]; onChange: (value: string) => void };
+  /** The menu before the box: flat `options`, or `<option>`/`<optgroup>` `children` with an optional trigger `display`. */
+  mode: { label: string; value: string; options?: readonly (readonly [string, string])[]; children?: ReactNode; display?: string; onChange: (value: string) => void };
   query: string;
   onQueryChange: (query: string) => void;
   inputRef: RefObject<HTMLInputElement | null>;
@@ -20,8 +21,8 @@ export function CardCollectionSearch({ label, mode, query, onQueryChange, inputR
   return <fieldset className="os-card-search" disabled={disabled}>
     <legend className="os-sr-only">{label}</legend>
     <div className="os-card-search-mode">
-      <Select id={`${id}-mode`} label={mode.label} value={mode.value} onChange={mode.onChange}>
-        {mode.options.map(([value, name]) => <option key={value} value={value}>{name}</option>)}
+      <Select id={`${id}-mode`} label={mode.label} value={mode.value} display={mode.display} onChange={mode.onChange}>
+        {mode.children ?? mode.options?.map(([value, name]) => <option key={value} value={value}>{name}</option>)}
       </Select>
     </div>
     <div className="os-card-search-input">

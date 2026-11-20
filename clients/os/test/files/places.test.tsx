@@ -177,12 +177,15 @@ describe("the Head line and its hidden search panel (José, Nov 19 2026)", () =>
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
     const panel = document.getElementById(toggle.getAttribute("aria-controls")!)!;
     expect(within(panel).getByRole("textbox", { name: "Search" })).toBe(document.activeElement);
-    expect(selectedLabel(within(panel).getByLabelText("Kind of file"))).toBe("All");
+    expect(selectedLabel(within(panel).getByLabelText("Filter files"))).toBe("All");
     expect(selectedLabel(within(panel).getByLabelText("Sort"))).toBe("Newest first");
     expect(selectedLabel(within(panel).getByLabelText("Added"))).toBe("Any time");
     expect(within(panel).queryByRole("button", { name: /^Add/ })).toBeNull();
-    expect(within(openSelect(within(panel).getByLabelText("Kind of file"))).getAllByRole("option").map((o) => o.textContent))
-      .toEqual(["All", "Folders", "Documents", "Images", "Media", "Sheets", "Archives", "Misc"]);
+    // Kind first, then Source and Client (no Label group: nothing is labelled).
+    const kinds = openSelect(within(panel).getByLabelText("Filter files"));
+    expect([...kinds.querySelectorAll(".os-select-group")].map((g) => g.textContent)).toEqual(["Kind", "Source", "Client"]);
+    expect(within(kinds).getAllByRole("option").map((o) => o.textContent).slice(0, 9))
+      .toEqual(["All", "Folders", "Documents", "Images", "Media", "Sheets", "Archives", "Misc", "Any source"]);
     expect(within(openSelect(within(panel).getByLabelText("Sort"))).getAllByRole("option").map((o) => o.textContent))
       .toEqual(["Name", "Newest first", "Oldest first", "Size", "Kind"]);
     expect(within(openSelect(within(panel).getByLabelText("Added"))).getAllByRole("option").map((o) => o.textContent))
@@ -206,7 +209,7 @@ describe("the Head line and its hidden search panel (José, Nov 19 2026)", () =>
     await renderFiles();
     const toggle = screen.getByRole("button", { name: "Search" });
     await click(toggle);
-    const kind = () => screen.getByLabelText("Kind of file");
+    const kind = () => screen.getByLabelText("Filter files");
     const tiles = () => [...document.querySelectorAll(".os-files-files .os-files-tile-name")].map((name) => name.textContent);
 
     chooseOption(kind(), "Images");
@@ -233,6 +236,58 @@ describe("the Head line and its hidden search panel (José, Nov 19 2026)", () =>
     await click(toggle);
     expect(selectedLabel(kind())).toBe("All");
     expect(selectedLabel(screen.getByLabelText("Sort"))).toBe("Name");
+  });
+
+  it("puts Label, Source and Client in the kind menu as single choices that stack, and closing clears them (Jesús, Nov 20 2026, p17 C)", { timeout: 20000 }, async () => {
+    h.connection = fakeConnection({
+      accounts: [{ id: "acme", name: "Acme Consulting", status: "active", createdAt: "2026-08-01T00:00:00Z" }],
+      artifacts: [
+        artifactRow({ id: "a-1", title: "invoice.pdf", labels: ["invoices"], accountIds: ["acme"], createdAt: "2026-08-23T10:00:00Z" }),
+        artifactRow({ id: "a-2", title: "agent.pdf", labels: ["invoices"], source: "agent_generated", accountIds: ["acme"], createdAt: "2026-08-22T10:00:00Z" }),
+        artifactRow({ id: "a-3", title: "photo.jpg", labels: ["invoices"], accountIds: ["acme"], createdAt: "2026-08-21T10:00:00Z" }),
+        artifactRow({ id: "a-4", title: "loose.pdf", labels: ["misc"], createdAt: "2026-08-20T10:00:00Z" }),
+      ],
+    });
+    await renderFiles();
+    const toggle = screen.getByRole("button", { name: "Search" });
+    await click(toggle);
+    const menu = () => screen.getByRole("combobox", { name: "Filter files" });
+    const tiles = () => [...document.querySelectorAll(".os-files-files .os-files-tile-name")].map((name) => name.textContent);
+    const checked = () => within(openSelect(menu())).getAllByRole("option").filter((o) => o.getAttribute("aria-selected") === "true").map((o) => o.textContent);
+
+    const list = openSelect(menu());
+    expect([...list.querySelectorAll(".os-select-group")].map((g) => g.textContent)).toEqual(["Kind", "Label", "Source", "Client"]);
+    expect(within(list).getByRole("option", { name: "Made by an agent" })).toBeTruthy();
+    expect(within(list).getByRole("option", { name: "No client" })).toBeTruthy();
+    // Every group starts on its "any" answer, each with its own check.
+    expect(checked()).toEqual(["All", "Any label", "Any source", "Any client"]);
+    fireEvent.keyDown(menu(), { key: "Escape" });
+
+    chooseOption(menu(), "invoices");
+    await act(async () => {});
+    chooseOption(menu(), "Documents");
+    await act(async () => {});
+    chooseOption(menu(), "Uploaded");
+    await act(async () => {});
+    chooseOption(menu(), "Acme Consulting");
+    await act(async () => {});
+    await waitFor(() => expect(tiles()).toEqual(["invoice.pdf"]));
+    expect(checked()).toEqual(["Documents", "invoices", "Uploaded", "Acme Consulting"]);
+    fireEvent.keyDown(menu(), { key: "Escape" });
+    // The button reads the kind, plus how many of the other three are on.
+    expect(selectedLabel(menu())).toBe("Documents +3");
+
+    chooseOption(menu(), "Any source");
+    await act(async () => {});
+    await waitFor(() => expect(tiles()).toEqual(["invoice.pdf", "agent.pdf"]));
+    expect(selectedLabel(menu())).toBe("Documents +2");
+
+    // Closing the panel clears all four (item 8 keeps only the sort).
+    await click(toggle);
+    await waitFor(() => expect(tiles()).toHaveLength(4));
+    await click(toggle);
+    expect(selectedLabel(menu())).toBe("All");
+    expect(checked()).toEqual(["All", "Any label", "Any source", "Any client"]);
   });
 
   it("reads every page before sorting by name, so the first tile is the Library's first name", async () => {

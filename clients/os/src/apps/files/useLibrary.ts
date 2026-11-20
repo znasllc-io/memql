@@ -128,8 +128,10 @@ export function useLibraryFeeds(filter: FilesFilter, desk: DeskMembership, enabl
   }, [whole, hasMore, loadingMore, loadMoreError, pageable, progress, loadMore]);
   const index = facets.snapshot.rows[0];
   const counts = index ? new Map((index.folders as {folderId: string; count: number}[]).map(row => [row.folderId, row.count])) : null;
+  // The labels in the place, for the kind menu's Label group.
+  const labels = index ? [...new Set((index.labelGroups as string[][]).flat())].filter(Boolean).sort((a, b) => a.localeCompare(b)) : [];
   return { artifacts, folders, files, compositions: filter.place === "materializer" ? outputs : visibleOutputs,
-    counts, facetsError: facets.snapshot.error, effectiveFilter };
+    counts, labels, facetsError: facets.snapshot.error, effectiveFilter };
 }
 
 export type LibraryArtifactsFeed = PagedCollectionHandle<Row>;

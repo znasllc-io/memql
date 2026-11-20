@@ -69,11 +69,11 @@ export const EMPTY_DESK: DeskMembership = {
 };
 
 /**
- * NO CONTROL SETS `kind`, `source`, `accountId` OR `label` NOW. They were
- * Refine's facets, and Refine left the Files Head when the search panel
- * replaced it (José, Nov 19 2026), so they stay at their defaults. The
- * fields, their server arguments and their folds stay, so a facet can come
- * back as one more control on the panel's second line.
+ * `source`, `accountId` AND `label` WERE REFINE'S FACETS, and they are back
+ * (Jesús, Nov 20 2026, Option C of draft p17): Label, Source and Client are
+ * groups in the search panel's kind menu, under the kinds of file (see
+ * `filterMenuPick`). `kind` (the artifact's index kind) has no control and stays
+ * at its default.
  */
 export interface FilesFilter {
   /** Which of the rail's places is being looked at. */
@@ -103,7 +103,7 @@ export interface FilesFilter {
    * exact label a row must carry.
    *
    * =========================================================================
-   * A LABEL IS A FACET BEHIND `Refine`, NOT A SECOND RAIL (DESIGN.md rule 2)
+   * A LABEL IS A FACET IN THE SEARCH PANEL, NOT A SECOND RAIL (DESIGN.md rule 2)
    * =========================================================================
    * The portal filtered by `?label=`, and the obvious port of that is a
    * standing label list beside the folder tree. Two rules refuse it. Rule 2:
@@ -115,8 +115,7 @@ export interface FilesFilter {
    * is not a place -- one file carries several at once -- so a second
    * navigational axis beside the one that answers "where is this" would make
    * a rail click ambiguous about what it means. The label rides in the
-   * Refine, and an active one shows as a removable chip beside it exactly as
-   * kind, source and client do.
+   * search panel's kind menu, as its Label group (see `filterMenuPick`).
    *
    * "" IS THE SENTINEL rather than a word like ACCOUNT_ANY's "all", because
    * labels are FREE TEXT: "all" is a label somebody may genuinely have used,
@@ -397,7 +396,7 @@ export function applyFilters(
  * picked so one paged read holds the complete truth, and the engine's own
  * `libraryArtifactsByLabel` carries the default `archived != true` conjunct,
  * so a server-side label read would disagree with the archived, kind, source,
- * client and search filters standing beside it in the same Refine panel.
+ * client and search filters standing beside it in the same search panel.
  *
  * The caller passes the rows that pass every OTHER facet, so a label offered
  * always has at least one row behind it in the view being looked at -- and
@@ -413,4 +412,52 @@ export function labelsOf(rows: readonly ArtifactRow[]): string[] {
     }
   }
   return [...seen].sort((a, b) => a.localeCompare(b));
+}
+
+// ===========================================================================
+// THE KIND MENU HOLDS FOUR SINGLE CHOICES (Jesús, Nov 20 2026, draft p17 C)
+// ===========================================================================
+// Label, source and client came back INSIDE the search panel's kind menu, as
+// groups under the kinds of file: Kind, Label, Source, Client. Each group is
+// its own single choice -- one kind AND one label AND one source AND one
+// client can be on together -- so one option value carries its group in front
+// of a colon ("label:invoices") and `filterMenuPick` turns it back into the
+// one field it sets. Only the first colon splits: a label is free text.
+
+/** Words for the source values the old Refine offered (it showed the raw values). */
+export const SOURCE_LABELS: Record<SourceFilter, string> = {
+  all: "Any source",
+  uploaded: "Uploaded",
+  exported: "Exported",
+  workbench_generated: "Made on the workbench",
+  computer_use: "Computer use",
+  agent_generated: "Made by an agent",
+  derived: "Derived",
+  user_created: "Written here",
+  live: "Live",
+  pipeline: "Pipeline",
+};
+
+export type FilterMenuGroup = "type" | "label" | "source" | "client";
+
+export function filterMenuValue(group: FilterMenuGroup, value: string): string {
+  return `${group}:${value}`;
+}
+
+/** The one filter field an option of the kind menu sets. */
+export function filterMenuPick(option: string): Partial<FilesFilter> {
+  const at = option.indexOf(":");
+  const value = option.slice(at + 1);
+  switch (option.slice(0, at)) {
+    case "type": return { type: value as FileType };
+    case "label": return { label: value };
+    case "source": return { source: value as SourceFilter };
+    case "client": return { accountId: value };
+    default: return {};
+  }
+}
+
+/** How many of label, source and client are on: the kind menu's button adds "+N" to the kind. */
+export function otherFiltersOn(filter: Pick<FilesFilter, "label" | "source" | "accountId">): number {
+  return [filter.label !== LABEL_ANY, filter.source !== "all", filter.accountId !== ACCOUNT_ANY].filter(Boolean).length;
 }

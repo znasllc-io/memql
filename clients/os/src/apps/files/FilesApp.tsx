@@ -153,7 +153,7 @@ export function FilesApp({
     return { membership, shortcuts, deskIndexByArtifactId, desksWithItems: desksWithItems.size };
   }, [osState.shell.desks, osState.surfaces]);
 
-  const { artifacts, folders, files, compositions, counts, facetsError, effectiveFilter } = useLibraryFeeds(
+  const { artifacts, folders, files, compositions, counts, labels, facetsError, effectiveFilter } = useLibraryFeeds(
     filter, desk.membership, sectionId !== "settings" && sectionId !== "logs" && sectionId !== "backups", sectionId === "backups",
   );
 
@@ -377,6 +377,7 @@ export function FilesApp({
       list={list}
       artifacts={artifacts}
       counts={counts}
+      labelOptions={labels}
       facetsError={facetsError}
       files={files.snapshot.rows}
       foldersState={folders.snapshot.state}

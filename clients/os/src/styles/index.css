@@ -2254,7 +2254,15 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
 /* The hidden search panel opens under the Head and pushes the tiles down. */
 .os-files-search { display: grid; grid-template-rows: 1fr; border-block: 1px solid var(--os-line); animation: os-files-search-open var(--os-duration-fast) var(--os-ease); }
 .os-files-search-lines { min-height: 0; overflow: hidden; display: grid; gap: 8px; padding: 10px 2px; }
-.os-files-search .os-card-search-mode { flex-basis: 112px; }
+.os-files-search .os-card-search-mode { flex-basis: 128px; }
+/* The kind menu's list (Jesús, Nov 20 2026, draft p17 Option C): Kind, Label,
+ * Source and Client headings in small capitals as drawn, and a width cap so a
+ * long free-text label ellipsizes instead of widening the list off screen.
+ * The list is portalled, so it is reached by its accessible name. Height is
+ * the kit's own cap: many labels or clients scroll inside the list. */
+.os-select-list[aria-label="Filter files"] { max-width: min(280px, calc(100vw - 16px)); }
+.os-select-list[aria-label="Filter files"] .os-select-group { text-transform: uppercase; letter-spacing: 0.06em; }
+.os-select-list[aria-label="Filter files"] .os-select-option-label { min-width: 0; }
 .os-files-search-order { display: flex; flex-wrap: wrap; gap: 8px; }
 .os-files-search-order > .os-select-wrap { flex: none; }
 @keyframes os-files-search-open { from { grid-template-rows: 0fr; opacity: 0; } }

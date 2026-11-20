@@ -347,7 +347,7 @@ export function Inspector({
         {/* LABELS (epic memql#5009): editable, so a section of its own rather
             than a fact row. One short row: the field and Add, then the chips.
             The browse's label FACET asks a different question of the same
-            field and lives behind Refine (DESIGN.md rule 2). */}
+            field and lives in the search panel's kind menu (DESIGN.md rule 2). */}
         <DetailsSection title="Labels">
           <LabelEditor artifactId={row.id} labels={row.labels} />
         </DetailsSection>

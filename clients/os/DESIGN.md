@@ -76,7 +76,10 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    the Head that pushes the tiles down. Its first line is Fleet's search bar
    (`CardCollectionSearch`, without its add) choosing a kind of file; its
    second holds Sort (Name, Newest first, Oldest first, Size, Kind) and Added.
-   Closing the panel ends the search and keeps the order.
+   The kind menu also holds Label, Source and Client, each a group with its own
+   single choice under the kinds (Jesús, Nov 20 2026, draft p17 Option C); its
+   button reads the kind plus "+N" while N of those are on. Closing the panel
+   ends the search and clears all four, and keeps the order.
 
 4. **Micro-preferences live in the app's Settings section.** Show revoked,
    show deactivated, include archived, default sort -- preferences, not
