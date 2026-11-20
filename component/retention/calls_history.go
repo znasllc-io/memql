@@ -23,6 +23,8 @@ const callsHistoryReceiptConcept = "v1:calls:historyReceipt"
 // Each entry takes the same gate as archive/restore, then reads the newest row
 // again. A restore before the deadline wins; at the deadline the service refuses
 // restore even before this bounded hourly pass has reclaimed physical storage.
+// staged-data: MUST-NOT-GATE -- physical expiry must include staged private history;
+// hiding it would retain user-archived data past its deadline. Each row still passes Admit.
 func (s *Sweeper) sweepCallHistory(ctx context.Context, now time.Time, dry bool, report *Report) error {
 	if _, err := s.Concepts.Get(callsHistoryConcept); err != nil {
 		return nil
@@ -71,6 +73,9 @@ type historyRetentionPayload struct {
 	PurgeAt     string `json:"purgeAt"`
 }
 
+// staged-data: MUST-NOT-GATE -- expiry must see every history version and its
+// anti-resurrection receipt; hiding either would retain expired data or permit
+// backfill to recreate it. Row admission and the archive/restore gate still apply.
 func (s *Sweeper) purgeCallHistoryEntry(ctx context.Context, id string, now time.Time, dry bool) (int, error) {
 	var row memorynodes.MemoryNode
 	err := s.DB.NewSelect().TableExpr(`"MemoryNodes"`).ColumnExpr("*").Where("concept=? AND id=?", callsHistoryConcept, id).OrderExpr(`"createdAt" DESC`).Limit(1).Scan(ctx, &row)
