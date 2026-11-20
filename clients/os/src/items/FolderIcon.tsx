@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { Folder as FolderGlyph } from "lucide-react";
+
+import { FolderGlyph } from "../apps/files/Tiles";
 
 // A desktop folder (epic memql#4842, #4847): a real desktop icon. Single
 // click SELECTS -- exactly as a file icon does -- and double-click (or
 // Enter) opens the Files app scoped to this folder under the Desktop place.
 // The under-icon popover this replaces is gone, and with it the open/closed
-// glyph: a desk icon is a shortcut, not a disclosure.
+// glyph: a desk icon is a shortcut, not a disclosure. The glyph is the
+// Library's folder, at the Library's size (Nov 19 item 9).
 //
 // Rename is driven from the item's context menu (the desktop owns the
 // `renaming` state); the old rename-on-title-double-click gesture collided
@@ -61,8 +63,8 @@ export function FolderIcon({
           if (event.key === "Enter") onOpen();
         }}
       >
-        <span className="os-file-glyph">
-          <FolderGlyph size={26} aria-hidden />
+        <span className="os-files-tile-icon os-file-glyph">
+          <FolderGlyph />
         </span>
         {renaming ? (
           <input

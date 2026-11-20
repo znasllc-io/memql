@@ -55,12 +55,12 @@ export function FolderGlyph() {
 /**
  * What a file's glyph says it is: the name's extension, else the recorded
  * format, at most five characters (TAR.GZ reads as GZ). Empty when neither
- * says anything, and the outline then stands alone.
+ * says anything, and the outline then stands alone. A Library tile and its
+ * desk icon both ask this, so the two always say the same thing.
  */
-export function typeLabel(row: ArtifactRow): string {
-  const name = artifactName(row);
+export function typeLabel(name: string, format = ""): string {
   const dot = name.lastIndexOf(".");
-  const ext = dot > 0 && dot < name.length - 1 ? name.slice(dot + 1) : row.format;
+  const ext = dot > 0 && dot < name.length - 1 ? name.slice(dot + 1) : format;
   return /^[a-z0-9]{1,5}$/i.test(ext) ? ext.toUpperCase() : "";
 }
 
@@ -121,7 +121,7 @@ export function FileTile({
       name: artifactName(row),
       folder: false,
       deskItemId: "",
-      desk: { entry: deskEntryOf(row), glyph: typeLabel(row) },
+      desk: { entry: deskEntryOf(row), glyph: typeLabel(artifactName(row), row.format) },
     } satisfies DeskFileDrag,
     disabled: fixed,
   });
@@ -172,7 +172,7 @@ export function FileTile({
         }}
       >
         <span className="os-files-tile-icon">
-          <FileGlyph label={typeLabel(row)} />
+          <FileGlyph label={typeLabel(name, row.format)} />
         </span>
         <span className="os-files-tile-name">{name}</span>
         {caption ? <span className="os-files-tile-meta os-files-tile-from">{caption}</span> : null}

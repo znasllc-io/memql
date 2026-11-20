@@ -162,6 +162,7 @@ export function deskEntryOf(row: ArtifactRow): Omit<FileEntry, "id"> {
     fileKind: row.kind,
     source: row.source,
     ...(row.producedByWorkerId ? { producedByWorkerId: row.producedByWorkerId } : {}),
+    ...(row.format ? { format: row.format } : {}),
   };
 }
 
