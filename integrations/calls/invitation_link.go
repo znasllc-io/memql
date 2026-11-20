@@ -2,12 +2,7 @@ package calls
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/base32"
-	"encoding/binary"
 	"fmt"
-	"strings"
 
 	callrules "github.com/znasllc-io/memql/component/calls"
 	"github.com/znasllc-io/memql/component/memql"
@@ -54,7 +49,7 @@ func (s *Service) InvitationLink(ctx context.Context, sess callrules.Session, re
 	if err != nil {
 		return none, err
 	}
-	token := invitationLinkToken(pepper, h.site.OwnerUserID, h.site.SiteID, h.room.ID)
+	token := callrules.InvitationLinkToken(pepper, h.site.OwnerUserID, h.site.SiteID, h.room.ID)
 	digest := callrules.Digest(pepper, []byte(token))
 	prior, err := s.store.invitationLinkByID(fresh, h.site.OwnerUserID, h.site.SiteID, digest)
 	if err != nil {
@@ -75,17 +70,4 @@ func (s *Service) InvitationLink(ctx context.Context, sess callrules.Session, re
 func invitationHostMatches(h acting, identity string) bool {
 	return h.seat.Identity == identity && h.seat.RoomID == h.room.ID &&
 		h.room.SiteID == h.site.SiteID && h.room.OwnerUserID == h.site.OwnerUserID
-}
-
-// Length framing prevents ambiguity between scope components. The versioned domain
-// separates this MAC from stored token digests, invitation receipt ids and any future
-// capability. Truncation preserves the existing 160-bit token format and strength.
-func invitationLinkToken(pepper []byte, owner, site, room string) string {
-	mac := hmac.New(sha256.New, pepper)
-	mac.Write([]byte("memql.calls.guest-invitation-link.v1\x00"))
-	for _, scope := range []string{owner, site, room} {
-		mac.Write(binary.BigEndian.AppendUint32(nil, uint32(len(scope))))
-		mac.Write([]byte(scope))
-	}
-	return strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(mac.Sum(nil)[:callrules.TokenBytes]))
 }

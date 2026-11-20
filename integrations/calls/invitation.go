@@ -2,8 +2,6 @@ package calls
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -134,8 +132,7 @@ func (s *Service) Invite(ctx context.Context, sess callrules.Session, req callru
 		return callrules.InviteResult{}, callrules.ErrInvitationUnavailable
 	}
 	message.IntentID = "calls-invitation-" + key
-	fingerprint := sha256.Sum256([]byte(message.Subject + "\x00" + message.TextBody + "\x00" + message.HTMLBody))
-	digest := hex.EncodeToString(fingerprint[:])
+	digest := callrules.InvitationFingerprint(message.Subject, message.TextBody, message.HTMLBody)
 	message.Revised = prior != nil && prior.Fingerprint != digest
 	// Reserve the provider before committing attempting: a busy provider gate means
 	// no attempt began, and must not strand a receipt that replay cannot safely send.

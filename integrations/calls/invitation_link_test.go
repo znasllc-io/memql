@@ -1,7 +1,6 @@
 package calls
 
 import (
-	"bytes"
 	"context"
 	"strings"
 	"testing"
@@ -12,26 +11,6 @@ import (
 	callrules "github.com/znasllc-io/memql/component/calls"
 	"github.com/znasllc-io/memql/component/memql"
 )
-
-func TestInvitationLinkDerivationSeparatesEveryScope(t *testing.T) {
-	pepper := bytes.Repeat([]byte{7}, 32)
-	token := invitationLinkToken(pepper, "owner", "site", "room")
-	// Wire-stability vector: changing framing, domain or encoding would silently
-	// mint another alias for every existing room and orphan recovery records.
-	require.Equal(t, "sobceuaioyttstvp5muiymahlqnsdf3n", token)
-	require.True(t, callrules.TokenWellFormed(token))
-	require.Equal(t, token, invitationLinkToken(pepper, "owner", "site", "room"))
-	for _, other := range []string{
-		invitationLinkToken(pepper, "another", "site", "room"),
-		invitationLinkToken(pepper, "owner", "another", "room"),
-		invitationLinkToken(pepper, "owner", "site", "another"),
-		invitationLinkToken(bytes.Repeat([]byte{8}, 32), "owner", "site", "room"),
-	} {
-		require.NotEqual(t, token, other)
-	}
-	require.NotEqual(t, invitationLinkToken(pepper, "a", "bc", "d"), invitationLinkToken(pepper, "ab", "c", "d"))
-	require.NotEqual(t, invitationLinkToken(pepper, "a\x00b", "c", "d"), invitationLinkToken(pepper, "a", "b\x00c", "d"))
-}
 
 func TestInvitationLinkLookupIsBoundedGuestOnlyAndChecksBindings(t *testing.T) {
 	digest := strings.Repeat("a", 64)
