@@ -148,6 +148,7 @@ type callsFakeService struct {
 	// countdowns are when the host-left countdown of the token's call ends, for a token
 	// whose call is counting down.
 	countdowns map[string]time.Time
+	openedAt   map[string]time.Time
 	refusals   map[string]callsFakeRefusal
 	got        []callsFakeCall
 }
@@ -242,7 +243,7 @@ func (f *callsFakeService) SessionCall(_ context.Context, sess calls.Session) (c
 		return calls.SeatCall{}, err
 	}
 	roster := f.rosters[sess.Token]
-	return calls.SeatCall{Host: roster != nil, Roster: roster, CountdownEndsAt: f.countdowns[sess.Token]}, nil
+	return calls.SeatCall{Host: roster != nil, Roster: roster, CountdownEndsAt: f.countdowns[sess.Token], OpenedAt: f.openedAt[sess.Token]}, nil
 }
 
 func (f *callsFakeService) Start(_ context.Context, sess calls.Session, body calls.StartBody) (calls.StartResult, error) {
@@ -430,6 +431,7 @@ func newCallsRig(t *testing.T) *callsRig {
 		sessions:   map[string]calls.Session{},
 		rosters:    map[string]*calls.Roster{},
 		countdowns: map[string]time.Time{},
+		openedAt:   map[string]time.Time{},
 		refusals:   map[string]callsFakeRefusal{},
 	}
 	// THE SITE'S KEY HOLDER IS ALREADY IN, so every route that takes a session has one to

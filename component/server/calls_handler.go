@@ -905,7 +905,7 @@ func setCallsRetryAfter(w http.ResponseWriter, d time.Duration) {
 // `expiresAt` AND `expiresInMs` ARE ONE INSTANT, stated twice. The remainder is the one a
 // client schedules from, so a wrong client clock does not move the moment; it also tells a
 // page the server's now (expiresAt less expiresInMs), which is what `countdownEndsAt` is
-// counted down from.
+// counted down from and an occupying seat's elapsed call time is measured from.
 type callsSessionReply struct {
 	Kind        string `json:"kind"`
 	KeyID       string `json:"keyId,omitempty"`
@@ -916,6 +916,9 @@ type callsSessionReply struct {
 	// Host is true while the session's seat hosts its open call (a host seat admitted or in
 	// the call), and absent otherwise.
 	Host bool `json:"host,omitempty"`
+	// OpenedAt is the room's persisted start in RFC 3339, only for an admitted or
+	// in-call seat of an open room. Rejoining never resets it.
+	OpenedAt string `json:"openedAt,omitempty"`
 	// CountdownEndsAt is when the call ends unless a host is back first, in RFC 3339, while
 	// its host-left countdown runs (and once it has run out, until a pass ends the call), for
 	// any seat of the call; absent otherwise.
@@ -965,6 +968,9 @@ func (h *callsHandler) sessionReply(sess calls.Session, call calls.SeatCall) cal
 	}
 	if !call.CountdownEndsAt.IsZero() {
 		reply.CountdownEndsAt = call.CountdownEndsAt.UTC().Format(time.RFC3339Nano)
+	}
+	if !call.OpenedAt.IsZero() {
+		reply.OpenedAt = call.OpenedAt.UTC().Format(time.RFC3339Nano)
 	}
 	return reply
 }

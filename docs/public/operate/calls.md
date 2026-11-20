@@ -461,7 +461,12 @@ all, so a page must not assume a JSON body on a `5xx`.
 its ids bare, and never its token; to a seat in an open call it adds `host: true` while
 the seat hosts the call, `countdownEndsAt` (an RFC 3339 time) while the host-left
 countdown runs, and to a host the `roster`, each absent otherwise. `expiresAt` less
-`expiresInMs` is the server's clock, which a page counts `countdownEndsAt` down from. A
+`expiresInMs` is the server's clock, which a page counts `countdownEndsAt` down from.
+An admitted or in-call seat also receives `openedAt`, the open room's persisted start
+in RFC 3339. Every participant receives the same start, including late joiners and
+reconnects, so elapsed call time uses this start and the server clock rather than the
+browser's join time. Waiting, departed and removed seats, ended rooms and sessions
+without a seat omit it. This is elapsed room time, not a billing counter. A
 join's answer is
 `{outcome, url, pass, identity, host, expiresInMs, retryAfterMs, position, reason}`:
 `admit` with the media server's address, the pass and the seat's media identity, or

@@ -1270,12 +1270,13 @@ func TestASeatIsToldWhetherItHostsAndWhenTheCountdownEnds(t *testing.T) {
 		require.True(t, host.Host, "the host seat in the call is not told it hosts")
 		require.NotNil(t, host.Roster, "a host is told it hosts but given no roster")
 		require.True(t, host.CountdownEndsAt.IsZero(), "a countdown runs with the host in the call")
-		require.Equal(t, callrules.SeatCall{}, cw.sessionCall(guest), "a guest was told something while the host is in the call")
+		opened := rowTime(cw.row(roomConcept, started.Call.ID), "openedAt")
+		require.Equal(t, callrules.SeatCall{OpenedAt: opened}, cw.sessionCall(guest), "a guest was given host controls or a countdown while the host is in the call")
 
 		cw.clock.Advance(time.Minute)
 		left := cw.clock.Now()
 		require.NoError(t, cw.svc.Leave(ctx, hostSess))
-		require.Equal(t, callrules.SeatCall{CountdownEndsAt: left.Add(grace)}, cw.sessionCall(guest),
+		require.Equal(t, callrules.SeatCall{OpenedAt: opened, CountdownEndsAt: left.Add(grace)}, cw.sessionCall(guest),
 			"a guest is not told when the call ends now that the host left")
 		require.Equal(t, callrules.SeatCall{}, cw.sessionCall(hostSess), "a host who left is told about a call it is not in")
 

@@ -312,6 +312,9 @@ func (s *Service) SessionCall(ctx context.Context, sess callrules.Session) (call
 		return none, err
 	}
 	var out callrules.SeatCall
+	if seat.occupying() {
+		out.OpenedAt = room.OpenedAt
+	}
 	if seat.Host && seat.occupying() {
 		out.Host = true
 		out.Roster = rosterOf(*room, v.seats, v.entries)

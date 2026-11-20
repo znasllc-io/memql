@@ -53,9 +53,11 @@ type RosterWaiter struct {
 // until a pass has ended the call; the zero time when no countdown runs. Roster is the
 // call as its host controls name it, for a host and nobody else. The zero SeatCall is
 // what a session seated nowhere, a seat that left or was removed, and a seat of an ended
-// call are told.
+// call are told. OpenedAt is the room's persisted start, shared by every admitted or
+// in-call seat across late joins and reconnects; waiting seats are not given it.
 type SeatCall struct {
 	Host            bool
+	OpenedAt        time.Time
 	CountdownEndsAt time.Time
 	Roster          *Roster
 }
