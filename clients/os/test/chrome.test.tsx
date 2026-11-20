@@ -397,7 +397,10 @@ describe("phone chrome (spec D13)", () => {
     expect(screen.queryByRole("button", { name: appTileName("Profile") })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Open Profile" }));
     fireEvent.click(screen.getByRole("button", { name: "About" }));
-    expect(await screen.findByRole("heading", { name: "About" })).toBeTruthy();
+    // Profile loads on demand, as Settings above does. Await the real module
+    // and its React update; this checks navigation, not a 1s cold-import budget.
+    await act(async () => { await import("../src/apps/profile/ProfileApp"); });
+    expect(screen.getByRole("heading", { name: "About" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Back to home" }));
     expect(screen.queryByRole("heading", { name: "About" })).toBeNull();
   });
