@@ -215,6 +215,16 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "calls/mutations.memql", Name: "updateCallsMediaServer"}:        true,
 		{Path: "calls/mutations.memql", Name: "createCallsPolicy"}:             true,
 		{Path: "calls/mutations.memql", Name: "updateCallsPolicy"}:             true,
+		// Invitation receipts and budgets are private effect coordination. A
+		// caller's actor cannot establish the calls host session or guest-token
+		// proof, nor replace the shared gates and version fences around a send.
+		{Path: "calls/queries.memql", Name: "callsInvitationById"}:           true,
+		{Path: "calls/queries.memql", Name: "callsInvitationsForRoom"}:       true,
+		{Path: "calls/queries.memql", Name: "callsInvitationBudget"}:         true,
+		{Path: "calls/mutations.memql", Name: "createCallsInvitation"}:       true,
+		{Path: "calls/mutations.memql", Name: "updateCallsInvitation"}:       true,
+		{Path: "calls/mutations.memql", Name: "createCallsInvitationBudget"}: true,
+		{Path: "calls/mutations.memql", Name: "updateCallsInvitationBudget"}: true,
 		// actor.userId alone cannot enforce private credential admission, sealed
 		// address values, revision fencing or separation of research/attestation.
 		{Path: "worker/mutations.memql", Name: "storeWorkerEnergyProfile"}: true,
