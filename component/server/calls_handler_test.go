@@ -110,6 +110,7 @@ type callsFakeCall struct {
 	callID   string
 	join     calls.JoinBody
 	host     calls.HostActionRequest
+	invite   calls.InviteRequest
 }
 
 // callsFakeRefusal is what a test makes one op answer instead of its default.
@@ -369,6 +370,17 @@ func (f *callsFakeService) Host(_ context.Context, sess calls.Session, req calls
 	}
 	_, err := f.known(sess)
 	return err
+}
+
+func (f *callsFakeService) Invite(_ context.Context, sess calls.Session, req calls.InviteRequest) (calls.InviteResult, error) {
+	f.record(callsFakeCall{op: "Invite", session: &sess, invite: req})
+	if r, ok := f.refusal("Invite"); ok {
+		return calls.InviteResult{}, r.err
+	}
+	if _, err := f.known(sess); err != nil {
+		return calls.InviteResult{}, err
+	}
+	return calls.InviteResult{Status: "captured"}, nil
 }
 
 func (f *callsFakeService) Leave(_ context.Context, sess calls.Session) error {

@@ -163,3 +163,26 @@ shape policy callsPolicyFull {
   queuePoll
   accountId
 }
+
+@row
+shape invitationReceipt callsInvitationFull {
+  row.id
+  row.createdAt
+  siteId
+  roomId
+  status
+  fingerprint
+  attemptedAt
+  retryAt
+}
+
+@row
+shape invitationBudget callsInvitationBudgetFull {
+  row.id
+  row.createdAt
+  siteId
+  minuteStartedAt
+  minuteCount
+  dayStartedAt
+  dayCount
+}

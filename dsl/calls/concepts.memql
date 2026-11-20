@@ -256,3 +256,44 @@ concept policy {
   @relationship(type="references", as="forSite", field="siteId", target=site, direction="outgoing")
   @relationship(type="references", as="siteOwner", field="ownerUserId", target=user, direction="outgoing")
 }
+
+/// One invitation effect, identified by a keyed digest of site, room and canonical recipient.
+/// No address or guest token is stored. The newest receipt lasts as long as its room so retries
+/// after any replica restart cannot send it twice; superseded versions expire after one day.
+// @no-displayCard: Private effect receipt; its public send outcome is returned by the checked host action.
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@retention(ttl="1d", keepLatest=true, archive="none")
+@belongsTo(account, via="siteId", stays="signin")
+concept invitationReceipt {
+  siteId string!
+  ownerUserId string!
+  roomId string!
+  status enum("attempting", "sent", "captured", "unknown", "retryable")!
+  fingerprint string! @maxLength(64) @pattern("^[0-9a-f]{64}$")
+  attemptedAt datetime!
+  retryAt datetime
+  accountId string
+  @relationship(type="references", as="forSite", field="siteId", target=site, direction="outgoing")
+  @relationship(type="references", as="forRoom", field="roomId", target=room, direction="outgoing")
+  @relationship(type="references", as="siteOwner", field="ownerUserId", target=user, direction="outgoing")
+}
+
+/// Mandatory per-site invitation counters. Every provider attempt, safe retries included,
+/// consumes this shared budget before the effect begins. No addresses or link capabilities.
+// @no-displayCard: Private abuse counters have no user-facing identity; the host action returns the remaining wait.
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@retention(ttl="1d", keepLatest=true, archive="none")
+@belongsTo(account, via="siteId", stays="signin")
+concept invitationBudget {
+  siteId string!
+  ownerUserId string!
+  minuteStartedAt datetime!
+  minuteCount int!
+  dayStartedAt datetime!
+  dayCount int!
+  accountId string
+  @relationship(type="references", as="forSite", field="siteId", target=site, direction="outgoing")
+  @relationship(type="references", as="siteOwner", field="ownerUserId", target=user, direction="outgoing")
+}

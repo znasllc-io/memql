@@ -26,6 +26,7 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/secret"
 	"github.com/znasllc-io/memql/integrations/calls"
+	"github.com/znasllc-io/memql/integrations/email"
 )
 
 // calls_surface_db_test.go -- a call through the real edge: the edge's resolver, switch,
@@ -34,8 +35,8 @@ import (
 // send. Everything the bff half's own tests do by stamping a request themselves happens
 // here because a browser asked the edge.
 //
-// THE MEDIA SERVER IS THE ONE FAKE (callsEdgeMedia): media never passes through MemQL, and
-// what is on trial here is everything between a browser and the rows.
+// Media and outbound mail are fakes: what is on trial here is everything between a
+// browser, the rows and the configured sender. No media or email leaves this test.
 //
 // WITH NO BUILD TAG, for access_surface_db_test.go's reason: the db-gated lane compiles
 // this package untagged. Postgres-gated: a skip is what an unreachable database produces,
@@ -51,6 +52,32 @@ func (callsEdgeMedia) Participants(context.Context, string) ([]calls.MediaPartic
 }
 func (callsEdgeMedia) RemoveParticipant(context.Context, string, string) error { return nil }
 func (callsEdgeMedia) MuteTrack(context.Context, string, string, string) error { return nil }
+
+type callsEdgeEmail struct {
+	mu       sync.Mutex
+	messages []email.Message
+	as       []email.SendAs
+}
+
+func (s *callsEdgeEmail) Send(_ context.Context, message email.Message, as email.SendAs) error {
+	if err := message.Validate(); err != nil {
+		return err
+	}
+	if err := as.Validate(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.messages = append(s.messages, message)
+	s.as = append(s.as, as)
+	return nil
+}
+
+func (s *callsEdgeEmail) sent() ([]email.Message, []email.SendAs) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]email.Message(nil), s.messages...), append([]email.SendAs(nil), s.as...)
+}
 
 // callsEdgeEngine is the narrow engine the calls integration asks for.
 type callsEdgeEngine struct{ engine *memql.MemQLEngine }
@@ -139,6 +166,7 @@ func TestACallThroughTheRealEdge(t *testing.T) {
 	host := site + ".example.test"
 	w.insert("v1:platform:site", site, map[string]any{
 		"hostname": host, "kind": "spa", "status": "live", "bundleRef": "blob://sites/" + site + "/v1/",
+		"title":       "Meetings & Co",
 		"ownerUserId": "v1:identity:user:" + w.owner, "accountId": w.account,
 		"packageId": "v1:platform:package:" + w.pkg, "packageDeployableName": "meetings",
 	})
@@ -150,6 +178,10 @@ func TestACallThroughTheRealEdge(t *testing.T) {
 	// The bff as the bff node mounts it: the real middleware ahead of the real mux.
 	a := &App{mux: http.NewServeMux(), engine: eng, Logger: slog.New(slog.DiscardHandler), identityVerifier: &verifier.Verifier{}}
 	a.mountCallsSurface()
+	// Register after mounting: the application must resolve the configured email
+	// integration when an invitation is sent, rather than capture an absent sender.
+	mail := &callsEdgeEmail{}
+	require.NoError(t, eng.RegisterIntegration(email.NewIntegration(mail, slog.New(slog.DiscardHandler))))
 	bff := &callsEdgeBFF{handler: a.identityHTTPMiddleware()(a.mux)}
 	bffServer := httptest.NewServer(bff)
 	t.Cleanup(bffServer.Close)
@@ -184,6 +216,9 @@ func TestACallThroughTheRealEdge(t *testing.T) {
 		}
 		req.Header.Set("Cookie", cookie)
 		req.Header.Set("Authorization", "Bearer not-a-credential-this-surface-reads")
+		req.Header.Set(memql.CallsStampSiteHeader, "forged-site")
+		req.Header.Set(memql.CallsStampOwnerHeader, "forged-owner")
+		req.Header.Set("X-Forwarded-Host", "forged.example.test")
 		res, err := front.Client().Do(req)
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = res.Body.Close() })
@@ -268,6 +303,7 @@ func TestACallThroughTheRealEdge(t *testing.T) {
 		Call struct {
 			ID         string `json:"id"`
 			GuestToken string `json:"guestToken"`
+			HostToken  string `json:"hostToken"`
 		} `json:"call"`
 		Join struct {
 			Outcome string `json:"outcome"`
@@ -297,6 +333,60 @@ func TestACallThroughTheRealEdge(t *testing.T) {
 	body = read(res)
 	require.Equal(t, http.StatusOK, res.StatusCode, body)
 	require.Contains(t, body, `"displayName":"Guest"`)
+
+	// The same authenticated host route sends the server's invitation through the
+	// application's configured email integration, with no browser-selected content.
+	inviteBody := func(recipient, token string) string {
+		t.Helper()
+		encoded, err := json.Marshal(map[string]string{"action": "invite", "email": recipient, "token": token})
+		require.NoError(t, err)
+		return string(encoded)
+	}
+	res = send(http.MethodPost, "/_memql/calls/host", inviteBody("invitee@example.test", started.Call.GuestToken), hostCookie)
+	body = read(res)
+	require.Equal(t, http.StatusOK, res.StatusCode, body)
+	require.JSONEq(t, `{"status":"sent","duplicate":false}`, body)
+	messages, identities := mail.sent()
+	require.Len(t, messages, 1)
+	require.Equal(t, []email.SendAs{{}}, identities, "a browser must not select the sending identity")
+	require.Equal(t, "invitee@example.test", messages[0].To)
+	require.Equal(t, "You're invited to a Meetings & Co call", messages[0].Subject)
+	guestURL := "https://" + host + "/#j=" + started.Call.GuestToken
+	require.Contains(t, messages[0].TextBody, guestURL)
+	require.Contains(t, messages[0].HTMLBody, `href="`+guestURL+`"`)
+	require.Contains(t, messages[0].HTMLBody, `src="https://`+host+`/favicon.png"`)
+	require.Contains(t, messages[0].HTMLBody, "Meetings &amp; Co")
+	require.Contains(t, messages[0].HTMLBody, ">Join call</a>")
+	require.NotEmpty(t, started.Call.HostToken)
+	for _, content := range []string{messages[0].HTMLBody, messages[0].TextBody} {
+		require.NotContains(t, content, started.Call.HostToken)
+		require.NotContains(t, content, "&h=")
+		require.NotContains(t, content, "forged.example.test")
+	}
+	_, handed = bff.seen()
+	require.Equal(t, []string{hostCookie}, handed.Values("Cookie"))
+	require.Empty(t, handed.Values("Authorization"))
+	require.Equal(t, []string{site}, handed.Values(memql.CallsStampSiteHeader))
+	require.Equal(t, w.owner, memql.BareShortId(handed.Get(memql.CallsStampOwnerHeader)))
+
+	// A deliberate retry, including another spelling of the same address, replays
+	// the durable receipt. It does not submit a second message to the provider.
+	for _, recipient := range []string{"invitee@example.test", "INVITEE@EXAMPLE.TEST"} {
+		res = send(http.MethodPost, "/_memql/calls/host", inviteBody(recipient, started.Call.GuestToken), hostCookie)
+		body = read(res)
+		require.Equal(t, http.StatusOK, res.StatusCode, body)
+		require.JSONEq(t, `{"status":"sent","duplicate":true}`, body)
+	}
+	res = send(http.MethodPost, "/_memql/calls/host", inviteBody("invitee@example.test", started.Call.GuestToken), guestCookie)
+	require.Equal(t, http.StatusForbidden, res.StatusCode, read(res))
+	for _, token := range []string{started.Call.HostToken, strings.Repeat("z", 32)} {
+		res = send(http.MethodPost, "/_memql/calls/host", inviteBody("another@example.test", token), hostCookie)
+		require.Equal(t, http.StatusBadRequest, res.StatusCode, read(res))
+	}
+	res = send(http.MethodPost, "/_memql/calls/host", `{"action":"invite","email":"another@example.test","token":"`+started.Call.GuestToken+`","html":"<script>forged</script>"}`, hostCookie)
+	require.Equal(t, http.StatusBadRequest, res.StatusCode, read(res))
+	messages, _ = mail.sent()
+	require.Len(t, messages, 1, "a replay or refusal submitted another message")
 
 	// The guest hangs up.
 	res = send(http.MethodPost, "/_memql/calls/leave", `{}`, guestCookie)

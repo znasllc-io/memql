@@ -716,6 +716,58 @@
       }
     },
     {
+      "concept": "v1:calls:invitationBudget",
+      "file": "calls/concepts.memql",
+      "fields": [
+        "accountId",
+        "dayCount",
+        "dayStartedAt",
+        "minuteCount",
+        "minuteStartedAt",
+        "ownerUserId",
+        "siteId"
+      ],
+      "required": [
+        "dayCount",
+        "dayStartedAt",
+        "minuteCount",
+        "minuteStartedAt",
+        "ownerUserId",
+        "siteId"
+      ]
+    },
+    {
+      "concept": "v1:calls:invitationReceipt",
+      "file": "calls/concepts.memql",
+      "fields": [
+        "accountId",
+        "attemptedAt",
+        "fingerprint",
+        "ownerUserId",
+        "retryAt",
+        "roomId",
+        "siteId",
+        "status"
+      ],
+      "required": [
+        "attemptedAt",
+        "fingerprint",
+        "ownerUserId",
+        "roomId",
+        "siteId",
+        "status"
+      ],
+      "enums": {
+        "status": [
+          "attempting",
+          "captured",
+          "retryable",
+          "sent",
+          "unknown"
+        ]
+      }
+    },
+    {
       "concept": "v1:calls:key",
       "file": "calls/concepts.memql",
       "fields": [

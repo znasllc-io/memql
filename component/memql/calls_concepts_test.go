@@ -12,11 +12,12 @@ import (
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
-// callsConcepts is the eight concepts of the calls namespace (dsl/calls/concepts.memql).
+// callsConcepts is the expected set of concepts of the calls namespace (dsl/calls/concepts.memql).
 // It is the EXPECTED set, not the iterated one: the test below takes the loaded set from
-// the registry and asserts it equals this, so a ninth concept fails here until it is
+// the registry and asserts it equals this, so an additional concept fails here until it is
 // listed and carries both properties.
 var callsConcepts = []string{
+	"v1:calls:invitationBudget", "v1:calls:invitationReceipt",
 	"v1:calls:key", "v1:calls:mediaServer", "v1:calls:policy", "v1:calls:queueEntry",
 	"v1:calls:room", "v1:calls:scheduledCall", "v1:calls:seat", "v1:calls:session",
 }

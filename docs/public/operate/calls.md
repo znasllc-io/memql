@@ -117,6 +117,38 @@ and, for one done to a seat, the `seat`:
 | `lock`, `unlock` | a locked call makes every newcomer wait for a host |
 | `admit` | lets one waiting seat in past the lock |
 | `end` | ends the call for everyone in it |
+| `invite` | sends one guest invitation through the configured MemQL email transport; takes `email` and `token`, never `seat` |
+
+**Email invitations** reuse this host route, reached at
+`POST /_memql/calls/host` on the deployable. The body is
+`{"action":"invite","email":"guest@example.test","token":"<guest token>"}`.
+Only a current host seat in an open call can send. The service checks the guest
+token against that room; a host token or another call's link is refused. The
+browser cannot supply a subject, HTML, sender, origin or custom link. The fixed
+HTML/plain-text template uses the trusted site title (deployable name as fallback),
+its canonical public host and a bundled `/favicon.png` logo. Ship that PNG in the
+site bundle. The sender mailbox and From identity remain the installation's
+configured email identity; a site title does not override a verified provider sender.
+
+The response is `{status,duplicate}`. `sent` means the provider accepted the mail;
+`captured` means the explicitly configured capture transport stored it in the
+restricted local Email inbox and sent nothing externally. `pending` and `unknown`
+never claim a send. Log-only transport is refused with 503 and does not log the
+recipient or link. A local installation with `MEMQL_EMAIL_TRANSPORT=capture` keeps
+that mode; the route cannot turn real delivery on.
+
+A private, durable receipt coalesces the normalized recipient within one call
+across hosts, replicas, reloads and retries. Sending starts only after that receipt
+is committed. A canceled browser request cannot erase an already authorized attempt.
+A crash or ambiguous provider response never triggers a blind resend; a provider's
+retained outcome can confirm acceptance, otherwise the receipt stays unknown.
+Only a provider refusal that proves it did not accept the message is retryable,
+after at least 30 seconds. Rate budgets count retries as well: 10 attempts per site
+per minute, 100 per 24-hour window, and at most 20 distinct recipients per room.
+The minute and day windows start with their first reserved attempt after expiry.
+Duplicates consume no new attempt. Timed limits return 429 with the actual wait;
+`409 conflict` / `invitation_full` is the permanent room cap, for which sharing the
+existing guest link remains available.
 
 **The roster** is how a host sees whom the controls name. `GET /session` answers it to a
 host seat in an open call: whether the call is locked (so the host is offered Lock or
@@ -224,9 +256,14 @@ deployable's rows belong to the deployable's owner.
 | `v1:calls:scheduledCall` | booked call: its links' digests and its status |
 | `v1:calls:mediaServer` | media server: the cluster's, and no deployable's |
 | `v1:calls:policy` | deployable's limits, where they differ from the defaults |
+| `v1:calls:invitationReceipt` | call and normalized recipient, identified by keyed digest: send state and message fingerprint; no raw address or link |
+| `v1:calls:invitationBudget` | site: shared minute/day invitation attempt counters |
 
 The key pepper and the media server's two key pairs are sealed global secrets
-(`calls.key-pepper`, `calls.media.bootstrap`, `calls.media.webhook`).
+(`calls.key-pepper`, `calls.media.bootstrap`, `calls.media.webhook`). Captured invitation
+mail contains its guest link inside the existing encrypted email capture record;
+only a signed-in operator can read the restricted Email inbox. It is not stored
+in the general outbound-request queue or exposed by raw calls concept reads.
 
 ## Turning calls on for a deployable
 

@@ -850,7 +850,7 @@ bundle and the generic `/_memql/*` proxy, and forwards each to the bff:
 | `POST /_memql/calls/cancel` | cancels a booked call |
 | `POST /_memql/calls/join` | seats a person by a call's link, or in the call their session is in |
 | `GET /_memql/calls/queue` | a waiting person's poll |
-| `POST /_memql/calls/host` | one host control |
+| `POST /_memql/calls/host` | one host control, including a bounded guest email invitation (`action: "invite"`) |
 | `POST /_memql/calls/leave` | the hang-up |
 
 - **The switch is the edge's first answer.** With it off, every one of the ten

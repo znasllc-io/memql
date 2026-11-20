@@ -339,3 +339,39 @@ query policy callsPolicyForSite {
   filter  row => row.siteId == args.siteId && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   shape   callsPolicyFull
 }
+
+/// Internal effect receipt. actor.userId scoping is not the fix: the host session is
+/// checked natively; @serverOnly keeps this service's borrowed authority off the wire.
+@serverOnly
+@unbounded("invitation by id -- one keyed digest identifies one receipt")
+@actor
+@cache(0)
+query invitationReceipt callsInvitationById {
+  args { id string! }
+  filter row => row.id == args.id && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  shape callsInvitationFull
+}
+
+/// At most twenty recipients may be invited per call. Twenty-one proves the cap is
+/// exhausted. actor.userId scoping is not the fix: only the native host gate calls this.
+@serverOnly
+@actor
+@cache(0)
+query invitationReceipt callsInvitationsForRoom {
+  args { roomId string! }
+  filter row => row.roomId == args.roomId && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  paginate 21
+  shape callsInvitationFull
+}
+
+/// Internal per-site rate counters. actor.userId scoping is not the fix: only the
+/// native host gate may read this row under borrowed authority.
+@serverOnly
+@unbounded("invitation budget by site id -- one row per site")
+@actor
+@cache(0)
+query invitationBudget callsInvitationBudget {
+  args { id string! }
+  filter row => row.id == args.id && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  shape callsInvitationBudgetFull
+}

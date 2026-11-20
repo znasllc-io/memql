@@ -413,3 +413,94 @@ mutation policy updateCallsPolicy {
     }
   }
 }
+
+/// The native host gate reserves one effect before submitting to the mail provider.
+/// actor.userId scoping is not the fix: @serverOnly retains the reservation authority.
+@actor
+@serverOnly
+mutation invitationReceipt createCallsInvitation {
+  args {
+    invitationId string!
+    siteId string!
+    roomId string!
+    status string!
+    fingerprint string!
+    attemptedAt datetime!
+    retryAt datetime
+    versionTime datetime
+  }
+  insert {
+    accept { siteId, roomId, status, fingerprint, attemptedAt, retryAt }
+    stamp {
+      id: args.invitationId
+      ownerUserId: actor.userId
+      createdAt: args.versionTime ?? now
+    }
+  }
+}
+
+/// Only the native sender may settle or safely retry its effect receipt.
+/// actor.userId scoping is not the fix: @serverOnly keeps forged delivery states out.
+@serverOnly
+mutation invitationReceipt updateCallsInvitation {
+  args {
+    invitationId string!
+    status string!
+    fingerprint string!
+    attemptedAt datetime!
+    retryAt datetime
+    versionTime datetime
+  }
+  update {
+    accept { status, fingerprint, attemptedAt, retryAt }
+    stamp {
+      id: args.invitationId
+      createdAt: args.versionTime ?? now
+    }
+  }
+}
+
+/// A native reservation creates the per-site rate budget under the site gate.
+/// actor.userId scoping is not the fix: @serverOnly bars client-authored counters.
+@actor
+@serverOnly
+mutation invitationBudget createCallsInvitationBudget {
+  args {
+    budgetId string!
+    siteId string!
+    minuteStartedAt datetime!
+    minuteCount int!
+    dayStartedAt datetime!
+    dayCount int!
+    versionTime datetime
+  }
+  insert {
+    accept { siteId, minuteStartedAt, minuteCount, dayStartedAt, dayCount }
+    stamp {
+      id: args.budgetId
+      ownerUserId: actor.userId
+      createdAt: args.versionTime ?? now
+    }
+  }
+}
+
+/// Native reservations update the budget under the same site gate on every replica.
+/// actor.userId scoping is not the fix: @serverOnly bars resetting it from a client.
+@serverOnly
+mutation invitationBudget updateCallsInvitationBudget {
+  args {
+    budgetId string!
+    minuteStartedAt datetime!
+    minuteCount int!
+    dayStartedAt datetime!
+    dayCount int!
+    versionTime datetime
+  }
+  update {
+    accept { minuteStartedAt, minuteCount, dayStartedAt, dayCount }
+    stamp {
+      id: args.budgetId
+      createdAt: args.versionTime ?? now
+    }
+  }
+}

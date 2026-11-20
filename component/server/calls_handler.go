@@ -150,6 +150,7 @@ type CallsService interface {
 	Join(ctx context.Context, site calls.SiteRef, sess *calls.Session, body calls.JoinBody) (calls.JoinResult, calls.Session, error)
 	Queue(ctx context.Context, sess calls.Session) (calls.JoinResult, error)
 	Host(ctx context.Context, sess calls.Session, req calls.HostActionRequest) error
+	Invite(ctx context.Context, sess calls.Session, req calls.InviteRequest) (calls.InviteResult, error)
 	Leave(ctx context.Context, sess calls.Session) error
 }
 
@@ -678,15 +679,49 @@ func (h *callsHandler) serveQueue(w http.ResponseWriter, r *http.Request, c call
 	h.write(w, http.StatusOK, joinReply(result))
 }
 
+// serveHost extends the existing closed host-control surface with one invitation effect.
+// The browser supplies only a mailbox and the call's guest capability; the service proves
+// their scope, builds the fixed template and chooses the installation's email transport.
 func (h *callsHandler) serveHost(w http.ResponseWriter, r *http.Request, c callsCall) {
 	var body struct {
-		Action string `json:"action"`
-		Seat   string `json:"seat"`
+		Action string  `json:"action"`
+		Seat   *string `json:"seat"`
+		Email  *string `json:"email"`
+		Token  *string `json:"token"`
 	}
-	if !h.decode(w, r, c, &body) || !h.requireSession(w, c) || !h.resolveSite(w, r, &c) {
+	if !h.decode(w, r, c, &body) {
 		return
 	}
-	if err := h.svc.Host(r.Context(), c.session(), calls.HostActionRequest{Action: body.Action, Seat: body.Seat}); err != nil {
+	inviting := body.Action == "invite"
+	if inviting && (body.Seat != nil || body.Email == nil || body.Token == nil) ||
+		!inviting && (body.Email != nil || body.Token != nil) {
+		h.refuse(w, c, calls.ErrInvalid, calls.JoinResult{})
+		return
+	}
+	if inviting && !calls.TokenWellFormed(*body.Token) {
+		h.refuse(w, c, calls.ErrInvalid, calls.JoinResult{})
+		return
+	}
+	if !h.requireSession(w, c) || !h.resolveSite(w, r, &c) {
+		return
+	}
+	if inviting {
+		result, err := h.svc.Invite(r.Context(), c.session(), calls.InviteRequest{Email: *body.Email, Token: *body.Token})
+		if err != nil {
+			h.refuse(w, c, err, calls.JoinResult{})
+			return
+		}
+		h.write(w, http.StatusOK, struct {
+			Status    string `json:"status"`
+			Duplicate bool   `json:"duplicate"`
+		}{result.Status, result.Duplicate})
+		return
+	}
+	seat := ""
+	if body.Seat != nil {
+		seat = *body.Seat
+	}
+	if err := h.svc.Host(r.Context(), c.session(), calls.HostActionRequest{Action: body.Action, Seat: seat}); err != nil {
 		h.refuse(w, c, err, calls.JoinResult{})
 		return
 	}
@@ -758,6 +793,10 @@ func callsAnswerFor(op string, err error, result calls.JoinResult) callsAnswer {
 		reason = result.Reason
 	}
 	retryAfter := callsMs(result.RetryAfter)
+	var invitationLimit *calls.InvitationLimit
+	if errors.As(err, &invitationLimit) {
+		retryAfter = callsMs(invitationLimit.RetryAfter)
+	}
 	switch {
 	case errors.Is(err, errCallsNotHere):
 		return callsAnswer{http.StatusNotFound, callsErrorReply{Error: "not_found"}, true}
@@ -775,6 +814,8 @@ func callsAnswerFor(op string, err error, result calls.JoinResult) callsAnswer {
 		return callsAnswer{http.StatusGone, callsErrorReply{Error: "ended", Reason: reason}, true}
 	case errors.Is(err, calls.ErrForbidden):
 		return callsAnswer{http.StatusForbidden, callsErrorReply{Error: "forbidden", Reason: reason}, true}
+	case errors.Is(err, calls.ErrInvitationUnavailable):
+		return callsAnswer{http.StatusServiceUnavailable, callsErrorReply{Error: "unavailable"}, true}
 	case errors.Is(err, calls.ErrInvalid):
 		return callsAnswer{http.StatusBadRequest, callsErrorReply{Error: "invalid", Reason: reason}, true}
 	case errors.Is(err, calls.ErrConflict) && reason == calls.ReasonRate:
@@ -799,7 +840,7 @@ func (h *callsHandler) refuse(w http.ResponseWriter, c callsCall, err error, res
 		clearCallsCookie(w)
 	}
 	if answer.body.RetryAfterMs > 0 {
-		setCallsRetryAfter(w, result.RetryAfter)
+		setCallsRetryAfter(w, time.Duration(answer.body.RetryAfterMs)*time.Millisecond)
 	}
 	h.write(w, answer.status, answer.body)
 }

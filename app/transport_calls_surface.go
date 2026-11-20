@@ -52,7 +52,7 @@ func (a *App) callsSurface() server.CallsService {
 			"component", memql.ComponentName)
 		return nil
 	}
-	return &callsSurface{Service: integration.Service(), engine: &callsEngineAdapter{engine: a.engine}}
+	return &callsSurface{Service: integration.Service().WithInvitationSender(a.campaignEmailSender), engine: &callsEngineAdapter{engine: a.engine}}
 }
 
 // callsSurface adapts integrations/calls to server.CallsService.

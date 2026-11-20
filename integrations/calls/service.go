@@ -16,6 +16,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
+	"github.com/znasllc-io/memql/integrations/email"
 
 	callrules "github.com/znasllc-io/memql/component/calls"
 )
@@ -148,13 +149,14 @@ const (
 // Service is the calls service. New builds it beside the integration's operator acts,
 // over the same store, gate pool, pepper, clock and randomness.
 type Service struct {
-	store  *Store
-	gateDB func() *sql.DB
-	pepper func(context.Context) ([]byte, error)
-	random io.Reader
-	now    func() time.Time
-	media  func(MediaServer, MediaCredential) (MediaBackend, error)
-	logger *slog.Logger
+	store            *Store
+	gateDB           func() *sql.DB
+	pepper           func(context.Context) ([]byte, error)
+	random           io.Reader
+	now              func() time.Time
+	media            func(MediaServer, MediaCredential) (MediaBackend, error)
+	logger           *slog.Logger
+	invitationSender func() email.Sender
 }
 
 // ---------------------------------------------------------------------------
