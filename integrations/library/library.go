@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
@@ -97,6 +98,11 @@ type Integration struct {
 	// refused rather than half made.
 	copyStore  ShareCopyStore
 	copyBucket string
+
+	// saveClaims is the cross-replica claim librarySaveSharedCopy takes so a
+	// burst of the same save makes one copy (share.go, oneSaveAtATime). Unset,
+	// a copy is refused rather than made unguarded.
+	saveClaims *automations.StrictClusterClaimer
 }
 
 // NewIntegration wires the engine handle. The factory is in plugin.go;

@@ -37,6 +37,11 @@ func (a *App) wireLibraryIntegration(uploader server.FileUploader, bucket string
 	if writer, ok := uploader.(library.ShareCopyStore); ok {
 		integ.SetShareCopyStorage(writer, bucket)
 	}
+	// ...one save at a time per person and file, on every replica (José, Nov
+	// 19: a burst of clicks or of agent calls counts as one).
+	if a.clusterGuard != nil {
+		integ.SetSaveClaims(a.clusterGuard.StrictClaimer())
+	}
 	// ...and read like an upload, so search by meaning finds it.
 	a.configureLibraryReading(integ)
 }
