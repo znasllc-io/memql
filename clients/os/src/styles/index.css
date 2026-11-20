@@ -284,17 +284,10 @@ button:not(:disabled):active {
   background: var(--os-accent-soft);
 }
 
+/* The Library tile's glyph box (.os-files-tile-icon, with the files below):
+ * the desk adds only what is its own -- the dot's anchor and the states. */
 .os-file-glyph {
   position: relative;
-  display: grid;
-  place-items: center;
-  width: 52px;
-  height: 52px;
-  border-radius: var(--os-radius-sm);
-  background: var(--os-plate);
-  border: 1px solid var(--os-line);
-  box-shadow: var(--os-shadow-item);
-  color: var(--os-muted);
 }
 .os-file-glyph[data-uploading] {
   opacity: 0.55;
@@ -343,9 +336,9 @@ button:not(:disabled):active {
   z-index: 30;
 }
 
-.os-folder[data-drop-target] .os-file-glyph {
-  border-color: var(--os-accent);
-  background: var(--os-accent-soft);
+.os-folder[data-drop-target] .os-files-glyph {
+  stroke: var(--os-accent);
+  fill: var(--os-accent-soft);
 }
 
 .os-folder-rename {
@@ -4650,22 +4643,29 @@ a.os-button {
 .os-files-tile:focus-visible { outline: 2px solid var(--os-accent); outline-offset: -2px; }
 .os-files-tile[data-archived] { opacity: 0.62; }
 /* Glyphs: one thin outline in the theme's quiet stroke, the way Fleet draws
- * a machine; the type is written inside in the data face. */
+ * a machine; the type is written inside in the data face.
+ *
+ * ONE SIZE FOR LIBRARY TILES AND DESK ICONS (José, Nov 19 call; Jesús picked
+ * Draft B, Nov 20 2026): the desk draws these same glyphs (items/FileIcon,
+ * items/FolderIcon), so the box height, the page and the folder set below are
+ * the only place either surface's glyph size lives. About a sixth under the
+ * Library's earlier 62px box, 46x57 page and 58x47 folder; names keep their
+ * text sizes. */
 .os-files-tile-icon {
-  height: 62px;
+  height: 52px;
   display: flex;
   align-items: flex-end;
   justify-content: center;
   color: var(--os-rail);
 }
 .os-files-glyph { display: block; fill: var(--os-plate); stroke: currentColor; stroke-width: 1.25; }
-.os-files-glyph-folder { width: 58px; height: 47px; fill: none; }
-.os-files-sheet { position: relative; display: block; width: 46px; height: 57px; }
+.os-files-glyph-folder { width: 48px; height: 39px; fill: none; }
+.os-files-sheet { position: relative; display: block; width: 38px; height: 47px; }
 .os-files-sheet .os-files-glyph { width: 100%; height: 100%; }
 .os-files-sheet b {
   position: absolute;
-  left: 6px;
-  bottom: 6px;
+  left: 5px;
+  bottom: 5px;
   font: 500 9px/1 var(--os-font-mono);
   letter-spacing: 0.03em;
   color: var(--os-muted);

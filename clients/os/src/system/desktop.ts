@@ -25,6 +25,9 @@ export interface FileEntry {
   /** Library provenance source (uploaded / computer_use / ...). */
   source: string;
   producedByWorkerId?: string;
+  /** The Library's recorded format, which names the glyph's kind when the
+   *  title has no extension. Absent on shortcuts made before it was kept. */
+  format?: string;
   /** Transient: present while an upload is in flight or has failed. */
   uploadState?: "uploading" | "failed";
 }
