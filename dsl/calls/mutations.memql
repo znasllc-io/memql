@@ -504,3 +504,25 @@ mutation invitationBudget updateCallsInvitationBudget {
     }
   }
 }
+
+/// Only the native active-host gate creates a room's guest alias, once, under its
+/// room gate and an absent-row version fence. actor.userId scoping is not the fix:
+/// @serverOnly withholds this capability minting authority from authored calls.
+@actor
+@serverOnly
+mutation invitationLink createCallsInvitationLink {
+  args {
+    linkId string! @maxLength(64) @pattern("^[0-9a-f]{64}$")
+    siteId string!
+    roomId string!
+    versionTime datetime
+  }
+  insert {
+    accept { siteId, roomId }
+    stamp {
+      id: args.linkId
+      ownerUserId: actor.userId
+      createdAt: args.versionTime ?? now
+    }
+  }
+}

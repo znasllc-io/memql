@@ -29,6 +29,7 @@ var stayingKinds = map[string]string{
 	// These are the sending cluster's bearer-call authority, not portable call
 	// history: receipt identities depend on its pepper and budgets meter its mail.
 	"v1:calls:invitationReceipt":    "signin",
+	"v1:calls:invitationLink":       "signin",
 	"v1:calls:invitationBudget":     "signin",
 	"v1:platform:sitePreviewGrant":  "signin",
 	"v1:identity:invitation":        "signin",

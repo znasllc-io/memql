@@ -375,3 +375,19 @@ query invitationBudget callsInvitationBudget {
   filter row => row.id == args.id && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   shape callsInvitationBudgetFull
 }
+
+/// The token digest is the primary id, so a guessed invitation never scans rooms.
+/// actor.userId scoping is not the fix: @serverOnly keeps this capability lookup off
+/// the wire, and the native caller checks the alias's site and room bindings again.
+@serverOnly
+@unbounded("guest invitation by digest id -- one immutable alias per room")
+@actor
+@cache(0)
+query invitationLink callsInvitationLinkById {
+  args {
+    id string! @maxLength(64) @pattern("^[0-9a-f]{64}$")
+    siteId string!
+  }
+  filter row => row.id == args.id && row.siteId == args.siteId && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  shape callsInvitationLinkFull
+}

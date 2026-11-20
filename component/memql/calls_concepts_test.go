@@ -17,7 +17,7 @@ import (
 // the registry and asserts it equals this, so an additional concept fails here until it is
 // listed and carries both properties.
 var callsConcepts = []string{
-	"v1:calls:invitationBudget", "v1:calls:invitationReceipt",
+	"v1:calls:invitationBudget", "v1:calls:invitationLink", "v1:calls:invitationReceipt",
 	"v1:calls:key", "v1:calls:mediaServer", "v1:calls:policy", "v1:calls:queueEntry",
 	"v1:calls:room", "v1:calls:scheduledCall", "v1:calls:seat", "v1:calls:session",
 }

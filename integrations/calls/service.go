@@ -34,8 +34,9 @@ import (
 //
 // A key, a session token and a call's two links are bearer secrets. Each is stored
 // only as calls.Digest under the keys' pepper and looked up within one deployable, so
-// a secret of one deployable opens nothing at another, and a plain secret is handed
-// out once and never stored or logged. A presented secret's SHAPE is checked before
+// a secret of one deployable opens nothing at another. Original random secrets are
+// handed out once; an active host can recover a separate, deterministic guest-only
+// alias (invitation_link.go). No plain secret is stored or logged. A presented secret's SHAPE is checked before
 // anything is read (a key must parse, calls.ParseKey; a token or a link must be exactly
 // what NewToken makes of calls.TokenBytes, calls.TokenWellFormed), so a guess of the wrong
 // shape costs no read. The calls route family asks the same two rules before it reads the
@@ -137,7 +138,7 @@ const tokenBytes = callrules.TokenBytes
 // participant's name on the media server, which every participant sees, so it is
 // random rather than the seat's row id, and never the display name: clients label a
 // participant by its kind and identity alone.
-const identityBytes = 10
+const identityBytes = callrules.MediaIdentityBytes
 
 // The bounds on what a person types at a join: a name other participants see and the
 // version of the terms they accept.

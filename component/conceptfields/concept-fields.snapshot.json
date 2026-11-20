@@ -737,6 +737,21 @@
       ]
     },
     {
+      "concept": "v1:calls:invitationLink",
+      "file": "calls/concepts.memql",
+      "fields": [
+        "accountId",
+        "ownerUserId",
+        "roomId",
+        "siteId"
+      ],
+      "required": [
+        "ownerUserId",
+        "roomId",
+        "siteId"
+      ]
+    },
+    {
       "concept": "v1:calls:invitationReceipt",
       "file": "calls/concepts.memql",
       "fields": [

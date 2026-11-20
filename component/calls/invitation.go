@@ -11,6 +11,32 @@ import (
 // holds. The service verifies that capability against the host's active room.
 type InviteRequest struct{ Email, Token string }
 
+// InvitationLinkRequest binds recovery to the media seat the requesting page is
+// showing. A cookie may have moved to another call in a second tab since that page
+// opened; its old identity must never recover the other call's invitation.
+type InvitationLinkRequest struct{ Identity string }
+
+// InvitationLinkResult carries only a guest capability, never a host capability.
+type InvitationLinkResult struct{ GuestToken string }
+
+// MediaIdentityBytes is the randomness in a participant's public media identity.
+const MediaIdentityBytes = 10
+
+// InvitationIdentityWellFormed accepts exactly an identity minted by the calls
+// service, before a transport or service performs any lookup. It is not authority:
+// the active host seat and exact identity are checked again under the room gate.
+func InvitationIdentityWellFormed(identity string) bool {
+	if len(identity) != MediaIdentityBytes*8/5 {
+		return false
+	}
+	for _, c := range identity {
+		if (c < 'a' || c > 'z') && (c < '2' || c > '7') {
+			return false
+		}
+	}
+	return true
+}
+
 // InviteResult reports provider acceptance separately from deliberate test capture.
 // Pending/unknown never imply delivery and never authorize an automatic resend.
 type InviteResult struct {

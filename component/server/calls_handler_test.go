@@ -99,18 +99,19 @@ func (s callsSecrets) all() map[string]string {
 
 // callsFakeCall is one call the handler made of the service, and what it was handed.
 type callsFakeCall struct {
-	op       string
-	site     calls.SiteRef  // the site the call was handed, as an argument or on its session
-	session  *calls.Session // the session it was handed, if any
-	siteID   string         // SiteAsOwner's arguments
-	owner    string
-	key      string
-	start    calls.StartBody
-	schedule calls.ScheduleRequest
-	callID   string
-	join     calls.JoinBody
-	host     calls.HostActionRequest
-	invite   calls.InviteRequest
+	op             string
+	site           calls.SiteRef  // the site the call was handed, as an argument or on its session
+	session        *calls.Session // the session it was handed, if any
+	siteID         string         // SiteAsOwner's arguments
+	owner          string
+	key            string
+	start          calls.StartBody
+	schedule       calls.ScheduleRequest
+	callID         string
+	join           calls.JoinBody
+	host           calls.HostActionRequest
+	invite         calls.InviteRequest
+	invitationLink calls.InvitationLinkRequest
 }
 
 // callsFakeRefusal is what a test makes one op answer instead of its default.
@@ -381,6 +382,17 @@ func (f *callsFakeService) Invite(_ context.Context, sess calls.Session, req cal
 		return calls.InviteResult{}, err
 	}
 	return calls.InviteResult{Status: "captured"}, nil
+}
+
+func (f *callsFakeService) InvitationLink(_ context.Context, sess calls.Session, req calls.InvitationLinkRequest) (calls.InvitationLinkResult, error) {
+	f.record(callsFakeCall{op: "InvitationLink", session: &sess, invitationLink: req})
+	if r, ok := f.refusal("InvitationLink"); ok {
+		return calls.InvitationLinkResult{}, r.err
+	}
+	if _, err := f.known(sess); err != nil {
+		return calls.InvitationLinkResult{}, err
+	}
+	return calls.InvitationLinkResult{GuestToken: f.secrets.guestLink}, nil
 }
 
 func (f *callsFakeService) Leave(_ context.Context, sess calls.Session) error {

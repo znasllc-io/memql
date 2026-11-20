@@ -314,7 +314,14 @@ func (s *Store) roomByLink(ctx context.Context, owner, siteID, digest string, ho
 		return s.oneRoom(ctx, owner, "a room by its host link", call, err)
 	}
 	call, err := langparser.RenderCall("callsRoomByGuestDigest", map[string]any{"siteId": memql.BareShortId(siteID), "guestDigest": digest})
-	return s.oneRoom(ctx, owner, "a room by its guest link", call, err)
+	room, err := s.oneRoom(ctx, owner, "a room by its guest link", call, err)
+	if err != nil || room != nil {
+		return room, err
+	}
+	// Recovery adds one guest-only alias without replacing either original link.
+	// Its digest is its row id, so this fallback is bounded and never enumerates
+	// rooms. The host branch above deliberately never consults aliases.
+	return s.roomByInvitationLink(ctx, owner, siteID, digest)
 }
 
 // openRoomsForKey is the open rooms one key opened.

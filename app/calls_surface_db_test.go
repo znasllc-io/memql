@@ -306,10 +306,11 @@ func TestACallThroughTheRealEdge(t *testing.T) {
 			HostToken  string `json:"hostToken"`
 		} `json:"call"`
 		Join struct {
-			Outcome string `json:"outcome"`
-			URL     string `json:"url"`
-			Pass    string `json:"pass"`
-			Host    bool   `json:"host"`
+			Outcome  string `json:"outcome"`
+			URL      string `json:"url"`
+			Pass     string `json:"pass"`
+			Host     bool   `json:"host"`
+			Identity string `json:"identity"`
 		} `json:"join"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(body), &started))
@@ -377,6 +378,47 @@ func TestACallThroughTheRealEdge(t *testing.T) {
 		require.Equal(t, http.StatusOK, res.StatusCode, body)
 		require.JSONEq(t, `{"status":"sent","duplicate":true}`, body)
 	}
+	// A refresh holds only its HttpOnly cookie. Recover from the restored media identity,
+	// without either original link, and keep the same alias across repeated requests.
+	res = send(http.MethodGet, "/_memql/calls/queue", "", hostCookie)
+	body = read(res)
+	require.Equal(t, http.StatusOK, res.StatusCode, body)
+	var restored struct {
+		Identity string `json:"identity"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(body), &restored))
+	require.Equal(t, started.Join.Identity, restored.Identity)
+	recoverBody, err := json.Marshal(map[string]string{"action": "invitation_link", "identity": restored.Identity})
+	require.NoError(t, err)
+	res = send(http.MethodPost, "/_memql/calls/host", string(recoverBody), hostCookie)
+	body = read(res)
+	require.Equal(t, http.StatusOK, res.StatusCode, body)
+	require.Equal(t, "no-store", res.Header.Get("Cache-Control"))
+	var recovered map[string]string
+	require.NoError(t, json.Unmarshal([]byte(body), &recovered))
+	require.Len(t, recovered, 1)
+	alias := recovered["guestToken"]
+	require.Regexp(t, `^[a-z2-7]{32}$`, alias)
+	require.NotEqual(t, started.Call.GuestToken, alias)
+	require.NotEqual(t, started.Call.HostToken, alias)
+	res = send(http.MethodPost, "/_memql/calls/host", string(recoverBody), hostCookie)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.JSONEq(t, body, read(res))
+
+	// The alias uses normal guest admission and cannot become a host capability.
+	res = send(http.MethodPost, "/_memql/calls/join", `{"token":"`+alias+`","name":"Recovered-link guest",`+callsEdgeConfirm+`}`, "")
+	body = read(res)
+	require.Equal(t, http.StatusOK, res.StatusCode, body)
+	require.Contains(t, body, `"outcome":"admit"`)
+	require.Contains(t, body, `"host":false`)
+	res = send(http.MethodPost, "/_memql/calls/join", `{"hostToken":"`+alias+`","name":"Not a host",`+callsEdgeConfirm+`}`, "")
+	require.Equal(t, http.StatusNotFound, res.StatusCode, read(res))
+	res = send(http.MethodPost, "/_memql/calls/host", string(recoverBody), guestCookie)
+	require.Equal(t, http.StatusForbidden, res.StatusCode, read(res))
+	// Switching to a recovered link cannot evade the durable email receipt.
+	res = send(http.MethodPost, "/_memql/calls/host", inviteBody("invitee@example.test", alias), hostCookie)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.JSONEq(t, `{"status":"sent","duplicate":true}`, read(res))
 	res = send(http.MethodPost, "/_memql/calls/host", inviteBody("invitee@example.test", started.Call.GuestToken), guestCookie)
 	require.Equal(t, http.StatusForbidden, res.StatusCode, read(res))
 	for _, token := range []string{started.Call.HostToken, strings.Repeat("z", 32)} {

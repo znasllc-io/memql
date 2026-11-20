@@ -186,3 +186,11 @@ shape invitationBudget callsInvitationBudgetFull {
   dayStartedAt
   dayCount
 }
+
+@row
+shape invitationLink callsInvitationLinkFull {
+  row.id
+  siteId
+  ownerUserId
+  roomId
+}

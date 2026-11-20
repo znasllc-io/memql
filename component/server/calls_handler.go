@@ -151,6 +151,7 @@ type CallsService interface {
 	Queue(ctx context.Context, sess calls.Session) (calls.JoinResult, error)
 	Host(ctx context.Context, sess calls.Session, req calls.HostActionRequest) error
 	Invite(ctx context.Context, sess calls.Session, req calls.InviteRequest) (calls.InviteResult, error)
+	InvitationLink(ctx context.Context, sess calls.Session, req calls.InvitationLinkRequest) (calls.InvitationLinkResult, error)
 	Leave(ctx context.Context, sess calls.Session) error
 }
 
@@ -679,30 +680,54 @@ func (h *callsHandler) serveQueue(w http.ResponseWriter, r *http.Request, c call
 	h.write(w, http.StatusOK, joinReply(result))
 }
 
-// serveHost extends the existing closed host-control surface with one invitation effect.
-// The browser supplies only a mailbox and the call's guest capability; the service proves
-// their scope, builds the fixed template and chooses the installation's email transport.
+// serveHost extends the existing closed host-control surface with invitation effects.
+// Link recovery binds the current host session to the media identity on the requesting
+// call screen. It returns only a guest capability; delivery still takes just a mailbox
+// and that capability, and the service chooses the fixed template and transport.
 func (h *callsHandler) serveHost(w http.ResponseWriter, r *http.Request, c callsCall) {
 	var body struct {
-		Action string  `json:"action"`
-		Seat   *string `json:"seat"`
-		Email  *string `json:"email"`
-		Token  *string `json:"token"`
+		Action   string  `json:"action"`
+		Seat     *string `json:"seat"`
+		Email    *string `json:"email"`
+		Token    *string `json:"token"`
+		Identity *string `json:"identity"`
 	}
 	if !h.decode(w, r, c, &body) {
 		return
 	}
 	inviting := body.Action == "invite"
-	if inviting && (body.Seat != nil || body.Email == nil || body.Token == nil) ||
-		!inviting && (body.Email != nil || body.Token != nil) {
-		h.refuse(w, c, calls.ErrInvalid, calls.JoinResult{})
-		return
+	recovering := body.Action == "invitation_link"
+	invalid := false
+	switch {
+	case inviting:
+		invalid = body.Seat != nil || body.Identity != nil || body.Email == nil || body.Token == nil
+		if !invalid {
+			invalid = !calls.TokenWellFormed(*body.Token)
+		}
+	case recovering:
+		invalid = body.Seat != nil || body.Email != nil || body.Token != nil || body.Identity == nil
+		if !invalid {
+			invalid = !calls.InvitationIdentityWellFormed(*body.Identity)
+		}
+	default:
+		invalid = body.Email != nil || body.Token != nil || body.Identity != nil
 	}
-	if inviting && !calls.TokenWellFormed(*body.Token) {
+	if invalid {
 		h.refuse(w, c, calls.ErrInvalid, calls.JoinResult{})
 		return
 	}
 	if !h.requireSession(w, c) || !h.resolveSite(w, r, &c) {
+		return
+	}
+	if recovering {
+		result, err := h.svc.InvitationLink(r.Context(), c.session(), calls.InvitationLinkRequest{Identity: *body.Identity})
+		if err != nil {
+			h.refuse(w, c, err, calls.JoinResult{})
+			return
+		}
+		h.write(w, http.StatusOK, struct {
+			GuestToken string `json:"guestToken"`
+		}{result.GuestToken})
 		return
 	}
 	if inviting {

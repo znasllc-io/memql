@@ -297,3 +297,21 @@ concept invitationBudget {
   @relationship(type="references", as="forSite", field="siteId", target=site, direction="outgoing")
   @relationship(type="references", as="siteOwner", field="ownerUserId", target=user, direction="outgoing")
 }
+
+/// One immutable guest-only recovery alias per call. Its id is the keyed digest of a
+/// deterministically derived guest token; no plaintext capability is retained. The
+/// original room links remain unchanged. A join still checks the room's current state.
+// @no-displayCard: Private capability lookup, returned only by the checked active-host action.
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@retention(ttl="1d", keepLatest=true, archive="none")
+@belongsTo(account, via="siteId", stays="signin")
+concept invitationLink {
+  siteId string!
+  ownerUserId string!
+  roomId string!
+  accountId string
+  @relationship(type="references", as="forSite", field="siteId", target=site, direction="outgoing")
+  @relationship(type="references", as="forRoom", field="roomId", target=room, direction="outgoing")
+  @relationship(type="references", as="siteOwner", field="ownerUserId", target=user, direction="outgoing")
+}

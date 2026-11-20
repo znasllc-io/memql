@@ -80,6 +80,7 @@ const callsClientUnreadableReason = "its rows are the calls integration's bookke
 // it is still decided by the concept's @rowAuthz row by row. It is the read-side
 // counterpart of @serverWritten, which bars the same two concepts from a raw write.
 var clientUnreadableConcepts = map[string]string{
+	"v1:calls:invitationLink":    callsClientUnreadableReason,
 	"v1:calls:invitationReceipt": callsClientUnreadableReason,
 	"v1:calls:invitationBudget":  callsClientUnreadableReason,
 	siteAccessCodeConcept:        "its row holds the digest of a bearer credential and the operator's notes on who may use it, and the only client path to it is a builtin that passes the access part and the organization gate; a raw read passes neither",

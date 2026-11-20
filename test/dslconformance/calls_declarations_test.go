@@ -32,6 +32,7 @@ func TestCallsDigestLookupsAreSiteScoped(t *testing.T) {
 		"callsKeyByDigest", "callsSessionByTokenDigest",
 		"callsRoomByGuestDigest", "callsRoomByHostDigest",
 		"callsScheduledCallByGuestDigest", "callsScheduledCallByHostDigest",
+		"callsInvitationLinkById",
 	} {
 		body := callsConstruct(t, "queries.memql", name)
 		if !regexp.MustCompile(`siteId\s+string!`).MatchString(body) {

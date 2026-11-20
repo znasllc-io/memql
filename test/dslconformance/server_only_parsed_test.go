@@ -219,9 +219,11 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// caller's actor cannot establish the calls host session or guest-token
 		// proof, nor replace the shared gates and version fences around a send.
 		{Path: "calls/queries.memql", Name: "callsInvitationById"}:           true,
+		{Path: "calls/queries.memql", Name: "callsInvitationLinkById"}:       true,
 		{Path: "calls/queries.memql", Name: "callsInvitationsForRoom"}:       true,
 		{Path: "calls/queries.memql", Name: "callsInvitationBudget"}:         true,
 		{Path: "calls/mutations.memql", Name: "createCallsInvitation"}:       true,
+		{Path: "calls/mutations.memql", Name: "createCallsInvitationLink"}:   true,
 		{Path: "calls/mutations.memql", Name: "updateCallsInvitation"}:       true,
 		{Path: "calls/mutations.memql", Name: "createCallsInvitationBudget"}: true,
 		{Path: "calls/mutations.memql", Name: "updateCallsInvitationBudget"}: true,

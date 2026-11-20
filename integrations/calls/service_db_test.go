@@ -270,7 +270,7 @@ func newCallWorld(t *testing.T, name string, seats int) *callWorld {
 // added: the world's own sweep knows only keys and limits.
 func (cw *callWorld) sweepCalls() {
 	ctx := context.Background()
-	concepts := []string{sessionConcept, roomConcept, seatConcept, queueEntryConcept, scheduledCallConcept}
+	concepts := []string{sessionConcept, roomConcept, seatConcept, queueEntryConcept, scheduledCallConcept, invitationLinkConcept}
 	for _, site := range cw.sites {
 		_, _ = cw.db.NewDelete().TableExpr(`"MemoryNodes"`).
 			Where("concept IN (?)", bun.In(concepts)).Where("payload->>'siteId' = ?", siteConcept+":"+site).Exec(ctx)

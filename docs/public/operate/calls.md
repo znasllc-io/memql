@@ -118,6 +118,24 @@ and, for one done to a seat, the `seat`:
 | `admit` | lets one waiting seat in past the lock |
 | `end` | ends the call for everyone in it |
 | `invite` | sends one guest invitation through the configured MemQL email transport; takes `email` and `token`, never `seat` |
+| `invitation_link` | recovers a guest invitation for the current host; takes its admitted media `identity`, never `seat`, `email` or `token` |
+
+**Invitation recovery** lets a host keep inviting after a browser refresh, when
+its original fragment has already been removed. Post
+`{"action":"invitation_link","identity":"<current admitted media identity>"}`
+to the same host route with the existing session cookie. The response is only
+`{"guestToken":"<guest token>"}`, with `Cache-Control: no-store`. Build the usual
+guest fragment on the canonical site origin. Keep it in page memory only.
+
+The service rechecks the session, occupying host seat and open room under the room
+gate. The identity must match that seat, so a stale tab cannot recover a link for
+another call after its cookie changes. A guest, waiter, removed participant or
+expired session cannot recover it. Recovery neither sends mail nor grants hosting.
+It deterministically derives one guest-only alias per owner/site/room and stores
+only its keyed digest and room binding. Repeated requests and different hosts get
+the same alias; both original guest and co-host links remain valid. The alias uses
+normal guest admission, locks and room lifetime checks. A co-host capability is
+never returned, and swapping guest links cannot bypass email deduplication.
 
 **Email invitations** reuse this host route, reached at
 `POST /_memql/calls/host` on the deployable. The body is
@@ -258,6 +276,7 @@ deployable's rows belong to the deployable's owner.
 | `v1:calls:policy` | deployable's limits, where they differ from the defaults |
 | `v1:calls:invitationReceipt` | call and normalized recipient, identified by keyed digest: send state and message fingerprint; no raw address or link |
 | `v1:calls:invitationBudget` | site: shared minute/day invitation attempt counters |
+| `v1:calls:invitationLink` | room that has recovered invitations: guest alias digest and immutable site/owner/room binding; no raw token |
 
 The key pepper and the media server's two key pairs are sealed global secrets
 (`calls.key-pepper`, `calls.media.bootstrap`, `calls.media.webhook`). Captured invitation
