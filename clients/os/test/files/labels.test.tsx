@@ -267,12 +267,17 @@ describe("the label editor in the inspector", () => {
     expect(within(inspector).queryByText("urgent")).toBeNull();
   });
 
-  it("says the free-text rule ONCE, in the editor and not on every chip", async () => {
+  // Item 11 (Jesús, Nov 20): Labels is one short row in Fleet's layout; the
+  // hint line above the field is dropped.
+  it("is one row, the field and Add, without a hint line", async () => {
     h.connection = fakeConnection({ artifacts: [BRIEF] });
     await renderFiles();
     const inspector = await openInspector("brief\\.pdf");
 
-    expect(within(inspector).getAllByText(/Use labels to find related files/)).toHaveLength(1);
+    expect(within(inspector).queryByText(/Use labels to find related files/)).toBeNull();
+    const section = within(inspector).getByRole("region", { name: "Labels" });
+    expect(within(section).getByLabelText("Add a label")).toBeTruthy();
+    expect(within(section).getByRole("button", { name: "Add" })).toBeTruthy();
   });
 
   it("keeps the input available without an empty label list", async () => {

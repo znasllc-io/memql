@@ -5010,21 +5010,6 @@ a.os-button {
  * The rule is drawn on each entry rather than once behind the list, so the
  * last entry can simply not draw one -- a single tall rule would hang past the
  * final node with nothing under it. */
-.os-files-versions {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-top: 10px;
-  border-top: 1px solid var(--os-line);
-}
-.os-files-versions-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.os-files-versions-head .os-caption {
-  margin-left: auto;
-}
 .os-files-versions-only {
   margin: 0;
   font-size: var(--os-text-sm);
@@ -15707,12 +15692,26 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 .os-file-detail-footer .os-actbar-detail { white-space: normal; }
 .os-file-detail-footer .os-button[aria-label] { min-width: var(--os-control-h); }
 .os-file-detail-notices { display: flex; flex-direction: column; gap: 8px; padding: 12px 20px; max-height: 28vh; overflow: auto; border-top: 1px solid var(--os-line); }
-.os-file-detail .os-files-labeledit { max-width: 34rem; }
+/* Fleet's Details layout (item 11, Nov 20): the sections are the kit's
+ * Details grid (kit/details.css); Labels and Client are one SHORT row each. */
+.os-file-detail .os-files-labeledit, .os-file-detail-short { max-width: 22rem; }
+.os-file-detail-short { display: flex; }
+/* A value with no copy icon starts where a copy row's text does, as on
+ * Fleet's Details (.fleet-machine-details); the kit's details.css lacks this. */
+.os-file-detail .os-details .os-facts dd:not(:has(> .os-copyvalue)) { padding-inline: 10px; }
+/* One version, one row on the facts' columns: the version and its chip where
+ * a fact's label stands, its story, size and digest where the value stands,
+ * and when, with its download, at the row's end. */
 .os-file-version-list { list-style: none; padding: 0; margin: 0; }
-.os-file-version-list .os-files-version { display: block; padding: 12px 0; border-bottom: 1px solid var(--os-line); }
+.os-file-version-list .os-files-version { grid-template-columns: 160px minmax(0, 1fr) auto; grid-template-areas: "line body meta"; column-gap: 24px; align-items: center; padding: 3px 0; }
 .os-file-version-list .os-files-version::before { content: none; }
-.os-file-version-list .os-files-version:last-child { border-bottom: 0; }
-.os-file-version-list .os-files-version-body { padding: 0; }
+.os-file-version-list .os-files-version-line { grid-area: line; }
+.os-file-version-list .os-files-version-body { grid-area: body; padding: 0 0 0 10px; }
+.os-file-version-list .os-files-version-meta { grid-area: meta; margin: 0; }
+.os-file-version-list .os-files-version-story > span + span::before { content: "\00b7\00a0"; }
+@container details (max-width: 480px) {
+  .os-file-version-list .os-files-version { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "line meta" "body body"; padding: 6px 0; }
+}
 .os-backup-editor { max-width: 720px; display: flex; flex-direction: column; gap: 16px; }
 .os-backup-schedule { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; }
 .os-backup-schedule .os-field { flex: 1; min-width: 120px; }

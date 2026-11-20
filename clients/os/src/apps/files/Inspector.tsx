@@ -9,7 +9,7 @@ import { openInVsCode, VSCODE_NO_ANSWER_MESSAGE } from "../../items/vscode";
 import { editorFilename, isZipArtifact } from "../../items/editorPreference";
 import { binItemFromArtifact } from "../bin/rows";
 import { planRestore, runRestore } from "../bin/restore";
-import { Button, CopyValue, Fact, Facts, Notice, Head, Subhead, formatBytes, formatMoment } from "../../kit";
+import { Button, Details, DetailsSection, Fact, Facts, Notice, Head, formatBytes, formatMoment } from "../../kit";
 import { ActionBar } from "../../kit/ActionBar";
 import { LabelEditor } from "./LabelEditor";
 import { AccountPicker } from "../accounts/AccountPicker";
@@ -32,8 +32,14 @@ import {
 import { downloadWorkerRegistration, runWorkerDownload } from "./actions/downloadWorker";
 import { artifactName, deskEntryOf, fileStory, type ArtifactRow, type CompositionRow } from "./rows";
 
-// File details occupy the page. Origin belongs with the other facts;
-// labels, clients and version history scroll above the pinned action footer.
+// File details occupy the page, laid out like Fleet's machine Details tab
+// (José, Nov 19: "this is how details should show up"; Jesús picked draft A,
+// Nov 20): each section's name in its own left column, then a label column
+// and a value column, a thin line between sections, and the copyable row under
+// the pointer lit with its copy button -- the kit's Details, DetailsSection and
+// Fact.copyValue, which own that grid for Fleet and Cluster too (DESIGN.md,
+// "Details and settings content"). Same sections and words as before; Labels
+// and Client are one short row each, and the action bar stays pinned below.
 
 function describe(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -288,124 +294,110 @@ export function Inspector({
       {/* A summary describes the contents; origin is a fact below. */}
       {row.summary.trim() !== "" ? <p className="os-files-summary">{row.summary}</p> : null}
 
-      <div className="os-files-group">
-        <Subhead>Details</Subhead>
-        <Facts>
-          <Fact label="Origin" value={story.sentence} />
-          <Fact label="Kind" value={row.kind.replaceAll("_", " ")} />
-          <Fact label="Filed in" value={filedIn} />
-          <Fact label="Format" value={row.format || row.mimeType} mono />
-          {row.kind === "document" ? (
-            <Fact label="Validation" value={row.validationStatus} />
-          ) : null}
-          <Fact label="Created" value={formatMoment(row.createdAt)} />
-          {/* THE TWO OPAQUE VALUES COME LAST, AND THEY ARE COPYABLE. Neither
-              is readable at a glance and neither is retypeable, so each stays
-              on one line and hands the whole string over on a click. Putting
-              them below the human facts also keeps the two longest values out
-              of the way of the four somebody actually reads. */}
-          {row.producedByRunId !== "" ? (
-            <Fact
-              label="Run"
-              value={<CopyValue value={row.producedByRunId} label="Run" />}
-              mono
-            />
-          ) : null}
-          <Fact label="Id" value={<CopyValue value={row.id} label="Id" />} mono />
-        </Facts>
-
-        {/* MADE IN THE MATERIALIZER. A fact and an act, and deliberately not a
-            panel: what this file was made FROM is the record's question, and
-            the record is one click away in the app that owns it. The act is
-            ABSENT rather than disabled when that app is not open-able
-            (DESIGN.md rule 12) -- `openApp` no-ops on an app the registry
-            does not hold, and a button that silently does nothing is worse
-            than one that is not there. */}
-        {composition !== null ? (
+      <Details>
+        <DetailsSection title="Details">
+          {/* Copy where it helps (DESIGN.md "Quiet copying"): names, formats,
+              exact times and identifiers; the origin sentence and the kind
+              are read, not copied. The two opaque values, Run and Id, come
+              last, out of the way of the facts somebody actually reads. */}
           <Facts>
-            <Fact
-              label="Made in"
-              value={
-                canOpen(registry, MATERIALIZER_APP_ID) ? (
-                  <button
-                    type="button"
-                    className="os-link"
-                    onClick={() =>
-                      actions.openApp(MATERIALIZER_APP_ID, MATERIALIZER_MADE_SECTION, {
-                        compositionId: composition.id,
-                      })
-                    }
-                  >
-                    Open in Materializer
-                  </button>
-                ) : (
-                  "the Materializer"
-                )
-              }
-            />
+            <Fact label="Origin" value={story.sentence} />
+            <Fact label="Kind" value={row.kind.replaceAll("_", " ")} />
+            <Fact label="Filed in" value={filedIn} copyValue={filedIn} />
+            <Fact label="Format" value={row.format || row.mimeType} copyValue={row.format || row.mimeType} mono />
+            {row.kind === "document" ? (
+              <Fact label="Validation" value={row.validationStatus} />
+            ) : null}
+            <Fact label="Created" value={formatMoment(row.createdAt)} copyValue={row.createdAt} />
+            {row.producedByRunId !== "" ? (
+              <Fact label="Run" value={row.producedByRunId} copyValue={row.producedByRunId} mono />
+            ) : null}
+            <Fact label="Id" value={row.id} copyValue={row.id} mono />
+            {/* MADE IN THE MATERIALIZER. A fact and an act, and deliberately
+                not a panel: what this file was made FROM is the record's
+                question, and the record is one click away in the app that
+                owns it. The act is ABSENT rather than disabled when that app
+                is not open-able (DESIGN.md rule 12) -- `openApp` no-ops on an
+                app the registry does not hold. */}
+            {composition !== null ? (
+              <Fact
+                label="Made in"
+                value={
+                  canOpen(registry, MATERIALIZER_APP_ID) ? (
+                    <button
+                      type="button"
+                      className="os-link"
+                      onClick={() =>
+                        actions.openApp(MATERIALIZER_APP_ID, MATERIALIZER_MADE_SECTION, {
+                          compositionId: composition.id,
+                        })
+                      }
+                    >
+                      Open in Materializer
+                    </button>
+                  ) : (
+                    "the Materializer"
+                  )
+                }
+              />
+            ) : null}
           </Facts>
-        ) : null}
+        </DetailsSection>
 
-      </div>
+        {/* LABELS (epic memql#5009): editable, so a section of its own rather
+            than a fact row. One short row: the field and Add, then the chips.
+            The browse's label FACET asks a different question of the same
+            field and lives behind Refine (DESIGN.md rule 2). */}
+        <DetailsSection title="Labels">
+          <LabelEditor artifactId={row.id} labels={row.labels} />
+        </DetailsSection>
 
-      {/* LABELS (epic memql#5009). They were a read-only chip row inside
-          Details; they are editable now, so they take a group of their own
-          for the reason Clients does -- an editable thing on a surface that
-          is otherwise a reading is not a fact row. The browse's label FACET
-          asks a different question of the same field and lives behind Refine
-          (DESIGN.md rule 2); this is where the value is set. */}
-      <div className="os-files-group">
-        <Subhead>Labels</Subhead>
-        <LabelEditor artifactId={row.id} labels={row.labels} />
-      </div>
+        {/* WHO THIS IS FOR (epic memql#4800, D5). ONE ACCOUNT PER ROW: a row
+            belongs to one account, so this is the single picker, one short
+            row. The index still stores the list `accountIds` until the export
+            piece retires it, so the write sends a one-element list, or an
+            empty one for none; the engine derives `accountId` from it. A file
+            labelled with several accounts before this change shows its first,
+            and choosing here replaces the list with that one choice.
 
-      {/* WHO THIS IS FOR (epic memql#4800, D5). ONE ACCOUNT PER ROW (account
-          row ownership, section G): a row belongs to one account, so this is
-          the single picker. The index still stores the list `accountIds`
-          until the export piece retires it, so the write sends a one-element
-          list, or an empty one for none; the engine derives `accountId` from
-          it. A file labelled with several accounts before this change shows
-          its first, and choosing here replaces the list with that one choice.
+            The write is ordinary and ungated. An account is a record with no
+            read effect, so labelling a file changes who it is ABOUT and
+            nothing about who may read it. */}
+        <DetailsSection title="Client">
+          <div className="os-file-detail-short">
+            <AccountPicker
+              id={`files-inspector-account-${row.id}`}
+              label="The client this file is about"
+              value={row.accountIds[0] ?? ""}
+              accounts={accounts}
+              disabled={accountTie.busy}
+              onChange={(next) => void accountTie.setAccounts(row.id, next === "" ? [] : [next])}
+            />
+          </div>
+          {accountTie.error === "" ? null : (
+            <Notice
+              tone="error"
+              sentence="The client was not changed."
+              next="This file still has the client it had."
+              detail={accountTie.error}
+            />
+          )}
+        </DetailsSection>
 
-          The write is ordinary and ungated. An account is a record with no
-          read effect, so labelling a file changes who it is ABOUT and nothing
-          about who may read it.
-
-          It is the one EDITABLE thing on a surface that is otherwise a
-          reading, which is why it is its own group rather than a fact row. */}
-      <div className="os-files-group">
-        <Subhead>Client</Subhead>
-        <AccountPicker
-          id={`files-inspector-account-${row.id}`}
-          label="The client this file is about"
-          value={row.accountIds[0] ?? ""}
-          accounts={accounts}
-          disabled={accountTie.busy}
-          onChange={(next) => void accountTie.setAccounts(row.id, next === "" ? [] : [next])}
-        />
-        {accountTie.error === "" ? null : (
-          <Notice
-            tone="error"
-            sentence="The client was not changed."
-            next="This file still has the client it had."
-            detail={accountTie.error}
+        {row.kind === "file" ? (
+          <VersionHistory
+            history={versions.history}
+            headName={versions.head?.name ?? name}
+            loading={versions.loading}
+            error={versions.error}
+            readAt={versions.readAt}
+            presence={presence}
+            onRefresh={versions.refresh}
+            onDownload={(entry) => void downloadVersion(entry)}
+            downloadingVersion={downloadingVersion}
           />
-        )}
-      </div>
-
-      {row.kind === "file" ? (
-        <VersionHistory
-          history={versions.history}
-          headName={versions.head?.name ?? name}
-          loading={versions.loading}
-          error={versions.error}
-          readAt={versions.readAt}
-          presence={presence}
-          onRefresh={versions.refresh}
-          onDownload={(entry) => void downloadVersion(entry)}
-          downloadingVersion={downloadingVersion}
-        />
-      ) : null}
+        ) : null}
+      </Details>
       </div>
       <footer className="os-file-detail-footer" data-confirming={confirmingArchive || undefined}>
         {vsNoAnswer || downloadError || archiveError ? (
