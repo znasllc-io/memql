@@ -1,8 +1,8 @@
 import { useRef, type PointerEvent as ReactPointerEvent } from "react";
 import { useDraggable } from "@dnd-kit/core";
 
-import type { BinDropPayload } from "../bin/concepts";
-import { artifactName, type ArtifactRow } from "./rows";
+import type { DeskFileDrag } from "../../chrome/Desktop";
+import { artifactName, deskEntryOf, type ArtifactRow } from "./rows";
 
 // The grid's glyphs: one thin outline each, the way Fleet draws a machine, with
 // a file's type written inside it in the data face rather than a coloured icon
@@ -106,13 +106,14 @@ export function FileTile({
   onMenu: (x: number, y: number) => void;
   /** A quiet line under the name (who shared a file with you). */
   caption?: string;
-  /** Not draggable to the Bin: a file shared with you is not yours to archive. */
+  /** Not draggable (to the Bin or the desk): a file shared with you is not yours. */
   fixed?: boolean;
 }) {
-  // DRAGGABLE TO THE BIN (memql#4784). The payload travels with the drag,
-  // because the dock holds no Library feed of its own. The listeners go on a
-  // wrapper and dnd-kit's `attributes` are not spread: they would make the
-  // wrapper a second focusable control announcing the same file.
+  // DRAGGABLE TO THE BIN (memql#4784) AND ONTO THE DESK (José, Nov 19 2026).
+  // The payload travels with the drag, because neither the dock nor the desk
+  // holds a Library feed of its own. The listeners go on a wrapper and
+  // dnd-kit's `attributes` are not spread: they would make the wrapper a
+  // second focusable control announcing the same file.
   const draggable = useDraggable({
     id: `artifact:${row.id}`,
     data: {
@@ -120,7 +121,8 @@ export function FileTile({
       name: artifactName(row),
       folder: false,
       deskItemId: "",
-    } satisfies BinDropPayload,
+      desk: { entry: deskEntryOf(row), glyph: typeLabel(row) },
+    } satisfies DeskFileDrag,
     disabled: fixed,
   });
   const name = artifactName(row);

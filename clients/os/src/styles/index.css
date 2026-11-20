@@ -7028,6 +7028,29 @@ a.os-button {
 .os-files-tile-wrap[data-dragging] {
   opacity: 0.55;
 }
+/* Out of the window and onto the desk (Draft A, Jesús Nov 20 2026): a
+ * see-through copy of the tile rides the pointer, and a dashed spot on the desk
+ * marks the cell the icon will take. Neither catches the pointer, so the drop
+ * reads what is under them. */
+.os-desk-ghost {
+  pointer-events: none;
+}
+.os-desk-ghost .os-files-tile {
+  opacity: 0.72;
+  background: var(--os-plate);
+  border-radius: var(--os-radius-sm);
+  box-shadow: 0 10px 28px rgb(0 0 0 / 0.28);
+}
+.os-desk-landing {
+  position: absolute;
+  width: 84px;
+  height: 96px;
+  border: 1.5px dashed var(--os-accent);
+  border-radius: var(--os-radius-sm);
+  background: var(--os-accent-soft);
+  pointer-events: none;
+  z-index: 1;
+}
 
 /* ---- the folder's origin-link rollup (epic memql#4783) ---- *
  *

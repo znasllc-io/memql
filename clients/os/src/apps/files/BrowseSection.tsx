@@ -61,6 +61,7 @@ import {
   artifactFingerprint,
   artifactFromRow,
   artifactName,
+  deskEntryOf,
   fileStory,
   type ArtifactRow,
   type CompositionRow,
@@ -240,13 +241,7 @@ export function BrowseSection({
   };
 
   const sendRowToDesk = (row: ArtifactRow) => {
-    const outcome = actions.sendFileToDesk({
-      artifactId: row.id,
-      title: artifactName(row),
-      fileKind: row.kind,
-      source: row.source,
-      ...(row.producedByWorkerId ? { producedByWorkerId: row.producedByWorkerId } : {}),
-    });
+    const outcome = actions.sendFileToDesk(deskEntryOf(row));
     setRailNote(
       outcome === "full"
         ? "The desk is full -- remove something from it first."

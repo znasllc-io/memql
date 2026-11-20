@@ -5,6 +5,7 @@ import {
   emptySurface,
   moveItem,
   nearestFreeCell,
+  placeFileAt,
   removeItem,
   sortSurface,
   surfaceHasContent,
@@ -78,6 +79,30 @@ describe("desk surface grid", () => {
     s = updateFile(s, "a", { uploadState: undefined, artifactId: "art-real" });
     const item = s.items.a!;
     expect(item.kind === "file" && item.artifactId).toBe("art-real");
+  });
+});
+
+describe("a file dragged out of Files onto the desk (Jesús, Nov 20 2026)", () => {
+  const entry = { id: "new", artifactId: "art-a", title: "a", fileKind: "file", source: "uploaded" };
+
+  it("lands at the drop cell, or the nearest free one", () => {
+    const landed = placeFileAt(place(emptySurface(), file("b"), 2, 1), entry, { col: 2, row: 1 }, GRID);
+    expect(landed?.itemId).toBe("new");
+    expect(landed?.surface.positions.new).not.toEqual({ col: 2, row: 1 });
+    expect(placeFileAt(emptySurface(), entry, { col: 4, row: 3 }, GRID)?.surface.positions.new).toEqual({ col: 4, row: 3 });
+  });
+
+  it("never makes a second icon: the file's own icon moves to the drop", () => {
+    const landed = placeFileAt(place(emptySurface(), file("a"), 0, 0), entry, { col: 5, row: 2 }, GRID);
+    expect(landed?.itemId).toBe("a");
+    expect(Object.keys(landed?.surface.items ?? {})).toEqual(["a"]);
+    expect(landed?.surface.positions.a).toEqual({ col: 5, row: 2 });
+  });
+
+  it("refuses a new icon on a full desk", () => {
+    let full = emptySurface();
+    for (let i = 0; i < GRID.cols * GRID.rows; i += 1) full = place(full, file(`f${i}`), i % GRID.cols, Math.floor(i / GRID.cols));
+    expect(placeFileAt(full, entry, { col: 0, row: 0 }, GRID)).toBeNull();
   });
 });
 
