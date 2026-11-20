@@ -123,10 +123,12 @@ or client-visible session authority.
   drawn with the Library tile's glyphs at the one size both surfaces share
   (the "ONE SIZE" block in `styles/index.css`). A file that cannot open yet
   (still uploading, or made on a computer that is offline) is drawn dim and
-  still selects, moves and files; opening it waits and it opens once it can.
-  One line under the name says the rest: "Opening when done", "Upload failed
-  -- retry", "Computer offline", or "Ready" for about three seconds after an
-  upload nobody opened (`items/deskFileState.ts`).
+  still selects, moves and files. Opening an uploading file waits and it
+  opens once the upload lands; opening an offline computer's file does
+  nothing and is not remembered, so it never pops open later. One line under
+  the name says the rest: "Opening when done", "Upload failed -- retry",
+  "Computer offline", or "Ready" for about three seconds after an upload
+  nobody opened (`items/deskFileState.ts`).
   Every icon behaves like
   a desktop icon (epic memql#4842): single click SELECTS, double-click or
   Enter OPENS -- a file hands off to VS Code, a folder opens the Files app

@@ -2,9 +2,12 @@
 // indicator"; Jesús picked the states on Nov 20 2026). A file that cannot open
 // yet -- still uploading, or made on a computer that is offline -- is drawn a
 // dimmer grey and can still be picked, moved, filed into a folder or thrown in
-// the Bin; it only does not open. Opening it anyway waits: the file opens by
-// itself the moment it can, with nothing announcing it. A failed upload drops
-// whatever was waiting. An upload that finishes with nobody waiting says
+// the Bin; it only does not open. Opening an UPLOADING file anyway waits: it
+// opens by itself the moment the upload lands, like a browser's "open when
+// done". Opening an OFFLINE file does nothing but leave "Computer offline"
+// showing, and nothing is remembered (Jesús, Nov 20: a computer can be off for
+// hours or days, and a file popping open long after the person moved on would
+// bother them). A failed upload drops whatever was waiting. An upload that finishes with nobody waiting says
 // "Ready" for a moment, then the icon is plain.
 //
 // The rules are pure functions over each icon's HOLD (what stops it opening),
@@ -48,8 +51,9 @@ export function holdOf(
   return deriveProvenance(file, machine).tone === "unreachable" ? "offline" : null;
 }
 
-// Opening needs the bytes, so it waits for both the upload and the computer;
-// filing into a folder is a Library write, so it waits only for the upload.
+// Opening needs the bytes, so it goes only when nothing holds it; filing into
+// a folder is a Library write, so it waits only for the upload. Only an
+// upload is ever waited on: see `ask` and `settle` for the offline case.
 function releases(wait: Wait, hold: Hold): boolean {
   return wait === "open" ? hold === null : hold === null || hold === "offline";
 }
@@ -59,14 +63,17 @@ export function ask(opens: DeskOpens, id: string, hold: Hold, wait: Wait): { ope
   // A failed upload offers its retry line instead; nothing waits on it.
   if (hold === "failed") return { opens, now: false };
   if (releases(wait, hold)) return { opens, now: true };
+  // An offline computer may stay off for days: the open is refused, not
+  // queued, so the file can never pop open later ("Computer offline" stays).
+  if (hold === "offline") return { opens, now: false };
   return { opens: { ...opens, waiting: new Map(opens.waiting).set(id, wait) }, now: false };
 }
 
 /**
  * The icons' holds moved from `before` to `after`. Returns what waited and may
  * go now (`release`), and which files just finished uploading with nothing
- * waiting (`readied`, to clear after READY_MS). A file that failed, or left
- * the desk, drops what it was waiting for.
+ * waiting (`readied`, to clear after READY_MS). A file that failed, left the
+ * desk, or whose computer went offline drops what it was waiting for.
  */
 export function settle(
   opens: DeskOpens,
@@ -79,7 +86,7 @@ export function settle(
   const readied: string[] = [];
   for (const [id, wait] of opens.waiting) {
     const hold = after.get(id);
-    if (hold === undefined || hold === "failed") waiting.delete(id);
+    if (hold === undefined || hold === "failed" || (hold === "offline" && wait === "open")) waiting.delete(id);
     else if (releases(wait, hold)) {
       waiting.delete(id);
       release.push([id, wait]);
