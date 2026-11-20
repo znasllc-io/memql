@@ -5999,6 +5999,26 @@ QueryClient.prototype.librarySharesForArtifact = function (this: QueryClient, ar
   return this.executeNamed("librarySharesForArtifact", buildLibrarySharesForArtifact(args), opts);
 };
 
+/** Every file the caller is sharing right now: one row per ACTIVE share, across all their files -- the Files app's "Sharing" page (Jesús, Nov 19 2026: "Shared" opens into "Shared with me" and "Sharing"). `title` names the file, `recipientDisplayName` who has it, `expiresAt` how long is left, and `id` is the shareId libraryShareStop takes. Stopped and expired shares are not listed: they stay as the record (revokedAt / expiresAt), read by nothing here yet. Live through the share rows' own graph events, which reach the sharer's stream because the sharer owns them. */
+// Bound concept: v1:library:share (machine-readable: BoundConcepts["librarySharing"] in generated_concepts.ts).
+export interface LibrarySharingArgs {
+}
+
+export function buildLibrarySharing(args: LibrarySharingArgs): string {
+  void args;
+  return "query librarySharing()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    librarySharing(args?: LibrarySharingArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.librarySharing = function (this: QueryClient, args: LibrarySharingArgs = {} as LibrarySharingArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("librarySharing", buildLibrarySharing(args), opts);
+};
+
 /** The caller's watched folders, live (epic memql#4783, the cockpit half memql#4841).
 ONE READ SERVES BOTH CONSUMERS, and that is deliberate. The Files app wants every watch the person has; a cockpit wants the watches for the one machine it is. Those are the same question with a guard on it, and a second query would be a second place for the owner filter and the soft-delete spelling to drift -- the `row.archived != true` / `== true` asymmetry two constructs up is exactly the kind of drift a duplicate read acquires.
 `workerId` is GUARDED, so an absent argument is the whole list rather than a match on the empty string. There is no half-supplied-key hazard here the way there is on libraryFileByUploadedFrom, because there is only one part to supply.

@@ -248,16 +248,16 @@ func (i *Integration) handleShareFile(ctx context.Context, args map[string]any, 
 		}
 	}
 	expiresAt := time.Now().UTC().Add(time.Duration(days) * 24 * time.Hour).Format(time.RFC3339Nano)
+	title := firstNonEmpty(stringField(file, "name"), stringField(artifact, "title"), "Untitled file")
 	if err := sharestore.Write(ctx, i.engine, "putLibraryShare", map[string]any{
 		"shareId": shareID, "recipientUserId": recipient, "recipientDisplayName": recipientName,
-		"artifactId": artifactID, "days": days, "expiresAt": expiresAt,
+		"artifactId": artifactID, "title": title, "days": days, "expiresAt": expiresAt,
 	}); err != nil {
 		return nil, err
 	}
 	notice := map[string]any{
 		"shareId": shareID, "artifactId": artifactID, "sharerUserId": sharer, "sharerDisplayName": sharerName,
-		"title":    firstNonEmpty(stringField(file, "name"), stringField(artifact, "title"), "Untitled file"),
-		"mimeType": stringField(file, "mimeType"), "expiresAt": expiresAt,
+		"title": title, "mimeType": stringField(file, "mimeType"), "expiresAt": expiresAt,
 	}
 	if format := stringField(file, "format"); format != "" {
 		notice["format"] = format

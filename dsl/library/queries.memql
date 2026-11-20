@@ -959,6 +959,20 @@ query folder libraryFolderDirectory {
 // notices. Nobody reads the other half; the access path reads a share under the
 // sharer's borrowed authority (component/server EngineLibraryStore.SharedFile).
 
+/// Every file the caller is sharing right now: one row per ACTIVE share, across all their files --
+/// the Files app's "Sharing" page (Jesús, Nov 19 2026: "Shared" opens into "Shared with me" and
+/// "Sharing"). `title` names the file, `recipientDisplayName` who has it, `expiresAt` how long is
+/// left, and `id` is the shareId libraryShareStop takes. Stopped and expired shares are not listed:
+/// they stay as the record (revokedAt / expiresAt), read by nothing here yet. Live through the
+/// share rows' own graph events, which reach the sharer's stream because the sharer owns them.
+@unbounded("the caller's active shares -- each ends within thirty days of being made or renewed, and a person shares by hand")
+@cache(0)
+@actor
+query share librarySharing {
+  filter row => row.ownerUserId == actor.userId && row.revokedAt == nil && row.expiresAt > now
+  shape libraryShareFull
+}
+
 /// The caller's ACTIVE shares of one of their files -- who has it now, and until when. Backs the
 /// Share panel: `id` is the shareId libraryShareStop takes, `days` is what Renew sends back to
 /// libraryShareFile. Stopped and expired shares are not listed.

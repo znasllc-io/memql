@@ -323,6 +323,7 @@ shape share libraryShareFull {
   recipientUserId
   recipientDisplayName
   artifactId
+  title
   days
   expiresAt
   revokedAt

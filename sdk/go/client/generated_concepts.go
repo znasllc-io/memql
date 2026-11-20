@@ -673,6 +673,7 @@ var BoundConcepts = map[string]string{
 	"libraryShareById":                                 "v1:library:share",
 	"librarySharedWithMe":                              "v1:library:shareNotice",
 	"librarySharesForArtifact":                         "v1:library:share",
+	"librarySharing":                                   "v1:library:share",
 	"libraryWatchedFolders":                            "v1:library:watchedFolder",
 	"libraryWorkspaceLiveSources":                      "v1:library:artifact",
 	"lineItemsForOrder":                                "v1:shopify:orderLineItem",

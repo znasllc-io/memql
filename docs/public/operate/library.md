@@ -389,7 +389,7 @@ organization, from the same code (`component/memql/library_share_directory.go`).
 
 | Concept | Owned by | What it is |
 |---|---|---|
-| `v1:library:share` | the **sharer** | The grant: `recipientUserId`, `recipientDisplayName` (a snapshot), `artifactId`, `days`, `expiresAt`, `revokedAt`. |
+| `v1:library:share` | the **sharer** | The grant: `recipientUserId`, `recipientDisplayName` (a snapshot), `artifactId`, `title` (the file's name, a snapshot; absent on shares made before Nov 20 2026), `days`, `expiresAt`, `revokedAt`. |
 | `v1:library:shareNotice` | the **recipient** | A display row: `shareId`, `artifactId`, `sharerUserId`, `sharerDisplayName`, `title`, `mimeType`, `format`, `size`, `expiresAt`, `endedAt`. |
 
 The grant is the **sharer's** because a grant the recipient owned is one the
@@ -414,6 +414,7 @@ the directory and the ownership check.
 | `libraryShareStop(shareId)` | the sharer | `{shareId, stopped}` |
 | `librarySaveSharedCopy(artifactId)` | the recipient, while the share is active | `{artifactId, fileId}` of the new copy |
 | `librarySharesForArtifact(artifactId)` | the sharer | the file's ACTIVE shares (`id` is the shareId) |
+| `librarySharing()` | the sharer | every ACTIVE share of theirs, across all their files: the Files app's *Sharing* page |
 | `librarySharedWithMe(artifactId?)` | the recipient | their notices that have not ended or expired |
 
 **Renew.** Calling `libraryShareFile` again for a person whose share of the

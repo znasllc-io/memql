@@ -1220,11 +1220,12 @@ mutation share putLibraryShare {
     recipientUserId       string!
     recipientDisplayName  string!
     artifactId            string!
+    title                 string
     days                  int!  @minimum(1) @maximum(30)
     expiresAt             datetime!
   }
   insert {
-    accept { recipientUserId, recipientDisplayName, artifactId, days, expiresAt }
+    accept { recipientUserId, recipientDisplayName, artifactId, title, days, expiresAt }
     stamp {
       id:           args.shareId
       ownerUserId:  actor.userId

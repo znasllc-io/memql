@@ -3794,7 +3794,8 @@
         "ownerUserId",
         "recipientDisplayName",
         "recipientUserId",
-        "revokedAt"
+        "revokedAt",
+        "title"
       ],
       "required": [
         "artifactId",

@@ -442,6 +442,16 @@ func testOwnerSharesWithViewer(t *testing.T, x *shareFixture) {
 		memql.BareShortId(asString(shares[0]["id"])) != memql.BareShortId(shareID) {
 		t.Fatalf("alice's share list: %v", shares)
 	}
+	// Her Sharing page lists it across all her files, named, on either replica;
+	// nobody else's Sharing page does.
+	if sharing := noticesFor(x.rows(f.other, x.alice(), "librarySharing", nil), artifact); len(sharing) != 1 ||
+		asString(sharing[0]["title"]) != "q3.txt" || asString(sharing[0]["recipientDisplayName"]) != x.name("vera") ||
+		memql.BareShortId(asString(sharing[0]["id"])) != memql.BareShortId(shareID) {
+		t.Fatalf("alice's Sharing page: %v", sharing)
+	}
+	if len(noticesFor(x.rows(f.other, x.vera(), "librarySharing", nil), artifact)) != 0 {
+		t.Fatal("the recipient's Sharing page lists the sharer's share")
+	}
 
 	// The recipient downloads it through the content route on the second replica.
 	if code, data := x.download(f.other, x.vera(), artifact, ""); code != http.StatusOK || string(data) != body {
@@ -557,6 +567,9 @@ func testOwnerSharesWithViewer(t *testing.T, x *shareFixture) {
 		}
 		if len(x.rows(e, x.alice(), "librarySharesForArtifact", map[string]any{"artifactId": artifact})) != 0 {
 			t.Fatalf("replica %d still lists a stopped share to its sharer", i)
+		}
+		if len(noticesFor(x.rows(e, x.alice(), "librarySharing", nil), artifact)) != 0 {
+			t.Fatalf("replica %d still lists a stopped share on its sharer's Sharing page", i)
 		}
 	}
 	if _, err := f.second.handleSaveSharedCopy(x.vera(), map[string]any{"artifactId": artifact}, 0); err == nil {
@@ -726,7 +739,8 @@ func testExpiredShareRefuses(t *testing.T, x *shareFixture) {
 	if _, err := f.second.handleSaveSharedCopy(x.vera(), map[string]any{"artifactId": artifact}, 0); err == nil {
 		t.Fatal("an expired share let its recipient save a copy")
 	}
-	if len(x.rows(f.other, x.alice(), "librarySharesForArtifact", map[string]any{"artifactId": artifact})) != 0 {
+	if len(x.rows(f.other, x.alice(), "librarySharesForArtifact", map[string]any{"artifactId": artifact})) != 0 ||
+		len(noticesFor(x.rows(f.other, x.alice(), "librarySharing", nil), artifact)) != 0 {
 		t.Fatal("an expired share is listed as active")
 	}
 }
