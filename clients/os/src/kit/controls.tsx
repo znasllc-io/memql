@@ -1,7 +1,6 @@
 import { Breadcrumbs, type Breadcrumb } from "./Breadcrumbs";
 import { usePageNavigation } from "./pageNavigation";
 import { IconButton } from "./IconButton";
-import { useWindowSearchTarget } from "./windowSearch";
 import {
   Children,
   Fragment,
@@ -949,7 +948,6 @@ export function Refine({
   // choice, which left every Select facet keyboard-only. The capture handler
   // on the root sees the event either way; the document listener defers to it.
   const pointerWithin = useRef<Event | null>(null);
-  const hosted = useWindowSearchTarget(rootRef, () => { returnFocus.current = document.activeElement as HTMLElement; setOpen(true); rootRef.current?.querySelector("input")?.focus(); });
 
   useEffect(() => {
     if (!open) return;
@@ -991,19 +989,19 @@ export function Refine({
           </button>
         </span>
       ))}
-      {hosted && search ? <span className="os-chip os-chip-editable" data-tone="accent">{search}<button type="button" className="os-chip-remove" aria-label="Clear search" onClick={() => onSearch("")}><X size={10} aria-hidden /></button></span> : null}
-      {!hosted ? <button
+      <button
         type="button"
         className={iconOnly ? "os-refine-open os-refine-icon" : "os-refine-open"}
         title={label}
         aria-expanded={open}
         aria-label={label}
         data-active={search !== "" || undefined}
-        onClick={() => setOpen((v) => !v)}
+        // Escape hands focus back here, the control that opened the panel.
+        onClick={(event) => { returnFocus.current = event.currentTarget; setOpen((v) => !v); }}
       >
         <Search size={13} aria-hidden />
         {iconOnly ? null : <span className="os-refine-open-text">{search !== "" ? search : placeholder}</span>}
-      </button> : null}
+      </button>
       {open ? (
         <div className="os-refine-panel">
           <Input

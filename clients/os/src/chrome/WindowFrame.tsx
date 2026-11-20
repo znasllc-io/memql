@@ -1,15 +1,12 @@
 import { LiveReadVisibility } from "../live/useGraphRevision";
-import { visiblePageContext, visiblePageLabel } from "../kit/pageContext";
 import { PageNavigationProvider } from "../kit/pageNavigation";
 import { TrailRow } from "../kit/TrailRow";
 import { PageContent } from "../kit/PageContent";
-import { WindowSearchContext, useWindowSearchHost } from "../kit/windowSearch";
 import { useDraggable } from "@dnd-kit/core";
 import { useEffect, useRef, useState } from "react";
-import { X, Search, ListFilter, Maximize, Maximize2, Minimize2, Minus, Settings2 } from "lucide-react";
+import { X, ListFilter, Maximize, Maximize2, Minimize2, Minus, Settings2 } from "lucide-react";
 
 import { useDrivingCue } from "../ask/useDrivingCue";
-import { useAsk } from "../ask/AskProvider";
 import { ProvenanceDot, Select } from "../kit";
 import { SurfaceRefused } from "../kit/RankStates";
 import {
@@ -32,7 +29,6 @@ import {
 import type { OsWindow } from "../system/windows";
 import { useSession } from "./access";
 import { useAppSetupMark } from "./useAppSetupMark";
-import { Mark } from "./Mark";
 import { useOs } from "./state";
 import { WindowErrorBoundary } from "./WindowErrorBoundary";
 import { ContextMenu } from "./ContextMenu";
@@ -41,8 +37,13 @@ import { useWindowAsk } from "./windowAsk";
 // The window (spec A): glass frame on a token-carrying root, computed rect
 // (the desk animates BETWEEN rects; during a drag dnd-kit's transform
 // rides on top and transitions pause), title bar with the app identity,
-// section breadcrumb, Ask-in-context, settings gear, min / full / close.
-// Apps never open windows; they navigate sections inside this one.
+// settings gear and logs, min / full / close. Apps never open windows; they
+// navigate sections inside this one.
+//
+// NO ASK AND NO SEARCH IN THE TITLE BAR (José, Nov 19 2026; Jesús picked the
+// clean bar on Nov 20): Ask lives in the dock, one place for every app, and
+// search lives inside the apps that need it -- each section's own `Refine`
+// draws its search button in the page, where the list it searches is.
 
 export function WindowFrame({
   win,
@@ -72,42 +73,12 @@ export function WindowFrame({
 }) {
   const { actions, state, registry } = useOs();
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
-  const searchDialog = useRef<HTMLDialogElement>(null);
-  const [searchQuery, setSearchQuery] = useState("");
-  const { host: searchHost, openVisible: openContentSearch, revision: searchRevision } = useWindowSearchHost();
-  const [pendingSearch, setPendingSearch] = useState<{ sectionId: string; revision: number } | null>(null);
-  useEffect(() => {
-    if (pendingSearch === null) return;
-    if (hidden || win.sectionId !== pendingSearch.sectionId || (win.sectionNavigation?.revision ?? 0) !== pendingSearch.revision) { setPendingSearch(null); return; }
-    // The app may reveal a retained list in its layout effect after navigation.
-    const frame = requestAnimationFrame(() => {
-      if (!openContentSearch()) {
-        if (searchHost.loading > 0) return;
-        setSearchQuery(""); searchDialog.current?.showModal();
-      }
-      setPendingSearch(null);
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [pendingSearch, win.sectionId, win.sectionNavigation?.revision, searchRevision, hidden]);
-  const searchApp = () => {
-    if (openContentSearch()) return;
-    if (manifest.searchSection) {
-      actions.navigateSection(win.id, manifest.searchSection);
-      setPendingSearch({ sectionId: manifest.searchSection, revision: (win.sectionNavigation?.revision ?? 0) + 1 });
-    } else if (searchHost.loading > 0) {
-      // Every app can register a current-section search after its chunk loads,
-      // including apps without a default search destination in the manifest.
-      setPendingSearch({ sectionId: win.sectionId, revision: win.sectionNavigation?.revision ?? 0 });
-    } else { setSearchQuery(""); searchDialog.current?.showModal(); }
-  };
   const content = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!hidden) return;
     setMenu(null);
-    if (searchDialog.current?.open) searchDialog.current.close();
     content.current?.querySelectorAll<HTMLDialogElement>("dialog[open]").forEach(dialog => dialog.close());
   }, [hidden]);
-  const { canAsk, openAsk } = useAsk();
   const askActivity = useDrivingCue(manifest.id);
   const driving = askActivity ? askActivity.phase === "completed" ? "completed" : "running" : undefined;
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
@@ -151,7 +122,9 @@ export function WindowFrame({
   const Icon = manifest.icon;
   const Body = manifest.component;
   const contextTag = `app:${manifest.id}${current ? ` section:${current.id}` : ""}`;
-  // What the app noted rides on this window's Ask button; noting never opens.
+  // `askAbout` opens Ask about one chosen thing. What `askContext` notes is
+  // no longer read on the desktop: it rode on the title bar's Ask button,
+  // which is gone (the phone's Ask orb still reads its own copy).
   const windowAsk = useWindowAsk(contextTag);
   // What the size button does next (desks.ts cycleWindowMode): alone, window
   // -> borderless -> full screen -> window on this desk; shared, full screen
@@ -238,17 +211,6 @@ export function WindowFrame({
         <div className="os-window-drag-space" {...listeners} {...attributes} aria-label={`Drag ${manifest.name}`} />
         <div className="os-window-controls">
           <div className="os-window-control-group">
-          {canAsk && <button
-            type="button"
-            className="os-icon-button"
-            aria-label={`Ask about ${manifest.name}`}
-            title={`Ask about ${manifest.name}`}
-            onClick={() => openAsk(visiblePageContext(content.current, windowAsk.contextTag()), visiblePageLabel(content.current, `${manifest.name} / ${current?.name ?? ""}`))}
-          >
-            <Mark size={14} aria-hidden />
-          </button>}
-          <button type="button" className="os-icon-button" aria-label={`Search ${manifest.name}`} title={`Search ${manifest.name}`} onClick={searchApp}><Search size={14} aria-hidden /></button>
-          </div><div className="os-window-control-group">
           {manifest.settingsSection ? (
             <button
               type="button"
@@ -291,12 +253,6 @@ export function WindowFrame({
           </div>
         </div>
       </header>
-      <dialog ref={searchDialog} className="os-window-search" aria-label={`Search ${manifest.name} destinations`}>
-        <header><strong>{manifest.name} destinations</strong><button type="button" className="os-icon-button" aria-label="Close destination search" onClick={() => searchDialog.current?.close()}><X size={14} aria-hidden /></button></header>
-        <input autoFocus className="os-input" aria-label="Find a destination" placeholder="Find a destination…" value={searchQuery} onChange={event => setSearchQuery(event.target.value)} />
-        <nav aria-label="Matching destinations">{sections.filter(section => section.name.toLowerCase().includes(searchQuery.toLowerCase())).map(section => <button type="button" className="os-window-nav-item" key={section.id} onClick={() => { searchDialog.current?.close(); actions.navigateSection(win.id, section.id, "content"); }}>{section.name}</button>)}</nav>
-        {!sections.some(section => section.name.toLowerCase().includes(searchQuery.toLowerCase())) ? <p>No destinations match.</p> : null}
-      </dialog>
       <div className="os-window-body">
         {/* THE ONE TRAIL ROW sits UNDER the section tabs, in the same place in
             every window (it is drawn after the nav below). The order is the
@@ -378,7 +334,7 @@ export function WindowFrame({
                focused-window guess does not. Keyed by window so one window's
                fault never carries into another's. */
             <WindowErrorBoundary key={win.id} app={manifest.id} section={current?.id ?? ""}>
-              <LiveReadVisibility.Provider value={!hidden}><WindowSearchContext.Provider value={searchHost}><Body
+              <LiveReadVisibility.Provider value={!hidden}><Body
                 sectionId={current?.id ?? ""}
                 reportSetupState={reportSetupState}
                 navigation={win.sectionNavigation}
@@ -388,7 +344,7 @@ export function WindowFrame({
                 askAbout={windowAsk.askAbout}
                 intent={win.intent}
                 consumeIntent={(intentId) => actions.consumeWindowIntent(win.id, intentId)}
-              /></WindowSearchContext.Provider></LiveReadVisibility.Provider>
+              /></LiveReadVisibility.Provider>
             </WindowErrorBoundary>
           )}
         </PageContent>

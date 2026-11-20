@@ -1,5 +1,4 @@
 import { useEffect, useState, type ComponentType } from "react";
-import { useWindowSearchLoading } from "../kit/windowSearch";
 import { ContentSkeleton } from "../kit/ContentSkeleton";
 import type { OsAppProps } from "./registry";
 
@@ -31,7 +30,6 @@ export function loadApp(name: string, load: () => Promise<ComponentType<OsAppPro
       });
       return () => { active = false; };
     }, [component]);
-    useWindowSearchLoading(component === null && error === null);
     if (error) throw error;
     const Body = component;
     return Body ? <Body {...props} /> : <ContentSkeleton label={`Opening ${name}`} />;

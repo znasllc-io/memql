@@ -129,8 +129,10 @@ or client-visible session authority.
   and never archives. The under-icon folder popover the foundation shipped
   is gone -- the Files window is the one folder surface. Widgets are
   desk-resident cards; Ask ships first.
-- **Ask** is chrome, not a module: the dock orb, the desk widget and every
-  title bar open the same streaming surface. It takes dictation (#4747):
+- **Ask** is chrome, not a module: the dock orb and the desk widget open the
+  same streaming surface. A window's title bar carries neither Ask nor a
+  search button (José, Nov 19 2026): search lives in each app's page, on its
+  `Refine` control. It takes dictation (#4747):
   hold the mic to talk, tap it to keep listening. Each turn uses the same durable
   work engine as Nexus. Its goals remain visible in Nexus; message menus offer
   copying and activity inspection. Explicit Stop cancels the durable goal; closing a viewer

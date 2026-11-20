@@ -128,23 +128,13 @@ describe("Select (rule 5: no UA chrome)", () => {
   });
 });
 
-const { WindowSearchContext, useWindowSearchHost } = await import('../../src/kit/windowSearch');
-function SearchWindow({ name }: { name: string }) {
-  const {host,openVisible}=useWindowSearchHost();
-  return <div><button onClick={openVisible}>Search {name}</button><WindowSearchContext.Provider value={host}>
-    <div hidden><Refine search="" onSearch={()=>{}} label={`Hidden ${name}`} placeholder={`Hidden ${name}`}/></div>
-    <Refine search="" onSearch={()=>{}} label={`Refine ${name}`} placeholder={`Find ${name}`}><span>{name} filters</span></Refine>
-  </WindowSearchContext.Provider></div>;
-}
-it('uses one window search, focuses its own content and ignores parked panes',()=>{
- render(<><SearchWindow name="Fleet"/><SearchWindow name="Deployables"/></>);
- expect(screen.queryByRole('button',{name:'Refine Fleet'})).toBeNull();
- expect(screen.queryByRole('button',{name:'Refine Deployables'})).toBeNull();
- const trigger=screen.getByRole('button',{name:'Search Deployables'});trigger.focus();fireEvent.click(trigger);
- expect(document.activeElement).toBe(screen.getByPlaceholderText('Find Deployables'));
- expect(screen.queryByPlaceholderText('Find Fleet')).toBeNull();
- expect(screen.queryByPlaceholderText('Hidden Deployables')).toBeNull();
- fireEvent.keyDown(document,{key:'Escape'});expect(document.activeElement).toBe(trigger);
- fireEvent.click(screen.getByRole('button',{name:'Search Fleet'}));
+// The window title bar has no search button (José, Nov 19 2026): every
+// Refine draws its own, in the page, and Escape hands focus back to it.
+it('draws its own search button, focuses the field and returns focus on Escape',()=>{
+ render(<Refine search="" onSearch={()=>{}} label="Refine Fleet" placeholder="Find Fleet"><span>Fleet filters</span></Refine>);
+ const trigger=screen.getByRole('button',{name:'Refine Fleet'});fireEvent.click(trigger);
  expect(document.activeElement).toBe(screen.getByPlaceholderText('Find Fleet'));
+ fireEvent.keyDown(document,{key:'Escape'});
+ expect(screen.queryByPlaceholderText('Find Fleet')).toBeNull();
+ expect(document.activeElement).toBe(trigger);
 });
