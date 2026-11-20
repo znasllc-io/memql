@@ -4608,6 +4608,9 @@ a.os-button {
 .os-files-outgoing-columns .os-record-state { font-size: var(--os-text-sm); font-weight: 400; color: var(--os-muted); }
 .os-files-outgoing-columns .os-record-actions { padding-block: 0; }
 .os-files-outgoing-ghost { visibility: hidden; }
+/* "Shared by" on the Sharing page's Head, for someone who oversees others'
+ * shares: the words, then the drop-down, on the control line. */
+.os-files-sharedby { display: inline-flex; align-items: center; gap: 8px; color: var(--os-muted); font-size: var(--os-text-sm); white-space: nowrap; }
 @container os-record-list (max-width: 600px) { .os-files-outgoing-columns .os-record-entry { display: none; } }
 .os-files-outgoing-who,
 .os-files-outgoing-left { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; color: var(--os-muted); }

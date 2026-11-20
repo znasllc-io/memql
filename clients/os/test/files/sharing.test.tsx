@@ -434,3 +434,59 @@ describe("timeLeftLabel", () => {
     expect(timeLeftLabel("2026-11-20T11:00:00Z", now)).toBe("Ended");
   });
 });
+
+describe("Shared by, for someone who oversees others' shares (item 13, Nov 20 2026)", () => {
+  const mine = shareRow({ id: "s-mine", artifactId: "a-1", recipientUserId: "u-sam", recipientDisplayName: "Sam Lee", title: "brief.pdf" });
+  const overseen = [
+    { ...mine, ownerUserId: "u-me", ownerDisplayName: "Me Myself", mine: true },
+    shareRow({ id: "s-enr", artifactId: "x-1", ownerUserId: "u-enr", recipientUserId: "u-carlos", recipientDisplayName: "Carlos", title: "Lab results summary.pdf", createdAt: "2026-11-19T10:00:00Z" }),
+    { ...shareRow({ id: "s-majo", artifactId: "x-2", ownerUserId: "u-majo", recipientUserId: "", recipientDisplayName: "ZNAS team", title: "Site visit 03.jpg", createdAt: "2026-11-19T11:00:00Z" }), recipientGroupId: "g-znas" },
+  ].map((row, i) => ({ ...row, ownerDisplayName: (row as Record<string, unknown>).ownerDisplayName ?? ["", "Enrique Mendivil", "Majo Zepeda"][i] }));
+  const sharedBy = () => screen.getByLabelText("Shared by", { selector: "button" });
+
+  it("starts on Me, and Everyone lists each share with who shared it", async () => {
+    const connection = connect({ shares: [mine], overseen });
+    await renderFiles();
+    await click(within(rail()).getByRole("button", { name: "Sharing" }));
+    expect(sharedBy().textContent).toContain("Me");
+    expect(within(openSelect(sharedBy())).getAllByRole("option").map((o) => o.textContent)).toEqual(["Me", "Everyone", "Enrique Mendivil", "Majo Zepeda"]);
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    // On Me, only your own, with no "by" line.
+    expect((await screen.findByRole("list", { name: "Sharing" })).textContent).not.toContain("by ");
+
+    chooseOption(sharedBy(), "Everyone");
+    const rows = within(await screen.findByRole("list", { name: "Sharing" })).getAllByRole("listitem");
+    expect(rows.map((row) => row.textContent)).toEqual([
+      expect.stringContaining("by Majo Zepeda"),
+      expect.stringContaining("by Enrique Mendivil"),
+      expect.stringContaining("by Me Myself"),
+    ]);
+    expect(connection.callsNamed("librarySharesOverseen").length).toBeGreaterThan(0);
+
+    chooseOption(sharedBy(), "Enrique Mendivil");
+    const only = within(await screen.findByRole("list", { name: "Sharing" })).getAllByRole("listitem");
+    expect(only).toHaveLength(1);
+    expect(only[0]!.textContent).toContain("Lab results summary.pdf");
+  });
+
+  it("stops somebody else's share and reads the list again", async () => {
+    const connection = connect({ shares: [mine], overseen });
+    await renderFiles();
+    await click(within(rail()).getByRole("button", { name: "Sharing" }));
+    chooseOption(sharedBy(), "Everyone");
+    const reads = connection.callsNamed("librarySharesOverseen").length;
+    await click(await screen.findByRole("button", { name: "Stop sharing Lab results summary.pdf with Carlos" }));
+    expect(connection.callsNamed("libraryShareStop")).toEqual(['builtin libraryShareStop(shareId: "s-enr")']);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    expect(connection.callsNamed("librarySharesOverseen").length).toBeGreaterThan(reads);
+  });
+
+  it("is absent for someone below admin rank", async () => {
+    const connection = connect({ shares: [mine], overseen });
+    await renderFiles({ role: "writer" });
+    await click(within(rail()).getByRole("button", { name: "Sharing" }));
+    await screen.findByRole("list", { name: "Sharing" });
+    expect(screen.queryByLabelText("Shared by", { selector: "button" })).toBeNull();
+    expect(connection.callsNamed("librarySharesOverseen")).toEqual([]);
+  });
+});

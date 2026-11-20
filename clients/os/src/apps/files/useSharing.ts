@@ -178,6 +178,9 @@ export interface OutgoingShare {
   expiresAt: string;
   revokedAt: string;
   createdAt: string;
+  /** Who shared it: the oversight read names them; the caller's own feed leaves these "". */
+  ownerUserId: string;
+  ownerDisplayName: string;
 }
 
 export function outgoingFromRow(raw: Row): OutgoingShare {
@@ -192,6 +195,8 @@ export function outgoingFromRow(raw: Row): OutgoingShare {
     expiresAt: rowString(row, "expiresAt"),
     revokedAt: rowString(row, "revokedAt"),
     createdAt: rowString(row, "createdAt"),
+    ownerUserId: rowString(row, "ownerUserId"),
+    ownerDisplayName: rowString(row, "ownerDisplayName"),
   };
 }
 
@@ -283,4 +288,35 @@ export function shareFileCall(artifactId: string, to: { userId: string } | { gro
     "days" in end ? `days: ${renderMemQLValue(end.days)}` : `until: ${renderMemQLValue(end.until.toISOString())}`,
   ];
   return `builtin libraryShareFile(${args.join(", ")})`;
+}
+
+/**
+ * Every active share the caller may see and stop -- other people's too, by
+ * rank (librarySharesOverseen, item 13 of the Nov 19 2026 call): the Sharing
+ * page's "Shared by" drop-down when it is not on "Me". Other people's shares
+ * send no events to the caller's stream, so this is read, not live, and
+ * refreshed on the shared AutoRefresh cadence and after a Stop.
+ */
+export function useSharesOverseen(enabled: boolean): LiveCollectionHandle<Row> {
+  return useLiveCollection<Row>(enabled ? "files:shares-overseen" : null, (connection) => ({
+    concept: Concepts.LIBRARY_SHARE,
+    actions: [],
+    paged: false,
+    seed: async (_cursor, signal) => {
+      const result = await connection.query.executeNamed("librarySharesOverseen", "builtin librarySharesOverseen()", { signal });
+      return { rows: result.rows(), nextCursor: "" };
+    },
+  }));
+}
+
+/** The other people in an oversight read, by id, for "Shared by": name order, the caller left out. */
+export function overseenSharers(rows: readonly Row[]): Array<[string, string]> {
+  const people = new Map<string, string>();
+  for (const raw of rows) {
+    const row = flatten(raw);
+    const share = outgoingFromRow(raw);
+    if (row["mine"] === true || share.ownerUserId === "" || !shareStands(share)) continue;
+    people.set(share.ownerUserId, share.ownerDisplayName || "Unnamed person");
+  }
+  return [...people.entries()].sort((a, b) => a[1].localeCompare(b[1]) || a[0].localeCompare(b[0]));
 }

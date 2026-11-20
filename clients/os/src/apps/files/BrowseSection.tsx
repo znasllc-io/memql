@@ -32,7 +32,9 @@ import { AddButton } from "../../kit/AddButton";
 import { InPlaceAsk } from "../../kit/pressHold";
 import { FileFolders } from "./FileFolders";
 import { FilesRail } from "./Rail";
-import { noticeFromRow, outgoingFromRow, shareStands, useCanShareFiles, useSharedWithMe, useSharing, useShareTitles, type OutgoingShare, type SharedNotice } from "./useSharing";
+import { noticeFromRow, outgoingFromRow, overseenSharers, shareStands, useCanShareFiles, useSharedWithMe, useSharesOverseen, useSharing, useShareTitles, type OutgoingShare, type SharedNotice } from "./useSharing";
+import { roleAdmits } from "../../system/roles";
+import { AutoRefresh } from "../../kit/AutoRefresh";
 import { SharingPlace } from "./SharingPlace";
 import { ShareView } from "./ShareView";
 import { useLiveView } from "../../live/liveView";
@@ -653,6 +655,21 @@ export function BrowseSection({
   const outgoingList = useLiveView<Row, OutgoingShare>(outgoing.source, `files:sharing:${filter.search}|${filter.type}|${filter.added}|${filter.sort}`,
     (rows) => askOfShares(rows.map(outgoingFromRow).filter((share) => share.id !== "" && shareStands(share)), filter));
   const shareTitles = useShareTitles(sharingPlace ? outgoingList?.snapshot.rows ?? [] : []);
+  // SHARED BY (item 13; Jesús's pick, Nov 20, draft B): someone at admin rank
+  // or above may look past their own shares -- "Me", "Everyone", or one
+  // person -- and Stop what the engine lets them. It starts on "Me", which is
+  // the live list above; the rest is librarySharesOverseen, which the engine
+  // already narrows to the shares this person may stop (owners: everyone's;
+  // developers and admins: those ranked below them). The drop-down is only
+  // the way in; the engine decides, on the list and on every Stop.
+  const overseer = sharingPlace && roleAdmits(access?.role ?? "", { min: "admin" });
+  const [sharedBy, setSharedBy] = useState("me");
+  const overseen = useSharesOverseen(overseer);
+  const overseenList = useLiveView<Row, OutgoingShare>(overseen.source, `files:overseen:${sharedBy}:${filter.search}|${filter.type}|${filter.added}|${filter.sort}`,
+    (rows) => askOfShares(rows.map(outgoingFromRow).filter((share) => share.id !== "" && shareStands(share) &&
+      (sharedBy === "everyone" || share.ownerUserId === sharedBy)), filter));
+  const sharers = overseenSharers(overseen.snapshot.rows);
+  const byOthers = overseer && sharedBy !== "me";
   const pickedActs = selected !== null ? null
     : pickedNotice !== null ? { name: pickedNotice.title, entries: noticeMenuEntries(pickedNotice) }
     : pickedRow !== null ? { name: artifactName(pickedRow), entries: rowMenuEntries(pickedRow) }
@@ -756,7 +773,7 @@ export function BrowseSection({
   // The Head's meta is what the LIST is showing right now -- scoped folder,
   // facets and search included -- never a different population's number
   // beside the scope's name. Showing Folders, that is the folders.
-  const listedSnapshot = shared ? noticeList?.snapshot : sharingPlace ? outgoingList?.snapshot : list?.snapshot;
+  const listedSnapshot = shared ? noticeList?.snapshot : sharingPlace ? (byOthers ? overseenList : outgoingList)?.snapshot : list?.snapshot;
   const listedCount = foldersOnly ? visibleFolders.length : listedSnapshot?.rows.length ?? 0;
   const pageRoot = usePageScroll(`${filter.place}:${filter.folderId ?? ""}:${selectedId}`);
 
@@ -805,7 +822,7 @@ export function BrowseSection({
         tree={tree}
         place={filter.place}
         folderId={filter.folderId ?? ""}
-        onPlace={(place) => { onSelect(""); setPicked(""); setShareTarget(null); patch({ place, folderId: "", search: "" }); }}
+        onPlace={(place) => { onSelect(""); setPicked(""); setShareTarget(null); setSharedBy("me"); patch({ place, folderId: "", search: "" }); }}
         onFolder={(folderId) => { onSelect(""); setPicked(""); setShareTarget(null); patch({ place: "library", folderId, search: "" }); }}
         onFolderMenu={(x, y, node) => setFolderMenu({ x, y, node })}
       />
@@ -842,6 +859,16 @@ export function BrowseSection({
                 {PICKED_ICON[entry.id]}
               </IconButton>
             ))}
+          </span>
+        ) : null}
+        {overseer ? (
+          <span className="os-files-sharedby">
+            <span aria-hidden="true">Shared by</span>
+            <Select id="files-shared-by" label="Shared by" value={sharedBy} onChange={setSharedBy}>
+              <option value="me">Me</option>
+              <option value="everyone">Everyone</option>
+              {sharers.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+            </Select>
           </span>
         ) : null}
         <IconButton
@@ -990,20 +1017,27 @@ export function BrowseSection({
             <UploadPlaceholder key={task.id} task={task} />
           ))}
           {sharingPlace && !foldersOnly ? (
-            <SharingPlace
-              source={outgoingList}
-              label={headTitle}
-              emptyText={emptyText}
-              titleOf={(share) => shareTitles.get(share.artifactId) ?? content.find((row) => row.id === share.artifactId)?.title ?? "Untitled file"}
-              onStop={async (share) => {
-                setRowNote(null);
-                try {
-                  await stopShare(share.id);
-                } catch (err: unknown) {
-                  refuse("Sharing did not stop.", "The file is still shared.", err);
-                }
-              }}
-            />
+            <>
+              {byOthers ? <AutoRefresh onRefresh={() => overseen.reseed({ ifIdle: true })} /> : null}
+              <SharingPlace
+                key={byOthers ? "others" : "mine"}
+                source={byOthers ? overseenList : outgoingList}
+                label={headTitle}
+                emptyText={byOthers ? (sharedBy === "everyone" ? "Nobody is sharing a file you can stop." : "They are not sharing a file you can stop.") : emptyText}
+                showSharer={byOthers}
+                titleOf={(share) => shareTitles.get(share.artifactId) ?? content.find((row) => row.id === share.artifactId)?.title ?? "Untitled file"}
+                onStop={async (share) => {
+                  setRowNote(null);
+                  try {
+                    await stopShare(share.id);
+                  } catch (err: unknown) {
+                    refuse("Sharing did not stop.", "The file is still shared.", err);
+                  }
+                  // Somebody else's share sends no event here: read again.
+                  if (overseer) overseen.reseed();
+                }}
+              />
+            </>
           ) : (
           <div className="os-files-files">
           {foldersOnly ? (

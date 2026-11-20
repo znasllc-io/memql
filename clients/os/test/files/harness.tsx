@@ -109,6 +109,8 @@ export interface FakeSeed {
    *  (librarySharedWithMe). */
   shareDirectory?: Row[];
   shares?: Row[];
+  /** What librarySharesOverseen answers: the shares the caller may see and stop. */
+  overseen?: Row[];
   sharedWithMe?: Row[];
   /** Refusal sentences, keyed by construct name (e.g. archiveArtifact). */
   refuse?: Record<string, string>;
@@ -169,6 +171,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       if (name === "libraryShareDirectory") return rowsResult(seed.shareDirectory ?? []);
       if (name === "librarySharesForArtifact") return rowsResult((seed.shares ?? []).filter(row => row.artifactId === args.artifactId && !row.revokedAt));
       if (name === "librarySharing") return rowsResult((seed.shares ?? []).filter(row => !row.revokedAt));
+      if (name === "librarySharesOverseen") return rowsResult((seed.overseen ?? []).filter(row => !row.revokedAt));
       if (name === "librarySharedWithMe") return rowsResult(seed.sharedWithMe ?? []);
       if (name === "libraryShareFile") return rowsResult([{ shareId: "share-new", days: args.days, expiresAt: "2026-12-01T00:00:00Z" }]);
       if (name === "libraryShareStop") return rowsResult([{ shareId: args.shareId, stopped: true }]);
@@ -309,6 +312,8 @@ export async function renderFiles(opts: {
    * app is not there, and present when it is). Defaults to the real one.
    */
   registry?: OsRegistry;
+  /** The signed-in person's role, for the rank-decided surfaces (owner by default). */
+  role?: string;
 } = {}) {
   const frame = (intent: typeof opts.intent) => (
     withSession(
@@ -331,6 +336,7 @@ export async function renderFiles(opts: {
           />
         </MachinesProvider>
       </OsProvider>,
+      opts.role ? { role: opts.role } : {},
     )
   );
   const view = render(frame(opts.intent));

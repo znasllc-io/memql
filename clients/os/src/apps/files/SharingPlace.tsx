@@ -23,6 +23,7 @@ export function SharingPlace({
   emptyText,
   titleOf,
   onStop,
+  showSharer = false,
 }: {
   source: LiveView<OutgoingShare> | null;
   label: string;
@@ -31,6 +32,8 @@ export function SharingPlace({
   titleOf: (share: OutgoingShare) => string;
   /** Ends a share; a refusal is the caller's to say. */
   onStop: (share: OutgoingShare) => Promise<void>;
+  /** Each row says who shared it ("by Majo Zepeda"): the list is not only yours. */
+  showSharer?: boolean;
 }) {
   // One clock for the list, so every row's time left agrees (kit/useNow).
   const now = useNow(60_000);
@@ -75,6 +78,7 @@ export function SharingPlace({
             <RecordRow
               icon={<FileText size={15} aria-hidden />}
               name={title}
+              secondary={showSharer ? `by ${share.ownerDisplayName || "Unnamed person"}` : undefined}
               trailing={
                 <span className="os-files-outgoing-left">
                   <Clock size={13} aria-hidden /> {timeLeftLabel(share.expiresAt, now)}
