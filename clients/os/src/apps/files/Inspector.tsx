@@ -413,7 +413,7 @@ export function Inspector({
             {vsNoAnswer ? <Notice tone="warn" sentence={VSCODE_NO_ANSWER_MESSAGE} /> : null}
             {downloadError ? (
               <Notice tone="error" sentence="The download did not land." detail={downloadError}>
-                <Button onClick={() => void download()} busy={downloadBusy}>Try again</Button>
+                <Button onClick={download} busy={downloadBusy}>Try again</Button>
               </Notice>
             ) : null}
             {archiveError ? (
@@ -433,24 +433,24 @@ export function Inspector({
           {confirmingArchive ? (
             <>
               <button type="button" className="os-actbar-text" onClick={() => setConfirmingArchive(false)}>Cancel</button>
-              <Button tone="danger" onClick={() => void archive()}>Delete</Button>
+              <Button tone="danger" onClick={archive}>Delete</Button>
             </>
           ) : (
             <>
               {row.archived ? (
-                <Button busy={archiveBusy} busyLabel="Restoring" onClick={() => void restore()}>
+                <Button busy={archiveBusy} busyLabel="Restoring…" onClick={restore}>
                   <RotateCcw size={16} aria-hidden /> Restore
                 </Button>
               ) : (
                 <Button tone="danger" busy={archiveBusy} ariaLabel={archiveBusy ? "Deleting" : "Delete"} title="Delete"
-                  onClick={() => (confirmBeforeArchive ? setConfirmingArchive(true) : void archive())}>
+                  onClick={() => (confirmBeforeArchive ? setConfirmingArchive(true) : archive())}>
                   <Trash2 size={16} aria-hidden />
                 </Button>
               )}
               <Button onClick={sendToDesk} disabled={archiveBusy} ariaLabel="Send to desktop" title="Send to desktop">
                 <CornerUpRight size={16} aria-hidden />
               </Button>
-              {!uploadUnavailable ? <Button onClick={() => void download()} busy={downloadBusy} disabled={archiveBusy}
+              {!uploadUnavailable ? <Button onClick={download} busy={downloadBusy} disabled={archiveBusy}
                 tone={isZipArtifact(row) ? "primary" : "quiet"}
                 ariaLabel={downloadBusy ? "Downloading" : isZipArtifact(row) ? "Download ZIP" : "Download"} title={isZipArtifact(row) ? "Download ZIP" : "Download"}>
                 <Download size={16} aria-hidden />

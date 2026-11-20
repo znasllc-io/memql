@@ -488,7 +488,7 @@ export function BrowseSection({
     const download = {
       id: "download",
       label: "Download",
-      onSelect: () => void downloadRow(row),
+      onSelect: () => downloadRow(row),
     };
     // The file's page -- origin, client, labels, versions -- now that a click
     // no longer opens it. It replaces the grid, with the way back in the trail.
@@ -501,7 +501,7 @@ export function BrowseSection({
           // wherever it appears.
           label: "Restore",
           disabled: connection === null,
-          onSelect: () => void restoreOneRow(row),
+          onSelect: () => restoreOneRow(row),
         },
         download,
         details,
@@ -536,7 +536,7 @@ export function BrowseSection({
         label: "Delete",
         disabled: connection === null,
         onSelect: () =>
-          confirmBeforeArchive ? setRowArchive(row) : void archiveOneRow(row),
+          confirmBeforeArchive ? setRowArchive(row) : archiveOneRow(row),
       },
     ];
   };
@@ -587,8 +587,11 @@ export function BrowseSection({
   };
 
   const noticeMenuEntries = (notice: SharedNotice): MenuEntry[] => [
-    { id: "download", label: "Download", onSelect: () => void downloadNotice(notice) },
-    { id: "save", label: "Save to my Library", disabled: connection === null, onSelect: () => void saveNotice(notice) },
+    // The acts hand back their promise: drawn as the Head's icons, each takes
+    // no second press until it has finished (kit/oneAtATime; José, Nov 19:
+    // twenty clicks on Save made eighteen copies).
+    { id: "download", label: "Download", onSelect: () => downloadNotice(notice) },
+    { id: "save", label: "Save to my Library", disabled: connection === null, onSelect: () => saveNotice(notice) },
   ];
   const [noticeMenu, setNoticeMenu] = useState<{ x: number; y: number; notice: SharedNotice } | null>(null);
 
@@ -992,7 +995,7 @@ export function BrowseSection({
                     }
                   >
                     <div className="os-files-confirm">
-                      <Button tone="danger" onClick={() => void runFolderArchive(pendingArchive)}>
+                      <Button tone="danger" busyLabel="Deleting…" onClick={() => runFolderArchive(pendingArchive)}>
                         Delete
                       </Button>
                       <Button onClick={() => setPendingArchive("")}>Cancel</Button>
@@ -1163,7 +1166,7 @@ export function BrowseSection({
             next="It goes to the Bin with its bytes, its history and everywhere it came from, and the Bin can put it back."
           >
             <div className="os-files-confirm">
-              <Button tone="danger" onClick={() => void archiveOneRow(rowArchive)}>
+              <Button tone="danger" busyLabel="Deleting…" onClick={() => archiveOneRow(rowArchive)}>
                 Delete
               </Button>
               <Button onClick={() => setRowArchive(null)}>Cancel</Button>

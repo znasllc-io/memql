@@ -111,6 +111,8 @@ export interface FakeSeed {
   sharedWithMe?: Row[];
   /** Refusal sentences, keyed by construct name (e.g. archiveArtifact). */
   refuse?: Record<string, string>;
+  /** Calls held unanswered until the promise settles, keyed by construct name. */
+  hold?: Record<string, Promise<unknown>>;
 }
 
 export interface FakeConnection {
@@ -125,6 +127,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
   const stub = {
     executeNamed: vi.fn(async (name: string, call: string, options?: QueryCallOptions) => {
       calls.push(call);
+      await seed.hold?.[name];
       const refusal = seed.refuse?.[name];
       if (refusal !== undefined) throw new Error(refusal);
 

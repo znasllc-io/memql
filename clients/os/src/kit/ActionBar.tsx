@@ -81,7 +81,9 @@ import { drawnBy, usePressHold } from "./pressHold";
 export interface Act {
   /** The label, which is also the promise: an act keeps its name through the whole flow. */
   label: string;
-  onAct: () => void;
+  /** Return the act's promise and the button takes no second press until it
+   *  settles (kit/oneAtATime). */
+  onAct: () => unknown;
   tone?: ButtonTone;
   /** Shown while this act is in flight. */
   busy?: boolean;

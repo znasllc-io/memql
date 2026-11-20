@@ -103,7 +103,7 @@ export function LabelEditor({
             void add();
           }}
         />
-        <Button onClick={() => void add()} disabled={write.busy || draft.trim() === ""}>
+        <Button onClick={add} disabled={write.busy || draft.trim() === ""}>
           Add
         </Button>
       </div>

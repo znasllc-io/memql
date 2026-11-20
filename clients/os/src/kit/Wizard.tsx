@@ -348,7 +348,7 @@ export function Wizard({
         tone={status.tone}
         meta={status.meta}
         live
-        acts={acts.map(act => ({ ...act, onAct: () => { focusNextQuestion.current = true; act.onAct(); } }))}
+        acts={acts.map(act => ({ ...act, onAct: () => { focusNextQuestion.current = true; return act.onAct(); } }))}
         scope={open}
       >
         {confirm}
