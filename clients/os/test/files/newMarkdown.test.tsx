@@ -15,7 +15,7 @@ beforeEach(() => {
   h.connection = fakeConnection({ folders: [folderRow({ id: "research", name: "Research" })] });
 });
 async function addMarkdown() {
-  await click(screen.getByRole("button", { name: "Add to this folder" }));
+  await click(screen.getByRole("button", { name: "Add" }));
   await click(screen.getByRole("menuitem", { name: "New Markdown file" }));
 }
 it("opens Make a file with Markdown, this folder and the way back", async () => {
@@ -42,12 +42,18 @@ it("names no folder while searching from a folder", async () => {
 });
 it("is absent when Materializer cannot be opened", async () => {
   await renderFiles({ registry: registryWith(null, "materializer") });
-  await click(screen.getByRole("button", { name: "Add to this folder" }));
+  await click(screen.getByRole("button", { name: "Add" }));
   expect(screen.queryByRole("menuitem", { name: "New Markdown file" })).toBeNull();
 });
 it("lists the three ways to add under the folder's name", async () => {
   await renderFiles({ intent: { id: "folder", payload: { place: "library", folderId: "research" } } });
-  await click(screen.getByRole("button", { name: "Add to this folder" }));
+  const add = screen.getByRole("button", { name: "Add" });
+  // A bare plus in the accent's outline, named Add (Jesús's pick, Nov 20 2026).
+  expect(add.className).toContain("os-add-button-outlined");
+  expect(add.getAttribute("title")).toBe("Add");
+  expect(add.textContent).toBe("");
+  await click(add);
+  expect(add.getAttribute("aria-expanded")).toBe("true");
   const menu = screen.getByRole("menu", { name: "Add to this folder" });
   expect(within(menu).getByText("Into Research")).toBeTruthy();
   expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent?.trim())).toEqual(["Upload files", "New Markdown file", "New folder"]);

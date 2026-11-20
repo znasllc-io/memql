@@ -31,7 +31,10 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    accessible label and tooltip. Keep it borderless in light and dark, with
    theme-aware icon color, hover feedback and a visible keyboard focus ring.
    Use the shared component’s style for creation links too; never add per-app
-   borders. Do not replace it with a text button such as
+   borders. The one exception is the Files Head, where José asked for Add to
+   be easier to see (Nov 19 2026): `AddButton outlined` draws the plus and a
+   thin outline in the accent, still with no word (Jesús's pick, Nov 20).
+   Do not replace it with a text button such as
    "Connect GitHub account". A settings page is titled **Settings**; subjects
    such as **GitHub accounts** are sections beneath that title, with their Add
    control on the section heading (`kit` `Subhead` `actions`). Settings lists

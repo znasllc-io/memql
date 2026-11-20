@@ -3,8 +3,12 @@ import { Plus } from "lucide-react";
 import { IconButton } from "./IconButton";
 
 /** One creation entry point, shared by app headers. Form submission stays explicit. */
-export function AddButton({ label, className = "", ...props }: Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children" | "aria-label" | "title"> & { label: string }) {
-  return <IconButton label={label} {...props} className={`os-add-button ${className}`}><Plus size={16} aria-hidden /></IconButton>;
+export function AddButton({ label, className = "", outlined = false, ...props }: Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children" | "aria-label" | "title"> & {
+  label: string;
+  /** Drawn in an accent outline, for a Head where Add must be easy to find (Files: DESIGN.md rule 1). */
+  outlined?: boolean;
+}) {
+  return <IconButton label={label} {...props} className={`os-add-button ${outlined ? "os-add-button-outlined " : ""}${className}`}><Plus size={16} aria-hidden /></IconButton>;
 }
 
 /** The same header affordance for creation that continues in another page. */

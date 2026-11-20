@@ -1315,7 +1315,10 @@ function AddMenu({
 
   return (
     <div className="os-files-add" ref={wrap}>
-      <AddButton label="Add to this folder" aria-expanded={open} onClick={() => setOpen(!open)} />
+      {/* A bare "+" in the accent's outline, no word (José: "make it more
+          noticeable"; Jesús's pick, Nov 20 2026). Its tooltip says Add; the
+          menu still names the folder the new things land in. */}
+      <AddButton label="Add" outlined aria-expanded={open} onClick={() => setOpen(!open)} />
       {open ? (
         <div
           className="os-menu os-files-add-menu"
