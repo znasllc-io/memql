@@ -511,14 +511,21 @@ another copy, by design.
 
   | Caller | Sees and may stop |
   |---|---|
-  | owner (there can be several) | everyone's shares, other owners' included |
-  | developer | their own, and those of anyone ranked below them: admins' and everyone else's -- not owners' or other developers' |
-  | admin | their own, and those of anyone ranked below them -- not owners', developers' or other admins'. A guess: José said only "And then admins, same, whatever." |
-  | anyone else | only their own |
+  | owner (there can be several) | their own, and everyone else's -- **not other owners'** ("what an owner shares is completely private in their account") |
+  | developer | their own, **other developers'**, and those of anyone ranked below them: admins', members', viewers' |
+  | admin | their own, and members' and viewers' -- not owners', developers' or **other admins'** |
+  | member | their own, and viewers' |
+  | viewer | only their own |
 
-  Developers and admins are shown only the shares they can stop (Jesús, Nov
-  20). A custom role oversees the people ranked strictly below it from admin
-  rank up. A borrowed, synthetic or client-account caller oversees nobody. The
+  In short: everybody oversees the people ranked strictly below them
+  ("trickle-down of authority", José, settled by Jesús Nov 20 2026), nobody an
+  equal -- except developers, who see each other's on purpose: "as a
+  developer, I should be able to see what another developer is sharing since
+  we are developing the app." (an access rule flagged to José). Everybody is
+  shown only the shares they can stop. A custom role slots in by its rank; one
+  ranked exactly where the catalog ranks `developer` counts as a developer. A
+  sharer whose role does not resolve ranks at the ladder's floor, below
+  everyone. A borrowed, synthetic or client-account caller oversees nobody. The
   sharer's rank is read off their user row (`role`), as the row-authz rank tier
   reads it. Tested in `TestFileSharingBetweenRanksDB` (`OversightFollowsRank`).
 - **Expiry** writes nothing: every access compares `expiresAt`, and both lists

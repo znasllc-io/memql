@@ -597,13 +597,13 @@ builtin libraryShareFile {
 /// Every active file share you may see and stop: your own, and other people's by rank.
 @sdk
 @executor("librarySharesOverseen")
-@description("Every ACTIVE file share you may see and stop, newest first: one row per share, {id, ownerUserId, ownerDisplayName, mine, recipientUserId, recipientGroupId, recipientDisplayName, artifactId, title, days, expiresAt, createdAt}. Always your own. An owner also sees everyone's, other owners' included; anyone else at admin rank or above sees the shares of the people ranked strictly below them (a developer: admins' and everyone else's, not owners' or other developers'; an admin: everyone else's, not owners', developers' or other admins'); everybody else only their own. Ranks are the cluster's role ladder, custom roles included. A borrowed, synthetic or client-account caller sees only their own. libraryShareStop stops exactly these.")
+@description("Every ACTIVE file share you may see and stop, newest first: one row per share, {id, ownerUserId, ownerDisplayName, mine, recipientUserId, recipientGroupId, recipientDisplayName, artifactId, title, days, expiresAt, createdAt}. Always your own, plus the shares of everyone ranked strictly below you (an owner: everyone else's; a developer: admins', members' and viewers'; an admin: members' and viewers'; a member: viewers'; a viewer: none), never an equal's -- other owners' and other admins' stay private -- except that developers also see other developers'. Ranks are the cluster's role ladder, custom roles included. A borrowed, synthetic or client-account caller sees only their own. libraryShareStop stops exactly these.")
 builtin librarySharesOverseen { }
 
 /// Stop sharing a file with one person or group, at once.
 @sdk
 @executor("integration.library.stopShare")
-@description("Stop a share at once: the next view, download or copy by its recipient -- or by any member of the group it was shared with -- is refused, on every replica, and the file leaves their Shared with me list. The share stays as the record that it existed. Your own shares, and anybody else's that librarySharesOverseen lists for you (an owner: everyone's; a developer or an admin: those of the people ranked below them); anything else is refused with one sentence whether or not it exists. Stopping a share that already ended answers as success. Returns {shareId, stopped}.")
+@description("Stop a share at once: the next view, download or copy by its recipient -- or by any member of the group it was shared with -- is refused, on every replica, and the file leaves their Shared with me list. The share stays as the record that it existed. Your own shares, and anybody else's that librarySharesOverseen lists for you (those of the people ranked below you, and a developer's fellow developers'); anything else is refused with one sentence whether or not it exists. Stopping a share that already ended answers as success. Returns {shareId, stopped}.")
 builtin libraryShareStop {
   shareId  string!  @description("The share to stop -- the `id` librarySharesForArtifact lists.")
 }
