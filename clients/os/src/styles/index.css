@@ -232,10 +232,10 @@ button:not(:disabled):active {
 
 .os-desk-numeral {
   position: absolute;
-  right: 3vw;
-  bottom: calc(var(--os-dock-h) + 4vh);
+  right: calc(3vw / var(--os-scale, 1));
+  bottom: calc(var(--os-dock-h) + calc(4vh / var(--os-scale, 1)));
   font-family: var(--os-font-display);
-  font-size: clamp(200px, 36vh, 440px);
+  font-size: clamp(200px, calc(36vh / var(--os-scale, 1)), 440px);
   line-height: 0.78;
   color: var(--os-desk-numeral);
   pointer-events: none;
@@ -660,7 +660,7 @@ button:not(:disabled):active {
   border-radius: calc(var(--os-radius) + 4px);
   box-shadow: var(--os-shadow-float);
   z-index: 40;
-  max-width: calc(100vw - 24px);
+  max-width: calc(calc(100vw / var(--os-scale, 1)) - 24px);
 }
 
 .os-dock-strip {
@@ -926,8 +926,8 @@ button:not(:disabled):active {
 }
 
 .os-launcher-panel {
-  width: min(720px, 92vw);
-  max-height: min(560px, 86vh);
+  width: min(720px, calc(92vw / var(--os-scale, 1)));
+  max-height: min(560px, calc(86vh / var(--os-scale, 1)));
   padding: 22px 24px;
   border-radius: var(--os-radius);
   box-shadow: var(--os-shadow-window);
@@ -1037,8 +1037,8 @@ button:not(:disabled):active {
 .os-ask-backdrop { pointer-events: none; }
 .os-ask-sheet {
   position: absolute; pointer-events: auto; left: 50%; bottom: calc(var(--os-dock-h) + 22px);
-  transform: translateX(-50%); width: min(880px, 94vw);
-  height: min(720px, calc(100dvh - var(--os-dock-h) - 84px));
+  transform: translateX(-50%); width: min(880px, calc(94vw / var(--os-scale, 1)));
+  height: min(720px, calc(calc(100dvh / var(--os-scale, 1)) - var(--os-dock-h) - 84px));
   border-radius: var(--os-radius); box-shadow: var(--os-shadow-window); padding: 0; overflow: hidden;
 }
 .os-ask-sheet[data-maximized] { left: 0; top: 0; bottom: var(--ask-dock-reserve); transform: none; width: 100%; height: auto; border-radius: 0; }
@@ -2469,7 +2469,7 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   z-index: 95;
   margin: 0;
   padding: 4px;
-  max-height: min(320px, 60vh);
+  max-height: min(320px, calc(60vh / var(--os-scale, 1)));
   overflow-y: auto;
   /* A long list scrolled to its end must not hand the wheel to the surface
    * behind it, which on this desktop is somebody's window. */
@@ -3967,7 +3967,7 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
 .os-map-canvas {
   display: block;
   width: 100%;
-  height: clamp(220px, 46vh, 560px);
+  height: clamp(220px, calc(46vh / var(--os-scale, 1)), 560px);
   border: 1px solid var(--os-line);
   border-radius: var(--os-radius-sm);
   background: var(--os-plate);
@@ -4559,7 +4559,7 @@ a.os-button {
 }
 @container os-files (max-width: 560px) {
   .os-files-browse { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
-  .os-files-rail { position: static; max-height: 40vh; border-right: 0; border-bottom: 1px solid var(--os-line); padding: 0 0 8px; }
+  .os-files-rail { position: static; max-height: calc(40vh / var(--os-scale, 1)); border-right: 0; border-bottom: 1px solid var(--os-line); padding: 0 0 8px; }
   .os-files-main { padding-left: 0; padding-top: 10px; border-left: 0; }
   /* Sort, Search and Add keep one line together, wrapping below the title as
    * a group rather than one control at a time (as Fleet's narrow heads do). */
@@ -4579,7 +4579,7 @@ a.os-button {
 .os-files-sharing { grid-column: 1; grid-row: 1; align-self: end; position: sticky; bottom: 0; margin-right: 10px; padding: 12px 0 8px; border-top: 1px solid var(--os-line); background: var(--os-glass-solid); }
 .os-files-sharing-head { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; font-size: var(--os-text-sm); font-weight: 500; color: var(--os-muted); }
 .os-files-sharing-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
-.os-files-sharing-list { max-height: 40vh; overflow-y: auto; }
+.os-files-sharing-list { max-height: calc(40vh / var(--os-scale, 1)); overflow-y: auto; }
 .os-files-sharing-list button { appearance: none; display: flex; align-items: center; gap: 10px; width: 100%; min-height: var(--os-control-h); padding: 0 8px; border: 0; border-radius: var(--os-selection-radius); background: transparent; color: var(--os-ink); font: inherit; text-align: left; cursor: pointer; }
 .os-files-sharing-list button:hover { background: var(--os-hover); }
 .os-files-sharing-list button[aria-pressed="true"] { background: color-mix(in srgb, var(--os-accent) 12%, transparent); box-shadow: inset 2px 0 0 var(--os-accent); }
@@ -5234,7 +5234,7 @@ a.os-button {
   bottom: calc(var(--os-dock-h) + 26px);
   transform: translateX(-50%);
   margin: 0;
-  max-width: min(520px, 80vw);
+  max-width: min(520px, calc(80vw / var(--os-scale, 1)));
   padding: 7px 12px;
   border-radius: 0;
   background: var(--os-glass-solid);
@@ -6632,7 +6632,7 @@ a.os-button {
 }
 
 .os-themes {
-  width: min(380px, 100vw);
+  width: min(380px, calc(100vw / var(--os-scale, 1)));
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -6816,7 +6816,7 @@ a.os-button {
   }
   .os-themes {
     width: 100%;
-    height: min(78vh, 620px);
+    height: min(calc(78vh / var(--os-scale, 1)), 620px);
     border-left: 0;
     border-top: 1px solid var(--os-line);
     border-radius: var(--os-radius) var(--os-radius) 0 0;
@@ -6879,7 +6879,7 @@ a.os-button {
   position: absolute;
   right: 0;
   bottom: calc(100% + 10px);
-  width: min(340px, calc(100vw - 32px));
+  width: min(340px, calc(calc(100vw / var(--os-scale, 1)) - 32px));
   z-index: 41;
   border-radius: var(--os-radius);
   box-shadow: var(--os-shadow-float);
@@ -8361,8 +8361,8 @@ a.os-button {
   margin-top: 18px;
 }
 .os-entry-layout {
-  height: 100vh;
-  height: 100dvh;
+  height: calc(100vh / var(--os-scale, 1));
+  height: calc(100dvh / var(--os-scale, 1));
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -10502,7 +10502,7 @@ a.os-button {
    * the taller clamp that left nearly half the canvas empty above and below
    * the road in a desktop window, which reads as a picture that failed to
    * load rather than as a road with room around it. */
-  height: clamp(380px, 58vh, 760px);
+  height: clamp(380px, calc(58vh / var(--os-scale, 1)), 760px);
   /* A GROUND RATHER THAN A PLATE. The map is a place, not a card: the darker
    * of the two surfaces reads as depth behind the road, and the beacon's glow
    * has something to sit against. */
@@ -11424,7 +11424,7 @@ a.os-button {
   gap: 12px;
   align-items: stretch;
   min-height: 0;
-  max-height: 60vh;
+  max-height: calc(60vh / var(--os-scale, 1));
 }
 
 .os-cluster-list {
@@ -12825,7 +12825,7 @@ button.os-cluster-mesh-peer:focus-visible {
   color: var(--os-ink);
   /* The entry header owns the theme control above this scrollable pane.
      Keep the column top-anchored so expanding a stop grows downward. */
-  padding: clamp(32px, 8vh, 110px) 24px 96px;
+  padding: clamp(32px, calc(8vh / var(--os-scale, 1)), 110px) 24px 96px;
 }
 
 .os-core-gate-column {
@@ -14442,8 +14442,8 @@ button.os-cluster-mesh-peer:focus-visible {
  * generalises. The plate is the window's own ground, so controls look exactly
  * as they do on a page; the floor is the raised plane beneath them. */
 .os-dialog {
-  width: min(560px, calc(100vw - 32px));
-  max-height: calc(100dvh - 48px);
+  width: min(560px, calc(calc(100vw / var(--os-scale, 1)) - 32px));
+  max-height: calc(calc(100dvh / var(--os-scale, 1)) - 48px);
   padding: 0;
   overflow: hidden;
   color: var(--os-ink);
@@ -14673,7 +14673,7 @@ button.os-cluster-mesh-peer:focus-visible {
 
 .os-window-control-group { display:flex; align-items:center; gap:2px; }
 .os-window-control-group + .os-window-control-group { border-left:1px solid var(--os-line); margin-left:6px; padding-left:6px; }
-.os-window-search { color:var(--os-ink); background:var(--os-glass-solid); border:1px solid var(--os-line); border-radius:12px; padding:18px; width:min(420px,calc(100vw - 32px)); }
+.os-window-search { color:var(--os-ink); background:var(--os-glass-solid); border:1px solid var(--os-line); border-radius:12px; padding:18px; width:min(420px,calc(calc(100vw / var(--os-scale, 1)) - 32px)); }
 .os-window-search header { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
 .os-window-search nav { display:flex; flex-direction:column; margin-top:12px; }
 .os-window-search::backdrop { background:#0005; }
@@ -15631,7 +15631,7 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 .os-ask-discussion-actions > .os-caption { flex: 1 1 20ch; }
 .os-ask-discussion-actions > div { display: flex; flex-wrap: wrap; gap: 8px; }
 .os-ask-guidance-notice { margin: 0 18px 10px; font-size: var(--os-text-sm); color: var(--os-muted); }
-.os-ask-work-queue { display: grid; gap: 6px; margin: 0 18px 10px; max-height: 32vh; overflow-y: auto; }
+.os-ask-work-queue { display: grid; gap: 6px; margin: 0 18px 10px; max-height: calc(32vh / var(--os-scale, 1)); overflow-y: auto; }
 /* A card holds the control that opens its work and, when a message asked to
  * drop that work, the question that stops it: siblings, never one inside the
  * other. */
@@ -15706,7 +15706,7 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 .os-file-detail-footer[data-confirming] .os-actbar-state { flex-direction: column; align-items: flex-start; gap: 4px; }
 .os-file-detail-footer .os-actbar-detail { white-space: normal; }
 .os-file-detail-footer .os-button[aria-label] { min-width: var(--os-control-h); }
-.os-file-detail-notices { display: flex; flex-direction: column; gap: 8px; padding: 12px 20px; max-height: 28vh; overflow: auto; border-top: 1px solid var(--os-line); }
+.os-file-detail-notices { display: flex; flex-direction: column; gap: 8px; padding: 12px 20px; max-height: calc(28vh / var(--os-scale, 1)); overflow: auto; border-top: 1px solid var(--os-line); }
 .os-file-detail .os-files-labeledit { max-width: 34rem; }
 .os-file-version-list { list-style: none; padding: 0; margin: 0; }
 .os-file-version-list .os-files-version { display: block; padding: 12px 0; border-bottom: 1px solid var(--os-line); }
@@ -15765,7 +15765,7 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 @container (max-width:520px) { .nexus-now { flex-direction:column; gap:6px; } }
 
 .os-nexus-node-label { font-family:var(--os-font); font-size:13px; }
-.os-nexus-map[data-orientation="vertical"] .os-nexus-map-canvas { height:clamp(450px,65vh,700px); }
+.os-nexus-map[data-orientation="vertical"] .os-nexus-map-canvas { height:clamp(450px,calc(65vh / var(--os-scale, 1)),700px); }
 
 /* A human-readable journey owns the page; the dependency map is optional evidence. */
 .nexus-journey-progress { margin: 0 0 18px; color: var(--os-muted); }

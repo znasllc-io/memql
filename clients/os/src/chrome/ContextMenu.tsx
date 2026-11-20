@@ -1,3 +1,4 @@
+import { osScale } from "../system/scale";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -165,6 +166,9 @@ export function ContextMenu({
   // Unmeasured on the first pass, so it opens at the click and the layout
   // effect above corrects it before anything is painted.
   const placed = box === null ? { left: x, top: y } : placeContextMenu({ x, y, ...box });
+  // Placed in screen pixels (the pointer, the menu's measured box, the
+  // window); drawn in the zoomed page's CSS pixels (system/scale.ts).
+  const scale = osScale();
 
   return createPortal(
     <div
@@ -172,7 +176,7 @@ export function ContextMenu({
       role="menu"
       aria-label={label}
       className="os-menu os-context-menu"
-      style={{ left: placed.left, top: placed.top }}
+      style={{ left: placed.left / scale, top: placed.top / scale }}
       onKeyDown={onKeyDown}
       onContextMenu={(e) => e.preventDefault()}
     >

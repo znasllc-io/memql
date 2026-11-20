@@ -1,3 +1,4 @@
+import { osScale } from "../../system/scale";
 import { summarizeUsage, usageLabel } from "./modelUsage";
 import { UsageDetails } from "./UsageDetails";
 import type { ModelUsageState } from "./useModelUsage";
@@ -201,8 +202,9 @@ export function GoalView({
     // the action, and leave scrolling alone when live evidence changes.
     const view = scroller.getBoundingClientRect();
     const target = heading.getBoundingClientRect();
-    if (target.top < view.top) scroller.scrollTop += target.top - view.top;
-    else if (target.bottom > view.bottom) scroller.scrollTop += target.bottom - view.bottom;
+    // Rects are screen pixels; scrollTop is CSS pixels (system/scale.ts).
+    if (target.top < view.top) scroller.scrollTop += (target.top - view.top) / osScale();
+    else if (target.bottom > view.bottom) scroller.scrollTop += (target.bottom - view.bottom) / osScale();
   }, [selectedStepKey]);
 
   const keepOpen = () => {

@@ -22,6 +22,7 @@ import { ContextMenu, type MenuEntry } from "./ContextMenu";
 import { Mark } from "./Mark";
 import { AccountAvatar } from "./AccountAvatar";
 import { useOs, type OsNotice } from "./state";
+import { dragTranslate } from "../system/scale";
 
 // The one bar (spec A): Launcher at the left end; pinned then running apps
 // center (running dot beneath, right-click to pin/unpin/close, drag to
@@ -65,7 +66,7 @@ function DockApp({
       data-running={running || undefined}
       data-dragging={isDragging || undefined}
       style={{
-        transform: transform ? `translate(${transform.x}px, ${transform.y}px)` : undefined,
+        transform: dragTranslate(transform),
         transition: transition ?? undefined,
       }}
       aria-label={`${manifest.name}${running ? " (running)" : ""}`}

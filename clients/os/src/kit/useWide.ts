@@ -1,3 +1,4 @@
+import { osScale } from "../system/scale";
 import { useLayoutEffect, useState, type RefObject } from "react";
 
 /**
@@ -48,7 +49,8 @@ function useMeasuredWidth<T>(ref: RefObject<HTMLElement | null>, answer: (width:
   useLayoutEffect(() => {
     const el = ref.current;
     if (el === null) return;
-    const read = () => setValue(answer(el.getBoundingClientRect().width));
+    // CSS pixels, the unit the thresholds are written in (system/scale.ts).
+    const read = () => setValue(answer(el.getBoundingClientRect().width / osScale()));
     read();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(read);

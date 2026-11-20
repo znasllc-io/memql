@@ -331,7 +331,7 @@ describe("The Brand page's preview", () => {
     // The template page and the inbox keep their frame's own height.
     const shared = rules.filter((rule) => rule.selector === ".email-preview-frame");
     expect(shared).toHaveLength(1);
-    expect(shared[0]!.body).toMatch(/height:\s*min\(72vh,\s*900px\)/);
+    expect(shared[0]!.body).toMatch(/height:\s*min\(calc\(72vh \/ var\(--os-scale, 1\)\),\s*900px\)/);
     // Every other rule that sizes the frame is the Brand page's.
     const others = rules.filter((rule) => rule.selector !== ".email-preview-frame" && rule.selector.includes(".email-preview-frame"));
     expect(others.length).toBeGreaterThan(0);

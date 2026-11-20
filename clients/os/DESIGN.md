@@ -810,6 +810,19 @@ placement is computed, never dragged freehand or resized (`system/placement.ts`,
 - Snap highlights and the picker are static fills: no animation, so reduced
   motion adds none. The phone layout has no desks or windows.
 
+### The desktop scales with the screen
+
+Owner-set (Jesús, Nov 20 2026). The whole desktop -- windows, dock, icons and
+text -- grows with the screen: scale = screen width / 1440, never below x1,
+capped at x1.5 (`system/scale.ts`, `SCALE_BASE_WIDTH` and `SCALE_CAP`). A
+13-inch laptop stays x1, Full HD is x1.33, a 1440p monitor x1.5; past the cap
+a bigger screen only adds room. It is CSS `zoom` on the page, so every rule
+here is written in the desktop's own pixels and needs no change. Two things
+do: a length measured from the browser (a pointer position, a
+`getBoundingClientRect`) is in screen pixels and is divided by `osScale()`
+before it becomes a style, a scroll position or a grid cell; and a viewport
+unit is written `calc(Nvh / var(--os-scale, 1))`, which a test enforces.
+
 ### One trail row, and the window draws it
 
 Every window carries exactly one trail row (`kit` `TrailRow`), drawn by the
