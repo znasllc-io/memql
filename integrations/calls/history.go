@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -47,6 +48,9 @@ func (s *Service) roomHistory(ctx context.Context, site callrules.SiteRef, key s
 	}
 	row := historyRow{SiteID: site.SiteID, OwnerUserID: site.OwnerUserID, KeyID: key, SourceKind: kind, SourceID: source, Title: callTitle(room.Title, room.OpenedAt), CanRename: room.KeyID == key, Role: role, Status: "active", StartedAt: room.OpenedAt, EndedAt: room.EndedAt}
 	if !room.open() {
+		if room.KeyID == key {
+			row.CostCents = room.UsageCostCents
+		}
 		row.Status = "ended"
 	}
 	row.ID = historyID(pepper, site.SiteID, key, kind, source)
@@ -116,7 +120,7 @@ func (s *Service) upsertHistory(ctx context.Context, row historyRow) (*historyRo
 	if !prior.ArchivedAt.IsZero() {
 		return prior, nil
 	}
-	if prior.Title == row.Title && prior.Role == row.Role && prior.Status == row.Status && prior.StartedAt.Equal(row.StartedAt) && prior.EndedAt.Equal(row.EndedAt) {
+	if equalOptionalCents(prior.CostCents, row.CostCents) && prior.Title == row.Title && prior.Role == row.Role && prior.Status == row.Status && prior.StartedAt.Equal(row.StartedAt) && prior.EndedAt.Equal(row.EndedAt) {
 		prior.CanRename = row.CanRename
 		return prior, nil
 	}
@@ -287,6 +291,10 @@ func (s *Service) History(ctx context.Context, sess callrules.Session, req callr
 		return none, err
 	}
 	out := callrules.HistoryPage{AccountID: h.row.KeyID, Calls: []callrules.HistoryCall{}, Collecting: collecting, Overview: callrules.HistoryOverview{Currency: "USD", PeriodDays: req.Period, Series: []callrules.HistorySeries{}}}
+	out.CurrentCall, err = s.currentHistoryCall(ctx, h)
+	if err != nil {
+		return none, err
+	}
 	rows, err := s.store.historyForKey(ctx, h.site.OwnerUserID, h.site.SiteID, h.row.KeyID, after, req.Archive)
 	if err != nil {
 		return none, err
@@ -336,6 +344,13 @@ func (s *Service) History(ctx context.Context, sess callrules.Session, req callr
 			out.Collecting = true
 			out.Overview = callrules.HistoryOverview{Currency: "USD", PeriodDays: req.Period, Series: []callrules.HistorySeries{}}
 		}
+	}
+	wallet, available, reserved, walletErr := s.usageWalletSnapshot(ctx, h.site.OwnerUserID, h.site.SiteID, h.row.KeyID)
+	if walletErr != nil {
+		return none, walletErr
+	}
+	if wallet != nil {
+		out.Overview.AvailableCents, out.Overview.ReservedCents = &available, &reserved
 	}
 	return out, nil
 }
@@ -408,15 +423,99 @@ func (s *Service) refreshHistory(ctx context.Context, h keyHolder, row historyRo
 	return projected, err
 }
 func (s *Service) historyReply(h keyHolder, row historyRow) callrules.HistoryCall {
-	result := callrules.HistoryCall{ID: row.ID, Title: row.Title, Role: row.Role, Status: row.Status, StartedAt: historyStamp(row.StartedAt), EndedAt: historyStamp(row.EndedAt), ArchivedAt: historyStamp(row.ArchivedAt), DeleteAt: historyStamp(row.PurgeAt), CanArchive: row.ArchivedAt.IsZero() && (row.Status == "ended" || row.Status == "cancelled")}
+	result := callrules.HistoryCall{CostCents: row.CostCents, ID: row.ID, Title: row.Title, Role: row.Role, Status: row.Status, StartedAt: historyStamp(row.StartedAt), EndedAt: historyStamp(row.EndedAt), ArchivedAt: historyStamp(row.ArchivedAt), DeleteAt: historyStamp(row.PurgeAt), CanArchive: row.ArchivedAt.IsZero() && (row.Status == "ended" || row.Status == "cancelled")}
 	// Host role alone is not rename authority. The action checks the operational
 	// owner's key or actual live host seat; guest projections never get a shortcut.
 	result.CanRename = row.CanRename && row.ArchivedAt.IsZero()
+	if row.Status == "scheduled" {
+		result.ScheduledAt = historyStamp(row.StartedAt)
+	}
 	if row.Status == "ended" && !row.StartedAt.IsZero() && !row.EndedAt.Before(row.StartedAt) {
 		seconds := int64(row.EndedAt.Sub(row.StartedAt) / time.Second)
 		result.DurationSeconds = &seconds
 	}
 	return result
+}
+
+// The dashboard's one actionable call is independent of history pagination,
+// archive/search filters and reporting periods. These operational reads contain
+// only the key's open rooms and bounded upcoming bookings, not all past calls.
+// Projection and refresh retain the same private id and live rename authority
+// as the history list; missing costs remain unknown.
+func (s *Service) currentHistoryCall(ctx context.Context, h keyHolder) (*callrules.HistoryCall, error) {
+	ctx = memql.ContextWithFreshRead(ctx)
+	rooms, err := s.store.openRoomsForKey(ctx, h.site.OwnerUserID, h.row.KeyID)
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(rooms, func(i, j int) bool {
+		if (rooms[i].ID == h.row.RoomID) != (rooms[j].ID == h.row.RoomID) {
+			return rooms[i].ID == h.row.RoomID
+		}
+		if !rooms[i].OpenedAt.Equal(rooms[j].OpenedAt) {
+			return rooms[i].OpenedAt.After(rooms[j].OpenedAt)
+		}
+		return rooms[i].ID < rooms[j].ID
+	})
+	project := func(row historyRow) (*callrules.HistoryCall, error) {
+		stored, err := s.upsertHistory(ctx, row)
+		if err != nil || stored == nil {
+			return nil, err
+		}
+		current, err := s.refreshHistory(ctx, h, *stored)
+		if err != nil || current == nil {
+			return nil, err
+		}
+		if !current.ArchivedAt.IsZero() || current.Role != "host" || (current.Status != "active" && current.Status != "scheduled") {
+			return nil, nil
+		}
+		if current.Status == "scheduled" && current.StartedAt.Before(s.now()) {
+			return nil, nil
+		}
+		reply := s.historyReply(h, *current)
+		return &reply, nil
+	}
+	for _, room := range rooms {
+		if room.KeyID != h.row.KeyID || room.SiteID != h.site.SiteID || room.OwnerUserID != h.site.OwnerUserID {
+			return nil, callrules.ErrForbidden
+		}
+		if !room.open() {
+			continue
+		}
+		row, err := s.roomHistory(ctx, h.site, h.row.KeyID, room, h.pepper)
+		if err != nil {
+			return nil, err
+		}
+		if current, err := project(row); err != nil || current != nil {
+			return current, err
+		}
+	}
+	bookings, err := s.store.bookingsForKey(ctx, h.site.OwnerUserID, h.row.KeyID)
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(bookings, func(i, j int) bool {
+		if !bookings[i].Start.Equal(bookings[j].Start) {
+			return bookings[i].Start.Before(bookings[j].Start)
+		}
+		return bookings[i].ID < bookings[j].ID
+	})
+	for _, booking := range bookings {
+		if booking.KeyID != h.row.KeyID || booking.SiteID != h.site.SiteID {
+			return nil, callrules.ErrForbidden
+		}
+		if booking.Start.Before(s.now()) || booking.status() == callrules.BookingCancelled || booking.status() == callrules.BookingEnded {
+			continue
+		}
+		row, err := s.bookingHistory(ctx, h.site, h.row.KeyID, booking, h.pepper)
+		if err != nil {
+			return nil, err
+		}
+		if current, err := project(row); err != nil || current != nil {
+			return current, err
+		}
+	}
+	return nil, nil
 }
 
 // Overview is bounded independently of pagination. If more than 1,000 retained

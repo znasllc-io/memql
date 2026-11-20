@@ -19,13 +19,14 @@ const historySyncConcept = "v1:calls:historySync"
 // operation additionally binds the authenticated key and site. Internal origin is
 // stamped at this named-construct seam; raw client graph reads remain closed.
 type historyRow struct {
+	CostCents                                                                           *int64
 	CanRename                                                                           bool // Derived from the fresh operational owner, never stored.
 	ID, SiteID, OwnerUserID, KeyID, SourceKind, SourceID, Title, Role, Status, OrderKey string
 	StartedAt, EndedAt, ArchivedAt, PurgeAt, Version                                    time.Time
 }
 
 func historyFromRow(r map[string]any) historyRow {
-	return historyRow{ID: memql.BareShortId(rowString(r, "id")), SiteID: memql.BareShortId(rowString(r, "siteId")), OwnerUserID: memql.BareShortId(rowString(r, "ownerUserId")), KeyID: memql.BareShortId(rowString(r, "keyId")), SourceKind: rowString(r, "sourceKind"), SourceID: memql.BareShortId(rowString(r, "sourceId")), Title: rowString(r, "title"), Role: rowString(r, "role"), Status: rowString(r, "status"), OrderKey: rowString(r, "orderKey"), StartedAt: rowTime(r, "startedAt"), EndedAt: rowTime(r, "endedAt"), ArchivedAt: rowTime(r, "archivedAt"), PurgeAt: rowTime(r, "purgeAt"), Version: rowTime(r, "createdAt")}
+	return historyRow{CostCents: optionalRoomCents(r, "costCents"), ID: memql.BareShortId(rowString(r, "id")), SiteID: memql.BareShortId(rowString(r, "siteId")), OwnerUserID: memql.BareShortId(rowString(r, "ownerUserId")), KeyID: memql.BareShortId(rowString(r, "keyId")), SourceKind: rowString(r, "sourceKind"), SourceID: memql.BareShortId(rowString(r, "sourceId")), Title: rowString(r, "title"), Role: rowString(r, "role"), Status: rowString(r, "status"), OrderKey: rowString(r, "orderKey"), StartedAt: rowTime(r, "startedAt"), EndedAt: rowTime(r, "endedAt"), ArchivedAt: rowTime(r, "archivedAt"), PurgeAt: rowTime(r, "purgeAt"), Version: rowTime(r, "createdAt")}
 }
 func (s *Store) historyByID(ctx context.Context, owner, id string) (*historyRow, error) {
 	call, err := langparser.RenderCall("callsHistoryById", map[string]any{"id": id})
@@ -69,6 +70,9 @@ func (s *Store) historyPendingForKey(ctx context.Context, owner, site, key strin
 }
 func historyFields(r historyRow) map[string]any {
 	fields := map[string]any{"title": r.Title, "role": r.Role, "status": r.Status}
+	if r.CostCents != nil {
+		fields["costCents"] = *r.CostCents
+	}
 	for k, v := range map[string]time.Time{"startedAt": r.StartedAt, "endedAt": r.EndedAt, "archivedAt": r.ArchivedAt, "purgeAt": r.PurgeAt} {
 		if !v.IsZero() {
 			fields[k] = versionStamp(v)

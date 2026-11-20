@@ -287,6 +287,9 @@ func (s *Service) Start(ctx context.Context, sess callrules.Session, body callru
 	if err != nil {
 		return callrules.StartResult{}, err
 	}
+	if body.QuoteID != "" || policy.CallConfiguration && h.row.CredentialID != "" {
+		return s.startConfigured(ctx, sess, body, h, policy, title, name, confirm)
+	}
 	// The gated phase asks all of this again. Asking first, without the gates, is what
 	// keeps a refused Start from taking a lock or opening a media room.
 	if refused, err := s.openRefusal(ctx, h.site, h.row.KeyID, h.row, true); err != nil {
@@ -340,6 +343,28 @@ func (s *Service) startGated(ctx context.Context, h keyHolder, policy callrules.
 	}
 	if !current.usable(now) {
 		return callrules.JoinResult{}, seatRow{}, fmt.Errorf("%w: the session ended", callrules.ErrNoSession)
+	}
+	if o.configuration != nil {
+		existing, err := s.store.roomByID(fresh, h.site.OwnerUserID, o.roomID)
+		if err != nil {
+			return callrules.JoinResult{}, seatRow{}, err
+		}
+		if existing != nil {
+			if existing.KeyID != current.KeyID || existing.SiteID != h.site.SiteID || existing.UsageDigest != o.usageDigest {
+				return callrules.JoinResult{}, seatRow{}, fundingConflict("idempotency_conflict")
+			}
+			return callrules.JoinResult{}, seatRow{}, nil
+		}
+	}
+	if o.configuration != nil {
+		if err := s.retireUnopenedSeats(fresh, h.site.OwnerUserID, o.roomID); err != nil {
+			return callrules.JoinResult{}, seatRow{}, err
+		}
+	}
+	if o.quoteID != "" {
+		if _, err := s.readCallQuote(h, o.quoteID, false); err != nil {
+			return callrules.JoinResult{}, seatRow{}, err
+		}
 	}
 	if refused, err := s.openRefusal(fresh, h.site, current.KeyID, current, true); err != nil {
 		return refused, seatRow{}, err
@@ -487,6 +512,9 @@ type placedRoom struct {
 // them up. A gated check that refuses after this leaves an empty media room, which the
 // server closes on its own.
 func (s *Service) placeRoom(ctx context.Context, policy callrules.Policy) (placedRoom, callrules.JoinResult, error) {
+	return s.placeNamedRoom(ctx, policy, id.NewShortId())
+}
+func (s *Service) placeNamedRoom(ctx context.Context, policy callrules.Policy, roomID string) (placedRoom, callrules.JoinResult, error) {
 	server, err := s.place(ctx)
 	if err != nil {
 		return placedRoom{}, callrules.JoinResult{}, err
@@ -502,7 +530,7 @@ func (s *Service) placeRoom(ctx context.Context, policy callrules.Policy) (place
 	if err != nil {
 		return placedRoom{}, callrules.JoinResult{}, fmt.Errorf("calls: reach media server %s: %w", server.ID, err)
 	}
-	placed := placedRoom{server: *server, credential: credential, roomID: id.NewShortId()}
+	placed := placedRoom{server: *server, credential: credential, roomID: roomID}
 	if err := backend.CreateRoom(ctx, placed.roomID, mediaRoomLimit(policy)); err != nil {
 		return placedRoom{}, callrules.JoinResult{}, fmt.Errorf("calls: open the call's media room: %w", err)
 	}
@@ -512,13 +540,16 @@ func (s *Service) placeRoom(ctx context.Context, policy callrules.Policy) (place
 // roomOpening is a new call's room as the opening decides it: everything Start and a booked
 // call's first join decide differently, and nothing else.
 type roomOpening struct {
-	roomID, identity        string               // the room, which names its media room; the opener's media identity
-	keyID                   string               // the key the call runs on
-	host, locked            bool                 // the opener takes a host seat; the room opens locked
-	class                   callrules.QueueClass // the opener's place in the server's queue when it is full
-	guestDigest, hostDigest string               // the room's links
-	scheduledCallID         string               // the booking a booked call's room is opened for
-	title                   string
+	configuration               *callrules.CallConfiguration
+	usageOperation, usageDigest string
+	quoteID                     string
+	roomID, identity            string               // the room, which names its media room; the opener's media identity
+	keyID                       string               // the key the call runs on
+	host, locked                bool                 // the opener takes a host seat; the room opens locked
+	class                       callrules.QueueClass // the opener's place in the server's queue when it is full
+	guestDigest, hostDigest     string               // the room's links
+	scheduledCallID             string               // the booking a booked call's room is opened for
+	title                       string
 }
 
 // openRoom decides a new call's first seat and writes the call. The caller holds the new
@@ -541,7 +572,15 @@ type roomOpening struct {
 // wait or a place in the queue, the session the opener now holds, and their seat.
 func (s *Service) openRoom(ctx context.Context, site callrules.SiteRef, server MediaServer, policy callrules.Policy, held *sessionRow, ask joinAsk, o roomOpening, out callrules.Session, beforeRoom func(context.Context, time.Time) error, now time.Time) (callrules.JoinResult, callrules.Session, seatRow, error) {
 	owner := site.OwnerUserID
-	funding, allowance, err := s.fundingForOpening(ctx, site, o.keyID, now)
+	var funding roomFunding
+	var allowance callrules.KeyAllowance
+	var err error
+	if o.configuration != nil {
+		funding, allowance, err = s.configuredFunding(ctx, site, o.keyID, *o.configuration, now)
+		funding.UsageOperation, funding.UsageDigest = o.usageOperation, o.usageDigest
+	} else {
+		funding, allowance, err = s.fundingForOpening(ctx, site, o.keyID, now)
+	}
 	if err != nil {
 		return refuseJoin(callrules.ReasonOf(err)), out, seatRow{}, err
 	}
@@ -1402,7 +1441,7 @@ func (s *Service) answerWaiting(ctx context.Context, site callrules.SiteRef, roo
 	// back when the lock lifts. While the lock holds, DecideJoin answers it "locked".
 	position := placeInLine(live, entry)
 	// A host seat, and a seat a host admitted, pass the lock (seatRow.passesLock).
-	decision := callrules.DecideJoin(load.roomState(room), callrules.JoinAsk{Kind: callrules.SeatKind(seat.Kind), Host: seat.passesLock()}, policy, load.free()-position)
+	decision := callrules.DecideJoin(load.roomState(room), callrules.JoinAsk{Kind: fundedSeatKind(room, callrules.SeatKind(seat.Kind)), Host: seat.passesLock()}, policy, load.free()-position)
 
 	switch decision.Outcome {
 	case callrules.OutcomeAdmit:
@@ -1561,6 +1600,7 @@ func (s *Service) Leave(ctx context.Context, sess callrules.Session) error {
 	if err != nil || seat == nil || room == nil {
 		return err
 	}
+	s.checkpointUsage(ctx, *room)
 	left, ended, err := s.leaveGated(ctx, site.OwnerUserID, *room, seat.ID)
 	if err != nil || left == nil {
 		return err

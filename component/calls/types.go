@@ -28,6 +28,7 @@ type Policy struct {
 	RequirePasskeys      bool
 	SimulatedFunding     bool
 	UsagePreview         bool
+	CallConfiguration    bool
 	MaxPeople            int
 	MaxAgents            int
 	RoomJoinsPerMinute   int
@@ -182,18 +183,22 @@ type StartResult struct {
 // StartBody is what a host starts a call with: the host's display name and
 // the confirmation every seat records.
 type StartBody struct {
-	Title   string
-	Name    string
-	Confirm Confirmation
+	QuoteID        string
+	IdempotencyKey string
+	Title          string
+	Name           string
+	Confirm        Confirmation
 }
 
 // ScheduleRequest books a call: when it starts, how many minutes it is booked
 // for, and its title in the calendar file, at most MaxScheduledTitleRunes
 // characters.
 type ScheduleRequest struct {
-	Start   time.Time
-	Minutes int
-	Title   string
+	QuoteID        string
+	IdempotencyKey string
+	Start          time.Time
+	Minutes        int
+	Title          string
 }
 
 // ScheduledCall is a booked call as its scheduler is handed it, once: its id,
@@ -203,6 +208,7 @@ type ScheduleRequest struct {
 // stored, so the tokens and links here are the only copies there are; the
 // calendar file carries the guest link and never the host token.
 type ScheduledCall struct {
+	Configuration         *CallConfiguration
 	ID                    string
 	Start, End            time.Time
 	Title                 string

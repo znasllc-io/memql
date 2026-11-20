@@ -185,20 +185,30 @@ func (s *Service) fundingSnapshot(ctx context.Context, site callrules.SiteRef, o
 	if out.Account.Legacy {
 		out.Account.FundingMode = "legacy"
 	}
-	wallet, err := s.simulatedWallet(ctx, site.OwnerUserID, site.SiteID, key.ID)
+	wallet, available, reserved, err := s.usageWalletSnapshot(ctx, site.OwnerUserID, site.SiteID, key.ID)
 	if err != nil {
 		return err
 	}
 	if wallet == nil {
+		if out.Capabilities.CallConfiguration && !out.Account.Legacy && !out.Account.Unclaimed {
+			out.Account.HostingMode = usageMeteredMode
+			zero := int64(0)
+			out.Account.AvailableCents = &zero
+			out.Account.ReservedCents = &zero
+		}
 		return nil
 	}
 	out.Account.FundingMode = "simulation"
 	balance := wallet.BalanceCents
 	out.Account.BalanceCents = &balance
+	out.Account.AvailableCents, out.Account.ReservedCents = &available, &reserved
 	out.Account.CanHost = false
-	preview := out.Capabilities.UsagePreview && balance > 0 && keyActive(key.Status) && key.UserHandle != "" && out.Account.CredentialCount > 0
+	preview := (out.Capabilities.UsagePreview || out.Capabilities.CallConfiguration) && available > 0 && keyActive(key.Status) && key.UserHandle != "" && out.Account.CredentialCount > 0
 	if preview {
 		out.Account.HostingMode, out.Account.CanHost = usagePreviewMode, true
+	}
+	if out.Capabilities.CallConfiguration && !out.Account.Legacy && !out.Account.Unclaimed {
+		out.Account.HostingMode = usageMeteredMode
 	}
 	if wallet.Pass == nil || !s.now().Before(wallet.Pass.ExpiresAt) {
 		return nil

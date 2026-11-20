@@ -537,15 +537,17 @@ func (b callsConfirmBody) confirmation() calls.Confirmation {
 
 func (h *callsHandler) serveStart(w http.ResponseWriter, r *http.Request, c callsCall) {
 	var body struct {
-		Title   string           `json:"title"`
-		Name    string           `json:"name"`
-		Confirm callsConfirmBody `json:"confirm"`
+		QuoteID        string           `json:"quoteId"`
+		IdempotencyKey string           `json:"idempotencyKey"`
+		Title          string           `json:"title"`
+		Name           string           `json:"name"`
+		Confirm        callsConfirmBody `json:"confirm"`
 	}
 	if !h.decode(w, r, c, &body) || !h.requireSession(w, c) || !h.resolveSite(w, r, &c) {
 		return
 	}
 	// THE HOST'S SEAT IS THE SESSION THEY BROUGHT, so a start hands the browser nothing new.
-	result, err := h.svc.Start(r.Context(), c.session(), calls.StartBody{Title: body.Title, Name: body.Name, Confirm: body.Confirm.confirmation()})
+	result, err := h.svc.Start(r.Context(), c.session(), calls.StartBody{QuoteID: body.QuoteID, IdempotencyKey: body.IdempotencyKey, Title: body.Title, Name: body.Name, Confirm: body.Confirm.confirmation()})
 	if err != nil || result.Join.Outcome == calls.OutcomeRefuse {
 		h.refuse(w, c, err, result.Join)
 		return
@@ -562,9 +564,11 @@ func (h *callsHandler) serveStart(w http.ResponseWriter, r *http.Request, c call
 // callsBookingBody is a booking as schedule takes it: when it starts (RFC 3339), how many
 // minutes it is booked for, and its title.
 type callsBookingBody struct {
-	Start   time.Time `json:"start"`
-	Minutes int       `json:"minutes"`
-	Title   string    `json:"title"`
+	QuoteID        string    `json:"quoteId"`
+	IdempotencyKey string    `json:"idempotencyKey"`
+	Start          time.Time `json:"start"`
+	Minutes        int       `json:"minutes"`
+	Title          string    `json:"title"`
 }
 
 // callsMoveBody is a reschedule: the call it moves, and the booking it moves to.
@@ -584,7 +588,7 @@ func (h *callsHandler) serveSchedule(w http.ResponseWriter, r *http.Request, c c
 	if !h.decode(w, r, c, into) || !h.requireSession(w, c) || !h.resolveSite(w, r, &c) {
 		return
 	}
-	req := calls.ScheduleRequest{Start: move.Start, Minutes: move.Minutes, Title: move.Title}
+	req := calls.ScheduleRequest{QuoteID: move.QuoteID, IdempotencyKey: move.IdempotencyKey, Start: move.Start, Minutes: move.Minutes, Title: move.Title}
 	var booked calls.ScheduledCall
 	var err error
 	if c.route.op == callsOpSchedule {
@@ -597,8 +601,9 @@ func (h *callsHandler) serveSchedule(w http.ResponseWriter, r *http.Request, c c
 		return
 	}
 	h.write(w, http.StatusOK, callsScheduledReply{
-		ID:    memql.BareShortId(booked.ID),
-		Start: booked.Start.UTC().Format(time.RFC3339Nano), End: booked.End.UTC().Format(time.RFC3339Nano),
+		CallConfiguration: booked.Configuration,
+		ID:                memql.BareShortId(booked.ID),
+		Start:             booked.Start.UTC().Format(time.RFC3339Nano), End: booked.End.UTC().Format(time.RFC3339Nano),
 		Title:      booked.Title,
 		GuestToken: booked.GuestToken, HostToken: booked.HostToken,
 		GuestLink: booked.GuestLink, HostLink: booked.HostLink,
@@ -955,12 +960,16 @@ func setCallsRetryAfter(w http.ResponseWriter, d time.Duration) {
 // page the server's now (expiresAt less expiresInMs), which is what `countdownEndsAt` is
 // counted down from and an occupying seat's elapsed call time is measured from.
 type callsSessionReply struct {
-	Kind        string `json:"kind"`
-	KeyID       string `json:"keyId,omitempty"`
-	SeatID      string `json:"seatId,omitempty"`
-	RoomID      string `json:"roomId,omitempty"`
-	ExpiresAt   string `json:"expiresAt"`
-	ExpiresInMs int64  `json:"expiresInMs"`
+	ParticipantLimit int    `json:"participantLimit,omitempty"`
+	DurationMinutes  int    `json:"durationMinutes,omitempty"`
+	ReservedCents    *int64 `json:"reservedCents,omitempty"`
+	CostCents        *int64 `json:"costCents,omitempty"`
+	Kind             string `json:"kind"`
+	KeyID            string `json:"keyId,omitempty"`
+	SeatID           string `json:"seatId,omitempty"`
+	RoomID           string `json:"roomId,omitempty"`
+	ExpiresAt        string `json:"expiresAt"`
+	ExpiresInMs      int64  `json:"expiresInMs"`
 	// Host is true while the session's seat hosts its open call (a host seat admitted or in
 	// the call), and absent otherwise.
 	Host bool `json:"host,omitempty"`
@@ -1025,6 +1034,10 @@ func (h *callsHandler) sessionReply(sess calls.Session, call calls.SeatCall) cal
 	if !call.AllowanceEndsAt.IsZero() {
 		reply.AllowanceEndsAt = call.AllowanceEndsAt.UTC().Format(time.RFC3339Nano)
 		reply.FundingMode = call.FundingMode
+		reply.ParticipantLimit, reply.DurationMinutes = call.ParticipantLimit, call.DurationMinutes
+		if call.Host {
+			reply.ReservedCents, reply.CostCents = call.ReservedCents, call.CostCents
+		}
 	}
 	reply.Title = call.Title
 	if !call.OpenedAt.IsZero() {
@@ -1095,6 +1108,7 @@ type callsLinksReply struct {
 // callsScheduledReply is a booked call as its scheduler is handed it, once: the secrets of
 // its links, both links, and its calendar file as text.
 type callsScheduledReply struct {
+	*calls.CallConfiguration
 	ID         string `json:"id"`
 	Start      string `json:"start"`
 	End        string `json:"end"`

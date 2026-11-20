@@ -45,7 +45,7 @@ concept simulatedWalletEntry {
   siteId string! @description("The v1:platform:site whose operator explicitly enables this local simulation.")
   ownerUserId string! @description("The owning v1:identity:user, stamped from the internal actor; never caller-supplied.")
   keyId string! @description("The authenticated v1:calls:key that owns this simulated balance.")
-  kind enum("topup", "activation")!
+  kind enum("topup", "activation", "settlement")!
   requestDigest string! @maxLength(64) @pattern("^[0-9a-f]{64}$") @description("Canonical non-secret request digest. The row id separately binds site, key and idempotency nonce, independent of session-secret rotation.")
   balanceCents int! @description("Complete resulting simulated USD balance, bounded by the native invariant to 0..50000 cents.")
   creditedCents int! @description("Simulated cents credited by this immutable receipt; zero for activation.")
@@ -122,7 +122,13 @@ concept session {
 @belongsTo(account, via="siteId")
 concept room {
   @relationship(type="references", as="simulationPass", field="fundingPassId", target=simulatedWalletEntry, direction="outgoing")
-  fundingMode enum("usage_preview") @description("Explicit bounded local usage preview; absent keeps the original pass or legacy room behavior. Immutable at room creation.")
+  fundingMode enum("usage_preview", "usage_metered_preview") @description("Explicit bounded local usage preview; absent keeps the original pass or legacy room behavior. Immutable at room creation.")
+  usageConfig string
+  usageOperation string
+  usageDigest string
+  usageReservedCents int
+  usageMeter string
+  usageCostCents int
   fundingPassId string @description("The v1:calls:simulatedWalletEntry activation whose simulated allowance pays for this room; fixed at creation.")
   fundingStartedAt datetime @description("First actual media admission for this funded room. Waiting without an admitted participant consumes no room time.")
   fundingDeadline datetime @description("Server-enforced latest end: fixed at first admission for legacy passes or room creation for usage preview; never extended by top-up or handover.")
@@ -238,6 +244,10 @@ concept queueEntry {
 @displayCard(primary="title", secondary="start", status="status")
 @belongsTo(account, via="siteId")
 concept scheduledCall {
+  usageRequests string
+  usageConfig string
+  usageOperation string
+  usageDigest string
   historyPending bool @description("Atomically marks source changes not yet durably projected into private history; only a version-fenced successful projection clears it.")
   siteId  string!  @description("The v1:platform:site (deployable) this row belongs to.")
   ownerUserId  string!  @description("The v1:identity:user who owns the site -- the row-authz key. STAMPED from the actor the write runs as and never an argument: the calls integration writes as the site's owner (borrowed authority), so this is the site's owner and never a visitor.")
@@ -289,6 +299,7 @@ concept policy {
   siteId  string!  @description("The v1:platform:site (deployable) these limits apply to. One policy per site.")
   ownerUserId  string!  @description("The v1:identity:user who owns the site -- the row-authz key. STAMPED from the actor the write runs as and never an argument: the calls integration writes as the site's owner (borrowed authority), so this is the site's owner and never the operator who set the limits.")
   requirePasskeys int @description("0 preserves optional guest access; 1 requires a currently credential-backed session at join.")
+  callConfiguration int @description("Operator opt-in for configured local simulated prepaid rooms. Requires simulatedFunding; never real payment authority.")
   usagePreview int @description("Operator-only opt-in for bounded local usage preview. Requires simulatedFunding. Never charges usage or enables real payments.")
   simulatedFunding int @description("Operator-only opt-in for local simulated wallet funding and hosting passes. 0/absent disables it. Never enables real payments.")
   maxPeople  int  @description("calls.Policy.MaxPeople: people allowed in one room.")
@@ -395,6 +406,7 @@ concept credential {
 @belongsTo(account, via="siteId")
 @displayCard(primary="title", secondary="startedAt", status="status")
 concept history {
+  costCents int @description("Final local simulated settlement snapshot for the payer only. Never billing authority; absent means unknown or uncharged legacy mode.")
   siteId string! @description("Deployable v1:platform:site that owns this private projection.")
   ownerUserId string! @description("Platform v1:identity:user owner used for internal row admission, not the participant account.")
   keyId string! @description("Authenticated v1:calls:key whose private history this is.")

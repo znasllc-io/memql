@@ -746,6 +746,7 @@
       "fields": [
         "accountId",
         "archivedAt",
+        "costCents",
         "endedAt",
         "keyId",
         "orderKey",
@@ -951,6 +952,7 @@
       "file": "calls/concepts.memql",
       "fields": [
         "accountId",
+        "callConfiguration",
         "hostLeftGrace",
         "maxAgents",
         "maxPeople",
@@ -1036,7 +1038,13 @@
         "shareStartedAt",
         "siteId",
         "status",
-        "title"
+        "title",
+        "usageConfig",
+        "usageCostCents",
+        "usageDigest",
+        "usageMeter",
+        "usageOperation",
+        "usageReservedCents"
       ],
       "required": [
         "ownerUserId",
@@ -1044,6 +1052,7 @@
       ],
       "enums": {
         "fundingMode": [
+          "usage_metered_preview",
           "usage_preview"
         ],
         "status": [
@@ -1068,7 +1077,11 @@
         "siteId",
         "start",
         "status",
-        "title"
+        "title",
+        "usageConfig",
+        "usageDigest",
+        "usageOperation",
+        "usageRequests"
       ],
       "required": [
         "ownerUserId",
@@ -1194,6 +1207,7 @@
       "enums": {
         "kind": [
           "activation",
+          "settlement",
           "topup"
         ],
         "passPlan": [

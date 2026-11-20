@@ -46,6 +46,7 @@ type MediaBackend interface {
 // for a participant MemQL never admitted.
 type MediaParticipant struct {
 	Identity, Kind string
+	SID            string
 	JoinedAt       time.Time
 	Tracks         []MediaTrack
 }
@@ -150,7 +151,7 @@ func participantFrom(p *livekit.ParticipantInfo) MediaParticipant {
 		tracks = append(tracks, MediaTrack{SID: t.GetSid(), Source: strings.ToLower(t.GetSource().String()), Muted: t.GetMuted()})
 	}
 	return MediaParticipant{
-		Identity: p.GetIdentity(),
+		SID: p.GetSid(), Identity: p.GetIdentity(),
 		Kind:     p.GetAttributes()[KindAttribute],
 		JoinedAt: joined,
 		Tracks:   tracks,

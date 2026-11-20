@@ -171,6 +171,13 @@ func (s *Service) Schedule(ctx context.Context, sess callrules.Session, req call
 	if err != nil {
 		return none, err
 	}
+	if req.QuoteID != "" || policy.CallConfiguration && h.row.CredentialID != "" {
+		out, e := s.configuredSchedule(ctx, h, req, "")
+		if e == nil {
+			s.observeBookedHistory(ctx, h, out.ID)
+		}
+		return out, e
+	}
 	span := want.span(policy)
 	if err := invalidBooking(s.now(), span, policy); err != nil {
 		return none, err
@@ -247,6 +254,13 @@ func (s *Service) Reschedule(ctx context.Context, sess callrules.Session, callID
 	policy, err := s.store.PolicyFor(ctx, owner, h.site.SiteID)
 	if err != nil {
 		return none, err
+	}
+	if req.QuoteID != "" || b.UsageConfig != "" {
+		out, e := s.configuredSchedule(ctx, h, req, b.ID)
+		if e == nil {
+			s.observeBookedHistory(ctx, h, out.ID)
+		}
+		return out, e
 	}
 	span := want.span(policy)
 	if err := invalidBooking(s.now(), span, policy); err != nil {
@@ -652,6 +666,13 @@ func (s *Service) joinBooking(ctx context.Context, site callrules.SiteRef, sess 
 	if err != nil {
 		return callrules.JoinResult{}, held.state(sess, site), err
 	}
+	if b.UsageConfig != "" {
+		c, e := decodeUsageConfig(b.UsageConfig)
+		if e != nil {
+			return callrules.JoinResult{}, held.state(sess, site), e
+		}
+		policy.MaxPeople, policy.MaxAgents = c.ParticipantLimit, 0
+	}
 	placed, refused, err := s.placeRoom(ctx, policy)
 	if err != nil {
 		return refused, held.state(sess, site), err
@@ -777,7 +798,16 @@ func (s *Service) openGated(ctx context.Context, site callrules.SiteRef, b booki
 			"status": callrules.BookingStarted, "roomId": roomID,
 		}, memql.VersionTimeAfter(current.Version, now))
 	}
+	var configuration *callrules.CallConfiguration
+	if current.UsageConfig != "" {
+		c, e := decodeUsageConfig(current.UsageConfig)
+		if e != nil {
+			return opening{}, e
+		}
+		configuration = &c
+	}
 	result, out, seat, err := s.openRoom(fresh, site, server, policy, held, ask, roomOpening{
+		configuration: configuration, usageOperation: current.UsageOperation, usageDigest: current.UsageDigest,
 		roomID: roomID, identity: identity, keyID: current.KeyID,
 		// A host link's holder takes a host seat and passes the lock; the room opens LOCKED,
 		// its waiting room on until its host lets people in; a full server queues the
@@ -808,10 +838,11 @@ func bookingsAs(ctx context.Context, owner string) (context.Context, bool) {
 // bookingRow is one v1:calls:scheduledCall. Its ids are BARE; its digests are filtered
 // on and read back only by bookingDigests.
 type bookingRow struct {
-	HistoryPending                                        bool
-	ID, SiteID, KeyID, Title, Status, RoomID, CalendarUID string
-	Start, End                                            time.Time
-	Version                                               time.Time
+	UsageConfig, UsageOperation, UsageDigest, UsageRequests string
+	HistoryPending                                          bool
+	ID, SiteID, KeyID, Title, Status, RoomID, CalendarUID   string
+	Start, End                                              time.Time
+	Version                                                 time.Time
 }
 
 // status is the concept's rule: an absent status reads as scheduled.
@@ -824,6 +855,7 @@ func (r bookingRow) status() string {
 
 func bookingFromRow(r map[string]any) bookingRow {
 	return bookingRow{
+		UsageConfig: rowString(r, "usageConfig"), UsageOperation: rowString(r, "usageOperation"), UsageDigest: rowString(r, "usageDigest"), UsageRequests: rowString(r, "usageRequests"),
 		HistoryPending: rowBool(r, "historyPending"),
 		ID:             memql.BareShortId(rowString(r, "id")),
 		SiteID:         memql.BareShortId(rowString(r, "siteId")),
@@ -908,6 +940,7 @@ func (s *Store) bookingDigests(ctx context.Context, owner, callID string) (guest
 
 // newBooking is what a booking's create writes: digests of its links, never the links.
 type newBooking struct {
+	UsageConfig, UsageOperation, UsageDigest, UsageRequests        string
 	ID, SiteID, KeyID, Title, GuestDigest, HostDigest, CalendarUID string
 	Start, End                                                     time.Time
 }
@@ -928,6 +961,9 @@ func (s *Store) createBooking(ctx context.Context, owner string, n newBooking, v
 	// Absent rather than empty: a call booked with no title has none.
 	if n.Title != "" {
 		args["title"] = n.Title
+	}
+	if n.UsageConfig != "" {
+		args["usageConfig"], args["usageOperation"], args["usageDigest"], args["usageRequests"] = n.UsageConfig, n.UsageOperation, n.UsageDigest, n.UsageRequests
 	}
 	call, err := langparser.RenderCall("createCallsScheduledCall", args)
 	return s.writeBooking(ctx, owner, absent(scheduledCallConcept, n.ID), "the booking", call, err)

@@ -184,6 +184,9 @@ func (s *Service) Host(ctx context.Context, sess callrules.Session, req callrule
 	if err != nil {
 		return err
 	}
+	if action == callrules.HostEnd || action == callrules.HostRemove {
+		s.checkpointUsage(ctx, h.room)
+	}
 	switch action {
 	case callrules.HostMute, callrules.HostCameraOff, callrules.HostStopShare:
 		return s.muteTracks(ctx, h, target, action)
@@ -318,6 +321,18 @@ func (s *Service) SessionCall(ctx context.Context, sess callrules.Session) (call
 	out.Title = callTitle(room.Title, room.OpenedAt)
 	out.AllowanceEndsAt = room.FundingDeadline
 	out.FundingMode = room.FundingMode
+	if room.FundingMode == usageMeteredMode {
+		c, e := decodeUsageConfig(room.UsageConfig)
+		if e != nil {
+			return none, e
+		}
+		out.ParticipantLimit, out.DurationMinutes = c.ParticipantLimit, c.DurationMinutes
+		if seat.Host {
+			reserved := room.UsageReservedCents
+			out.ReservedCents = &reserved
+			out.CostCents = room.UsageCostCents
+		}
+	}
 	if seat.occupying() {
 		out.OpenedAt = room.OpenedAt
 	}
@@ -766,9 +781,15 @@ func (s *Service) endRows(ctx context.Context, v roomView, reason string, now ti
 	if err := s.endBooking(ctx, owner, v.room, now); err != nil {
 		return err
 	}
-	return s.store.updateRoom(ctx, owner, v.room, map[string]any{
-		"status": "ended", "endedAt": now, "endReason": reason,
-	}, memql.VersionTimeAfter(v.room.Version, now))
+	cost, err := s.settleUsage(ctx, v.room, now)
+	if err != nil {
+		return err
+	}
+	fields := map[string]any{"status": "ended", "endedAt": now, "endReason": reason}
+	if cost != nil {
+		fields["usageCostCents"] = *cost
+	}
+	return s.store.updateRoom(ctx, owner, v.room, fields, memql.VersionTimeAfter(v.room.Version, now))
 }
 
 // hostLeftVerdict is what the host-left countdown says of a call now (hostLeft): what to

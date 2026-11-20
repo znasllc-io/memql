@@ -107,7 +107,13 @@ mutation session updateCallsSession {
 @serverOnly
 mutation room createCallsRoom {
   args {
-    fundingMode enum("usage_preview")
+    usageConfig string
+    usageOperation string
+    usageDigest string
+    usageReservedCents int
+    usageMeter string
+    usageCostCents int
+    fundingMode enum("usage_preview", "usage_metered_preview")
     fundingPassId string
     fundingStartedAt datetime
     fundingDeadline datetime
@@ -132,7 +138,7 @@ mutation room createCallsRoom {
     joinWindowCount  int
   }
   insert {
-    accept { fundingMode, fundingPassId, fundingStartedAt, fundingDeadline, fundingMaxPeople, historyPending, title, siteId, deployable, keyId, mediaServerId, mediaRoom, locked, hostSeatId, scheduledCallId, guestDigest, hostDigest, openedAt, joinWindowStartedAt, joinWindowCount }
+    accept { usageConfig, usageOperation, usageDigest, usageReservedCents, usageMeter, usageCostCents, fundingMode, fundingPassId, fundingStartedAt, fundingDeadline, fundingMaxPeople, historyPending, title, siteId, deployable, keyId, mediaServerId, mediaRoom, locked, hostSeatId, scheduledCallId, guestDigest, hostDigest, openedAt, joinWindowStartedAt, joinWindowCount }
     stamp {
       id: args.roomId
       ownerUserId: actor.userId
@@ -146,6 +152,8 @@ mutation room createCallsRoom {
 @serverOnly
 mutation room updateCallsRoom {
   args {
+    usageMeter string
+    usageCostCents int
     fundingStartedAt datetime
     fundingDeadline datetime
     historyPending bool
@@ -166,7 +174,7 @@ mutation room updateCallsRoom {
     shareStartedAt  datetime
   }
   update {
-    accept { fundingStartedAt, fundingDeadline, historyPending, title, mediaServerId, mediaRoom, status, locked, hostSeatId, hostLeftAt, endedAt, endReason, joinWindowStartedAt, joinWindowCount, shareSeatId, shareStartedAt }
+    accept { usageMeter, usageCostCents, fundingStartedAt, fundingDeadline, historyPending, title, mediaServerId, mediaRoom, status, locked, hostSeatId, hostLeftAt, endedAt, endReason, joinWindowStartedAt, joinWindowCount, shareSeatId, shareStartedAt }
     stamp {
       id: args.roomId
       createdAt: args.versionTime ?? now
@@ -288,6 +296,10 @@ mutation queueEntry updateCallsQueueEntry {
 @serverOnly
 mutation scheduledCall createCallsScheduledCall {
   args {
+    usageRequests string
+    usageConfig string
+    usageOperation string
+    usageDigest string
     historyPending bool
     scheduledCallId  string!
     versionTime  datetime
@@ -302,7 +314,7 @@ mutation scheduledCall createCallsScheduledCall {
     calendarUid  string @maxLength(320)
   }
   insert {
-    accept { historyPending, siteId, keyId, start, end, title, guestDigest, hostDigest, calendarUid }
+    accept { usageRequests, usageConfig, usageOperation, usageDigest, historyPending, siteId, keyId, start, end, title, guestDigest, hostDigest, calendarUid }
     stamp {
       id: args.scheduledCallId
       ownerUserId: actor.userId
@@ -316,6 +328,10 @@ mutation scheduledCall createCallsScheduledCall {
 @serverOnly
 mutation scheduledCall updateCallsScheduledCall {
   args {
+    usageRequests string
+    usageConfig string
+    usageOperation string
+    usageDigest string
     historyPending bool
     scheduledCallId  string!
     versionTime  datetime
@@ -328,7 +344,7 @@ mutation scheduledCall updateCallsScheduledCall {
     hostDigest  string @maxLength(64) @pattern("^[0-9a-f]{64}$")
   }
   update {
-    accept { historyPending, start, end, title, status, roomId, guestDigest, hostDigest }
+    accept { usageRequests, usageConfig, usageOperation, usageDigest, historyPending, start, end, title, status, roomId, guestDigest, hostDigest }
     stamp {
       id: args.scheduledCallId
       createdAt: args.versionTime ?? now
@@ -391,6 +407,7 @@ mutation policy createCallsPolicy {
     policyId  string!
     versionTime  datetime
     siteId  string!
+    callConfiguration int
     usagePreview int
     simulatedFunding int
     requirePasskeys int
@@ -406,7 +423,7 @@ mutation policy createCallsPolicy {
     queuePoll  int
   }
   insert {
-    accept { siteId, usagePreview, simulatedFunding, requirePasskeys, maxPeople, maxAgents, roomJoinsPerMinute, maxUpcomingScheduled, maxScheduledMinutes, hostLeftGrace, passTtl, scheduleHorizon, queueEntryTtl, queuePoll }
+    accept { siteId, callConfiguration, usagePreview, simulatedFunding, requirePasskeys, maxPeople, maxAgents, roomJoinsPerMinute, maxUpcomingScheduled, maxScheduledMinutes, hostLeftGrace, passTtl, scheduleHorizon, queueEntryTtl, queuePoll }
     stamp {
       id: args.policyId
       ownerUserId: actor.userId
@@ -421,6 +438,7 @@ mutation policy updateCallsPolicy {
   args {
     policyId  string!
     versionTime  datetime
+    callConfiguration int
     usagePreview int
     simulatedFunding int
     requirePasskeys int
@@ -436,7 +454,7 @@ mutation policy updateCallsPolicy {
     queuePoll  int
   }
   update {
-    accept { usagePreview, simulatedFunding, requirePasskeys, maxPeople, maxAgents, roomJoinsPerMinute, maxUpcomingScheduled, maxScheduledMinutes, hostLeftGrace, passTtl, scheduleHorizon, queueEntryTtl, queuePoll }
+    accept { callConfiguration, usagePreview, simulatedFunding, requirePasskeys, maxPeople, maxAgents, roomJoinsPerMinute, maxUpcomingScheduled, maxScheduledMinutes, hostLeftGrace, passTtl, scheduleHorizon, queueEntryTtl, queuePoll }
     stamp {
       id: args.policyId
       createdAt: args.versionTime ?? now
@@ -598,6 +616,7 @@ mutation credential updateCallsCredential {
 @serverOnly
 mutation history createCallsHistory {
   args {
+    costCents int
     historyId string!
     versionTime datetime
     siteId string!
@@ -614,7 +633,7 @@ mutation history createCallsHistory {
     purgeAt datetime
   }
   insert {
-    accept { siteId, keyId, sourceKind, sourceId, title, role, status, orderKey, startedAt, endedAt, archivedAt, purgeAt }
+    accept { costCents, siteId, keyId, sourceKind, sourceId, title, role, status, orderKey, startedAt, endedAt, archivedAt, purgeAt }
     stamp {
       id: args.historyId
       ownerUserId: actor.userId
@@ -627,6 +646,7 @@ mutation history createCallsHistory {
 @serverOnly
 mutation history updateCallsHistory {
   args {
+    costCents int
     historyId string!
     versionTime datetime
     title string
@@ -638,7 +658,7 @@ mutation history updateCallsHistory {
     purgeAt datetime
   }
   update {
-    accept { title, role, status, startedAt, endedAt, archivedAt, purgeAt }
+    accept { costCents, title, role, status, startedAt, endedAt, archivedAt, purgeAt }
     stamp {
       id: args.historyId
       createdAt: args.versionTime ?? now

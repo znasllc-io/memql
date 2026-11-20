@@ -214,9 +214,13 @@ type reconcilePlan struct {
 // reconcileRoom reconciles one call: its participant list read outside the gates, its
 // rows repaired under them, and the media calls their decisions need made after them.
 func (s *Service) reconcileRoom(ctx context.Context, server MediaServer, backend MediaBackend, hint roomRow, tally *reconcileTally) error {
+	if handled, err := s.reconcileMeterCapacity(ctx, hint, backend, tally); handled || err != nil {
+		return err
+	}
 	if handled, err := s.reconcileFunding(ctx, hint, backend, tally); handled || err != nil {
 		return err
 	}
+	observedAt := s.now() // Bound the observation before the provider request, never at delayed gate acquisition.
 	var present []MediaParticipant
 	if err := bounded(ctx, func(ctx context.Context) error {
 		var err error
@@ -225,7 +229,7 @@ func (s *Service) reconcileRoom(ctx context.Context, server MediaServer, backend
 	}); err != nil {
 		return err
 	}
-	plan, err := s.reconcileGated(ctx, server, hint, present, tally)
+	plan, err := s.reconcileGatedObserved(ctx, server, hint, present, tally, observedAt)
 	if err != nil {
 		return err
 	}
@@ -266,6 +270,9 @@ func (s *Service) reconcileRoom(ctx context.Context, server MediaServer, backend
 // reconcileGated is steps 1 to 5 of the file note, under the call's gates, in the note's
 // order: the seats, the identities, the queue, the host, and how the call ends.
 func (s *Service) reconcileGated(ctx context.Context, server MediaServer, hint roomRow, present []MediaParticipant, tally *reconcileTally) (reconcilePlan, error) {
+	return s.reconcileGatedObserved(ctx, server, hint, present, tally, s.now())
+}
+func (s *Service) reconcileGatedObserved(ctx context.Context, server MediaServer, hint roomRow, present []MediaParticipant, tally *reconcileTally, observedAt time.Time) (reconcilePlan, error) {
 	release, err := s.gates(ctx, endGates(hint)...)
 	if err != nil {
 		return reconcilePlan{}, err
@@ -282,6 +289,12 @@ func (s *Service) reconcileGated(ctx context.Context, server MediaServer, hint r
 	if err != nil {
 		return reconcilePlan{}, err
 	}
+	updated, err := s.meterPresence(fresh, *room, v.seats, present, observedAt)
+	if err != nil {
+		return reconcilePlan{}, err
+	}
+	room = &updated
+	v.room = updated
 	shown := map[string]bool{}
 	for _, participant := range present {
 		shown[participant.Identity] = true

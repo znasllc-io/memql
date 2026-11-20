@@ -8,29 +8,35 @@ import (
 // AccountRequest is one bounded account ceremony or credential-management act.
 // Credential is the browser's WebAuthn response, verified by the service.
 type AccountRequest struct {
-	Action         string          `json:"action"`
-	Key            string          `json:"key,omitempty"`
-	ChallengeID    string          `json:"challengeId,omitempty"`
-	Credential     json.RawMessage `json:"credential,omitempty"`
-	CredentialID   string          `json:"credentialId,omitempty"`
-	Label          string          `json:"label,omitempty"`
-	AccountID      string          `json:"accountId,omitempty"`
-	AmountCents    int64           `json:"amountCents,omitempty"`
-	Plan           string          `json:"plan,omitempty"`
-	IdempotencyKey string          `json:"idempotencyKey,omitempty"`
+	ParticipantLimit int             `json:"participantLimit,omitempty"`
+	DurationMinutes  int             `json:"durationMinutes,omitempty"`
+	Insights         bool            `json:"insights,omitempty"`
+	Action           string          `json:"action"`
+	Key              string          `json:"key,omitempty"`
+	ChallengeID      string          `json:"challengeId,omitempty"`
+	Credential       json.RawMessage `json:"credential,omitempty"`
+	CredentialID     string          `json:"credentialId,omitempty"`
+	Label            string          `json:"label,omitempty"`
+	AccountID        string          `json:"accountId,omitempty"`
+	AmountCents      int64           `json:"amountCents,omitempty"`
+	Plan             string          `json:"plan,omitempty"`
+	IdempotencyKey   string          `json:"idempotencyKey,omitempty"`
 }
 
 type AccountCapabilities struct {
-	Passkeys         bool `json:"passkeys"`
-	RequirePasskeys  bool `json:"requirePasskeys"`
-	Payments         bool `json:"payments"`
-	SimulatedFunding bool `json:"simulatedFunding"`
-	UsagePreview     bool `json:"usagePreview"`
+	CallConfiguration bool `json:"callConfiguration"`
+	Passkeys          bool `json:"passkeys"`
+	RequirePasskeys   bool `json:"requirePasskeys"`
+	Payments          bool `json:"payments"`
+	SimulatedFunding  bool `json:"simulatedFunding"`
+	UsagePreview      bool `json:"usagePreview"`
 }
 
 // AccountID is the durable calls key id, not a MemQL operator identity or the
 // site's owning organization. A separate random handle identifies it to WebAuthn.
 type AccountInfo struct {
+	AvailableCents  *int64       `json:"availableCents,omitempty"`
+	ReservedCents   *int64       `json:"reservedCents,omitempty"`
 	AccountID       string       `json:"accountId"`
 	KeyID           string       `json:"keyId"`
 	KeyLabel        string       `json:"keyLabel"`
@@ -81,6 +87,7 @@ type AccountCredential struct {
 }
 
 type AccountResult struct {
+	Quote           *CallQuote          `json:"quote,omitempty"`
 	Authenticated   bool                `json:"authenticated"`
 	Capabilities    AccountCapabilities `json:"capabilities"`
 	Account         *AccountInfo        `json:"account,omitempty"`

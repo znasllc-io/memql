@@ -65,6 +65,12 @@ shape simulatedWalletEntry callsSimulatedWalletEntryFull {
 /// The room row as the calls integration reads it. No digest is projected.
 @row
 shape room callsRoomFull {
+  usageConfig
+  usageOperation
+  usageDigest
+  usageReservedCents
+  usageMeter
+  usageCostCents
   fundingMode
   fundingPassId
   fundingStartedAt
@@ -143,6 +149,10 @@ shape queueEntry callsQueueEntryFull {
 /// The scheduledCall row as the calls integration reads it. No digest is projected.
 @row
 shape scheduledCall callsScheduledCallFull {
+  usageRequests
+  usageConfig
+  usageOperation
+  usageDigest
   historyPending
   row.id
   row.createdAt
@@ -186,6 +196,7 @@ shape mediaServer callsMediaServerFull {
 /// The policy row as the calls integration reads it. No digest is projected.
 @row
 shape policy callsPolicyFull {
+  callConfiguration
   usagePreview
   simulatedFunding
   row.id
@@ -256,6 +267,7 @@ shape credential callsCredentialFull {
 /// Private history service projection; never client-readable.
 @row
 shape history callsHistoryFull {
+  costCents
   row.id
   row.createdAt
   siteId

@@ -1339,3 +1339,101 @@ failures, first-admission repair, unchanged balance/history cost, old pass
 compatibility and host-left cleanup. Actual participant billing and optional
 transcription or sentiment processing are separate capabilities; this flag does
 not implement or enable them.
+
+### Configured metered simulation
+
+The separate operator opt-in `callConfiguration: 1`, together with
+`simulatedFunding: 1`, enables configured prepaid **simulation**. Install the
+additive calls schema and matching binaries on every application node before
+using `callsPolicySet` on the intended local site. A local site permitting the
+full preview range also sets `maxPeople: 100`. The existing
+`maxScheduledMinutes` continues to control legacy bookings; configured bookings
+use their explicit 1440-minute ceiling. No real payment, paid media processing,
+transcription, sentiment processing or commercial billing is enabled.
+
+The account capability `callConfiguration` and `hostingMode:
+"usage_metered_preview"` distinguish this mode. A claimed key can request an
+account `quote_call` with its expected `accountId`, `participantLimit` (1–100),
+`durationMinutes` (10, or a multiple of 15 through 1440), and `insights: false`.
+The host and human or AI guests share that participant ceiling. Insights true is
+refused as `insights_unavailable`; an estimate is never evidence of processing.
+
+A quote is an authenticated, site/key-bound five-minute configuration snapshot,
+not a reservation. Its result includes `quoteId`, the configuration,
+`rateVersion`, integer `rateMicroDollarsPerMinute`, `maxCostCents`, `expiresAt`
+and `expiresInMs`. Clients use the server amount and may use the relative lifetime
+with a monotonic clock. The local illustrative rate version
+`preview-2026-11-20-v1` uses marginal participant bands: 2500 microdollars per
+participant-minute for the first eight, 1500 for the next seventeen, 1000 for the
+next twenty-five, and 500 for the next fifty. These are simulation rates, not a
+production catalog. The maximum reservation rounds up to a cent; final usage
+retains fractional cents and rounds once to the nearest cent, capped by that
+reservation. Ten minutes is the shortest configured **ceiling**, not a minimum
+charge. This simulation rounds each completed call independently: a one-person,
+one-minute call costs 0.25 cents before rounding and settles at zero cents.
+**Production billing must not ship with that repeated-short-call arbitrage.**
+It must retain and carry sub-cent usage across calls on the same wallet before
+charging whole cents, with durable replay-safe precision. No minimum charge is
+introduced by this preview; final real-money rounding and its customer wording
+remain a launch requirement.
+
+Start, schedule and reschedule accept the quoted `quoteId` and a durable
+16–128 character `idempotencyKey` using letters, digits, `_` or `-`. Scheduling's
+existing `minutes` must equal the quote duration. Changed configuration requires
+a fresh quote and operation. Lookup of an already committed operation precedes
+quote expiry. Operation identifiers and payload fingerprints survive process
+and token-pepper changes; invitation tokens remain secret-derived. A booking
+retains its last configuration and up to 100 operation fingerprints, refusing
+further revisions rather than forgetting old retries. A superseded or cancelled
+operation cannot restore old configuration or resurrect a booking.
+
+The payer key gate serializes starts, scheduled openings, top-ups and settlement
+across replicas. One payer supports one open room. The room is written **last**,
+after the opener's session, seat, optional queue entry and booking: a failed
+initial write therefore creates no monetary hold. The room itself is the durable
+reservation; no separate wallet-debit/reservation-write gap exists. An immutable
+configured room stores its participant ceiling, rate version, maximum reserve
+and creation-time deadline. Waiting, queueing, rejoin, host transfer, top-up and
+retry never extend that deadline. A booking checks available funds when saved,
+creates no hold, and checks again when opened. Its stored quote version remains
+authoritative after the short confirmation token expires.
+
+`balanceCents` is total unspent simulated credit; `availableCents + reservedCents`
+always equals that total. A hold does not debit balance. Settlement writes one
+deterministic immutable wallet entry carrying the final debit and complete new
+wallet state, then ends the room. A committed settlement receipt releases its
+hold even if the final room write fails; reconciliation completes the end without
+debiting again. Wallet snapshots validate the immutable head around the hold
+read and retry a concurrent change. Archiving private history cannot release a
+hold, refund a call or affect billing authority. History projects final simulated
+cost only for the payer; ongoing or legacy costs remain unknown rather than zero.
+
+The usage journal contains **connection metadata only**: authenticated provider
+connection SIDs, opaque seat identities and timestamps. It contains no audio,
+video, transcript or chat. Provider join/disconnect events and authenticated
+participant lists establish continuous per-connection intervals. Reconciliation
+persists proven bounds before advancing; provider disconnects may shorten an
+earlier observation. Settlement unions overlapping connections for each identity
+and recalculates the marginal rate at every concurrency boundary. It never
+multiplies the current participant count by the call's earlier elapsed time.
+Browser clocks, browser counters and seat admission alone cannot create usage.
+
+Final provider checkpoints run before explicit leave, removal, end and deadline
+cleanup. When a provider read fails or join/disconnect evidence is missing, the
+last proven bound is retained: gaps are **undercharged**, never extrapolated as
+billable time. This conservative local preview is not a qualified production
+meter. Provider clock disagreement, missing events and process/provider outages
+remain production qualification work. The journal is bounded to 4096 connections;
+reaching that limit refuses further admissions and reconciliation closes and
+settles the room. Media deletion failure preserves the open hold until retry;
+physical disconnection still depends on the existing reconciliation/provider
+availability rather than a hard real-time guarantee.
+
+Older `usage_preview` rooms remain uncharged with their original eight-seat,
+180-minute bound. Existing day/month receipts and rooms keep their original
+semantics. There is no destructive conversion, automatic pass activation or
+fabricated historical debit. Disabling the new flag prevents new configured
+operations; existing rooms retain their stored deadline and settlement mode.
+Regression coverage includes `usage_metered_db_test.go`, the pure configuration
+and usage-meter tests, the existing pass/preview tests and
+`history_current_db_test.go`.

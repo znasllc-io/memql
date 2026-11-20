@@ -56,13 +56,17 @@ type RosterWaiter struct {
 // call are told. OpenedAt is the room's persisted start, shared by every admitted or
 // in-call seat across late joins and reconnects; waiting seats are not given it.
 type SeatCall struct {
-	Title           string
-	Host            bool
-	OpenedAt        time.Time
-	CountdownEndsAt time.Time
-	AllowanceEndsAt time.Time
-	FundingMode     string
-	Roster          *Roster
+	ParticipantLimit int
+	DurationMinutes  int
+	ReservedCents    *int64
+	CostCents        *int64
+	Title            string
+	Host             bool
+	OpenedAt         time.Time
+	CountdownEndsAt  time.Time
+	AllowanceEndsAt  time.Time
+	FundingMode      string
+	Roster           *Roster
 }
 
 // The host controls (design section 7.7, "Host controls"). Each is stable: a client

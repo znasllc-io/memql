@@ -22,6 +22,7 @@ type HistoryCall struct {
 	Role            string `json:"role"`
 	Status          string `json:"status"`
 	StartedAt       string `json:"startedAt,omitempty"`
+	ScheduledAt     string `json:"scheduledAt,omitempty"`
 	EndedAt         string `json:"endedAt,omitempty"`
 	DurationSeconds *int64 `json:"durationSeconds"`
 	CostCents       *int64 `json:"costCents"`
@@ -51,11 +52,12 @@ type HistoryOverview struct {
 }
 
 type HistoryPage struct {
-	AccountID  string          `json:"accountId"`
-	Calls      []HistoryCall   `json:"calls"`
-	NextCursor string          `json:"nextCursor,omitempty"`
-	Collecting bool            `json:"collecting"`
-	Overview   HistoryOverview `json:"overview"`
+	AccountID   string          `json:"accountId"`
+	Calls       []HistoryCall   `json:"calls"`
+	NextCursor  string          `json:"nextCursor,omitempty"`
+	Collecting  bool            `json:"collecting"`
+	Overview    HistoryOverview `json:"overview"`
+	CurrentCall *HistoryCall    `json:"currentCall,omitempty"`
 }
 
 type HistoryActionRequest struct {

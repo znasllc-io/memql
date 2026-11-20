@@ -173,6 +173,7 @@ const (
 // (screen_share, ...); At the event's time, whole seconds, zero when it carried none.
 type mediaEvent struct {
 	ID, Kind, Room, Identity, TrackSID, TrackSource string
+	ParticipantSID                                  string
 	At                                              time.Time
 }
 
@@ -186,7 +187,7 @@ func parseMediaEvent(body []byte) (mediaEvent, error) {
 		return mediaEvent{}, errors.New("calls: the delivery's body is not a media server event")
 	}
 	out := mediaEvent{
-		ID: ev.GetId(), Kind: ev.GetEvent(), Room: ev.GetRoom().GetName(), Identity: ev.GetParticipant().GetIdentity(),
+		ParticipantSID: ev.GetParticipant().GetSid(), ID: ev.GetId(), Kind: ev.GetEvent(), Room: ev.GetRoom().GetName(), Identity: ev.GetParticipant().GetIdentity(),
 	}
 	if track := ev.GetTrack(); track != nil {
 		out.TrackSID = track.GetSid()
@@ -267,6 +268,11 @@ func (s *Service) participantGated(ctx context.Context, hint roomRow, ev mediaEv
 	if err != nil || room == nil {
 		return outcomeUnknownRoom, err
 	}
+	metered, meterErr := s.meterEvent(fresh, *room, seat, ev)
+	if meterErr != nil {
+		return "", meterErr
+	}
+	room = &metered
 	if seat == nil || !seat.occupying() || !room.open() {
 		// NO SEAT IN THE CALL. A connection is disconnected again; a disconnect has
 		// nothing left to disconnect, and changes nothing.

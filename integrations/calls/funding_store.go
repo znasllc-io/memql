@@ -34,8 +34,11 @@ func simulationWalletFrom(row map[string]any) (*simulationWalletEntry, error) {
 	if e.ID == "" || e.SiteID == "" || e.KeyID == "" || e.Version.IsZero() || len(e.RequestDigest) != 64 {
 		return nil, invalidSimulationWallet("identity")
 	}
-	if e.Kind != "topup" && e.Kind != "activation" {
+	if e.Kind != "topup" && e.Kind != "activation" && e.Kind != "settlement" {
 		return nil, invalidSimulationWallet("kind")
+	}
+	if e.Kind == "settlement" && (e.CreditedCents != 0 || e.Plan != "") {
+		return nil, invalidSimulationWallet("settlement")
 	}
 	if (e.Kind == "topup" && (e.CreditedCents < simulatedMinimumTopUpCents || e.DebitedCents != 0 || e.Plan != "")) || (e.Kind == "activation" && (e.CreditedCents != 0 || e.DebitedCents == 0)) {
 		return nil, invalidSimulationWallet("receipt")

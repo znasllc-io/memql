@@ -42,6 +42,9 @@ func (s *Service) Account(ctx context.Context, site callrules.SiteRef, token str
 	if !validAccountRequest(req) {
 		return callrules.AccountResult{}, callrules.ErrInvalid
 	}
+	if req.Action == "quote_call" {
+		return s.quoteCall(ctx, site, token, req)
+	}
 	if req.Action == "simulate_topup" || req.Action == "activate_pass" {
 		return s.accountFunding(ctx, site, token, req)
 	}
@@ -74,6 +77,12 @@ func (s *Service) Account(ctx context.Context, site callrules.SiteRef, token str
 }
 
 func validAccountRequest(r callrules.AccountRequest) bool {
+	if r.Action == "quote_call" {
+		return validQuoteRequest(r)
+	}
+	if r.ParticipantLimit != 0 || r.DurationMinutes != 0 || r.Insights {
+		return false
+	}
 	if r.Action == "simulate_topup" || r.Action == "activate_pass" {
 		return validFundingRequest(r)
 	}
@@ -105,7 +114,7 @@ func validAccountRequest(r callrules.AccountRequest) bool {
 
 func (s *Service) accountBase(ctx context.Context, site callrules.SiteRef) (callrules.AccountResult, error) {
 	policy, err := s.store.PolicyFor(ctx, site.OwnerUserID, site.SiteID)
-	return callrules.AccountResult{Capabilities: callrules.AccountCapabilities{Passkeys: true, RequirePasskeys: policy.RequirePasskeys, Payments: false, SimulatedFunding: policy.SimulatedFunding, UsagePreview: policy.SimulatedFunding && policy.UsagePreview}, Credentials: []callrules.AccountCredential{}}, err
+	return callrules.AccountResult{Capabilities: callrules.AccountCapabilities{Passkeys: true, RequirePasskeys: policy.RequirePasskeys, Payments: false, SimulatedFunding: policy.SimulatedFunding, CallConfiguration: policy.SimulatedFunding && policy.CallConfiguration, UsagePreview: policy.SimulatedFunding && policy.UsagePreview}, Credentials: []callrules.AccountCredential{}}, err
 }
 func (s *Service) accountSnapshot(ctx context.Context, site callrules.SiteRef, token string) (callrules.AccountResult, error) {
 	out, err := s.accountBase(ctx, site)

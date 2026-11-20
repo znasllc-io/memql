@@ -405,6 +405,9 @@ func (s *Store) createRoom(ctx context.Context, owner string, n newRoom, version
 			args["fundingStartedAt"] = versionStamp(n.FundingStartedAt)
 		}
 	}
+	if n.FundingMode == usageMeteredMode {
+		args["usageConfig"], args["usageOperation"], args["usageDigest"], args["usageReservedCents"], args["usageMeter"] = n.UsageConfig, n.UsageOperation, n.UsageDigest, n.UsageReservedCents, n.UsageMeter
+	}
 	call, err := langparser.RenderCall("createCallsRoom", args)
 	return s.writeAs(ctx, owner, absent(roomConcept, n.ID), "the room", call, err)
 }
@@ -820,6 +823,10 @@ func (l serverLoad) roomState(room roomRow) callrules.RoomState {
 		case callrules.KindAgent:
 			state.Agents++
 		}
+	}
+	if room.bounded() {
+		state.People += state.Agents
+		state.Agents = 0
 	}
 	return state
 }

@@ -67,31 +67,31 @@ func TestALiveKitWebhookBodyReadsAsItsEvent(t *testing.T) {
 		{
 			name:  "participant_joined",
 			event: &livekit.WebhookEvent{Event: "participant_joined", Id: "EV_1", Room: room, Participant: who, CreatedAt: at.Unix()},
-			want:  mediaEvent{ID: "EV_1", Kind: eventParticipantJoined, Room: "room-short-id", Identity: "seat-identity", At: at},
+			want:  mediaEvent{ID: "EV_1", Kind: eventParticipantJoined, Room: "room-short-id", Identity: "seat-identity", ParticipantSID: "PA_abc", At: at},
 		},
 		{
 			name:  "participant_left",
 			event: &livekit.WebhookEvent{Event: "participant_left", Id: "EV_2", Room: room, Participant: who, CreatedAt: at.Unix() + 7},
-			want:  mediaEvent{ID: "EV_2", Kind: eventParticipantLeft, Room: "room-short-id", Identity: "seat-identity", At: at.Add(7 * time.Second)},
+			want:  mediaEvent{ID: "EV_2", Kind: eventParticipantLeft, Room: "room-short-id", Identity: "seat-identity", ParticipantSID: "PA_abc", At: at.Add(7 * time.Second)},
 		},
 		{
 			name: "track_published, a screen share",
 			event: &livekit.WebhookEvent{Event: "track_published", Id: "EV_3", Room: room, Participant: who, CreatedAt: at.Unix(),
 				Track: &livekit.TrackInfo{Sid: "TR_share", Type: livekit.TrackType_VIDEO, Source: livekit.TrackSource_SCREEN_SHARE}},
-			want: mediaEvent{ID: "EV_3", Kind: eventTrackPublished, Room: "room-short-id", Identity: "seat-identity", TrackSID: "TR_share", TrackSource: "screen_share", At: at},
+			want: mediaEvent{ID: "EV_3", Kind: eventTrackPublished, Room: "room-short-id", Identity: "seat-identity", ParticipantSID: "PA_abc", TrackSID: "TR_share", TrackSource: "screen_share", At: at},
 		},
 		{
 			name: "track_published, the share's audio",
 			event: &livekit.WebhookEvent{Event: "track_published", Id: "EV_4", Room: room, Participant: who, CreatedAt: at.Unix(),
 				Track: &livekit.TrackInfo{Sid: "TR_audio", Type: livekit.TrackType_AUDIO, Source: livekit.TrackSource_SCREEN_SHARE_AUDIO}},
-			want: mediaEvent{ID: "EV_4", Kind: eventTrackPublished, Room: "room-short-id", Identity: "seat-identity", TrackSID: "TR_audio", TrackSource: "screen_share_audio", At: at},
+			want: mediaEvent{ID: "EV_4", Kind: eventTrackPublished, Room: "room-short-id", Identity: "seat-identity", ParticipantSID: "PA_abc", TrackSID: "TR_audio", TrackSource: "screen_share_audio", At: at},
 		},
 		{
 			// protojson leaves a zero enum out, so this body has no "source" at all.
 			name: "track_published, a source nobody named",
 			event: &livekit.WebhookEvent{Event: "track_published", Id: "EV_5", Room: room, Participant: who, CreatedAt: at.Unix(),
 				Track: &livekit.TrackInfo{Sid: "TR_unknown"}},
-			want: mediaEvent{ID: "EV_5", Kind: eventTrackPublished, Room: "room-short-id", Identity: "seat-identity", TrackSID: "TR_unknown", TrackSource: "unknown", At: at},
+			want: mediaEvent{ID: "EV_5", Kind: eventTrackPublished, Room: "room-short-id", Identity: "seat-identity", ParticipantSID: "PA_abc", TrackSID: "TR_unknown", TrackSource: "unknown", At: at},
 		},
 		{
 			name:  "room_finished",
@@ -101,7 +101,7 @@ func TestALiveKitWebhookBodyReadsAsItsEvent(t *testing.T) {
 		{
 			name:  "an event the service does not act on",
 			event: &livekit.WebhookEvent{Event: "track_unpublished", Id: "EV_7", Room: room, Participant: who, CreatedAt: at.Unix()},
-			want:  mediaEvent{ID: "EV_7", Kind: "track_unpublished", Room: "room-short-id", Identity: "seat-identity", At: at},
+			want:  mediaEvent{ID: "EV_7", Kind: "track_unpublished", Room: "room-short-id", Identity: "seat-identity", ParticipantSID: "PA_abc", At: at},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
