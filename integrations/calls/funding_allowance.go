@@ -12,19 +12,54 @@ import (
 )
 
 // Simulated funding is deliberately bounded, not a production financial
-// ledger. Its authoritative usage is operational room time; private history
-// can be archived or purged without returning a second of allowance.
+// ledger. Legacy pass allowance uses operational room time; usage previews
+// never charge a wallet. Private history cannot grant either funding mode.
 const fundingRoomScanLimit = 1000
 const endReasonAllowance = "allowance_exhausted"
 
+// Usage preview is an operator-authorized local resource grant, not a price or
+// debit. These hard bounds remain independent of the illustrative UI rates.
+const usagePreviewMode = "usage_preview"
+const usagePreviewDuration = 180 * time.Minute
+const usagePreviewMaxPeople = 8
+
 type roomFunding struct {
-	FundingPassID                     string
+	FundingPassID, FundingMode        string
 	FundingStartedAt, FundingDeadline time.Time
 	FundingMaxPeople                  int
 }
 
 func fundingFromRow(r map[string]any) roomFunding {
-	return roomFunding{FundingPassID: memql.BareShortId(rowString(r, "fundingPassId")), FundingStartedAt: rowTime(r, "fundingStartedAt"), FundingDeadline: rowTime(r, "fundingDeadline"), FundingMaxPeople: rowInt(r, "fundingMaxPeople")}
+	return roomFunding{FundingMode: rowString(r, "fundingMode"), FundingPassID: memql.BareShortId(rowString(r, "fundingPassId")), FundingStartedAt: rowTime(r, "fundingStartedAt"), FundingDeadline: rowTime(r, "fundingDeadline"), FundingMaxPeople: rowInt(r, "fundingMaxPeople")}
+}
+
+// A mode marker is necessary: old rooms without it retain their exact pass
+// semantics, while preview rooms must never fall through to unlimited legacy.
+func (f roomFunding) bounded() bool { return f.FundingPassID != "" || f.FundingMode != "" }
+
+// Opening from a link may have no payer session. Check the durable claimed key
+// and live credentials under the payer gate rather than trusting client canHost.
+func (s *Service) usagePreviewEligible(ctx context.Context, site callrules.SiteRef, keyID string, wallet *simulationWalletEntry, policy callrules.Policy) (bool, error) {
+	if !policy.SimulatedFunding || !policy.UsagePreview || wallet == nil || wallet.BalanceCents <= 0 {
+		return false, nil
+	}
+	key, err := s.store.keyByID(ctx, site.OwnerUserID, keyID)
+	if err != nil {
+		return false, err
+	}
+	if key == nil || key.SiteID != site.SiteID || !keyActive(key.Status) || key.UserHandle == "" {
+		return false, nil
+	}
+	credentials, err := s.store.credentialsForKey(ctx, site.OwnerUserID, keyID)
+	if err != nil {
+		return false, err
+	}
+	for _, credential := range credentials {
+		if credential.RevokedAt.IsZero() {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func allowanceUnavailable() error {
@@ -85,15 +120,23 @@ func (s *Service) fundingForOpening(ctx context.Context, site callrules.SiteRef,
 	if !policy.SimulatedFunding {
 		return roomFunding{}, callrules.KeyAllowance{}, callrules.Refuse(callrules.ErrForbidden, "simulation_disabled", "simulated funding is disabled for this site")
 	}
-	if wallet.Pass == nil || now.Before(wallet.Pass.ActivatedAt) || !now.Before(wallet.Pass.ExpiresAt) {
-		return roomFunding{}, callrules.KeyAllowance{}, callrules.Refuse(callrules.ErrConflict, "pass_required", "an active simulated pass is required")
-	}
 	rooms, err := s.store.openRoomsForKey(ctx, site.OwnerUserID, keyID)
 	if err != nil {
 		return roomFunding{}, callrules.KeyAllowance{}, err
 	}
 	if len(rooms) > 0 {
-		return roomFunding{}, callrules.KeyAllowance{}, callrules.Refuse(callrules.ErrConflict, callrules.ReasonKeyInCall, "one simulated pass covers one open room")
+		return roomFunding{}, callrules.KeyAllowance{}, callrules.Refuse(callrules.ErrConflict, callrules.ReasonKeyInCall, "one funded key covers one open room")
+	}
+	preview, err := s.usagePreviewEligible(ctx, site, keyID, wallet, policy)
+	if err != nil {
+		return roomFunding{}, callrules.KeyAllowance{}, err
+	}
+	if preview {
+		deadline := now.Add(usagePreviewDuration)
+		return roomFunding{FundingMode: usagePreviewMode, FundingDeadline: deadline, FundingMaxPeople: usagePreviewMaxPeople}, callrules.KeyAllowance{AvailableUntil: deadline}, nil
+	}
+	if wallet.Pass == nil || now.Before(wallet.Pass.ActivatedAt) || !now.Before(wallet.Pass.ExpiresAt) {
+		return roomFunding{}, callrules.KeyAllowance{}, callrules.Refuse(callrules.ErrConflict, "pass_required", "an active simulated pass or funded usage preview is required")
 	}
 	allowance, err := s.passAllowance(ctx, site.OwnerUserID, site.SiteID, keyID, *wallet.Pass, now)
 	if err != nil {
@@ -105,9 +148,9 @@ func (s *Service) fundingForOpening(ctx context.Context, site callrules.SiteRef,
 	return roomFunding{FundingPassID: wallet.Pass.ID, FundingDeadline: wallet.Pass.ExpiresAt, FundingMaxPeople: wallet.Pass.MaxPeople}, allowance, nil
 }
 
-// A booking is an intention, not a reserved financial balance. It must fit
-// within the existing pass and per-day/total allowance; opening rechecks the
-// actual usage because other calls may consume time after the booking is made.
+// A booking is an intention, not a reserved financial balance. Preview bookings
+// obey the local duration ceiling; legacy bookings must fit their pass allowance.
+// Opening rechecks eligibility because it may change after booking.
 // Cancellation deliberately does not call this: expiry cannot prevent cleanup.
 func (s *Service) checkFundingBooking(ctx context.Context, h keyHolder, start, end time.Time) error {
 	wallet, err := s.simulatedWallet(ctx, h.site.OwnerUserID, h.site.SiteID, h.row.KeyID)
@@ -120,6 +163,16 @@ func (s *Service) checkFundingBooking(ctx context.Context, h keyHolder, start, e
 	}
 	if !policy.SimulatedFunding {
 		return callrules.Refuse(callrules.ErrForbidden, "simulation_disabled", "simulated funding is disabled for this site")
+	}
+	preview, err := s.usagePreviewEligible(ctx, h.site, h.row.KeyID, wallet, policy)
+	if err != nil {
+		return err
+	}
+	if preview {
+		if end.Sub(start) > usagePreviewDuration {
+			return callrules.Refuse(callrules.ErrInvalid, "preview_duration", "local preview calls last at most 180 minutes")
+		}
+		return nil
 	}
 	if wallet.Pass == nil || !s.now().Before(wallet.Pass.ExpiresAt) || start.Before(wallet.Pass.ActivatedAt) || end.After(wallet.Pass.ExpiresAt) {
 		return callrules.Refuse(callrules.ErrConflict, "pass_required", "the scheduled call must fit within the current simulated pass")
@@ -176,7 +229,7 @@ func (s *Service) heldKeyForCancellation(ctx context.Context, h keyHolder, now t
 }
 
 func fundedPolicy(policy callrules.Policy, funding roomFunding) callrules.Policy {
-	if funding.FundingPassID != "" {
+	if funding.bounded() {
 		policy.MaxPeople = min(policy.MaxPeople, max(0, funding.FundingMaxPeople))
 		// Current invitations all enter as person seats, including external
 		// agents. A separate machine seat must not add capacity above this pass.
@@ -186,10 +239,16 @@ func fundedPolicy(policy callrules.Policy, funding roomFunding) callrules.Policy
 }
 
 func fundingRoomAllowed(room roomRow, now time.Time) error {
-	if room.FundingPassID == "" {
+	if !room.bounded() {
 		return nil
 	}
+	if room.FundingMode != "" && (room.FundingMode != usagePreviewMode || room.FundingPassID != "") {
+		return allowanceUnavailable()
+	}
 	if room.FundingDeadline.IsZero() || room.FundingMaxPeople <= 0 {
+		return allowanceUnavailable()
+	}
+	if room.FundingMode == usagePreviewMode && (room.OpenedAt.IsZero() || !room.FundingDeadline.After(room.OpenedAt) || room.FundingDeadline.After(room.OpenedAt.Add(usagePreviewDuration)) || room.FundingMaxPeople > usagePreviewMaxPeople) {
 		return allowanceUnavailable()
 	}
 	if !now.Before(room.FundingDeadline) {
@@ -203,7 +262,7 @@ func fundingRoomAllowed(room roomRow, now time.Time) error {
 // persisted admission, never from the retry's clock. All callers hold the
 // payer key and room gates in the same acquisition; no nested pool reservation.
 func (s *Service) beginRoomFunding(ctx context.Context, room roomRow, now time.Time) (roomRow, error) {
-	if room.FundingPassID == "" || !room.FundingStartedAt.IsZero() {
+	if !room.bounded() || !room.FundingStartedAt.IsZero() {
 		return room, fundingRoomAllowed(room, now)
 	}
 	seats, err := s.store.seatsForRoom(ctx, room.OwnerUserID, room.ID)
@@ -218,6 +277,19 @@ func (s *Service) beginRoomFunding(ctx context.Context, room roomRow, now time.T
 	}
 	if began.IsZero() {
 		return room, fundingRoomAllowed(room, now)
+	}
+	// Preview keeps the creation-time ceiling even after queuing or a failed
+	// first-admission write. It never consumes money or a legacy pass allowance.
+	if room.FundingMode == usagePreviewMode {
+		if err := fundingRoomAllowed(room, now); err != nil {
+			return room, err
+		}
+		version := memql.VersionTimeAfter(room.Version, now)
+		if err := s.store.updateRoom(ctx, room.OwnerUserID, room, map[string]any{"fundingStartedAt": began}, version); err != nil {
+			return room, err
+		}
+		room.FundingStartedAt, room.Version = began, version
+		return room, nil
 	}
 	wallet, err := s.simulatedWallet(ctx, room.OwnerUserID, room.SiteID, room.KeyID)
 	if err != nil || wallet == nil || wallet.Pass == nil || wallet.Pass.ID != room.FundingPassID {
@@ -242,7 +314,7 @@ func (s *Service) beginRoomFunding(ctx context.Context, room roomRow, now time.T
 // may prepend its own account gate; the payer is immutable for a room.
 func fundingAdmissionGates(room roomRow) []string {
 	keys := []string{}
-	if room.FundingPassID != "" {
+	if room.bounded() {
 		keys = append(keys, keyGate(room.KeyID))
 	}
 	return append(keys, roomGate(room.ID), serverGate(room.MediaServerID))
@@ -255,7 +327,7 @@ func fundingAdmissionGates(room roomRow) []string {
 // until the next reconciliation retries. This is a bounded periodic cleanup,
 // not a claim of hard real-time media disconnection during provider outages.
 func (s *Service) reconcileFunding(ctx context.Context, hint roomRow, backend MediaBackend, tally *reconcileTally) (bool, error) {
-	if hint.FundingPassID == "" {
+	if !hint.bounded() {
 		return false, nil
 	}
 	if !hint.FundingStartedAt.IsZero() && s.now().Before(hint.FundingDeadline) {
@@ -278,7 +350,7 @@ func (s *Service) reconcileFunding(ctx context.Context, hint roomRow, backend Me
 	if err != nil || current == nil || !current.open() {
 		return true, err
 	}
-	if current.FundingPassID == "" || s.now().Before(current.FundingDeadline) {
+	if !current.bounded() || s.now().Before(current.FundingDeadline) {
 		return true, nil
 	}
 	v, err := s.viewRoom(fresh, *current)
@@ -304,7 +376,7 @@ func (s *Service) fundingEndState(ctx context.Context, hint roomRow) (bool, room
 	defer release()
 	fresh := memql.ContextWithFreshRead(ctx)
 	room, err := s.store.roomByID(fresh, hint.OwnerUserID, hint.ID)
-	if err != nil || room == nil || !room.open() || room.FundingPassID == "" {
+	if err != nil || room == nil || !room.open() || !room.bounded() {
 		return false, hint, err
 	}
 	now := s.now()
@@ -334,7 +406,7 @@ func (s *Service) admittedWithFunding(ctx context.Context, owner string, server 
 	if err := fundingRoomAllowed(*room, s.now()); err != nil {
 		return refuseJoin(callrules.ReasonOf(err)), err
 	}
-	if room.FundingPassID != "" {
+	if room.bounded() {
 		policy.PassTTL = min(policy.PassTTL, room.FundingDeadline.Sub(s.now()))
 		if policy.PassTTL < time.Second {
 			return refuseJoin(endReasonAllowance), callrules.Refuse(callrules.ErrEnded, endReasonAllowance, "the room's allowance has ended")

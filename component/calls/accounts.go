@@ -25,6 +25,7 @@ type AccountCapabilities struct {
 	RequirePasskeys  bool `json:"requirePasskeys"`
 	Payments         bool `json:"payments"`
 	SimulatedFunding bool `json:"simulatedFunding"`
+	UsagePreview     bool `json:"usagePreview"`
 }
 
 // AccountID is the durable calls key id, not a MemQL operator identity or the
@@ -40,6 +41,7 @@ type AccountInfo struct {
 	Legacy          bool         `json:"legacy"`
 	CanHost         bool         `json:"canHost"`
 	FundingMode     string       `json:"fundingMode"`
+	HostingMode     string       `json:"hostingMode,omitempty"`
 	ActivePass      *AccountPass `json:"activePass,omitempty"`
 }
 

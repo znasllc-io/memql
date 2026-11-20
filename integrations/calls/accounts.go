@@ -105,7 +105,7 @@ func validAccountRequest(r callrules.AccountRequest) bool {
 
 func (s *Service) accountBase(ctx context.Context, site callrules.SiteRef) (callrules.AccountResult, error) {
 	policy, err := s.store.PolicyFor(ctx, site.OwnerUserID, site.SiteID)
-	return callrules.AccountResult{Capabilities: callrules.AccountCapabilities{Passkeys: true, RequirePasskeys: policy.RequirePasskeys, Payments: false, SimulatedFunding: policy.SimulatedFunding}, Credentials: []callrules.AccountCredential{}}, err
+	return callrules.AccountResult{Capabilities: callrules.AccountCapabilities{Passkeys: true, RequirePasskeys: policy.RequirePasskeys, Payments: false, SimulatedFunding: policy.SimulatedFunding, UsagePreview: policy.SimulatedFunding && policy.UsagePreview}, Credentials: []callrules.AccountCredential{}}, err
 }
 func (s *Service) accountSnapshot(ctx context.Context, site callrules.SiteRef, token string) (callrules.AccountResult, error) {
 	out, err := s.accountBase(ctx, site)

@@ -964,7 +964,8 @@
         "roomJoinsPerMinute",
         "scheduleHorizon",
         "simulatedFunding",
-        "siteId"
+        "siteId",
+        "usagePreview"
       ],
       "required": [
         "ownerUserId",
@@ -1014,6 +1015,7 @@
         "endedAt",
         "fundingDeadline",
         "fundingMaxPeople",
+        "fundingMode",
         "fundingPassId",
         "fundingStartedAt",
         "guestDigest",
@@ -1041,6 +1043,9 @@
         "siteId"
       ],
       "enums": {
+        "fundingMode": [
+          "usage_preview"
+        ],
         "status": [
           "ended",
           "open"

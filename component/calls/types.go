@@ -27,6 +27,7 @@ const (
 type Policy struct {
 	RequirePasskeys      bool
 	SimulatedFunding     bool
+	UsagePreview         bool
 	MaxPeople            int
 	MaxAgents            int
 	RoomJoinsPerMinute   int

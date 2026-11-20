@@ -65,6 +65,7 @@ shape simulatedWalletEntry callsSimulatedWalletEntryFull {
 /// The room row as the calls integration reads it. No digest is projected.
 @row
 shape room callsRoomFull {
+  fundingMode
   fundingPassId
   fundingStartedAt
   fundingDeadline
@@ -185,6 +186,7 @@ shape mediaServer callsMediaServerFull {
 /// The policy row as the calls integration reads it. No digest is projected.
 @row
 shape policy callsPolicyFull {
+  usagePreview
   simulatedFunding
   row.id
   row.createdAt

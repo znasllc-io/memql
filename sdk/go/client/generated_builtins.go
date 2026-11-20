@@ -806,6 +806,8 @@ func CallsMediaServersBuild(args CallsMediaServersArgs) string {
 type CallsPolicySetArgs struct {
 	// Require a currently credential-backed session at join: 0 optional guest access, 1 required.
 	RequirePasskeys int
+	// Operator-only opt-in for bounded local usage preview. Requires simulatedFunding. Never charges usage or enables real payments.
+	UsagePreview int
 	// Operator-only local funding simulation: 0 disabled by default, 1 enables simulated wallet credit and bounded hosting passes. Never enables real payments.
 	SimulatedFunding int
 	// The deployable the limits are for.
@@ -844,6 +846,13 @@ func CallsPolicySetBuild(args CallsPolicySetArgs) string {
 	if args.RequirePasskeys != 0 {
 		b.WriteString("requirePasskeys: ")
 		b.WriteString(fmt.Sprintf("%v", args.RequirePasskeys))
+	}
+	if args.UsagePreview != 0 {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("usagePreview: ")
+		b.WriteString(fmt.Sprintf("%v", args.UsagePreview))
 	}
 	if args.SimulatedFunding != 0 {
 		if b.Len() > 23 {

@@ -196,6 +196,10 @@ func (s *Service) fundingSnapshot(ctx context.Context, site callrules.SiteRef, o
 	balance := wallet.BalanceCents
 	out.Account.BalanceCents = &balance
 	out.Account.CanHost = false
+	preview := out.Capabilities.UsagePreview && balance > 0 && keyActive(key.Status) && key.UserHandle != "" && out.Account.CredentialCount > 0
+	if preview {
+		out.Account.HostingMode, out.Account.CanHost = usagePreviewMode, true
+	}
 	if wallet.Pass == nil || !s.now().Before(wallet.Pass.ExpiresAt) {
 		return nil
 	}
@@ -206,7 +210,7 @@ func (s *Service) fundingSnapshot(ctx context.Context, site callrules.SiteRef, o
 	}
 	pass.TotalRemainingSeconds, pass.TodayRemainingSeconds, pass.DailyResetsAt = allowance.RemainingSeconds, allowance.DailyRemainingSeconds, allowance.DailyResetsAt
 	out.Account.ActivePass = &pass
-	out.Account.CanHost = out.Capabilities.SimulatedFunding && keyActive(key.Status) && allowance.RemainingSeconds > 0 && allowance.DailyRemainingSeconds > 0 && out.Account.CredentialCount > 0
+	out.Account.CanHost = preview || out.Capabilities.SimulatedFunding && keyActive(key.Status) && allowance.RemainingSeconds > 0 && allowance.DailyRemainingSeconds > 0 && out.Account.CredentialCount > 0
 	return nil
 }
 

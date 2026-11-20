@@ -76,6 +76,7 @@ builtin callsSiteEnable {
 @description("Set any of a deployable's calls limits, which are per site; a limit not named keeps its value and one never set is the shipped default. Counts are whole numbers and durations are whole seconds, each held to the cluster's bounds so no site claims more than the cluster allows. Judged in the deployable's organization; refused for a deployable the caller cannot read, one with no owner, a caller who is not a person and any call inside a run. Returns the effective limits: {policyId, siteId, maxPeople, maxAgents, roomJoinsPerMinute, maxUpcomingScheduled, maxScheduledMinutes, hostLeftGrace, passTtl, scheduleHorizon, queueEntryTtl, queuePoll}.")
 builtin callsPolicySet {
   requirePasskeys int @description("Require a currently credential-backed session at join: 0 optional guest access, 1 required.")
+  usagePreview int @description("Operator-only opt-in for bounded local usage preview. Requires simulatedFunding. Never charges usage or enables real payments.")
   simulatedFunding int @description("Operator-only local funding simulation: 0 disabled by default, 1 enables simulated wallet credit and bounded hosting passes. Never enables real payments.")
   siteId                string!  @description("The deployable the limits are for.")
   maxPeople             int      @description("People allowed in one room, 1 to 1000.")

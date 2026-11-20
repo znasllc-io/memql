@@ -684,6 +684,8 @@ PER SITE: the limits are the site's, on a row its owner owns, because a package 
 export interface CallsPolicySetArgs {
   /** Require a currently credential-backed session at join: 0 optional guest access, 1 required. */
   requirePasskeys?: number;
+  /** Operator-only opt-in for bounded local usage preview. Requires simulatedFunding. Never charges usage or enables real payments. */
+  usagePreview?: number;
   /** Operator-only local funding simulation: 0 disabled by default, 1 enables simulated wallet credit and bounded hosting passes. Never enables real payments. */
   simulatedFunding?: number;
   /** The deployable the limits are for. */
@@ -713,6 +715,7 @@ export interface CallsPolicySetArgs {
 export function buildCallsPolicySet(args: CallsPolicySetArgs): string {
   const parts: string[] = [];
   if (args.requirePasskeys !== undefined) parts.push("requirePasskeys: " + renderMemQLValue(args.requirePasskeys));
+  if (args.usagePreview !== undefined) parts.push("usagePreview: " + renderMemQLValue(args.usagePreview));
   if (args.simulatedFunding !== undefined) parts.push("simulatedFunding: " + renderMemQLValue(args.simulatedFunding));
   parts.push("siteId: " + renderMemQLValue(args.siteId));
   if (args.maxPeople !== undefined) parts.push("maxPeople: " + renderMemQLValue(args.maxPeople));

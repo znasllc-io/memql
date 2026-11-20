@@ -246,7 +246,8 @@ unopened answer `call_ended`.
 ### Simulated room-time allowance
 
 When an operator enables simulated funding for a site, a secured key with a
-simulated wallet needs an active pass to open or book a call. Disabling the switch
+simulated wallet needs an active pass to open or book a call, unless the operator
+also enables the bounded usage preview described below. Disabling the switch
 does not convert that wallet into an unlimited legacy key. Existing operator-minted
 test and paid keys keep their previous behavior. This local testing mode does not
 charge a card or settle real funds.
@@ -1292,3 +1293,49 @@ authentication do not prove that an earlier attempt failed. Local credit has no
 cash value and cannot become real payment credit. Stripe and financial compliance
 remain separate work. Funding regression tests cover receipt replay, lost replies,
 concurrent caps/debits, account isolation, expiry and logout/sign-in persistence.
+
+
+### Bounded usage preview
+
+For local prepaid-usage UI review, an operator may additionally enable
+`callsPolicySet(siteId: "<site id>", simulatedFunding: 1, usagePreview: 1)`.
+Both flags default off; `usagePreview` alone grants nothing. Apply the additive
+calls schema and updated application binaries before enabling the flag. This
+mode is a local resource authorization, not participant metering, a payment
+processor, or a production commercial entitlement.
+
+The account capability `usagePreview` is true only while both flags are enabled.
+A claimed, active key with a live passkey and positive simulated balance receives
+`hostingMode: "usage_preview"` and can start or schedule without buying a calendar
+pass. Top-ups retain their existing receipts and idempotency contract. Preview
+calls never debit balance, activate a pass, or write estimated history costs.
+The UI must distinguish illustrative usage estimates from charged amounts.
+
+A preview admits at most eight total participants and one open room per payer key.
+Each room stores immutable `fundingMode: "usage_preview"`, its participant ceiling
+and a deadline at most 180 minutes after creation. A scheduled preview is at most
+180 minutes, and ordinary booking-end and host-left limits still apply. Queueing,
+refresh, rejoin, top-up, process retry and host transfer cannot extend that ceiling.
+The original payer gate serializes openings across replicas, including a guest
+opening a scheduled call. A retained pending room therefore reserves that key's
+single preview slot until normal cleanup or its deadline.
+
+Authorized call sessions expose `fundingMode: "usage_preview"` alongside
+`allowanceEndsAt`, allowing the UI to call it a preview time limit. Token renewal
+and admission enforce the same deadline. Reconciliation attempts media deletion
+before participant listing when the ceiling is due. Failed deletion leaves the
+room open and prevents another funded room until cleanup succeeds; provider
+outages can delay physical disconnection beyond that bounded retry schedule.
+
+Existing pass receipts, balances and rooms are unchanged. A pass room opened
+before enabling preview keeps its original deadline and allowance accounting.
+New preview rooms consume no old pass allowance. Disabling preview prevents new
+preview openings while existing bounded rooms retain their stored deadline;
+valid old passes remain usable when simulated funding is still enabled.
+
+`usage_preview_db_test.go` exercises persisted top-up and sign-in, bounded
+admission, cross-replica opening races, booking limits, deadline and cleanup
+failures, first-admission repair, unchanged balance/history cost, old pass
+compatibility and host-left cleanup. Actual participant billing and optional
+transcription or sentiment processing are separate capabilities; this flag does
+not implement or enable them.

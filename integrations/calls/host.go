@@ -317,6 +317,7 @@ func (s *Service) SessionCall(ctx context.Context, sess callrules.Session) (call
 	var out callrules.SeatCall
 	out.Title = callTitle(room.Title, room.OpenedAt)
 	out.AllowanceEndsAt = room.FundingDeadline
+	out.FundingMode = room.FundingMode
 	if seat.occupying() {
 		out.OpenedAt = room.OpenedAt
 	}
@@ -732,7 +733,7 @@ func (v roomView) hostComing(now time.Time) bool {
 // before the gates are taken.
 func endGates(room roomRow) []string {
 	var keys []string
-	if room.FundingPassID != "" {
+	if room.bounded() {
 		keys = append(keys, keyGate(room.KeyID))
 	}
 	if room.ScheduledCallID != "" {
@@ -922,10 +923,10 @@ func (s *Service) recordAbandonedHost(ctx context.Context, room roomRow, load se
 // the call, not a host, whose holder unlocked a key that is the deployable's and active --
 // the earliest let in, ties by id, so every replica picks the same one. Nil is none.
 func (s *Service) keyHolderIn(ctx context.Context, v roomView) (*seatRow, error) {
-	// A simulated pass sponsors this room under its original key and deadline.
+	// Simulated funding sponsors this room under its original key and deadline.
 	// Merely attending with another key is not consent to become its payer or
 	// extend that sponsorship. Explicit host links keep their usual controls.
-	if v.room.FundingPassID != "" {
+	if v.room.bounded() {
 		return nil, nil
 	}
 	site := callrules.SiteRef{SiteID: v.room.SiteID, OwnerUserID: v.room.OwnerUserID}

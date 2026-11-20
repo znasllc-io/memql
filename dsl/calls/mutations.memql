@@ -107,6 +107,7 @@ mutation session updateCallsSession {
 @serverOnly
 mutation room createCallsRoom {
   args {
+    fundingMode enum("usage_preview")
     fundingPassId string
     fundingStartedAt datetime
     fundingDeadline datetime
@@ -131,7 +132,7 @@ mutation room createCallsRoom {
     joinWindowCount  int
   }
   insert {
-    accept { fundingPassId, fundingStartedAt, fundingDeadline, fundingMaxPeople, historyPending, title, siteId, deployable, keyId, mediaServerId, mediaRoom, locked, hostSeatId, scheduledCallId, guestDigest, hostDigest, openedAt, joinWindowStartedAt, joinWindowCount }
+    accept { fundingMode, fundingPassId, fundingStartedAt, fundingDeadline, fundingMaxPeople, historyPending, title, siteId, deployable, keyId, mediaServerId, mediaRoom, locked, hostSeatId, scheduledCallId, guestDigest, hostDigest, openedAt, joinWindowStartedAt, joinWindowCount }
     stamp {
       id: args.roomId
       ownerUserId: actor.userId
@@ -390,6 +391,7 @@ mutation policy createCallsPolicy {
     policyId  string!
     versionTime  datetime
     siteId  string!
+    usagePreview int
     simulatedFunding int
     requirePasskeys int
     maxPeople  int
@@ -404,7 +406,7 @@ mutation policy createCallsPolicy {
     queuePoll  int
   }
   insert {
-    accept { siteId, simulatedFunding, requirePasskeys, maxPeople, maxAgents, roomJoinsPerMinute, maxUpcomingScheduled, maxScheduledMinutes, hostLeftGrace, passTtl, scheduleHorizon, queueEntryTtl, queuePoll }
+    accept { siteId, usagePreview, simulatedFunding, requirePasskeys, maxPeople, maxAgents, roomJoinsPerMinute, maxUpcomingScheduled, maxScheduledMinutes, hostLeftGrace, passTtl, scheduleHorizon, queueEntryTtl, queuePoll }
     stamp {
       id: args.policyId
       ownerUserId: actor.userId
@@ -419,6 +421,7 @@ mutation policy updateCallsPolicy {
   args {
     policyId  string!
     versionTime  datetime
+    usagePreview int
     simulatedFunding int
     requirePasskeys int
     maxPeople  int
@@ -433,7 +436,7 @@ mutation policy updateCallsPolicy {
     queuePoll  int
   }
   update {
-    accept { simulatedFunding, requirePasskeys, maxPeople, maxAgents, roomJoinsPerMinute, maxUpcomingScheduled, maxScheduledMinutes, hostLeftGrace, passTtl, scheduleHorizon, queueEntryTtl, queuePoll }
+    accept { usagePreview, simulatedFunding, requirePasskeys, maxPeople, maxAgents, roomJoinsPerMinute, maxUpcomingScheduled, maxScheduledMinutes, hostLeftGrace, passTtl, scheduleHorizon, queueEntryTtl, queuePoll }
     stamp {
       id: args.policyId
       createdAt: args.versionTime ?? now

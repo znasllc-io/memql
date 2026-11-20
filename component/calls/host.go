@@ -61,6 +61,7 @@ type SeatCall struct {
 	OpenedAt        time.Time
 	CountdownEndsAt time.Time
 	AllowanceEndsAt time.Time
+	FundingMode     string
 	Roster          *Roster
 }
 

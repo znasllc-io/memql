@@ -392,8 +392,13 @@ func (s *Store) createRoom(ctx context.Context, owner string, n newRoom, version
 	if n.Locked {
 		args["locked"] = true
 	}
-	if n.FundingPassID != "" {
-		args["fundingPassId"] = n.FundingPassID
+	if n.bounded() {
+		if n.FundingPassID != "" {
+			args["fundingPassId"] = n.FundingPassID
+		}
+		if n.FundingMode != "" {
+			args["fundingMode"] = n.FundingMode
+		}
 		args["fundingDeadline"] = versionStamp(n.FundingDeadline)
 		args["fundingMaxPeople"] = n.FundingMaxPeople
 		if !n.FundingStartedAt.IsZero() {

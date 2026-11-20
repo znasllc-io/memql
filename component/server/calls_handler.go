@@ -975,6 +975,7 @@ type callsSessionReply struct {
 	// AllowanceEndsAt is independent of host presence: returning to the room
 	// cannot extend its admitted simulated pass budget.
 	AllowanceEndsAt string `json:"allowanceEndsAt,omitempty"`
+	FundingMode     string `json:"fundingMode,omitempty"`
 	// Roster is there for a host seat in an open call and absent for every other session.
 	Roster *callsRosterReply `json:"roster,omitempty"`
 }
@@ -1023,6 +1024,7 @@ func (h *callsHandler) sessionReply(sess calls.Session, call calls.SeatCall) cal
 	}
 	if !call.AllowanceEndsAt.IsZero() {
 		reply.AllowanceEndsAt = call.AllowanceEndsAt.UTC().Format(time.RFC3339Nano)
+		reply.FundingMode = call.FundingMode
 	}
 	reply.Title = call.Title
 	if !call.OpenedAt.IsZero() {

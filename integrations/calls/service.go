@@ -424,8 +424,9 @@ func (s *Service) openRefusal(ctx context.Context, site callrules.SiteRef, keyID
 }
 
 // keyOpensCalls requires an active same-site key and hosting entitlement. Simulated
-// wallets require the operator switch and a current pass; room admission checks its
-// remaining time separately. Cancellation requires ownership, not spending entitlement.
+// wallets require the operator switch and either funded, claimed preview access
+// or a current legacy pass; room admission checks its time ceiling separately.
+// Cancellation requires ownership, not spending entitlement.
 func (s *Service) keyOpensCalls(ctx context.Context, site callrules.SiteRef, keyID string) (bool, error) {
 	key, err := s.store.keyByID(ctx, site.OwnerUserID, keyID)
 	if err != nil {
@@ -444,6 +445,10 @@ func (s *Service) keyOpensCalls(ctx context.Context, site callrules.SiteRef, key
 	policy, err := s.store.PolicyFor(ctx, site.OwnerUserID, site.SiteID)
 	if err != nil {
 		return false, err
+	}
+	preview, err := s.usagePreviewEligible(ctx, site, keyID, wallet, policy)
+	if err != nil || preview {
+		return preview, err
 	}
 	return policy.SimulatedFunding && wallet.Pass != nil && !s.now().Before(wallet.Pass.ActivatedAt) && s.now().Before(wallet.Pass.ExpiresAt), nil
 }
@@ -578,7 +583,7 @@ func (s *Service) openRoom(ctx context.Context, site callrules.SiteRef, server M
 	joinedAt := time.Time{}
 	if decision.Outcome == callrules.OutcomeAdmit {
 		seat.Status, joinedAt = seatAdmitted, now
-		if funding.FundingPassID != "" {
+		if funding.bounded() {
 			funding.FundingStartedAt, funding.FundingDeadline = now, allowance.AvailableUntil
 		}
 	}
@@ -823,7 +828,7 @@ func (s *Service) joinRoom(ctx context.Context, site callrules.SiteRef, room roo
 // wrote: the seat stays admitted, and its next ask, a poll or a rejoin, opens the room
 // again before it is handed one.
 func (s *Service) ensureMediaRoom(ctx context.Context, server MediaServer, credential MediaCredential, room roomRow, policy callrules.Policy) error {
-	if room.FundingPassID != "" {
+	if room.bounded() {
 		latest, err := s.store.roomByID(memql.ContextWithFreshRead(ctx), room.OwnerUserID, room.ID)
 		if err != nil {
 			return err
@@ -925,7 +930,7 @@ func (s *Service) joinGated(ctx context.Context, site callrules.SiteRef, room ro
 			// ordered before the room/server locks even when attendee and payer
 			// differ, or two accounts recovering each other's calls could deadlock.
 			keys := []string{keyGate(held.KeyID)}
-			if room.FundingPassID != "" && room.KeyID != held.KeyID {
+			if room.bounded() && room.KeyID != held.KeyID {
 				keys = append(keys, keyGate(room.KeyID))
 			}
 			sort.Strings(keys)
