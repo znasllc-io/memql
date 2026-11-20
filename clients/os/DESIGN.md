@@ -783,6 +783,10 @@ placement is computed, never dragged freehand or resized (`system/placement.ts`,
 
 - **Window mode exists only for an app alone on its desk.** A newly opened app
   that is alone opens as a centred window.
+- **Every window reaches down to the dock** (Jesús, Nov 20 2026, Draft B):
+  a window, a borderless one and a split pair all stop 16px above the dock's
+  top edge (`DOCK_GAP`), so the dock never covers anything and no empty strip
+  is left under an app. Full screen still covers the dock.
 - **Borderless** (`maximized`) fills the area above the dock; the dock's band
   stays, and so does the title bar. **Full screen** covers the viewport and
   hides the dock and desk dots, and it keeps its desk to itself: no second app

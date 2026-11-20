@@ -5,6 +5,12 @@
 // two windows split the borderless area edge to edge, whatever mode each was
 // in (Jesús, Nov 2026). The chrome animates BETWEEN these rects (FLIP); tests
 // assert the rects.
+//
+// EVERY WINDOW REACHES DOWN TO THE DOCK (José, Nov 19 2026: "use that real
+// estate down there"; Jesús picked Draft B on Nov 20): a window, a borderless
+// one and a split pair all stop DOCK_GAP above the dock's top edge, so the
+// dock never covers anything and no empty strip is left. Full screen covers
+// the dock and stays as it was.
 
 import type { OsWindow } from "./windows";
 import type { WindowId } from "./windows";
@@ -22,27 +28,33 @@ export interface Viewport {
 }
 
 export interface PlacementTokens {
-  /** Outer margin around the desk area. */
+  /** Outer margin above and beside a solo window. */
   margin: number;
-  /** Height reserved for the dock (and pager) at the bottom. */
+  /** Height kept clear at the bottom: the dock's band plus DOCK_GAP above it. */
   dockReserve: number;
   /** A solo window never grows wider than this. */
   maxSoloWidth: number;
 }
 
+/** The gap between a window's bottom edge and the dock's top (Draft B: 16px). */
+export const DOCK_GAP = 16;
+
+/** The dock's band: `.os-dock` floats 12px up and is `--os-dock-h` (64px) tall. */
+const DOCK_BAND = 12 + 64;
+
 export const DEFAULT_PLACEMENT: PlacementTokens = {
   margin: 28,
-  dockReserve: 96,
+  dockReserve: DOCK_BAND + DOCK_GAP,
   maxSoloWidth: 1280,
 };
 
-/** The desk area: viewport minus margins and the dock reserve. */
+/** The desk area: the margin above and at the sides, down to the dock reserve. */
 export function deskArea(viewport: Viewport, t: PlacementTokens = DEFAULT_PLACEMENT): Rect {
   return {
     x: t.margin,
     y: t.margin,
     w: Math.max(0, viewport.w - t.margin * 2),
-    h: Math.max(0, viewport.h - t.margin * 2 - t.dockReserve),
+    h: Math.max(0, viewport.h - t.margin - t.dockReserve),
   };
 }
 
