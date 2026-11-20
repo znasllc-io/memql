@@ -8,7 +8,7 @@ import "testing"
 func TestShareNamesNeverCarryAnEmail(t *testing.T) {
 	for _, tc := range []struct{ in, want string }{
 		{"share-viewer2@example.test", "share-viewer2"},
-		{"  ana@znas.io ", "ana"},
+		{"  ana@example.org ", "ana"},
 		{"Ana Ruiz", "Ana Ruiz"},
 		{"Ana @ ZNAS", "Ana @ ZNAS"},
 		{"@handle", "@handle"},
