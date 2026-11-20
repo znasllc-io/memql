@@ -4,7 +4,6 @@ import { usePageScroll } from "../../kit/pageNavigation";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { ArrowUpDown, Download, FilePlus, FileText, FolderInput, FolderPlus, Import, Layers, Monitor, RotateCcw, Search, SquareArrowOutUpRight, Trash2, Upload } from "lucide-react";
 import { CardCollectionSearch } from "../../kit/CardCollectionEditor";
-import { useWindowSearchTarget } from "../../kit/windowSearch";
 import { IconButton } from "../../kit/IconButton";
 import { Mark } from "../../chrome/Mark";
 import {
@@ -769,9 +768,6 @@ export function BrowseSection({
   const mainRef = useRef<HTMLDivElement | null>(null);
   const searchPanelId = useId();
   useEffect(() => { if (searchOpen) searchInput.current?.focus(); }, [searchOpen]);
-  // The window's own search (its title-bar button) opens this panel, as it
-  // opened Refine before it.
-  useWindowSearchTarget(mainRef, () => { setSearchOpen(true); searchInput.current?.focus(); });
   const toggleSearch = () => {
     if (searchOpen) patch({ search: "", type: "all", added: "any" });
     setSearchOpen(!searchOpen);
