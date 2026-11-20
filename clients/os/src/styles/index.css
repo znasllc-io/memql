@@ -2217,8 +2217,22 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   gap: 8px;
   flex-wrap: wrap;
 }
-/* Files: the picked file's acts, kept apart from the folder's Sort, Refine and Add. */
-.os-files-picked-acts { display: inline-flex; align-items: center; gap: 8px; padding-right: 8px; border-right: 1px solid var(--os-line); }
+/* Files: one Head row, three areas (José, Nov 19 2026; Jesús picked Draft A):
+ * the picked file's acts beside the title behind a hairline, one search
+ * button on the right, and Add apart at the far right. */
+.os-files-main > .os-head > .os-head-actions { display: contents; }
+.os-files-picked-acts { display: inline-flex; align-items: center; gap: 8px; padding-left: 10px; border-left: 1px solid var(--os-line); }
+.os-files-search-toggle { margin-left: auto; }
+.os-files-search-toggle[aria-expanded="true"] { color: var(--os-ink); box-shadow: inset 0 0 0 1px var(--os-rail-hover); }
+.os-files-add { margin-left: 8px; }
+/* The hidden search panel opens under the Head and pushes the tiles down. */
+.os-files-search { display: grid; grid-template-rows: 1fr; border-block: 1px solid var(--os-line); animation: os-files-search-open var(--os-duration-fast) var(--os-ease); }
+.os-files-search-lines { min-height: 0; overflow: hidden; display: grid; gap: 8px; padding: 10px 2px; }
+.os-files-search .os-card-search-mode { flex-basis: 112px; }
+.os-files-search-order { display: flex; flex-wrap: wrap; gap: 8px; }
+.os-files-search-order > .os-select-wrap { flex: none; }
+@keyframes os-files-search-open { from { grid-template-rows: 0fr; opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .os-files-search { animation: none; } }
 
 /* Two-state sorting stays quiet, with the current order visible. */
 .os-sort {
@@ -4437,33 +4451,6 @@ a.os-button {
   min-height: 0;
 }
 
-/* Kind choices share the straight selection edge at toolbar size. */
-.os-files-kinds {
-  display: inline-flex;
-  gap: 4px;
-}
-.os-files-kind {
-  display: inline-flex;
-  align-items: center;
-  height: var(--os-control-h);
-  padding: 0 12px;
-  border: 1px solid var(--os-line);
-  border-radius: var(--os-selection-radius);
-  background: none;
-  color: var(--os-muted);
-  font-size: var(--os-text-base);
-  cursor: pointer;
-}
-.os-files-kind[aria-checked="true"] {
-  background: var(--os-accent-soft);
-  border-color: var(--os-accent);
-  color: var(--os-ink);
-}
-.os-files-kind:focus-visible {
-  outline: 2px solid var(--os-accent);
-  outline-offset: 1px;
-}
-
 /* ---- the Places browse (Nov 2026): rail beside one scrolling column ----
  * The rail is the place language (DESIGN.md rule 6): Library and its folder
  * tree, then Desktop, Materializer and Bin, on the window's own plate -- no
@@ -4549,13 +4536,13 @@ a.os-button {
   outline: 2px solid var(--os-accent);
   outline-offset: -2px;
 }
-/* A picked file's icons take a line of their own wherever the Head cannot
- * hold them beside Sort, Search and Add -- that line needs about 620px of
- * the main column, so below an 860px Files window -- and never push those
- * off the edge. Without the line beside them, the hairline goes too. */
+/* A picked file's icons take a line of their own, under Search and Add,
+ * wherever the Head cannot hold them beside the title -- below an 860px
+ * Files window -- and never push those off the edge. Without the title
+ * beside them, the hairline goes too. */
 @container os-files (max-width: 860px) {
-  .os-files-main .os-head-actions:has(> .os-files-picked-acts) { flex-wrap: wrap; }
-  .os-files-picked-acts { flex-basis: 100%; padding-right: 0; border-right: 0; }
+  .os-files-main > .os-head:has(.os-files-picked-acts) { flex-wrap: wrap; }
+  .os-files-picked-acts { order: 1; flex-basis: 100%; padding-left: 0; border-left: 0; }
 }
 @container os-files (max-width: 560px) {
   .os-files-browse { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }

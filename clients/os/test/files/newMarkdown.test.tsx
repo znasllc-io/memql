@@ -34,7 +34,7 @@ it.each(["library", "bin", "materializer"])("names no folder at the %s root", as
 });
 it("names no folder while searching from a folder", async () => {
   await renderFiles({ intent: { id: "folder", payload: { place: "library", folderId: "research" } } });
-  await click(screen.getByRole("button", { name: "Refine files" }));
+  await click(screen.getByRole("button", { name: "Search" }));
   const search = screen.getByRole("textbox", { name: "Search" });
   fireEvent.change(search, { target: { value: "notes" } });
   await addMarkdown();

@@ -68,6 +68,12 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    (`LocalTabs.actions`), keeping the Head’s Add button by itself. Without
    local tabs, use the right of the Head. The default order stays an
    app-settings preference.
+   **Files is the exception to rules 2 and 3** (José, Nov 19 2026; Jesús's
+   picks, Nov 20): one search button on its Head opens a hidden panel under
+   the Head that pushes the tiles down. Its first line is Fleet's search bar
+   (`CardCollectionSearch`, without its add) choosing a kind of file; its
+   second holds Sort (Name, Newest first, Oldest first, Size, Kind) and Added.
+   Closing the panel ends the search and keeps the order.
 
 4. **Micro-preferences live in the app's Settings section.** Show revoked,
    show deactivated, include archived, default sort -- preferences, not
