@@ -2,7 +2,7 @@ import { LoadMore } from "../../kit/LoadMore";
 import type { LibraryArtifactsFeed } from "./useLibrary";
 import { usePageScroll } from "../../kit/pageNavigation";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { ArrowUpDown, Download, FilePlus, FileText, FolderInput, FolderPlus, Import, Layers, Monitor, RotateCcw, Search, SquareArrowOutUpRight, Trash2, Upload } from "lucide-react";
+import { ArrowUpDown, Download, FilePlus, FileText, FolderInput, FolderPlus, Import, Layers, Monitor, RotateCcw, Search, Share2, SquareArrowOutUpRight, Trash2, Upload } from "lucide-react";
 import { CardCollectionSearch } from "../../kit/CardCollectionEditor";
 import { IconButton } from "../../kit/IconButton";
 import { Mark } from "../../chrome/Mark";
@@ -32,9 +32,9 @@ import { AddButton } from "../../kit/AddButton";
 import { InPlaceAsk } from "../../kit/pressHold";
 import { FileFolders } from "./FileFolders";
 import { FilesRail } from "./Rail";
-import { ShareFoot } from "./sharing";
-import { noticeFromRow, outgoingFromRow, shareStands, useCanShareFiles, useFileShares, useShareDirectory, useSharedWithMe, useSharing, useShareTitles, type OutgoingShare, type SharedNotice } from "./useSharing";
+import { noticeFromRow, outgoingFromRow, shareStands, useCanShareFiles, useSharedWithMe, useSharing, useShareTitles, type OutgoingShare, type SharedNotice } from "./useSharing";
 import { SharingPlace } from "./SharingPlace";
+import { ShareView } from "./ShareView";
 import { useLiveView } from "../../live/liveView";
 import { FileTile } from "./Tiles";
 import {
@@ -219,6 +219,10 @@ export function BrowseSection({
   // The grid's selection: which file a click picked. It opens nothing; it only
   // marks the file a right-click, Enter or double-click is about.
   const [picked, setPicked] = useState("");
+  // THE SHARE VIEW (Nov 20 2026): the file whose Share was pressed. It takes
+  // the place of the tiles, the rail beside it, until its back arrow.
+  const [shareTarget, setShareTarget] = useState<ArtifactRow | null>(null);
+  const canShare = useCanShareFiles();
 
   // Every heavy verb the row menu offers is the inspector's verb, reached by
   // the SAME function -- the download decision is shared in actions/download,
@@ -517,11 +521,16 @@ export function BrowseSection({
     }
     // The owner's order: Open and Download first, Delete last. Rename,
     // which he also asked for, is absent until the engine can do it (rule 12:
-    // absent, never disabled). Share with is not a menu entry: one click on a
-    // file opens it at the foot of the rail (sharing.tsx), as he chose.
+    // absent, never disabled). Share opens the share view in place of the
+    // tiles (José, Nov 19: "another screen here in the middle"), only on a
+    // file of the caller's own and only with the share part.
+    const share = canShare && access !== null && row.ownerUserId === access.userId
+      ? [{ id: "share", label: "Share", onSelect: () => { setRowMenu(null); setShareTarget(row); } }]
+      : [];
     return [
       ...(!isZipArtifact(row) ? [{ id: "open", label: "Open", onSelect: () => openVsCodeFor(row) }] : []),
       download,
+      ...share,
       details,
       { id: "desk", label: "Send to desktop", onSelect: () => sendRowToDesk(row) },
       {
@@ -601,15 +610,8 @@ export function BrowseSection({
   ];
   const [noticeMenu, setNoticeMenu] = useState<{ x: number; y: number; notice: SharedNotice } | null>(null);
 
-  // The Share panel's acts. ShareFoot renders a thrown sentence in place, and
-  // the share rows arrive on their own events, so nothing is patched here.
-  // Renew is the same call: sharing again with someone who holds an active
-  // share restarts it for the days it was given.
-  const shareFile = async (artifactId: string, recipientUserId: string, days: number) => {
-    const query = connection?.query ?? null;
-    if (query === null) throw new Error("Not connected to the cluster, so nothing was shared.");
-    await query.libraryShareFile({ artifactId, recipientUserId, days });
-  };
+  // The Sharing place's Stop. The share row leaves on its own event, so
+  // nothing is patched here.
   const stopShare = async (shareId: string) => {
     const query = connection?.query ?? null;
     if (query === null) throw new Error("Not connected to the cluster, so the share was not stopped.");
@@ -623,20 +625,11 @@ export function BrowseSection({
   // nobody can see.
   const pickedRow = picked === "" ? null : list?.snapshot.rows.find((r) => r.id === picked) ?? null;
 
-  // SHARING (the engine's library sharing, Nov 2026). The Share panel sits at
-  // the foot of the rail for a picked file the caller owns and still has --
-  // never in the Bin, never for a file shared WITH them, never without the
-  // part -- and is absent otherwise (rule 12). Shared with me is a place of its
-  // own, fed by the caller's share notices rather than their Library.
+  // SHARING (the engine's library sharing, Nov 2026). Share is a verb on the
+  // caller's own live files (rowMenuEntries) and opens the share view.
+  // Shared with me is a place of its own, fed by the caller's share notices
+  // rather than their Library.
   const shared = filter.place === "shared";
-  const canShare = useCanShareFiles();
-  const sharing =
-    canShare && selected === null && filter.place !== "bin" && !shared &&
-    pickedRow !== null && !pickedRow.archived && access !== null && pickedRow.ownerUserId === access.userId
-      ? pickedRow
-      : null;
-  const directory = useShareDirectory(sharing !== null);
-  const fileShares = useFileShares(sharing?.id ?? "");
   const notices = useSharedWithMe(shared);
   // The search panel asks Shared with me the same questions, over its notices.
   const noticeList = useLiveView<Row, SharedNotice>(notices.source, `files:shared:${filter.search}|${filter.type}|${filter.added}|${filter.sort}`, (rows) => {
@@ -812,23 +805,19 @@ export function BrowseSection({
         tree={tree}
         place={filter.place}
         folderId={filter.folderId ?? ""}
-        onPlace={(place) => { onSelect(""); setPicked(""); patch({ place, folderId: "", search: "" }); }}
-        onFolder={(folderId) => { onSelect(""); setPicked(""); patch({ place: "library", folderId, search: "" }); }}
+        onPlace={(place) => { onSelect(""); setPicked(""); setShareTarget(null); patch({ place, folderId: "", search: "" }); }}
+        onFolder={(folderId) => { onSelect(""); setPicked(""); setShareTarget(null); patch({ place: "library", folderId, search: "" }); }}
         onFolderMenu={(x, y, node) => setFolderMenu({ x, y, node })}
       />
-      {sharing !== null && directory.people !== null ? (
-        <ShareFoot
-          key={sharing.id}
-          people={directory.people}
-          peopleError={directory.error}
-          shares={fileShares}
-          onShare={(recipientUserId, days) => shareFile(sharing.id, recipientUserId, days)}
-          onRenew={(share) => shareFile(sharing.id, share.recipientUserId, share.days)}
-          onStop={(share) => stopShare(share.shareId)}
-        />
+      {shareTarget !== null ? (
+        <div className="os-files-main">
+          <ShareView key={shareTarget.id} file={shareTarget} backLabel={headTitle} onBack={() => setShareTarget(null)} />
+        </div>
       ) : null}
-      <div className="os-files-main" ref={mainRef}>
-      <Head navigationKey={`browse:${filter.place}:${filter.folderId ?? ""}`} title={headTitle} breadcrumbs={headTrail} navigation={selected === null} back={filter.folderId ? {label: PLACE_TITLE[filter.place], onSelect: () => patch({folderId: tree.byId.get(filter.folderId!)?.folder.parentFolderId ?? ""})} : undefined} meta={listCount(listedSnapshot, listedCount) === undefined ? undefined : `${listedCount}${!shared && !sharingPlace && artifacts.hasMore ? "+" : ""}`}>
+      {/* Hidden, not unmounted, while the share view stands in its place, so
+          the way back finds the files where they were. */}
+      <div className="os-files-main" ref={mainRef} hidden={shareTarget !== null}>
+      <Head navigationKey={`browse:${filter.place}:${filter.folderId ?? ""}`} title={headTitle} breadcrumbs={headTrail} navigation={selected === null && shareTarget === null} back={filter.folderId ? {label: PLACE_TITLE[filter.place], onSelect: () => patch({folderId: tree.byId.get(filter.folderId!)?.folder.parentFolderId ?? ""})} : undefined} meta={listCount(listedSnapshot, listedCount) === undefined ? undefined : `${listedCount}${!shared && !sharingPlace && artifacts.hasMore ? "+" : ""}`}>
         {/* ONE ROW, THREE AREAS (José, Nov 19 2026; Jesús picked Draft A): the
             picked file's icons beside the title, one search button on the
             right, and Add apart at the far right.
@@ -1426,6 +1415,7 @@ const PICKED_ICON: Record<string, ReactNode> = {
   open: <SquareArrowOutUpRight size={16} aria-hidden />,
   download: <Download size={16} aria-hidden />,
   details: <FileText size={16} aria-hidden />,
+  share: <Share2 size={16} aria-hidden />,
   desk: <Monitor size={16} aria-hidden />,
   move: <FolderInput size={16} aria-hidden />,
   materializer: <Layers size={16} aria-hidden />,

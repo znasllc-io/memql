@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { Concepts, getRowByConceptAndId, rowNumber, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { Concepts, getRowByConceptAndId, renderMemQLValue, rowNumber, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useSessionIfPresent } from "../../chrome/access";
 import { useOsConnection } from "../../live/connection";
 import { flatten } from "../../kit/rows";
 import { useLiveCollection, type LiveCollectionHandle } from "../../live/useLiveCollection";
 import { holds } from "../../system/roles";
-import type { FileShare, SharePerson } from "./sharing";
 
 // FILE SHARING'S FOUR READS (the engine's library sharing, Nov 2026).
 //
@@ -23,6 +22,31 @@ import type { FileShare, SharePerson } from "./sharing";
 // The OS only asks: the engine re-checks the part, the organization and the
 // share itself on every act and every download.
 
+/** Someone a file can go to, as the directory names them. */
+export interface SharePerson {
+  userId: string;
+  displayName: string;
+}
+
+/** A group a file can go to: everyone active in it but the sharer. */
+export interface ShareGroup {
+  groupId: string;
+  displayName: string;
+  /** Its active people, the sharer included when they are in it. */
+  members: number;
+}
+
+/** One active share of one file: with a person, or with a group. */
+export interface FileShare {
+  shareId: string;
+  recipientUserId: string;
+  /** Set on a group share, which names no one person. */
+  recipientGroupId: string;
+  recipientDisplayName: string;
+  days: number;
+  expiresAt: string;
+}
+
 /** The part that lets a person share their own files (dsl/rbac/seeds.memql). */
 export const SHARE_PART = "app:files/share";
 
@@ -33,15 +57,20 @@ export function useCanShareFiles(): boolean {
   return useMemo(() => holds("execute", SHARE_PART), [epoch]);
 }
 
-/** The people a file can go to. Null until the read settles: unread is not "nobody". */
-export function useShareDirectory(enabled: boolean): { people: SharePerson[] | null; error: string } {
+/** The people and groups a file can go to. Null until the read settles: unread is not "nobody". */
+export function useShareDirectory(enabled: boolean): { people: SharePerson[] | null; groups: ShareGroup[]; error: string } {
   const feed = useLiveCollection<Row>(enabled ? "files:share-directory" : null, (connection) => ({
     concept: Concepts.IDENTITY_USER,
     actions: [],
     paged: false,
     seed: async (_cursor, signal) => {
       const result = await connection.query.libraryShareDirectory({}, { signal });
-      return { rows: result.rows().map((row) => ({ ...row, id: rowString(row, "userId") })), nextCursor: "" };
+      // A group's row is keyed apart from a person's, so the two can never
+      // share an id in the collection.
+      return {
+        rows: result.rows().map((row) => ({ ...row, id: rowString(row, "userId") || `group:${rowString(row, "groupId")}` })),
+        nextCursor: "",
+      };
     },
   }));
   const { rows, state, error } = feed.snapshot;
@@ -49,7 +78,12 @@ export function useShareDirectory(enabled: boolean): { people: SharePerson[] | n
     () => rows.map((row) => ({ userId: rowString(row, "userId"), displayName: rowString(row, "displayName") })).filter((p) => p.userId !== ""),
     [rows],
   );
-  return { people: state === "seeding" || !enabled ? null : people, error: error ?? "" };
+  const groups = useMemo(
+    () => rows.map((row) => ({ groupId: rowString(row, "groupId"), displayName: rowString(row, "displayName"), members: rowNumber(row, "members") }))
+      .filter((g) => g.groupId !== ""),
+    [rows],
+  );
+  return { people: state === "seeding" || !enabled ? null : people, groups, error: error ?? "" };
 }
 
 /** One file's active shares, live. "" reads nothing. */
@@ -72,6 +106,7 @@ export function useFileShares(artifactId: string): FileShare[] {
       feed.snapshot.rows.map(flatten).map((row) => ({
         shareId: rowString(row, "id"),
         recipientUserId: rowString(row, "recipientUserId"),
+        recipientGroupId: rowString(row, "recipientGroupId"),
         recipientDisplayName: rowString(row, "recipientDisplayName"),
         days: rowNumber(row, "days"),
         expiresAt: rowString(row, "expiresAt"),
@@ -137,6 +172,8 @@ export interface OutgoingShare {
   /** The file's name when it was shared; "" on a share made before shares carried it. */
   title: string;
   recipientUserId: string;
+  /** Set on a group share; the row then names the group, with a group icon. */
+  recipientGroupId: string;
   recipientDisplayName: string;
   expiresAt: string;
   revokedAt: string;
@@ -150,6 +187,7 @@ export function outgoingFromRow(raw: Row): OutgoingShare {
     artifactId: rowString(row, "artifactId"),
     title: rowString(row, "title"),
     recipientUserId: rowString(row, "recipientUserId"),
+    recipientGroupId: rowString(row, "recipientGroupId"),
     recipientDisplayName: rowString(row, "recipientDisplayName"),
     expiresAt: rowString(row, "expiresAt"),
     revokedAt: rowString(row, "revokedAt"),
@@ -228,4 +266,21 @@ export function useShareTitles(shares: readonly OutgoingShare[]): ReadonlyMap<st
     return () => abort.abort();
   }, [connection, key]);
   return titles;
+}
+
+/** When a share ends: one of the drop-down's lengths, or a picked day. */
+export type ShareEnd = { days: number } | { until: Date };
+
+/**
+ * The libraryShareFile call for one person or group, rendered here because
+ * its group and date arguments are newer than the SDK build a checkout may be
+ * linked against (useSharing's executeNamed note).
+ */
+export function shareFileCall(artifactId: string, to: { userId: string } | { groupId: string }, end: ShareEnd): string {
+  const args = [
+    `artifactId: ${renderMemQLValue(artifactId)}`,
+    "userId" in to ? `recipientUserId: ${renderMemQLValue(to.userId)}` : `recipientGroupId: ${renderMemQLValue(to.groupId)}`,
+    "days" in end ? `days: ${renderMemQLValue(end.days)}` : `until: ${renderMemQLValue(end.until.toISOString())}`,
+  ];
+  return `builtin libraryShareFile(${args.join(", ")})`;
 }

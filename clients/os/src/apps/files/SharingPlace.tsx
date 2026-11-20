@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Clock, FileText, User } from "lucide-react";
+import { Clock, FileText, User, Users } from "lucide-react";
 
 import { Button, LiveList, RecordRow } from "../../kit";
 import { useNow } from "../../kit/useNow";
@@ -8,10 +8,10 @@ import { timeLeftLabel, type OutgoingShare } from "./useSharing";
 
 // THE SHARING PLACE (Jesús, Nov 19 2026, draft A of "One Shared section with
 // two groups"): the files the caller is sharing, one row per share, each
-// saying four things -- the file, who has it, how long until it ends on its
-// own, and Stop, which ends it now. A share is one file with one person, so a
-// file shared with two people is two rows: each has its own time and its own
-// Stop.
+// saying four things -- the file, who has it (a person, or a whole group with
+// a group icon), how long until it ends on its own, and Stop, which ends it
+// now. A share is one file with one person or one group, so a file shared with
+// two is two rows: each has its own time and its own Stop.
 //
 // The column names sit once above the rows (the drawn rows carry them), on the
 // record row's own grid so they line up; on a narrow window the rows fold into
@@ -92,7 +92,9 @@ export function SharingPlace({
               }
             >
               <span className="os-files-outgoing-who">
-                <User size={13} aria-hidden /> {share.recipientDisplayName || "Unnamed person"}
+                {share.recipientGroupId
+                  ? <><Users size={13} aria-label="Group" /> {share.recipientDisplayName || "Unnamed group"}</>
+                  : <><User size={13} aria-hidden /> {share.recipientDisplayName || "Unnamed person"}</>}
               </span>
             </RecordRow>
           );

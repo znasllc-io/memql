@@ -15,6 +15,7 @@ vi.mock("../../src/apps/files/actions/download", async (importOriginal) => ({
 }));
 
 import { setEffectiveCapabilities } from "../../src/system/roles";
+import { chooseOption, openSelect } from "../selectControl";
 import { installSeededAccess, seededAccessWithout } from "../seededAccess";
 import { timeLeftLabel } from "../../src/apps/files/useSharing";
 import { artifactRow, click, emit, fakeConnection, noticeRow, renderFiles, shareRow, type FakeConnection, type FakeSeed } from "./harness";
@@ -39,7 +40,6 @@ function connect(seed: FakeSeed): FakeConnection {
   return connection;
 }
 
-const shareRegion = () => screen.queryByRole("region", { name: "Share with" });
 const rail = () => screen.getByRole("navigation", { name: "File locations" });
 
 beforeEach(() => {
@@ -49,48 +49,165 @@ afterEach(() => {
   installSeededAccess("owner");
 });
 
-describe("the Share panel's acts", () => {
-  it("shares the picked file with the chosen person for the chosen days", async () => {
+// The share view (Nov 20 2026): pressing Share puts it in place of the tiles.
+async function openShare(file = /brief\.pdf/) {
+  await click(screen.getByRole("button", { name: file }));
+  const icons = screen.getByRole("group", { name: /^Selected: / });
+  await click(within(icons).getByRole("button", { name: "Share" }));
+  return screen.getByRole("region", { name: /^Share / });
+}
+const expires = () => screen.getByLabelText("How long the file is shared", { selector: "button" });
+const searchBox = () => screen.getByRole("combobox", { name: "Search users and groups" });
+async function pick(name: string) {
+  fireEvent.focus(searchBox());
+  await click(await screen.findByRole("option", { name }));
+}
+const addButton = () => screen.getByRole("button", { name: "Add selected users and groups" });
+
+describe("the share view", () => {
+  it("takes the place of the tiles, the rail beside it, and the back arrow returns", async () => {
+    connect({});
+    await renderFiles();
+    const view = await openShare();
+    expect(within(view).getByRole("heading", { name: "Share" })).toBeTruthy();
+    expect(view.textContent).toContain("brief.pdf");
+    // Not a modal: the rail is still there and still works.
+    expect(rail()).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    // The tiles are out of sight while it stands in their place.
+    expect(screen.getByRole("button", { name: /brief\.pdf/, hidden: true }).closest("[hidden]")).not.toBeNull();
+    await click(screen.getByRole("button", { name: "Back to Library" }));
+    expect(screen.queryByRole("region", { name: /^Share / })).toBeNull();
+    expect(screen.getByRole("button", { name: /brief\.pdf/ }).closest("[hidden]")).toBeNull();
+  });
+
+  it("is a verb on the right-click menu too", async () => {
+    connect({});
+    await renderFiles();
+    await act(async () => { fireEvent.contextMenu(screen.getByRole("button", { name: /brief\.pdf/ })); });
+    await click(within(screen.getByRole("menu", { name: "File" })).getByRole("menuitem", { name: "Share" }));
+    expect(screen.getByRole("region", { name: "Share brief.pdf" })).toBeTruthy();
+  });
+
+  it("expires in 7 days to start, saying the end in words", async () => {
+    connect({});
+    await renderFiles();
+    await openShare();
+    expect(expires().textContent).toContain("7 days");
+    const end = new Date(Date.now() + 7 * 86_400_000).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+    expect(screen.getByText(`until ${end}`)).toBeTruthy();
+    expect(within(openSelect(expires())).getAllByRole("option").map((o) => o.textContent)).toEqual(["1 day", "7 days", "30 days", "Pick a date…"]);
+  });
+
+  it("shares with the people picked, for the length chosen", async () => {
     const connection = connect({});
     await renderFiles();
-    await click(screen.getByRole("button", { name: /brief\.pdf/ }));
-    await click(within(await screen.findByRole("region", { name: "Share with" })).getByRole("button", { name: /Dana Cole/ }));
-    await click(screen.getByRole("radio", { name: "30 days" }));
-    await click(screen.getByRole("button", { name: "Share" }));
+    await openShare();
+    chooseOption(expires(), "30 days");
+    await pick("Dana Cole");
+    await click(addButton());
     expect(connection.callsNamed("libraryShareFile")).toEqual([
       'builtin libraryShareFile(artifactId: "a-1", recipientUserId: "u-dana", days: 30)',
     ]);
   });
 
-  it("renews a share for the days it was given", async () => {
-    const connection = connect({});
+  it("offers groups beside people, and shares with a whole group", async () => {
+    const connection = connect({ shareDirectory: [...people, { groupId: "g-fylo", displayName: "Fylo", members: 4 }] });
     await renderFiles();
-    await click(screen.getByRole("button", { name: /brief\.pdf/ }));
-    await click(within(await screen.findByRole("region", { name: "Share with" })).getByRole("button", { name: /Sam Lee/ }));
-    await click(screen.getByRole("button", { name: "Renew" }));
+    await openShare();
+    fireEvent.focus(searchBox());
+    const option = await screen.findByRole("option", { name: "Fylo" });
+    expect(option.textContent).toContain("Group of 4 people");
+    // Groups narrows the list to groups.
+    chooseOption(screen.getByLabelText("Search users and groups by", { selector: "button" }), "Groups");
+    fireEvent.focus(searchBox());
+    expect(screen.getAllByRole("option").map((o) => o.getAttribute("aria-label"))).toEqual(["Fylo"]);
+    await click(screen.getByRole("option", { name: "Fylo" }));
+    await click(addButton());
     expect(connection.callsNamed("libraryShareFile")).toEqual([
-      'builtin libraryShareFile(artifactId: "a-1", recipientUserId: "u-sam", days: 10)',
+      'builtin libraryShareFile(artifactId: "a-1", recipientGroupId: "g-fylo", days: 7)',
     ]);
   });
 
-  it("stops a share by the share row's id", async () => {
+  it("does not offer who already has the file, and removes sharing with them", async () => {
     const connection = connect({});
     await renderFiles();
-    await click(screen.getByRole("button", { name: /brief\.pdf/ }));
-    await click(within(await screen.findByRole("region", { name: "Share with" })).getByRole("button", { name: /Sam Lee/ }));
-    await click(screen.getByRole("button", { name: "Stop sharing" }));
+    await openShare();
+    fireEvent.focus(searchBox());
+    expect(screen.queryByRole("option", { name: "Sam Lee" })).toBeNull();
+    expect(screen.getByRole("option", { name: "Dana Cole" })).toBeTruthy();
+    const card = screen.getByRole("button", { name: "Remove sharing with Sam Lee" });
+    expect(card.closest(".os-editable-card")?.textContent).toMatch(/User · \d+ days left/);
+    await click(card);
     expect(connection.callsNamed("libraryShareStop")).toEqual(['builtin libraryShareStop(shareId: "s-1")']);
+  });
+
+  it("names a group share with its group", async () => {
+    const groupShare = shareRow({ id: "s-g", artifactId: "a-1", recipientUserId: "", recipientGroupId: "g-fylo", recipientDisplayName: "Fylo" });
+    connect({ shares: [groupShare] });
+    await renderFiles();
+    await openShare();
+    const remove = await screen.findByRole("button", { name: "Remove sharing with Fylo" });
+    expect(remove.closest(".os-editable-card")?.textContent).toMatch(/Group · \d+ days left/);
+  });
+
+  it("says in place when the engine refuses", async () => {
+    connect({ refuse: { libraryShareFile: "choose someone from the people and groups offered to share with" } });
+    await renderFiles();
+    await openShare();
+    await pick("Dana Cole");
+    await click(addButton());
+    expect(screen.getByText("Sharing could not be updated.")).toBeTruthy();
+    expect(screen.getByText(/people and groups offered/)).toBeTruthy();
+  });
+
+  it("picks an end date on the OS's own calendar, past days disabled", async () => {
+    const connection = connect({});
+    await renderFiles();
+    await openShare();
+    chooseOption(expires(), "Pick a date…");
+    const calendar = screen.getByRole("dialog", { name: "Pick the day the share ends" });
+    const today = new Date();
+    const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+    const inTwo = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 2);
+    const label = (d: Date) => d.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+    // Yesterday is drawn (or a month away), and never pickable.
+    const past = within(calendar).queryByRole("button", { name: label(yesterday) });
+    if (past) expect((past as HTMLButtonElement).disabled).toBe(true);
+    if (inTwo.getMonth() !== today.getMonth()) await click(within(calendar).getByRole("button", { name: "Next month" }));
+    await click(within(calendar).getByRole("button", { name: label(inTwo) }));
+    expect(screen.queryByRole("dialog", { name: "Pick the day the share ends" })).toBeNull();
+    const words = inTwo.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+    expect(screen.getByText(`until ${words}`)).toBeTruthy();
+    expect(expires().textContent).toContain(words);
+    await pick("Dana Cole");
+    await click(addButton());
+    const end = new Date(inTwo.getFullYear(), inTwo.getMonth(), inTwo.getDate(), 23, 59, 59, 999).toISOString();
+    expect(connection.callsNamed("libraryShareFile")).toEqual([
+      `builtin libraryShareFile(artifactId: "a-1", recipientUserId: "u-dana", until: "${end}")`,
+    ]);
+  });
+
+  it("goes back to the length it replaced when the calendar is shut with no day picked", async () => {
+    connect({});
+    await renderFiles();
+    await openShare();
+    chooseOption(expires(), "Pick a date…");
+    expect(screen.getByRole("dialog", { name: "Pick the day the share ends" })).toBeTruthy();
+    await act(async () => { fireEvent.mouseDown(document.body); });
+    expect(screen.queryByRole("dialog", { name: "Pick the day the share ends" })).toBeNull();
+    expect(expires().textContent).toContain("7 days");
   });
 });
 
-describe("where the Share panel is absent", () => {
+describe("where Share is absent", () => {
   it("in the Bin, for an archived file", async () => {
     connect({ artifacts: [artifactRow({ id: "a-9", title: "old.pdf", archived: true })] });
     await renderFiles();
     await click(within(rail()).getByRole("button", { name: "Bin" }));
     await click(await screen.findByRole("button", { name: /old\.pdf/ }));
-    expect(screen.getByRole("group", { name: "Selected: old.pdf" })).toBeTruthy();
-    expect(shareRegion()).toBeNull();
+    const icons = screen.getByRole("group", { name: "Selected: old.pdf" });
+    expect(within(icons).queryByRole("button", { name: "Share" })).toBeNull();
   });
 
   it("in Shared with me, for a file somebody shared with you", async () => {
@@ -98,8 +215,16 @@ describe("where the Share panel is absent", () => {
     await renderFiles();
     await click(within(rail()).getByRole("button", { name: "Shared with me" }));
     await click(await screen.findByRole("button", { name: /Budget 2027\.xlsx/ }));
-    expect(screen.getByRole("group", { name: "Selected: Budget 2027.xlsx" })).toBeTruthy();
-    expect(shareRegion()).toBeNull();
+    const icons = screen.getByRole("group", { name: "Selected: Budget 2027.xlsx" });
+    expect(within(icons).queryByRole("button", { name: "Share" })).toBeNull();
+  });
+
+  it("for a file that is not yours", async () => {
+    connect({ artifacts: [artifactRow({ id: "a-x", title: "theirs.pdf", ownerUserId: "u-someone-else" })] });
+    await renderFiles();
+    await click(await screen.findByRole("button", { name: /theirs\.pdf/ }));
+    const icons = screen.getByRole("group", { name: "Selected: theirs.pdf" });
+    expect(within(icons).queryByRole("button", { name: "Share" })).toBeNull();
   });
 
   it("without the share part, and the directory is never read", async () => {
@@ -107,8 +232,8 @@ describe("where the Share panel is absent", () => {
     const connection = connect({});
     await renderFiles();
     await click(screen.getByRole("button", { name: /brief\.pdf/ }));
-    expect(screen.getByRole("group", { name: "Selected: brief.pdf" })).toBeTruthy();
-    expect(shareRegion()).toBeNull();
+    const icons = screen.getByRole("group", { name: "Selected: brief.pdf" });
+    expect(within(icons).queryByRole("button", { name: "Share" })).toBeNull();
     expect(connection.callsNamed("libraryShareDirectory")).toEqual([]);
   });
 });
@@ -280,6 +405,15 @@ describe("the Shared folder and the Sharing place (Nov 19 2026)", () => {
     await click(await screen.findByRole("button", { name: "Stop sharing plan.md with Dana Cole" }));
     expect(screen.getByText("Sharing did not stop.")).toBeTruthy();
     expect(screen.getByText(/That share is not one of yours\./)).toBeTruthy();
+  });
+
+  it("names a whole group, with a group icon", async () => {
+    connect({ shares: [shareRow({ id: "s-g", artifactId: "a-1", recipientUserId: "", recipientGroupId: "g-fylo", recipientDisplayName: "Fylo", title: "brief.pdf" })] });
+    await renderFiles();
+    await click(within(rail()).getByRole("button", { name: "Sharing" }));
+    const stop = await screen.findByRole("button", { name: "Stop sharing brief.pdf with Fylo" });
+    const row = stop.closest("li")!;
+    expect(within(row).getByLabelText("Group")).toBeTruthy();
   });
 
   it("says so when you are sharing nothing", async () => {

@@ -90,7 +90,10 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    and icon controls, app-content text scale and page gutters; its sheet
    dimensions do not define a separate scale for its contents. Selects drop UA chrome
    (`Select` draws its own currentColor chevron). A date and time is
-   `DateTimeInput`, on the line like `Input`; prose is `TextArea`, the one field
+   `DateTimeInput`, on the line like `Input`; a single DAY chosen from a month
+   (the Files share view's "Pick a date…") is `kit/CalendarMonth`, the OS's own
+   calendar with the days that cannot be picked greyed out, never the browser's
+   picker; prose is `TextArea`, the one field
    taller than the line (two lines to start, resizable) with the same radius and
    text size. Forms use `Field` --
    label above, control on the line; nothing invents a third field size.
