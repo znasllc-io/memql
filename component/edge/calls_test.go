@@ -825,7 +825,7 @@ func TestCallsRateLimitsUnlockAndJoinSeparately(t *testing.T) {
 	unlock := func(addr string) *http.Request { return callsFrom(http.MethodPost, "/_memql/calls/unlock", addr) }
 	join := func(addr string) *http.Request { return callsFrom(http.MethodPost, "/_memql/calls/join", addr) }
 	poll := func(addr string) *http.Request { return callsFrom(http.MethodGet, "/_memql/calls/session", addr) }
-	others := []string{"session", "start", "schedule", "reschedule", "cancel", "queue"}
+	others := []string{"account-get", "session", "start", "schedule", "reschedule", "cancel", "queue"}
 	controls := []string{"host", "leave"}
 
 	t.Run("unlock: ten per address", func(t *testing.T) {

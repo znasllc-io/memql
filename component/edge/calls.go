@@ -1,7 +1,10 @@
 package edge
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httputil"
 	"strconv"
@@ -97,18 +100,20 @@ var callsStampHeaders = []string{CallsStampSiteHeader, CallsStampOwnerHeader}
 
 // The operations. A fixed set, because the budget a request draws on is chosen by it.
 const (
-	callsOpAccount    = "account"
-	callsOpHistory    = "history"
-	callsOpUnlock     = "unlock"
-	callsOpSession    = "session"
-	callsOpStart      = "start"
-	callsOpSchedule   = "schedule"
-	callsOpReschedule = "reschedule"
-	callsOpCancel     = "cancel"
-	callsOpJoin       = "join"
-	callsOpQueue      = "queue"
-	callsOpHost       = "host"
-	callsOpLeave      = "leave"
+	callsOpAccount     = "account"
+	callsOpAccountRead = "account-read"
+	callsOpLogout      = "logout"
+	callsOpHistory     = "history"
+	callsOpUnlock      = "unlock"
+	callsOpSession     = "session"
+	callsOpStart       = "start"
+	callsOpSchedule    = "schedule"
+	callsOpReschedule  = "reschedule"
+	callsOpCancel      = "cancel"
+	callsOpJoin        = "join"
+	callsOpQueue       = "queue"
+	callsOpHost        = "host"
+	callsOpLeave       = "leave"
 )
 
 // callsRoute is one of the fixed method and path pairs and everything the edge needs to know
@@ -134,7 +139,7 @@ func callsInbound(upstream string) string {
 var callsRoutes = [...]callsRoute{
 	{http.MethodGet, callsInbound(memql.CallsHistoryPath), memql.CallsHistoryPath, callsOpHistory, memql.CallsSmallBodyBytes},
 	{http.MethodPost, callsInbound(memql.CallsHistoryPath), memql.CallsHistoryPath, callsOpHistory, memql.CallsScheduleBodyBytes},
-	{http.MethodGet, callsInbound(memql.CallsAccountPath), memql.CallsAccountPath, callsOpAccount, memql.CallsSmallBodyBytes},
+	{http.MethodGet, callsInbound(memql.CallsAccountPath), memql.CallsAccountPath, callsOpAccountRead, memql.CallsSmallBodyBytes},
 	{http.MethodPost, callsInbound(memql.CallsAccountPath), memql.CallsAccountPath, callsOpAccount, memql.CallsAccountBodyBytes},
 	{http.MethodPost, callsInbound(memql.CallsUnlockPath), memql.CallsUnlockPath, callsOpUnlock, memql.CallsSmallBodyBytes},
 	{http.MethodGet, callsInbound(memql.CallsSessionPath), memql.CallsSessionPath, callsOpSession, memql.CallsSmallBodyBytes},
@@ -171,11 +176,12 @@ const (
 	// times as many per address, because one address is routinely a household or an office
 	// whose people come into a call at once, and its per-site ceiling is sized for a
 	// deployable whose whole job is calls rather than for one gate on a site. A host's
-	// controls and the hang-up have a budget of their own, sized for the acts of a call's
+	// controls, hang-up and explicit logout have a budget of their own, sized for the acts of a call's
 	// people (a host admitting a line of knockers, a room hanging up at once) rather than
 	// for polling: no amount of polling or joining from an address can keep a person there
 	// from leaving or a host from using the controls. Everything else is ordinary use -- a
-	// page polls its session every few seconds -- and shares one larger budget. There is no
+	// page polls its session/account every few seconds -- and shares one larger budget.
+	// Account authentication mutations share unlock's limits; reads never spend them. There is no
 	// environment override, as there is none for the access surface's, because nothing asks
 	// for one yet.
 	callsUnlockPerMinutePerAddress  = 10
@@ -222,8 +228,8 @@ type callsLimits struct {
 	unlockSite     *shopperBucket // site: 60 a minute
 	joinAddress    *shopperBucket // (site, address): 30 a minute
 	joinSite       *shopperBucket // site: 600 a minute
-	controlAddress *shopperBucket // (site, address): 120 a minute, for POST /host and POST /leave
-	other          *shopperBucket // (site, address): 600 a minute, for the other six routes
+	controlAddress *shopperBucket // (site, address): 120 a minute, for host controls, leave and logout
+	other          *shopperBucket // (site, address): 600 a minute, for reads and other operations
 	now            func() time.Time
 }
 
@@ -262,7 +268,7 @@ func (l *callsLimits) allow(op, siteID, address string) (bool, time.Duration) {
 			return false, callsTokenWait(callsJoinPerMinutePerSite)
 		}
 		return true, 0
-	case callsOpHost, callsOpLeave:
+	case callsOpHost, callsOpLeave, callsOpLogout:
 		if !l.controlAddress.allow(key, now) {
 			return false, callsTokenWait(callsControlPerMinutePerAddress)
 		}
@@ -399,19 +405,26 @@ func (h *Handler) serveCallsSurface(w http.ResponseWriter, r *http.Request, site
 			return
 		}
 	}
-	if allowed, wait := h.callsRate.allow(route.op, site.ID, accessClientAddress(r)); !allowed {
+	budget := route.op
+	// Only account POST needs its bounded body before choosing a budget. A small,
+	// unambiguous logout uses the exit/control budget, so reading the account or
+	// exhausting login attempts cannot prevent sign-out. Every other account
+	// payload stays authentication-limited; the BFF still validates and authorizes it.
+	if route.op == callsOpAccount {
+		if !boundCallsBody(w, r, route.maxBody) {
+			return
+		}
+		if callsAccountIsLogout(r) {
+			budget = callsOpLogout
+		}
+	}
+	if allowed, wait := h.callsRate.allow(budget, site.ID, accessClientAddress(r)); !allowed {
 		w.Header().Set("Retry-After", strconv.Itoa(int((wait+time.Second-1)/time.Second)))
 		writeCallsRefusal(w, callsRefusalLimited(wait))
 		return
 	}
 
-	if err := boundAccessBody(w, r, route.maxBody); err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			writeCallsRefusal(w, callsRefusalTooLarge)
-			return
-		}
-		writeCallsRefusal(w, callsRefusalInvalid)
+	if route.op != callsOpAccount && !boundCallsBody(w, r, route.maxBody) {
 		return
 	}
 
@@ -422,6 +435,50 @@ func (h *Handler) serveCallsSurface(w http.ResponseWriter, r *http.Request, site
 	}
 	proxy.ModifyResponse = accessOwnReplyHeaders
 	proxy.ServeHTTP(w, r)
+}
+
+func boundCallsBody(w http.ResponseWriter, r *http.Request, limit int64) bool {
+	if err := boundAccessBody(w, r, limit); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeCallsRefusal(w, callsRefusalTooLarge)
+		} else {
+			writeCallsRefusal(w, callsRefusalInvalid)
+		}
+		return false
+	}
+	return true
+}
+
+// callsAccountIsLogout recognizes only {"action":"logout"}, with JSON whitespace
+// and escaping allowed. Duplicate/unknown fields, extra JSON values and large
+// bodies never earn the less restrictive bucket. The caller has already bounded
+// and buffered this body; restore its exact bytes for the BFF's own decoder.
+func callsAccountIsLogout(r *http.Request) bool {
+	if r.Body == nil || r.ContentLength < 0 || r.ContentLength > memql.CallsSmallBodyBytes {
+		return false
+	}
+	body, err := io.ReadAll(r.Body)
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	if err != nil {
+		return false
+	}
+	d := json.NewDecoder(bytes.NewReader(body))
+	if token, err := d.Token(); err != nil || token != json.Delim('{') {
+		return false
+	}
+	if token, err := d.Token(); err != nil || token != "action" {
+		return false
+	}
+	var action string
+	if err := d.Decode(&action); err != nil || action != "logout" {
+		return false
+	}
+	if token, err := d.Token(); err != nil || token != json.Delim('}') {
+		return false
+	}
+	_, err = d.Token()
+	return err == io.EOF
 }
 
 // callsStamp is the rewrite that makes the forwarded request the bff's.
