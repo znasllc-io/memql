@@ -4623,6 +4623,9 @@ a.os-button {
 .os-files-share-file { display: inline-flex; align-items: center; gap: 6px; }
 .os-files-share-expiry { position: relative; display: flex; align-items: center; gap: 12px; min-width: 0; }
 .os-files-share-expiry .os-select { min-width: 9rem; }
+/* One compact menu, as drawn (page 8, Draft B picked): the kit's select-wrap
+ * grows to fill a line by default, which stretched "7 days" across the view. */
+.os-files-share-expiry .os-select-wrap { flex: 0 0 auto; }
 .os-files-share-until { color: var(--os-muted); font-size: var(--os-text-sm); white-space: nowrap; }
 .os-files-share-calendar { position: absolute; top: calc(100% + 4px); left: 0; z-index: 40; padding: 10px; border: 1px solid var(--os-line); border-radius: var(--os-radius-xs); background: var(--os-glass-solid); box-shadow: var(--os-shadow-float); }
 .os-files-share-card .os-editable-card-open { cursor: default; }
