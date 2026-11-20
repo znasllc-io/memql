@@ -40,6 +40,7 @@ import {
 import {
   addItem,
   emptySurface,
+  fitSurface,
   moveItem as moveItemFn,
   placeFileAt,
   removeItem as removeItemFn,
@@ -559,7 +560,9 @@ export function OsProvider({
   }, [store]);
 
   const surfaceOf = useCallback(
-    (s: OsState, deskId: DeskId): DeskSurface => s.surfaces[deskId] ?? emptySurface(),
+    // Edits act on the spots the person SEES (fitSurface), not on spots saved
+    // past this screen's edge; gridRef is read at call time.
+    (s: OsState, deskId: DeskId): DeskSurface => fitSurface(s.surfaces[deskId] ?? emptySurface(), gridRef.current),
     [],
   );
 
@@ -862,9 +865,18 @@ export function OsProvider({
   const actorRoleRef = useRef(actorRole);
   actorRoleRef.current = actorRole;
 
+  // Every reader draws the desks as this grid can hold them (fitSurface): an
+  // item saved on a wider grid is shown at the nearest spot that fits.
+  const shown = useMemo<OsState>(() => {
+    const surfaces = Object.fromEntries(
+      Object.entries(state.surfaces).map(([id, surface]) => [id, surface && fitSurface(surface, grid)]),
+    ) as OsState["surfaces"];
+    return Object.entries(surfaces).every(([id, surface]) => surface === state.surfaces[id]) ? state : { ...state, surfaces };
+  }, [state, grid]);
+
   const value = useMemo<OsContextValue>(
-    () => ({ state, actions: actionsRef.current!, registry, actorRole, ladderLoaded, accessEpoch, grid, layout, notice }),
-    [state, registry, actorRole, ladderLoaded, accessEpoch, grid, layout, notice],
+    () => ({ state: shown, actions: actionsRef.current!, registry, actorRole, ladderLoaded, accessEpoch, grid, layout, notice }),
+    [shown, registry, actorRole, ladderLoaded, accessEpoch, grid, layout, notice],
   );
 
   // Every installed pack's CSS, in one style element, kept in step with the

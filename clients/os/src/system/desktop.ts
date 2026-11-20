@@ -212,6 +212,31 @@ export function updateFolder(
   return { ...surface, items: { ...surface.items, [id]: { ...item, name: patch.name } } };
 }
 
+/**
+ * The surface as THIS grid can hold it: every item whose saved spot fits stays
+ * put, and every one that does not (saved on a wider grid -- a wider window, or
+ * before the desktop scaled up, item 16) moves to the nearest free spot that
+ * does. Returns the same object when everything fits. The shell draws and edits
+ * through this, so an item is never painted past the screen edge; an edit then
+ * saves the spots it was edited at.
+ */
+export function fitSurface(surface: DeskSurface, grid: GridSize): DeskSurface {
+  const outside = Object.entries(surface.items).filter(([id, item]) => {
+    const pos = surface.positions[id];
+    return pos && !fits(item, pos, grid, new Set());
+  });
+  if (outside.length === 0) return surface;
+  let fitted: DeskSurface = { items: surface.items, positions: { ...surface.positions } };
+  // Placed against the items that stay, so a moved item never covers one.
+  for (const [id] of outside) delete fitted.positions[id];
+  for (const [id, item] of outside) {
+    const to = nearestFreeCell(fitted, item, surface.positions[id]!, grid);
+    // ponytail: a full grid leaves the item unplaced (not drawn) until room frees up.
+    if (to) fitted = { ...fitted, positions: { ...fitted.positions, [id]: to } };
+  }
+  return fitted;
+}
+
 /** Repack every item top-left, files and folders sorted by title/name. */
 export function sortSurface(surface: DeskSurface, grid: GridSize): DeskSurface {
   const entries = Object.values(surface.items);
