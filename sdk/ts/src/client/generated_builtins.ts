@@ -4317,18 +4317,21 @@ QueryClient.prototype.librarySaveTrainingLesson = function (this: QueryClient, a
   return this.executeNamed("librarySaveTrainingLesson", buildLibrarySaveTrainingLesson(args), opts);
 };
 
-/** Who you may share a Library file with. */
+/** Who you may share a Library file with: people and groups. */
 export interface LibraryShareDirectoryArgs {
+  /** A group from this directory: answer the people a share with it would reach, rather than the whole directory. */
+  groupId?: string;
 }
 
 export function buildLibraryShareDirectory(args: LibraryShareDirectoryArgs): string {
-  void args;
-  return "builtin libraryShareDirectory()";
+  const parts: string[] = [];
+  if (args.groupId !== undefined) parts.push("groupId: " + renderMemQLValue(args.groupId));
+  return "builtin libraryShareDirectory(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    libraryShareDirectory(args?: LibraryShareDirectoryArgs, opts?: QueryCallOptions): Promise<Result>;
+    libraryShareDirectory(args: LibraryShareDirectoryArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
@@ -4336,21 +4339,27 @@ QueryClient.prototype.libraryShareDirectory = function (this: QueryClient, args:
   return this.executeNamed("libraryShareDirectory", buildLibraryShareDirectory(args), opts);
 };
 
-/** Share one of your Library files with one person, for 1, 7, 10 or 30 days -- or renew a share. */
+/** Share one of your Library files with one person or one group, for a length or until a date -- or renew a share. */
 export interface LibraryShareFileArgs {
   /** The v1:library:artifact (a file) to share. Must be yours. */
   artifactId: string;
-  /** The person to share it with, as libraryShareDirectory names them. */
-  recipientUserId: string;
-  /** How long the share lasts: 1, 7, 10 or 30. */
-  days: number;
+  /** The person to share it with, as libraryShareDirectory names them. Give this or recipientGroupId. */
+  recipientUserId?: string;
+  /** The group to share it with, as libraryShareDirectory names it. Give this or recipientUserId. */
+  recipientGroupId?: string;
+  /** How long the share lasts: 1, 7, 10 or 30. Give this or until. */
+  days?: number;
+  /** When the share ends, as an RFC 3339 instant (the Files app sends the end of the picked day in the sharer's own time zone): after now, and at most 90 days away. Give this or days. */
+  until?: string;
 }
 
 export function buildLibraryShareFile(args: LibraryShareFileArgs): string {
   const parts: string[] = [];
   parts.push("artifactId: " + renderMemQLValue(args.artifactId));
-  parts.push("recipientUserId: " + renderMemQLValue(args.recipientUserId));
-  parts.push("days: " + renderMemQLValue(args.days));
+  if (args.recipientUserId !== undefined) parts.push("recipientUserId: " + renderMemQLValue(args.recipientUserId));
+  if (args.recipientGroupId !== undefined) parts.push("recipientGroupId: " + renderMemQLValue(args.recipientGroupId));
+  if (args.days !== undefined) parts.push("days: " + renderMemQLValue(args.days));
+  if (args.until !== undefined) parts.push("until: " + renderMemQLValue(args.until));
   return "builtin libraryShareFile(" + parts.join(", ") + ")";
 }
 

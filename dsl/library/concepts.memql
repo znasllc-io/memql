@@ -22,7 +22,7 @@
 // from actor.userId server-side so a caller can never see or mutate
 // another user's index rows.
 
-use identity.concepts.{ user }
+use identity.concepts.{ user, group }
 use agents.concepts.{ agent }
 use common.concepts.{ attachment }
 use work.concepts.{ run }
@@ -725,18 +725,30 @@ concept documentComment {
   @relationship(type="references", field="authorUserId", target=user, direction="outgoing")
 }
 
-// ---- share + shareNotice: one file, one person, a bounded time ----
+// ---- share + shareNotice: one file, one person or group, a bounded time ----
 //
 // File sharing (owner-approved 2026-11-18). A person shares ONE Library file
 // with ONE other person on this cluster for 1, 7, 10 or 30 days; the recipient
-// can view it, download it and save a copy of their own, and nothing else. Two
-// rows, because two people own the two halves:
+// can view it, download it and save a copy of their own, and nothing else.
+// Since Nov 20 2026 (José's Nov 19 call, item 6) the recipient may be a whole
+// GROUP, and the end may be a picked date up to 90 days away. Two rows,
+// because two people own the two halves:
 //
 //   share        the GRANT, owned by the SHARER. Every access re-reads it.
 //   shareNotice  a DISPLAY ROW, owned by the RECIPIENT, so their own stream
 //                hears it arrive (row admission gates graph events by owner).
 //                It grants nothing: an access that finds a notice still reads
 //                the share, under the sharer, and decides on the share alone.
+//                A group share writes one notice per member it reaches.
+//
+// A GROUP SHARE AND MEMBERSHIP CHANGES (decided Nov 20 2026, the simplest rule
+// that never widens access behind the sharer's back): the share reaches the
+// group's active members when it is shared or RENEWED, recorded on the share
+// as memberUserIds, each told by a notice. Every access then requires BOTH:
+// the caller is on that list, and is STILL an active member of the group. So
+// someone removed from the group loses access at once, and someone who joins
+// later is reached only when the sharer shares with the group again -- which
+// renews the share, tells the newcomers and ends the notices of those who left.
 //
 // WHY THE GRANT IS THE SHARER'S AND NOT THE RECIPIENT'S. A row the recipient
 // owned is a row the recipient could write, and a grant its holder can write
@@ -748,33 +760,38 @@ concept documentComment {
 // download route and the copy resolve a shared file through component/server's
 // EngineLibraryStore.SharedFile. docs/public/operate/library.md, "Sharing a file".
 
-/// One Library file shared by its owner with one other person on this cluster until expiresAt (file
-/// sharing, 2026-11-18). THE GRANT: every view, download and copy re-reads this row fresh, under the
-/// sharer, and requires the caller to be recipientUserId, revokedAt empty and expiresAt in the
-/// future -- compared in Go against the engine's clock, never answered from a cache. Owned by the
-/// SHARER, because a grant the recipient owned is one the recipient could extend. @serverWritten:
-/// written only by libraryShareFile, libraryShareStop and the archive cascade, which hold the
-/// bounds a raw insert would skip. Sharing the same file with the same person again while their
-/// share is active RENEWS this row (a new expiry from now); after a stop or an expiry it makes a
-/// fresh row and this one stays as the record -- there is never a second ACTIVE share of one file
-/// with one person. Per-row authz: the composite tier -- the sharer, or a cluster owner.
+/// One Library file shared by its owner with one other person -- or one group -- on this cluster
+/// until expiresAt (file sharing, 2026-11-18; groups and picked dates 2026-11-20). THE GRANT: every
+/// view, download and copy re-reads this row fresh, under the sharer, and requires revokedAt empty,
+/// expiresAt in the future -- compared in Go against the engine's clock, never answered from a cache
+/// -- and the caller to be recipientUserId, or, for a group share, on memberUserIds AND still an
+/// active member of recipientGroupId. Owned by the SHARER, because a grant the recipient owned is
+/// one the recipient could extend. @serverWritten: written only by libraryShareFile,
+/// libraryShareStop and the archive cascade, which hold the bounds a raw insert would skip. Sharing
+/// the same file with the same person or group again while that share is active RENEWS this row (a
+/// new expiry); after a stop or an expiry it makes a fresh row and this one stays as the record --
+/// there is never a second ACTIVE share of one file with one person, or with one group. Per-row
+/// authz: the composite tier -- the sharer, or a cluster owner.
 @serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @displayCard(primary="recipientDisplayName", secondary="artifactId", tertiary="expiresAt")
 @belongsTo(account, via="artifactId", stays="signin")
 concept share {
   ownerUserId           string!    @serverSet  @description("v1:identity:user.id of the SHARER. Stamped from actor.userId and never accepted as an argument: libraryShareFile runs as the person sharing and refuses a file they do not own, so the grant is always issued by the file's owner. The load-bearing per-row authz key.")
-  recipientUserId       string!    @description("v1:identity:user.id of the one person this file is shared with. Chosen from the sharer's directory (libraryShareDirectory) at share time, and never the sharer. Every access compares it to the caller.")
-  recipientDisplayName  string!    @description("The recipient's display name AS IT WAS when the file was shared, so the sharer's list can name them without reading a user row. A snapshot: a later rename is not reflected. Never an email.")
+  recipientUserId       string     @description("v1:identity:user.id of the one person this file is shared with. Chosen from the sharer's directory (libraryShareDirectory) at share time, and never the sharer. Every access compares it to the caller. ABSENT on a group share (recipientGroupId); exactly one of the two is set.")
+  recipientGroupId      string     @description("v1:identity:group.id of the group this file is shared with (Nov 20 2026). Chosen from the groups the sharer's directory offers. ABSENT on a share with one person; exactly one of recipientUserId and this is set. Every access requires the caller to be on memberUserIds AND still an active member of this group.")
+  memberUserIds         []string   @description("Who a GROUP share reaches: the group's active members, never the sharer, when it was shared or last renewed -- each of them was told by a shareNotice. A member who joins later is not on it until the sharer shares with the group again (a renewal), and one who leaves stays on it but is refused, because every access also checks that they are still a member. ABSENT on a share with one person.")
+  recipientDisplayName  string!    @description("The recipient's display name -- or the group's name -- AS IT WAS when the file was shared, so the sharer's list can name them without reading a user or group row. A snapshot: a later rename is not reflected. Never an email.")
   artifactId            string!    @description("The v1:library:artifact shared -- a kind=file index row the sharer owned at share time. Every access re-reads it under the sharer and refuses when it is archived or no longer theirs.")
   title                 string     @description("The file's name AS IT WAS when it was shared (or last renewed), so the sharer's Sharing list can name the file without reading the artifact. A snapshot, like recipientDisplayName: a later rename is not reflected. ABSENT on shares made before the Sharing list existed (Nov 20 2026); the list falls back to the caller's own Library row.")
-  days                  int!       @description("The lifetime the sharer chose, in days: 1, 7, 10 or 30 and nothing else. Kept so a RENEW can offer the same lifetime again: libraryShareFile called for a person who holds this share while it is active resets expiresAt to now plus the days it is given, on this same row.")
-  expiresAt             datetime!  @description("When access ends: `days` after the share or its latest renewal. Compared in Go against the engine's clock on every access; there is no grace.")
+  days                  int!       @description("The lifetime in whole days: 1, 7, 10 or 30 when the sharer chose a length, or the days from the share to a picked end date, rounded up -- at most 90 either way. Kept so a RENEW can offer the same lifetime again.")
+  expiresAt             datetime!  @description("When access ends: `days` after the share or its latest renewal, or the end date the sharer picked (at most 90 days away). Compared in Go against the engine's clock on every access; there is no grace.")
   revokedAt             datetime   @description("When the sharer stopped sharing, or the file was archived. ABSENT MEANS NOT STOPPED. A soft end: the row stays as the record of who was given what, and when it ended.")
   accountId             string     @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", as="sharedWith", field="recipientUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="sharedWithGroup", field="recipientGroupId", target=group, direction="outgoing")
   @relationship(type="references", as="shares", field="artifactId", target=artifact, direction="outgoing")
 }
 
@@ -791,7 +808,7 @@ concept share {
 @belongsTo(account, via="shareId", stays="signin")
 concept shareNotice {
   ownerUserId        string!    @serverSet  @description("v1:identity:user.id of the RECIPIENT. Stamped from the actor the notice is written under -- the recipient, borrowed for that one write -- and never accepted as an argument. The load-bearing per-row authz key, and what puts the notice on the recipient's stream and nobody else's.")
-  shareId            string!    @description("The v1:library:share this notice reports. The notice's own short id is the same, so the two are written and ended together.")
+  shareId            string!    @description("The v1:library:share this notice reports. The notice's own short id is the same for a share with one person, and `<shareId>-<member's user id>` for each member a group share reaches, so a notice is written and ended beside its share.")
   artifactId         string!    @description("The sharer's v1:library:artifact this notice names -- the id the recipient views, downloads and copies through. Grants nothing by itself: the share decides.")
   sharerUserId       string!    @description("v1:identity:user.id of the person who shared the file.")
   sharerDisplayName  string!    @description("The sharer's display name at share time. Never an email.")

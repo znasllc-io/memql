@@ -2109,7 +2109,7 @@ func (s *EngineLibraryStore) Artifact(ctx context.Context, artifactId string) (*
 }
 
 // SharedFile resolves a file shared WITH the caller (file sharing,
-// 2026-11-18). The one resolver behind both shared reads -- this route's
+// 2026-11-18) -- directly, or through a group they are in (2026-11-20). The one resolver behind both shared reads -- this route's
 // download and librarySaveSharedCopy (integrations/library/share.go) -- so the
 // two cannot disagree about whether a share is open.
 //
@@ -2120,9 +2120,10 @@ func (s *EngineLibraryStore) Artifact(ctx context.Context, artifactId string) (*
 // internal origin, which would open every @serverOnly construct to whoever
 // holds a share -- and every read carries ContextWithFreshRead, so a stop on
 // a sibling replica is seen before that replica's cache eviction lands. The
-// share must name this caller and this artifact, be unrevoked, and expire
-// after now on this node's clock: compared here rather than trusted to the
-// query's own `expiresAt > now`, which a cached answer could have outlived.
+// share must reach this caller (shareReaches: them, or a group they are
+// still in) and name this artifact, be unrevoked, and expire after now on
+// this node's clock: compared here rather than trusted to the query's own
+// `expiresAt > now`, which a cached answer could have outlived.
 //
 // THEN THE FILE, UNDER THE SAME SHARER. The artifact must still be the
 // sharer's, a file and not archived, and its backing file the same. The
@@ -2160,7 +2161,7 @@ func (s *EngineLibraryStore) SharedFile(ctx context.Context, artifactId string) 
 		expires, perr := time.Parse(time.RFC3339Nano, rowString(share, "expiresAt"))
 		if perr != nil || !expires.After(now) || rowString(share, "revokedAt") != "" ||
 			memql.BareShortId(rowString(share, "ownerUserId")) != sharer ||
-			memql.BareShortId(rowString(share, "recipientUserId")) != caller ||
+			!shareReaches(ctx, share, caller) ||
 			memql.BareShortId(rowString(share, "artifactId")) != memql.BareShortId(artifactId) {
 			continue
 		}
@@ -2182,6 +2183,47 @@ func (s *EngineLibraryStore) SharedFile(ctx context.Context, artifactId string) 
 		return artifact, file, nil
 	}
 	return nil, nil, nil
+}
+
+// shareReaches is the share's recipient half of SharedFile's decision. A
+// share with one person reaches its recipientUserId. A GROUP share (Nov 20
+// 2026) reaches a caller who is on its memberUserIds -- the members it was
+// shared with, or last renewed for -- AND is still an active member of the
+// group now, by the cluster's own membership resolution (the one every
+// capability gate asks, never a cache): someone removed from the group is
+// refused at once, and someone who joined later is not on the list until the
+// sharer shares with the group again. No membership source installed answers
+// no groups, which refuses.
+func shareReaches(ctx context.Context, share map[string]any, caller string) bool {
+	group := memql.BareShortId(rowString(share, "recipientGroupId"))
+	if group == "" {
+		return memql.BareShortId(rowString(share, "recipientUserId")) == caller
+	}
+	listed := false
+	switch members := share["memberUserIds"].(type) {
+	case []any:
+		for _, m := range members {
+			s, _ := m.(string)
+			listed = listed || memql.BareShortId(strings.TrimSpace(s)) == caller
+		}
+	case []string:
+		for _, s := range members {
+			listed = listed || memql.BareShortId(strings.TrimSpace(s)) == caller
+		}
+	}
+	if !listed {
+		return false
+	}
+	source := auth.InstalledMembershipSource()
+	if source == nil {
+		return false
+	}
+	for _, g := range source.ActiveGroupIdsForUser(ctx, caller) {
+		if memql.BareShortId(strings.TrimSpace(g)) == group {
+			return true
+		}
+	}
+	return false
 }
 
 // File reads one v1:library:file row through libraryFileById.

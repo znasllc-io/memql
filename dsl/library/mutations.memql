@@ -1210,22 +1210,25 @@ mutation file recordPreparedLibraryImage {
 /// days; the write read-merges, so a renewal keeps everything it does not name -- which is why an
 /// ended share is never reused, its revokedAt would ride along). Stamps the sharer from actor.userId -- and that
 /// scoping is not enough, which is why this is @serverOnly: the row WOULD be the caller's own, but
-/// the caller could then pick any lifetime and any person, and share a file that is not theirs.
-/// libraryShareFile holds those three bounds, and this is reached only behind it.
+/// the caller could then pick any lifetime and any person or group, and share a file that is not
+/// theirs. libraryShareFile holds those bounds, and this is reached only behind it. A renewal of a
+/// group share rewrites memberUserIds whole (a list is replaced, not merged).
 @serverOnly
 @actor
 mutation share putLibraryShare {
   args {
     shareId               string!
-    recipientUserId       string!
+    recipientUserId       string
+    recipientGroupId      string
+    memberUserIds         []string
     recipientDisplayName  string!
     artifactId            string!
     title                 string
-    days                  int!  @minimum(1) @maximum(30)
+    days                  int!  @minimum(1) @maximum(90)
     expiresAt             datetime!
   }
   insert {
-    accept { recipientUserId, recipientDisplayName, artifactId, title, days, expiresAt }
+    accept { recipientUserId, recipientGroupId, memberUserIds, recipientDisplayName, artifactId, title, days, expiresAt }
     stamp {
       id:           args.shareId
       ownerUserId:  actor.userId
@@ -1250,15 +1253,17 @@ mutation share endLibraryShare {
   }
 }
 
-/// Write the recipient's notice beside its share, at the share's own short id. Runs under the
-/// recipient's borrowed actor, which is what stamps them as its owner; a renewal rewrites its
-/// expiresAt the same way. actor.userId scoping cannot be the fix: the actor stamped IS the
-/// recipient, and a recipient who could write their own notice could make a file appear shared
-/// with them. Only libraryShareFile writes one, beside the share it reports.
+/// Write the recipient's notice beside its share, at noticeId: the share's own short id for one
+/// person, `<shareId>-<member>` for each member of a group share. Runs under the recipient's
+/// borrowed actor, which is what stamps them as its owner; a renewal rewrites its expiresAt the same
+/// way. actor.userId scoping cannot be the fix: the actor stamped IS the recipient, and a recipient
+/// who could write their own notice could make a file appear shared with them. Only
+/// libraryShareFile writes one, beside the share it reports.
 @serverOnly
 @actor
 mutation shareNotice putLibraryShareNotice {
   args {
+    noticeId           string!
     shareId            string!
     artifactId         string!
     sharerUserId       string!
@@ -1272,7 +1277,7 @@ mutation shareNotice putLibraryShareNotice {
   insert {
     accept { shareId, artifactId, sharerUserId, sharerDisplayName, title, mimeType, format, size, expiresAt }
     stamp {
-      id:           args.shareId
+      id:           args.noticeId
       ownerUserId:  actor.userId
     }
   }
@@ -1284,11 +1289,11 @@ mutation shareNotice putLibraryShareNotice {
 @serverOnly
 mutation shareNotice endLibraryShareNotice {
   args {
-    shareId  string!
+    noticeId  string!
   }
   update {
     stamp {
-      id:       args.shareId
+      id:       args.noticeId
       endedAt:  now
     }
   }

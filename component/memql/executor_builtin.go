@@ -179,8 +179,8 @@ func (e *MemQLEngine) initBuiltinExecutorHandlers() error {
 		BuiltinExecutorFleetShareDirectory: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			return e.evaluateFleetShareDirectoryExpression(ctx, args)
 		},
-		BuiltinExecutorLibraryShareDirectory: func(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-			return e.evaluateLibraryShareDirectoryExpression(ctx)
+		BuiltinExecutorLibraryShareDirectory: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+			return e.evaluateLibraryShareDirectoryExpression(ctx, args)
 		},
 		BuiltinExecutorModuleReadiness: func(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			return e.evaluateModuleReadinessExpression(ctx)

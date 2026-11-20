@@ -75,9 +75,12 @@ type shareEntry struct {
 // group by bare id so a stored subject can still be NAMED after it stops
 // being offered.
 type shareDirectory struct {
-	everyone      bool
-	people        []shareEntry
-	groups        []shareEntry
+	everyone bool
+	people   []shareEntry
+	groups   []shareEntry
+	// members holds, per OFFERED group, its active people other than the
+	// caller: who a Library share with that group reaches.
+	members       map[string][]shareEntry
 	offeredPeople map[string]struct{}
 	offeredGroups map[string]struct{}
 	knownPeople   map[string]shareEntry
@@ -126,7 +129,10 @@ func (e *MemQLEngine) actorSeesEveryone(ctx context.Context) bool {
 // the caller's ORGANIZATION -- which is the Library's rule for sharing a file
 // (library_share_directory.go). Fleet lends a machine to anybody the owner
 // shares any active group with, custom groups included, and passes false. The
-// `everyone` half is the same for both: `read principal` already sees everyone.
+// `everyone` half is the same for both: `read principal` already sees everyone,
+// and every active group, custom ones included -- a custom group can cross
+// organizations, which is why a member is not offered one, but it holds nobody
+// a caller who sees everyone could not already pick by name.
 func (e *MemQLEngine) shareDirectoryFor(ctx context.Context, accountGroupsOnly bool) (shareDirectory, error) {
 	dir := shareDirectory{
 		everyone:      e.actorSeesEveryone(ctx),
@@ -134,6 +140,7 @@ func (e *MemQLEngine) shareDirectoryFor(ctx context.Context, accountGroupsOnly b
 		offeredGroups: map[string]struct{}{},
 		knownPeople:   map[string]shareEntry{},
 		knownGroups:   map[string]shareEntry{},
+		members:       map[string][]shareEntry{},
 	}
 	caller := BareShortId(strings.TrimSpace(actingUserFromContext(ctx)))
 	if caller == "" {
@@ -179,7 +186,7 @@ func (e *MemQLEngine) shareDirectoryFor(ctx context.Context, accountGroupsOnly b
 			}
 			dir.knownGroups[id] = entry
 			if strings.TrimSpace(stringFromAny(payload["status"])) == "active" &&
-				(!accountGroupsOnly || strings.TrimSpace(stringFromAny(payload["kind"])) == "account") {
+				(!accountGroupsOnly || dir.everyone || strings.TrimSpace(stringFromAny(payload["kind"])) == "account") {
 				activeGroups[id] = entry
 			}
 		case conceptIdentityGroupMembership:
@@ -229,6 +236,17 @@ func (e *MemQLEngine) shareDirectoryFor(ctx context.Context, accountGroupsOnly b
 		entry.Members = countActive(group)
 		dir.offeredGroups[group] = struct{}{}
 		dir.groups = append(dir.groups, entry)
+		seen := map[string]struct{}{}
+		for _, user := range members[group] {
+			if _, dup := seen[user]; dup {
+				continue
+			}
+			seen[user] = struct{}{}
+			if p := people[user]; p.active && user != caller {
+				dir.members[group] = append(dir.members[group], p.entry)
+			}
+		}
+		sortShareEntries(dir.members[group])
 	}
 
 	if dir.everyone {

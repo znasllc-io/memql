@@ -5977,7 +5977,7 @@ QueryClient.prototype.librarySharedWithMe = function (this: QueryClient, args: L
   return this.executeNamed("librarySharedWithMe", buildLibrarySharedWithMe(args), opts);
 };
 
-/** The caller's ACTIVE shares of one of their files -- who has it now, and until when. Backs the Share panel: `id` is the shareId libraryShareStop takes, `days` is what Renew sends back to libraryShareFile. Stopped and expired shares are not listed. */
+/** The caller's ACTIVE shares of one of their files -- who has it now, and until when. Backs the share view: `id` is the shareId libraryShareStop takes, `days` is what Renew sends back to libraryShareFile. Stopped and expired shares are not listed. */
 // Bound concept: v1:library:share (machine-readable: BoundConcepts["librarySharesForArtifact"] in generated_concepts.ts).
 export interface LibrarySharesForArtifactArgs {
   artifactId: string;

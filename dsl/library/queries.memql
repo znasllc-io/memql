@@ -965,7 +965,7 @@ query folder libraryFolderDirectory {
 /// left, and `id` is the shareId libraryShareStop takes. Stopped and expired shares are not listed:
 /// they stay as the record (revokedAt / expiresAt), read by nothing here yet. Live through the
 /// share rows' own graph events, which reach the sharer's stream because the sharer owns them.
-@unbounded("the caller's active shares -- each ends within thirty days of being made or renewed, and a person shares by hand")
+@unbounded("the caller's active shares -- each ends within ninety days of being made or renewed, and a person shares by hand")
 @cache(0)
 @actor
 query share librarySharing {
@@ -974,9 +974,9 @@ query share librarySharing {
 }
 
 /// The caller's ACTIVE shares of one of their files -- who has it now, and until when. Backs the
-/// Share panel: `id` is the shareId libraryShareStop takes, `days` is what Renew sends back to
+/// share view: `id` is the shareId libraryShareStop takes, `days` is what Renew sends back to
 /// libraryShareFile. Stopped and expired shares are not listed.
-@unbounded("one file's active shares -- at most one per person the sharer may pick")
+@unbounded("one file's active shares -- at most one per person and one per group the sharer may pick")
 @cache(0)
 @actor
 query share librarySharesForArtifact {
@@ -1006,7 +1006,7 @@ query share libraryShareById {
 /// through the notice rows' graph events. artifactId narrows it to one file, which is how the
 /// download route and librarySaveSharedCopy find the share behind a file. A notice grants
 /// nothing: every access re-reads the share it names.
-@unbounded("the caller's live shared-with-me notices -- every one ends within thirty days of its share")
+@unbounded("the caller's live shared-with-me notices -- every one ends within ninety days of its share")
 @cache(0)
 @actor
 query shareNotice librarySharedWithMe {
