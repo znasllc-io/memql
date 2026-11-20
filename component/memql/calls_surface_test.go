@@ -15,6 +15,7 @@ func TestCallsSurfaceWireNamesArePinned(t *testing.T) {
 		"the base":         {CallsSurfacePathPrefix, "/calls/"},
 		"the inbound path": {CallsInboundPath, "/_memql/calls"},
 		"the cookie":       {CallsCookieName, "__Host-memql_calls"},
+		"account":          {CallsAccountPath, "/calls/account"},
 		"unlock":           {CallsUnlockPath, "/calls/unlock"},
 		"session":          {CallsSessionPath, "/calls/session"},
 		"start":            {CallsStartPath, "/calls/start"},
@@ -29,6 +30,9 @@ func TestCallsSurfaceWireNamesArePinned(t *testing.T) {
 		if tc.got != tc.want {
 			t.Errorf("%s = %q, want %q", name, tc.got, tc.want)
 		}
+	}
+	if CallsAccountBodyBytes != 65536 {
+		t.Errorf("account body cap = %d, want 64 KiB", CallsAccountBodyBytes)
 	}
 	if CallsSmallBodyBytes != 1024 {
 		t.Errorf("the small body cap = %d, want 1 KiB", CallsSmallBodyBytes)

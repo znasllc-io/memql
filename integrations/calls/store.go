@@ -148,6 +148,8 @@ var errNoOwner = errors.New("calls: a deployable's calls rows belong to its owne
 // digest is not here: it is filtered on and never read back.
 type Key struct {
 	ID, SiteID, OwnerUserID, AccountID, Label, Kind, Status string
+	UserHandle, KeySuffix                                   string
+	IssuedAt                                                time.Time
 	Version                                                 time.Time
 }
 
@@ -155,6 +157,8 @@ type Key struct {
 // it gets here: no shape of this call can store the key itself.
 type newKey struct {
 	ID, SiteID, Digest, Label, Kind string
+	UserHandle, KeySuffix           string
+	IssuedAt                        time.Time
 }
 
 // createKey writes a minted key as the site's owner, at an id nobody holds yet.
@@ -169,6 +173,14 @@ func (s *Store) createKey(ctx context.Context, owner string, k newKey, versionTi
 		"digest":      k.Digest,
 		"kind":        k.Kind,
 		"versionTime": versionStamp(versionTime),
+	}
+	if k.UserHandle != "" {
+		args["userHandle"] = k.UserHandle
+		args["keySuffix"] = k.KeySuffix
+
+	}
+	if !k.IssuedAt.IsZero() {
+		args["issuedAt"] = versionStamp(k.IssuedAt)
 	}
 	// Absent rather than empty: a key nobody named has no name.
 	if k.Label != "" {
@@ -200,7 +212,8 @@ func (s *Store) KeyByDigest(ctx context.Context, owner, siteID, digest string) (
 		Label:       rowString(r, "label"),
 		Kind:        rowString(r, "kind"),
 		Status:      rowString(r, "status"),
-		Version:     rowTime(r, "createdAt"),
+		UserHandle:  rowString(r, "userHandle"), KeySuffix: rowString(r, "keySuffix"), IssuedAt: rowTime(r, "issuedAt"),
+		Version: rowTime(r, "createdAt"),
 	}, nil
 }
 

@@ -143,6 +143,9 @@ func at(concept, rowID string, version time.Time) func(context.Context) (context
 // never read back.
 type sessionRow struct {
 	ID, Kind, KeyID, SeatID, RoomID string
+	SiteID                          string
+	CredentialID                    string
+	VerifiedAt                      time.Time
 	ExpiresAt, EndedAt              time.Time
 	Version                         time.Time
 }
@@ -154,8 +157,10 @@ func (r *sessionRow) usable(now time.Time) bool {
 
 func sessionFromRow(r map[string]any) *sessionRow {
 	return &sessionRow{
-		ID:        memql.BareShortId(rowString(r, "id")),
-		Kind:      rowString(r, "kind"),
+		SiteID:       memql.BareShortId(rowString(r, "siteId")),
+		ID:           memql.BareShortId(rowString(r, "id")),
+		Kind:         rowString(r, "kind"),
+		CredentialID: rowString(r, "credentialId"), VerifiedAt: rowTime(r, "verifiedAt"),
 		KeyID:     memql.BareShortId(rowString(r, "keyId")),
 		SeatID:    memql.BareShortId(rowString(r, "seatId")),
 		RoomID:    memql.BareShortId(rowString(r, "roomId")),
@@ -173,7 +178,7 @@ func (s *Store) sessionByDigest(ctx context.Context, owner, siteID, digest strin
 	if err != nil || len(rows) == 0 {
 		return nil, err
 	}
-	return sessionFromRow(rows[0]), nil
+	return s.checkedSessionRow(ctx, owner, sessionFromRow(rows[0]))
 }
 
 func (s *Store) sessionByID(ctx context.Context, owner, sessionID string) (*sessionRow, error) {
@@ -182,13 +187,15 @@ func (s *Store) sessionByID(ctx context.Context, owner, sessionID string) (*sess
 	if err != nil || len(rows) == 0 {
 		return nil, err
 	}
-	return sessionFromRow(rows[0]), nil
+	return s.checkedSessionRow(ctx, owner, sessionFromRow(rows[0]))
 }
 
 // newSession is what a session's create writes. The digest is all that is left of the
 // token by the time it gets here.
 type newSession struct {
 	ID, SiteID, TokenDigest, Kind, KeyID, SeatID, RoomID string
+	CredentialID                                         string
+	VerifiedAt                                           time.Time
 	ExpiresAt                                            time.Time
 }
 
@@ -200,6 +207,10 @@ func (s *Store) createSession(ctx context.Context, owner string, n newSession, v
 		"kind":        n.Kind,
 		"expiresAt":   versionStamp(n.ExpiresAt),
 		"versionTime": versionStamp(versionTime),
+	}
+	if n.CredentialID != "" {
+		args["credentialId"] = n.CredentialID
+		args["verifiedAt"] = versionStamp(n.VerifiedAt)
 	}
 	// Absent rather than empty: a link's session was drawn on no key, and a session is
 	// seated nowhere until it joins.
@@ -243,7 +254,8 @@ func (s *Store) keyByID(ctx context.Context, owner, keyID string) (*Key, error) 
 		Label:       rowString(r, "label"),
 		Kind:        rowString(r, "kind"),
 		Status:      rowString(r, "status"),
-		Version:     rowTime(r, "createdAt"),
+		UserHandle:  rowString(r, "userHandle"), KeySuffix: rowString(r, "keySuffix"), IssuedAt: rowTime(r, "issuedAt"),
+		Version: rowTime(r, "createdAt"),
 	}, nil
 }
 
@@ -258,8 +270,9 @@ func (s *Store) keyByID(ctx context.Context, owner, keyID string) (*Key, error) 
 // ShareSeatID and ShareStartedAt are the newest screen share the media server reported
 // (events.go), the zero time before any.
 type roomRow struct {
+	HistoryPending                                                               bool
 	ID, SiteID, OwnerUserID, KeyID, MediaServerID, MediaRoom, Status, HostSeatID string
-	ScheduledCallID, EndReason, ShareSeatID                                      string
+	ScheduledCallID, EndReason, ShareSeatID, Title                               string
 	Locked                                                                       bool
 	OpenedAt, HostLeftAt, EndedAt, ShareStartedAt                                time.Time
 	Window                                                                       callrules.JoinWindow
@@ -271,6 +284,7 @@ func (r roomRow) open() bool { return r.Status != "ended" }
 
 func roomFromRow(r map[string]any) roomRow {
 	return roomRow{
+		HistoryPending:  rowBool(r, "historyPending"),
 		ID:              memql.BareShortId(rowString(r, "id")),
 		SiteID:          memql.BareShortId(rowString(r, "siteId")),
 		OwnerUserID:     memql.BareShortId(rowString(r, "ownerUserId")),
@@ -281,6 +295,7 @@ func roomFromRow(r map[string]any) roomRow {
 		HostSeatID:      memql.BareShortId(rowString(r, "hostSeatId")),
 		ScheduledCallID: memql.BareShortId(rowString(r, "scheduledCallId")),
 		EndReason:       rowString(r, "endReason"),
+		Title:           rowString(r, "title"),
 		ShareSeatID:     memql.BareShortId(rowString(r, "shareSeatId")),
 		Locked:          rowBool(r, "locked"),
 		OpenedAt:        rowTime(r, "openedAt"),
@@ -343,7 +358,7 @@ func (s *Store) openRoomsForKey(ctx context.Context, owner, keyID string) ([]roo
 // opened it.
 type newRoom struct {
 	ID, SiteID, Deployable, KeyID, MediaServerID, MediaRoom, HostSeatID string
-	GuestDigest, HostDigest, ScheduledCallID                            string
+	GuestDigest, HostDigest, ScheduledCallID, Title                     string
 	Locked                                                              bool
 	OpenedAt                                                            time.Time
 	Window                                                              callrules.JoinWindow
@@ -351,6 +366,7 @@ type newRoom struct {
 
 func (s *Store) createRoom(ctx context.Context, owner string, n newRoom, versionTime time.Time) error {
 	args := map[string]any{
+		"historyPending":      true,
 		"roomId":              n.ID,
 		"siteId":              n.SiteID,
 		"keyId":               n.KeyID,
@@ -365,7 +381,7 @@ func (s *Store) createRoom(ctx context.Context, owner string, n newRoom, version
 	}
 	// Absent rather than empty: a room a guest opened has no host seat yet, an ad hoc
 	// call's names no booking, and a deployable may have no name.
-	for name, value := range map[string]string{"deployable": n.Deployable, "hostSeatId": n.HostSeatID, "scheduledCallId": n.ScheduledCallID} {
+	for name, value := range map[string]string{"deployable": n.Deployable, "hostSeatId": n.HostSeatID, "scheduledCallId": n.ScheduledCallID, "title": n.Title} {
 		if value != "" {
 			args[name] = value
 		}
@@ -400,6 +416,11 @@ func (s *Store) updateRoom(ctx context.Context, owner string, prior roomRow, fie
 		}
 		args[name] = value
 	}
+	for _, field := range []string{"title", "status", "endedAt"} {
+		if _, changed := fields[field]; changed {
+			args["historyPending"] = true
+		}
+	}
 	call, err := langparser.RenderCall("updateCallsRoom", args)
 	return s.writeAs(ctx, owner, at(roomConcept, prior.ID, prior.Version), "the room", call, err)
 }
@@ -415,7 +436,9 @@ func (s *Store) updateRoom(ctx context.Context, owner string, prior roomRow, fie
 // webhook about it: events.go), AbsentSince when a pass first found it missing there
 // (reconcile.go, calls.SeatAbsent), and LetInAt a host's admission past the call's lock.
 type seatRow struct {
+	HistoryPending                                                       bool
 	ID, RoomID, Identity, Kind, DisplayName, Status, TermsVersion, KeyID string
+	CredentialID                                                         string
 	Host, ConfirmAdult, ConfirmNoMinors                                  bool
 	JoinedAt, LeftAt, LastSeenAt, AbsentSince, LetInAt                   time.Time
 	// WaitingSince is when the seat last began waiting to come in (the concept's
@@ -438,9 +461,11 @@ func (r seatRow) passesLock() bool { return r.Host || !r.LetInAt.IsZero() }
 
 func seatFromRow(r map[string]any) seatRow {
 	return seatRow{
+		HistoryPending:  rowBool(r, "historyPending"),
 		ID:              memql.BareShortId(rowString(r, "id")),
 		RoomID:          memql.BareShortId(rowString(r, "roomId")),
 		Identity:        rowString(r, "identity"),
+		CredentialID:    rowString(r, "credentialId"),
 		Kind:            rowString(r, "kind"),
 		DisplayName:     rowString(r, "displayName"),
 		Status:          rowString(r, "status"),
@@ -489,6 +514,7 @@ func (s *Store) seatsForRoom(ctx context.Context, owner, roomID string) ([]seatR
 // its holder unlocked when a key opened their session.
 type newSeat struct {
 	ID, SiteID, RoomID, Identity, Kind, DisplayName, Status, KeyID string
+	CredentialID                                                   string
 	Host                                                           bool
 	Confirm                                                        callrules.Confirmation
 	JoinedAt                                                       time.Time
@@ -496,6 +522,7 @@ type newSeat struct {
 
 func (s *Store) createSeat(ctx context.Context, owner string, n newSeat, versionTime time.Time) error {
 	args := map[string]any{
+		"historyPending":  n.KeyID != "" && !n.JoinedAt.IsZero(),
 		"seatId":          n.ID,
 		"siteId":          n.SiteID,
 		"roomId":          n.RoomID,
@@ -517,7 +544,10 @@ func (s *Store) createSeat(ctx context.Context, owner string, n newSeat, version
 	if n.Status == seatWaiting {
 		args["waitingSince"] = versionStamp(versionTime)
 	}
-	// Absent rather than empty: a link's session holds no key.
+	if n.CredentialID != "" {
+		args["credentialId"] = n.CredentialID
+	}
+	// Legacy link-only seats may have no key; new invited guests retain theirs.
 	if n.KeyID != "" {
 		args["keyId"] = n.KeyID
 	}
@@ -534,6 +564,11 @@ func (s *Store) updateSeat(ctx context.Context, owner string, prior seatRow, fie
 			value = versionStamp(stamp)
 		}
 		args[name] = value
+	}
+	for _, field := range []string{"joinedAt"} {
+		if _, changed := fields[field]; changed {
+			args["historyPending"] = true
+		}
 	}
 	call, err := langparser.RenderCall("updateCallsSeat", args)
 	return s.writeAs(ctx, owner, at(seatConcept, prior.ID, prior.Version), "the seat", call, err)

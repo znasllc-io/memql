@@ -80,6 +80,10 @@ const callsClientUnreadableReason = "its rows are the calls integration's bookke
 // it is still decided by the concept's @rowAuthz row by row. It is the read-side
 // counterpart of @serverWritten, which bars the same two concepts from a raw write.
 var clientUnreadableConcepts = map[string]string{
+	"v1:calls:credential":        callsClientUnreadableReason,
+	"v1:calls:history":           callsClientUnreadableReason,
+	"v1:calls:historyReceipt":    callsClientUnreadableReason,
+	"v1:calls:historySync":       callsClientUnreadableReason,
 	"v1:calls:invitationLink":    callsClientUnreadableReason,
 	"v1:calls:invitationReceipt": callsClientUnreadableReason,
 	"v1:calls:invitationBudget":  callsClientUnreadableReason,

@@ -716,6 +716,117 @@
       }
     },
     {
+      "concept": "v1:calls:credential",
+      "file": "calls/concepts.memql",
+      "fields": [
+        "accountId",
+        "addedAt",
+        "credentialData",
+        "credentialDigest",
+        "keyId",
+        "label",
+        "lastUsedAt",
+        "ownerUserId",
+        "revokedAt",
+        "siteId"
+      ],
+      "required": [
+        "addedAt",
+        "credentialData",
+        "credentialDigest",
+        "keyId",
+        "label",
+        "ownerUserId",
+        "siteId"
+      ]
+    },
+    {
+      "concept": "v1:calls:history",
+      "file": "calls/concepts.memql",
+      "fields": [
+        "accountId",
+        "archivedAt",
+        "endedAt",
+        "keyId",
+        "orderKey",
+        "ownerUserId",
+        "purgeAt",
+        "role",
+        "siteId",
+        "sourceId",
+        "sourceKind",
+        "startedAt",
+        "status",
+        "title"
+      ],
+      "required": [
+        "keyId",
+        "orderKey",
+        "ownerUserId",
+        "role",
+        "siteId",
+        "sourceId",
+        "sourceKind",
+        "status"
+      ],
+      "enums": {
+        "role": [
+          "guest",
+          "host"
+        ],
+        "sourceKind": [
+          "booking",
+          "room"
+        ],
+        "status": [
+          "active",
+          "cancelled",
+          "ended",
+          "scheduled"
+        ]
+      }
+    },
+    {
+      "concept": "v1:calls:historyReceipt",
+      "file": "calls/concepts.memql",
+      "fields": [
+        "accountId",
+        "ownerUserId",
+        "purgeAt",
+        "siteId"
+      ],
+      "required": [
+        "ownerUserId",
+        "siteId"
+      ]
+    },
+    {
+      "concept": "v1:calls:historySync",
+      "file": "calls/concepts.memql",
+      "fields": [
+        "accountId",
+        "afterCursor",
+        "complete",
+        "keyId",
+        "ownerUserId",
+        "phase",
+        "siteId"
+      ],
+      "required": [
+        "keyId",
+        "ownerUserId",
+        "phase",
+        "siteId"
+      ],
+      "enums": {
+        "phase": [
+          "bookings",
+          "rooms",
+          "seats"
+        ]
+      }
+    },
+    {
       "concept": "v1:calls:invitationBudget",
       "file": "calls/concepts.memql",
       "fields": [
@@ -788,11 +899,14 @@
       "fields": [
         "accountId",
         "digest",
+        "issuedAt",
+        "keySuffix",
         "kind",
         "label",
         "ownerUserId",
         "siteId",
-        "status"
+        "status",
+        "userHandle"
       ],
       "required": [
         "digest",
@@ -801,6 +915,7 @@
       ],
       "enums": {
         "kind": [
+          "guest",
           "paid",
           "test"
         ],
@@ -845,6 +960,7 @@
         "passTtl",
         "queueEntryTtl",
         "queuePoll",
+        "requirePasskeys",
         "roomJoinsPerMinute",
         "scheduleHorizon",
         "siteId"
@@ -896,6 +1012,7 @@
         "endReason",
         "endedAt",
         "guestDigest",
+        "historyPending",
         "hostDigest",
         "hostLeftAt",
         "hostSeatId",
@@ -911,7 +1028,8 @@
         "shareSeatId",
         "shareStartedAt",
         "siteId",
-        "status"
+        "status",
+        "title"
       ],
       "required": [
         "ownerUserId",
@@ -932,6 +1050,7 @@
         "calendarUid",
         "end",
         "guestDigest",
+        "historyPending",
         "hostDigest",
         "keyId",
         "ownerUserId",
@@ -962,7 +1081,9 @@
         "accountId",
         "confirmAdult",
         "confirmNoMinors",
+        "credentialId",
         "displayName",
+        "historyPending",
         "host",
         "identity",
         "joinedAt",
@@ -1004,6 +1125,7 @@
       "file": "calls/concepts.memql",
       "fields": [
         "accountId",
+        "credentialId",
         "endedAt",
         "expiresAt",
         "keyId",
@@ -1012,7 +1134,8 @@
         "roomId",
         "seatId",
         "siteId",
-        "tokenDigest"
+        "tokenDigest",
+        "verifiedAt"
       ],
       "required": [
         "ownerUserId",

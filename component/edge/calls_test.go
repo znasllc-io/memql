@@ -33,15 +33,17 @@ var callsPairs = []struct {
 	name, method, path, forwarded string
 	limit                         int
 }{
+	{"account-get", http.MethodGet, "/_memql/calls/account", "/calls/account", 1 << 10},
+	{"account-post", http.MethodPost, "/_memql/calls/account", "/calls/account", 64 << 10},
 	{"unlock", http.MethodPost, "/_memql/calls/unlock", "/calls/unlock", 1 << 10},
 	{"session", http.MethodGet, "/_memql/calls/session", "/calls/session", 1 << 10},
-	{"start", http.MethodPost, "/_memql/calls/start", "/calls/start", 1 << 10},
+	{"start", http.MethodPost, "/_memql/calls/start", "/calls/start", 4 << 10},
 	{"schedule", http.MethodPost, "/_memql/calls/schedule", "/calls/schedule", 4 << 10},
 	{"reschedule", http.MethodPost, "/_memql/calls/reschedule", "/calls/reschedule", 4 << 10},
 	{"cancel", http.MethodPost, "/_memql/calls/cancel", "/calls/cancel", 1 << 10},
 	{"join", http.MethodPost, "/_memql/calls/join", "/calls/join", 1 << 10},
 	{"queue", http.MethodGet, "/_memql/calls/queue", "/calls/queue", 1 << 10},
-	{"host", http.MethodPost, "/_memql/calls/host", "/calls/host", 1 << 10},
+	{"host", http.MethodPost, "/_memql/calls/host", "/calls/host", 4 << 10},
 	{"leave", http.MethodPost, "/_memql/calls/leave", "/calls/leave", 1 << 10},
 }
 

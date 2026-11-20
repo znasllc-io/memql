@@ -20,7 +20,7 @@ import (
 	"github.com/znasllc-io/memql/core/logger"
 )
 
-// calls_handler.go -- THE BFF HALF OF THE CALLS SURFACE: the ten routes a person's browser
+// calls_handler.go -- THE BFF HALF OF THE CALLS SURFACE: the fixed calls routes a person's browser
 // reaches on a deployable whose calls switch is on, to trade a key for a session, start or
 // book a call, join one by its link, wait in line, make a host control and hang up. The
 // rules are the calls service's (integrations/calls, over component/calls); this file
@@ -158,6 +158,8 @@ type CallsService interface {
 // The route names, which a log line carries. A fixed set, so a line never holds anything a
 // request sent.
 const (
+	callsOpAccount    = "account"
+	callsOpHistory    = "history"
 	callsOpUnlock     = "unlock"
 	callsOpSession    = "session"
 	callsOpStart      = "start"
@@ -170,9 +172,9 @@ const (
 	callsOpLeave      = "leave"
 )
 
-// callsRoute is one of the ten method and path pairs. One table, because the routes this
+// callsRoute is one of the fixed method and path pairs. One table, because the routes this
 // handler answers and the routes the verifier steps aside for (CallsSelfAuthenticatedPaths)
-// have to be the same ten, and two lists that agree by coincidence are the pair that drifts.
+// have to be the same set, and two lists that agree by coincidence are the pair that drifts.
 type callsRoute struct {
 	method  string
 	path    string
@@ -183,15 +185,19 @@ type callsRoute struct {
 // THE CAPS ARE ENFORCED WHILE READING, before anything is decoded: the edge's cap is the
 // edge's.
 var callsRoutes = []callsRoute{
+	{http.MethodGet, memql.CallsHistoryPath, callsOpHistory, memql.CallsSmallBodyBytes},
+	{http.MethodPost, memql.CallsHistoryPath, callsOpHistory, memql.CallsScheduleBodyBytes},
+	{http.MethodGet, memql.CallsAccountPath, callsOpAccount, memql.CallsSmallBodyBytes},
+	{http.MethodPost, memql.CallsAccountPath, callsOpAccount, memql.CallsAccountBodyBytes},
 	{http.MethodPost, memql.CallsUnlockPath, callsOpUnlock, memql.CallsSmallBodyBytes},
 	{http.MethodGet, memql.CallsSessionPath, callsOpSession, memql.CallsSmallBodyBytes},
-	{http.MethodPost, memql.CallsStartPath, callsOpStart, memql.CallsSmallBodyBytes},
+	{http.MethodPost, memql.CallsStartPath, callsOpStart, memql.CallsScheduleBodyBytes},
 	{http.MethodPost, memql.CallsSchedulePath, callsOpSchedule, memql.CallsScheduleBodyBytes},
 	{http.MethodPost, memql.CallsReschedulePath, callsOpReschedule, memql.CallsScheduleBodyBytes},
 	{http.MethodPost, memql.CallsCancelPath, callsOpCancel, memql.CallsSmallBodyBytes},
 	{http.MethodPost, memql.CallsJoinPath, callsOpJoin, memql.CallsSmallBodyBytes},
 	{http.MethodGet, memql.CallsQueuePath, callsOpQueue, memql.CallsSmallBodyBytes},
-	{http.MethodPost, memql.CallsHostPath, callsOpHost, memql.CallsSmallBodyBytes},
+	{http.MethodPost, memql.CallsHostPath, callsOpHost, memql.CallsScheduleBodyBytes},
 	{http.MethodPost, memql.CallsLeavePath, callsOpLeave, memql.CallsSmallBodyBytes},
 }
 
@@ -273,6 +279,10 @@ func (h *callsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch route.op {
+	case callsOpHistory:
+		h.serveHistory(w, r, c)
+	case callsOpAccount:
+		h.serveAccount(w, r, c)
 	case callsOpUnlock:
 		h.serveUnlock(w, r, c)
 	case callsOpSession:
@@ -467,7 +477,15 @@ func (h *callsHandler) serveUnlock(w http.ResponseWriter, r *http.Request, c cal
 		return
 	}
 	// As typed: tidying a key is ParseKey's, and the service parses it again.
-	sess, err := h.svc.Unlock(r.Context(), c.site, body.Key)
+	var sess calls.Session
+	var err error
+	if replacement, ok := h.svc.(interface {
+		UnlockReplacing(context.Context, calls.SiteRef, string, string) (calls.Session, error)
+	}); ok {
+		sess, err = replacement.UnlockReplacing(r.Context(), c.site, body.Key, c.cookie.token)
+	} else {
+		sess, err = h.svc.Unlock(r.Context(), c.site, body.Key)
+	}
 	if err != nil {
 		h.refuse(w, c, err, calls.JoinResult{})
 		return
@@ -519,6 +537,7 @@ func (b callsConfirmBody) confirmation() calls.Confirmation {
 
 func (h *callsHandler) serveStart(w http.ResponseWriter, r *http.Request, c callsCall) {
 	var body struct {
+		Title   string           `json:"title"`
 		Name    string           `json:"name"`
 		Confirm callsConfirmBody `json:"confirm"`
 	}
@@ -526,7 +545,7 @@ func (h *callsHandler) serveStart(w http.ResponseWriter, r *http.Request, c call
 		return
 	}
 	// THE HOST'S SEAT IS THE SESSION THEY BROUGHT, so a start hands the browser nothing new.
-	result, err := h.svc.Start(r.Context(), c.session(), calls.StartBody{Name: body.Name, Confirm: body.Confirm.confirmation()})
+	result, err := h.svc.Start(r.Context(), c.session(), calls.StartBody{Title: body.Title, Name: body.Name, Confirm: body.Confirm.confirmation()})
 	if err != nil || result.Join.Outcome == calls.OutcomeRefuse {
 		h.refuse(w, c, err, result.Join)
 		return
@@ -691,32 +710,57 @@ func (h *callsHandler) serveHost(w http.ResponseWriter, r *http.Request, c calls
 		Email    *string `json:"email"`
 		Token    *string `json:"token"`
 		Identity *string `json:"identity"`
+		Title    *string `json:"title"`
 	}
 	if !h.decode(w, r, c, &body) {
 		return
 	}
 	inviting := body.Action == "invite"
 	recovering := body.Action == "invitation_link"
+	renaming := body.Action == "rename"
 	invalid := false
 	switch {
 	case inviting:
-		invalid = body.Seat != nil || body.Identity != nil || body.Email == nil || body.Token == nil
+		invalid = body.Title != nil || body.Seat != nil || body.Identity != nil || body.Email == nil || body.Token == nil
 		if !invalid {
 			invalid = !calls.TokenWellFormed(*body.Token)
 		}
 	case recovering:
-		invalid = body.Seat != nil || body.Email != nil || body.Token != nil || body.Identity == nil
+		invalid = body.Title != nil || body.Seat != nil || body.Email != nil || body.Token != nil || body.Identity == nil
+		if !invalid {
+			invalid = !calls.InvitationIdentityWellFormed(*body.Identity)
+		}
+	case renaming:
+		invalid = body.Title == nil || body.Seat != nil || body.Email != nil || body.Token != nil || body.Identity == nil
 		if !invalid {
 			invalid = !calls.InvitationIdentityWellFormed(*body.Identity)
 		}
 	default:
-		invalid = body.Email != nil || body.Token != nil || body.Identity != nil
+		invalid = body.Title != nil || body.Email != nil || body.Token != nil || body.Identity != nil
 	}
 	if invalid {
 		h.refuse(w, c, calls.ErrInvalid, calls.JoinResult{})
 		return
 	}
 	if !h.requireSession(w, c) || !h.resolveSite(w, r, &c) {
+		return
+	}
+	if renaming {
+		svc, ok := h.svc.(interface {
+			RenameCall(context.Context, calls.Session, string, string) (string, error)
+		})
+		if !ok {
+			h.refuse(w, c, calls.ErrNotFound, calls.JoinResult{})
+			return
+		}
+		title, err := svc.RenameCall(r.Context(), c.session(), *body.Title, *body.Identity)
+		if err != nil {
+			h.refuse(w, c, err, calls.JoinResult{})
+			return
+		}
+		h.write(w, http.StatusOK, struct {
+			Title string `json:"title"`
+		}{title})
 		return
 	}
 	if recovering {
@@ -919,6 +963,7 @@ type callsSessionReply struct {
 	// OpenedAt is the room's persisted start in RFC 3339, only for an admitted or
 	// in-call seat of an open room. Rejoining never resets it.
 	OpenedAt string `json:"openedAt,omitempty"`
+	Title    string `json:"title,omitempty"`
 	// CountdownEndsAt is when the call ends unless a host is back first, in RFC 3339, while
 	// its host-left countdown runs (and once it has run out, until a pass ends the call), for
 	// any seat of the call; absent otherwise.
@@ -969,6 +1014,7 @@ func (h *callsHandler) sessionReply(sess calls.Session, call calls.SeatCall) cal
 	if !call.CountdownEndsAt.IsZero() {
 		reply.CountdownEndsAt = call.CountdownEndsAt.UTC().Format(time.RFC3339Nano)
 	}
+	reply.Title = call.Title
 	if !call.OpenedAt.IsZero() {
 		reply.OpenedAt = call.OpenedAt.UTC().Format(time.RFC3339Nano)
 	}

@@ -288,6 +288,31 @@ func (s *Service) reconcileGated(ctx context.Context, server MediaServer, hint r
 	wrote := false
 	var hostGoneAt time.Time
 	for _, seat := range v.seats {
+		// A live media connection is not continuing account authority. End a
+		// revoked credential's seats even when its participant never disconnects.
+		// The disconnect plan below retries failed provider removals on every pass.
+		if seat.CredentialID != "" && seat.placed() {
+			cred, err := s.store.credentialByID(fresh, owner, seat.CredentialID)
+			if err != nil {
+				return reconcilePlan{}, err
+			}
+			if cred == nil || cred.SiteID != room.SiteID || cred.KeyID != seat.KeyID || !cred.RevokedAt.IsZero() {
+				if err := s.store.updateSeat(fresh, owner, seat, map[string]any{"status": seatLeft, "leftAt": now}, memql.VersionTimeAfter(seat.Version, now)); err != nil {
+					return reconcilePlan{}, err
+				}
+				if seat.Status == seatWaiting {
+					if err := s.giveUpPlace(fresh, owner, room.ID, seat.ID, now); err != nil {
+						return reconcilePlan{}, err
+					}
+				}
+				wrote = true
+				tally.closed++
+				if seat.Host && now.After(hostGoneAt) {
+					hostGoneAt = now
+				}
+				continue
+			}
+		}
 		if !seat.occupying() {
 			continue
 		}

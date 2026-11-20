@@ -173,6 +173,16 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 			"attribute name changed, which would silently exempt nothing and gate nothing.")
 	}
 	want := map[serverOnlyKey]bool{
+		// First claim is authorized by the unclaimed calls session plus a verified WebAuthn ceremony, never the borrowed site owner alone.
+		{Path: "calls/mutations.memql", Name: "claimCallsKey"}: true,
+		// Credential revocation cleanup requires a verified calls account, not the borrowed site-owner actor alone.
+		{Path: "calls/queries.memql", Name: "callsSeatsForCredential"}: true,
+		// Calls passkey material is protocol-only authority. A client actor cannot prove a calls cookie or a fresh WebAuthn assertion.
+		{Path: "calls/queries.memql", Name: "callsCredentialByDigest"}: true,
+		{Path: "calls/queries.memql", Name: "callsCredentialById"}:     true,
+		{Path: "calls/queries.memql", Name: "callsCredentialsForKey"}:  true,
+		{Path: "calls/mutations.memql", Name: "createCallsCredential"}: true,
+		{Path: "calls/mutations.memql", Name: "updateCallsCredential"}: true,
 		// The calls capability: only the calls integration reads or writes these rows, as the site owner or the cluster; a client-callable digest lookup would be an oracle for guessed secrets.
 		{Path: "calls/queries.memql", Name: "callsKeyById"}:                    true,
 		{Path: "calls/queries.memql", Name: "callsKeyByDigest"}:                true,
@@ -215,6 +225,25 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "calls/mutations.memql", Name: "updateCallsMediaServer"}:        true,
 		{Path: "calls/mutations.memql", Name: "createCallsPolicy"}:             true,
 		{Path: "calls/mutations.memql", Name: "updateCallsPolicy"}:             true,
+		// Private history reads/writes need authenticated per-key scope, archive confirmations and replica gates; actor.userId is only the site owner.
+		{Path: "calls/queries.memql", Name: "callsHistoryById"}:           true,
+		{Path: "calls/queries.memql", Name: "callsHistoryReceiptById"}:    true,
+		{Path: "calls/queries.memql", Name: "callsHistorySyncById"}:       true,
+		{Path: "calls/queries.memql", Name: "callsHistoryForKey"}:         true,
+		{Path: "calls/queries.memql", Name: "callsHistorySourceRooms"}:    true,
+		{Path: "calls/queries.memql", Name: "callsHistorySourceBookings"}: true,
+		{Path: "calls/queries.memql", Name: "callsHistorySourceSeats"}:    true,
+		// Internal-origin source dirty probes keep replica-visible totals unknown
+		// until every changed source has a version-fenced private projection.
+		{Path: "calls/queries.memql", Name: "callsHistoryPendingRooms"}:    true,
+		{Path: "calls/queries.memql", Name: "callsHistoryPendingBookings"}: true,
+		{Path: "calls/queries.memql", Name: "callsHistoryPendingSeats"}:    true,
+		{Path: "calls/mutations.memql", Name: "createCallsHistory"}:        true,
+		{Path: "calls/mutations.memql", Name: "updateCallsHistory"}:        true,
+		{Path: "calls/mutations.memql", Name: "createCallsHistoryReceipt"}: true,
+		{Path: "calls/mutations.memql", Name: "updateCallsHistoryReceipt"}: true,
+		{Path: "calls/mutations.memql", Name: "createCallsHistorySync"}:    true,
+		{Path: "calls/mutations.memql", Name: "updateCallsHistorySync"}:    true,
 		// Invitation receipts and budgets are private effect coordination. A
 		// caller's actor cannot establish the calls host session or guest-token
 		// proof, nor replace the shared gates and version fences around a send.

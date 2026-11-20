@@ -22,6 +22,8 @@ import (
 
 // stayingKinds is every kind that declares `stays`, with its reason.
 var stayingKinds = map[string]string{
+	// A credential is bound to this deployable origin and stays with sign-in authority.
+	"v1:calls:credential":           "signin",
 	"v1:platform:siteAccessSession": "signin",
 	"v1:calls:key":                  "signin",
 	"v1:calls:session":              "signin",

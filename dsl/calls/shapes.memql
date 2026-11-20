@@ -12,6 +12,9 @@ shape key callsKeyFull {
   siteId
   ownerUserId
   label
+  userHandle
+  keySuffix
+  issuedAt
   kind
   status
   accountId
@@ -30,12 +33,15 @@ shape session callsSessionFull {
   roomId
   expiresAt
   endedAt
+  credentialId
+  verifiedAt
   accountId
 }
 
 /// The room row as the calls integration reads it. No digest is projected.
 @row
 shape room callsRoomFull {
+  historyPending
   row.id
   row.createdAt
   siteId
@@ -57,17 +63,20 @@ shape room callsRoomFull {
   shareSeatId
   shareStartedAt
   accountId
+  title
 }
 
 /// The seat row as the calls integration reads it. No digest is projected.
 @row
 shape seat callsSeatFull {
+  historyPending
   row.id
   row.createdAt
   siteId
   ownerUserId
   roomId
   identity
+  credentialId
   kind
   displayName
   host
@@ -105,6 +114,7 @@ shape queueEntry callsQueueEntryFull {
 /// The scheduledCall row as the calls integration reads it. No digest is projected.
 @row
 shape scheduledCall callsScheduledCallFull {
+  historyPending
   row.id
   row.createdAt
   siteId
@@ -151,6 +161,7 @@ shape policy callsPolicyFull {
   row.createdAt
   siteId
   ownerUserId
+  requirePasskeys
   maxPeople
   maxAgents
   roomJoinsPerMinute
@@ -193,4 +204,66 @@ shape invitationLink callsInvitationLinkFull {
   siteId
   ownerUserId
   roomId
+}
+
+/// Internal public-credential projection; no browser has direct row access.
+@row
+shape credential callsCredentialFull {
+  row.id
+  row.createdAt
+  siteId
+  ownerUserId
+  keyId
+  credentialData
+  label
+  addedAt
+  lastUsedAt
+  revokedAt
+  accountId
+}
+
+/// Private history service projection; never client-readable.
+@row
+shape history callsHistoryFull {
+  row.id
+  row.createdAt
+  siteId
+  ownerUserId
+  keyId
+  sourceKind
+  sourceId
+  title
+  role
+  status
+  orderKey
+  startedAt
+  endedAt
+  archivedAt
+  purgeAt
+  accountId
+}
+
+/// Private history service projection; never client-readable.
+@row
+shape historyReceipt callsHistoryReceiptFull {
+  row.id
+  row.createdAt
+  siteId
+  ownerUserId
+  purgeAt
+  accountId
+}
+
+/// Private history service projection; never client-readable.
+@row
+shape historySync callsHistorySyncFull {
+  row.id
+  row.createdAt
+  siteId
+  ownerUserId
+  keyId
+  phase
+  afterCursor
+  complete
+  accountId
 }

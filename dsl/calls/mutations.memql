@@ -15,12 +15,15 @@ mutation key createCallsKey {
     versionTime  datetime
     siteId  string!
     digest  string! @maxLength(64) @pattern("^[0-9a-f]{64}$")
+    userHandle string
+    keySuffix string
+    issuedAt datetime
     label  string
     kind  string
     status  string
   }
   insert {
-    accept { siteId, digest, label }
+    accept { siteId, digest, label, userHandle, keySuffix, issuedAt }
     stamp {
       id: args.keyId
       ownerUserId: actor.userId
@@ -59,6 +62,8 @@ mutation session createCallsSession {
     versionTime  datetime
     siteId  string!
     tokenDigest  string! @maxLength(64) @pattern("^[0-9a-f]{64}$")
+    credentialId string
+    verifiedAt datetime
     kind  string
     keyId  string
     seatId  string
@@ -66,7 +71,7 @@ mutation session createCallsSession {
     expiresAt  datetime
   }
   insert {
-    accept { siteId, tokenDigest, kind, keyId, seatId, roomId, expiresAt }
+    accept { siteId, tokenDigest, kind, keyId, seatId, roomId, expiresAt, credentialId, verifiedAt }
     stamp {
       id: args.sessionId
       ownerUserId: actor.userId
@@ -85,9 +90,11 @@ mutation session updateCallsSession {
     roomId  string
     expiresAt  datetime
     endedAt  datetime
+    credentialId string
+    verifiedAt datetime
   }
   update {
-    accept { seatId, roomId, expiresAt, endedAt }
+    accept { seatId, roomId, expiresAt, endedAt, credentialId, verifiedAt }
     stamp {
       id: args.sessionId
       createdAt: args.versionTime ?? now
@@ -100,6 +107,8 @@ mutation session updateCallsSession {
 @serverOnly
 mutation room createCallsRoom {
   args {
+    historyPending bool
+    title  string @maxLength(2048)
     roomId  string!
     versionTime  datetime
     siteId  string!
@@ -118,7 +127,7 @@ mutation room createCallsRoom {
     joinWindowCount  int
   }
   insert {
-    accept { siteId, deployable, keyId, mediaServerId, mediaRoom, locked, hostSeatId, scheduledCallId, guestDigest, hostDigest, openedAt, joinWindowStartedAt, joinWindowCount }
+    accept { historyPending, title, siteId, deployable, keyId, mediaServerId, mediaRoom, locked, hostSeatId, scheduledCallId, guestDigest, hostDigest, openedAt, joinWindowStartedAt, joinWindowCount }
     stamp {
       id: args.roomId
       ownerUserId: actor.userId
@@ -132,6 +141,8 @@ mutation room createCallsRoom {
 @serverOnly
 mutation room updateCallsRoom {
   args {
+    historyPending bool
+    title  string @maxLength(2048)
     roomId  string!
     versionTime  datetime
     mediaServerId  string
@@ -148,7 +159,7 @@ mutation room updateCallsRoom {
     shareStartedAt  datetime
   }
   update {
-    accept { mediaServerId, mediaRoom, status, locked, hostSeatId, hostLeftAt, endedAt, endReason, joinWindowStartedAt, joinWindowCount, shareSeatId, shareStartedAt }
+    accept { historyPending, title, mediaServerId, mediaRoom, status, locked, hostSeatId, hostLeftAt, endedAt, endReason, joinWindowStartedAt, joinWindowCount, shareSeatId, shareStartedAt }
     stamp {
       id: args.roomId
       createdAt: args.versionTime ?? now
@@ -161,10 +172,12 @@ mutation room updateCallsRoom {
 @serverOnly
 mutation seat createCallsSeat {
   args {
+    historyPending bool
     seatId  string!
     versionTime  datetime
     siteId  string!
     roomId  string!
+    credentialId string
     identity  string
     kind  string
     displayName  string
@@ -178,7 +191,7 @@ mutation seat createCallsSeat {
     waitingSince  datetime
   }
   insert {
-    accept { siteId, roomId, identity, kind, displayName, host, status, confirmAdult, confirmNoMinors, termsVersion, joinedAt, keyId, waitingSince }
+    accept { historyPending, siteId, roomId, credentialId, identity, kind, displayName, host, status, confirmAdult, confirmNoMinors, termsVersion, joinedAt, keyId, waitingSince }
     stamp {
       id: args.seatId
       ownerUserId: actor.userId
@@ -191,6 +204,7 @@ mutation seat createCallsSeat {
 @serverOnly
 mutation seat updateCallsSeat {
   args {
+    historyPending bool
     seatId  string!
     versionTime  datetime
     displayName  string
@@ -207,7 +221,7 @@ mutation seat updateCallsSeat {
     waitingSince  datetime
   }
   update {
-    accept { displayName, host, status, confirmAdult, confirmNoMinors, termsVersion, joinedAt, leftAt, lastSeenAt, absentSince, letInAt, waitingSince }
+    accept { historyPending, displayName, host, status, confirmAdult, confirmNoMinors, termsVersion, joinedAt, leftAt, lastSeenAt, absentSince, letInAt, waitingSince }
     stamp {
       id: args.seatId
       createdAt: args.versionTime ?? now
@@ -266,6 +280,7 @@ mutation queueEntry updateCallsQueueEntry {
 @serverOnly
 mutation scheduledCall createCallsScheduledCall {
   args {
+    historyPending bool
     scheduledCallId  string!
     versionTime  datetime
     siteId  string!
@@ -279,7 +294,7 @@ mutation scheduledCall createCallsScheduledCall {
     calendarUid  string @maxLength(320)
   }
   insert {
-    accept { siteId, keyId, start, end, title, guestDigest, hostDigest, calendarUid }
+    accept { historyPending, siteId, keyId, start, end, title, guestDigest, hostDigest, calendarUid }
     stamp {
       id: args.scheduledCallId
       ownerUserId: actor.userId
@@ -293,6 +308,7 @@ mutation scheduledCall createCallsScheduledCall {
 @serverOnly
 mutation scheduledCall updateCallsScheduledCall {
   args {
+    historyPending bool
     scheduledCallId  string!
     versionTime  datetime
     start  datetime
@@ -304,7 +320,7 @@ mutation scheduledCall updateCallsScheduledCall {
     hostDigest  string @maxLength(64) @pattern("^[0-9a-f]{64}$")
   }
   update {
-    accept { start, end, title, status, roomId, guestDigest, hostDigest }
+    accept { historyPending, start, end, title, status, roomId, guestDigest, hostDigest }
     stamp {
       id: args.scheduledCallId
       createdAt: args.versionTime ?? now
@@ -367,6 +383,7 @@ mutation policy createCallsPolicy {
     policyId  string!
     versionTime  datetime
     siteId  string!
+    requirePasskeys int
     maxPeople  int
     maxAgents  int
     roomJoinsPerMinute  int
@@ -379,7 +396,7 @@ mutation policy createCallsPolicy {
     queuePoll  int
   }
   insert {
-    accept { siteId, maxPeople, maxAgents, roomJoinsPerMinute, maxUpcomingScheduled, maxScheduledMinutes, hostLeftGrace, passTtl, scheduleHorizon, queueEntryTtl, queuePoll }
+    accept { siteId, requirePasskeys, maxPeople, maxAgents, roomJoinsPerMinute, maxUpcomingScheduled, maxScheduledMinutes, hostLeftGrace, passTtl, scheduleHorizon, queueEntryTtl, queuePoll }
     stamp {
       id: args.policyId
       ownerUserId: actor.userId
@@ -394,6 +411,7 @@ mutation policy updateCallsPolicy {
   args {
     policyId  string!
     versionTime  datetime
+    requirePasskeys int
     maxPeople  int
     maxAgents  int
     roomJoinsPerMinute  int
@@ -406,7 +424,7 @@ mutation policy updateCallsPolicy {
     queuePoll  int
   }
   update {
-    accept { maxPeople, maxAgents, roomJoinsPerMinute, maxUpcomingScheduled, maxScheduledMinutes, hostLeftGrace, passTtl, scheduleHorizon, queueEntryTtl, queuePoll }
+    accept { requirePasskeys, maxPeople, maxAgents, roomJoinsPerMinute, maxUpcomingScheduled, maxScheduledMinutes, hostLeftGrace, passTtl, scheduleHorizon, queueEntryTtl, queuePoll }
     stamp {
       id: args.policyId
       createdAt: args.versionTime ?? now
@@ -524,5 +542,189 @@ mutation invitationLink createCallsInvitationLink {
       ownerUserId: actor.userId
       createdAt: args.versionTime ?? now
     }
+  }
+}
+
+/// Create verified public credential material. actor.userId alone is not the wire gate: serverOnly is.
+@actor
+@serverOnly
+mutation credential createCallsCredential {
+  args {
+    credentialRowId string!
+    versionTime datetime
+    siteId string!
+    keyId string!
+    credentialDigest string! @maxLength(64) @pattern("^[0-9a-f]{64}$")
+    credentialData string!
+    label string!
+    addedAt datetime!
+  }
+  insert {
+    accept { siteId, keyId, credentialDigest, credentialData, label, addedAt }
+    stamp { id: args.credentialRowId, ownerUserId: actor.userId, createdAt: args.versionTime ?? now }
+  }
+}
+
+/// Update counter or revocation under the credential and account gates. actor.userId alone is not the wire gate: serverOnly is.
+@serverOnly
+mutation credential updateCallsCredential {
+  args {
+    credentialRowId string!
+    versionTime datetime
+    credentialData string
+    lastUsedAt datetime
+    revokedAt datetime
+  }
+  update {
+    accept { credentialData, lastUsedAt, revokedAt }
+    stamp { id: args.credentialRowId, createdAt: args.versionTime ?? now }
+  }
+}
+
+/// Internal history create. actor.userId scoping is not the fix: only internal-origin calls reach this construct.
+@actor
+@serverOnly
+mutation history createCallsHistory {
+  args {
+    historyId string!
+    versionTime datetime
+    siteId string!
+    keyId string!
+    sourceKind string!
+    sourceId string!
+    title string
+    role string!
+    status string!
+    orderKey string!
+    startedAt datetime
+    endedAt datetime
+    archivedAt datetime
+    purgeAt datetime
+  }
+  insert {
+    accept { siteId, keyId, sourceKind, sourceId, title, role, status, orderKey, startedAt, endedAt, archivedAt, purgeAt }
+    stamp {
+      id: args.historyId
+      ownerUserId: actor.userId
+      createdAt: args.versionTime ?? now
+    }
+  }
+}
+
+/// Internal history update. actor.userId scoping is not the fix: only internal-origin calls reach this construct.
+@serverOnly
+mutation history updateCallsHistory {
+  args {
+    historyId string!
+    versionTime datetime
+    title string
+    role string
+    status string
+    startedAt datetime
+    endedAt datetime
+    archivedAt datetime
+    purgeAt datetime
+  }
+  update {
+    accept { title, role, status, startedAt, endedAt, archivedAt, purgeAt }
+    stamp {
+      id: args.historyId
+      createdAt: args.versionTime ?? now
+    }
+  }
+}
+
+/// Internal history create. actor.userId scoping is not the fix: only internal-origin calls reach this construct.
+@actor
+@serverOnly
+mutation historyReceipt createCallsHistoryReceipt {
+  args {
+    historyId string!
+    versionTime datetime
+    siteId string!
+    purgeAt datetime
+  }
+  insert {
+    accept { siteId, purgeAt }
+    stamp {
+      id: args.historyId
+      ownerUserId: actor.userId
+      createdAt: args.versionTime ?? now
+    }
+  }
+}
+
+/// Internal history update. actor.userId scoping is not the fix: only internal-origin calls reach this construct.
+@serverOnly
+mutation historyReceipt updateCallsHistoryReceipt {
+  args {
+    historyId string!
+    versionTime datetime
+    purgeAt datetime
+  }
+  update {
+    accept { purgeAt }
+    stamp {
+      id: args.historyId
+      createdAt: args.versionTime ?? now
+    }
+  }
+}
+
+/// Internal history create. actor.userId scoping is not the fix: only internal-origin calls reach this construct.
+@actor
+@serverOnly
+mutation historySync createCallsHistorySync {
+  args {
+    historyId string!
+    versionTime datetime
+    siteId string!
+    keyId string!
+    phase string!
+    afterCursor string
+    complete bool
+  }
+  insert {
+    accept { siteId, keyId, phase, afterCursor, complete }
+    stamp {
+      id: args.historyId
+      ownerUserId: actor.userId
+      createdAt: args.versionTime ?? now
+    }
+  }
+}
+
+/// Internal history update. actor.userId scoping is not the fix: only internal-origin calls reach this construct.
+@serverOnly
+mutation historySync updateCallsHistorySync {
+  args {
+    historyId string!
+    versionTime datetime
+    phase string
+    afterCursor string
+    complete bool
+  }
+  update {
+    accept { phase, afterCursor, complete }
+    stamp {
+      id: args.historyId
+      createdAt: args.versionTime ?? now
+    }
+  }
+}
+
+/// First passkey claim of an unclaimed guest key, under the shared account gate. The browser session authorizes this, never key text; actor.userId alone is not the gate.
+@serverOnly
+mutation key claimCallsKey {
+  args {
+    keyId string!
+    versionTime datetime
+    digest string! @maxLength(64) @pattern("^[0-9a-f]{64}$")
+    userHandle string!
+    keySuffix string!
+  }
+  update {
+    accept { digest, userHandle, keySuffix }
+    stamp { id: args.keyId, createdAt: args.versionTime ?? now }
   }
 }

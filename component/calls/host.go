@@ -56,6 +56,7 @@ type RosterWaiter struct {
 // call are told. OpenedAt is the room's persisted start, shared by every admitted or
 // in-call seat across late joins and reconnects; waiting seats are not given it.
 type SeatCall struct {
+	Title           string
 	Host            bool
 	OpenedAt        time.Time
 	CountdownEndsAt time.Time

@@ -804,6 +804,8 @@ func CallsMediaServersBuild(args CallsMediaServersArgs) string {
 // CallsPolicySet -- Set any of a deployable's calls limits (v1:calls:policy).
 // PER SITE: the limits are the site's, on a row its owner owns, because a package deployable's name is unique only together with its package. ONLY WHAT IS NAMED CHANGES: a limit left out keeps the value it had, and one nobody ever set is the shipped default (calls.DefaultPolicy). Counts are whole numbers and DURATIONS ARE WHOLE SECONDS. Every value is held to the CLUSTER'S bounds (a room of 1 to 1000 people, a pass of 10 to 900 seconds, a waiter that polls at least once a minute and whose place outlives a poll), so no site claims more than the cluster allows; what a deployable allows inside those bounds is its operator's to choose. Judged in the site's organization, and refused for a deployable the caller cannot read, one with no owner, a caller who is not a person and any call inside a run. Returns the effective limits: {policyId, siteId} and one field per limit.
 type CallsPolicySetArgs struct {
+	// Require persistent passkey accounts at join: 0 legacy, 1 required.
+	RequirePasskeys int
 	// The deployable the limits are for.
 	SiteId string
 	// People allowed in one room, 1 to 1000.
@@ -837,6 +839,13 @@ func (qc *QueryClient) CallsPolicySet(ctx context.Context, args CallsPolicySetAr
 func CallsPolicySetBuild(args CallsPolicySetArgs) string {
 	var b strings.Builder
 	b.WriteString("builtin callsPolicySet(")
+	if args.RequirePasskeys != 0 {
+		b.WriteString("requirePasskeys: ")
+		b.WriteString(fmt.Sprintf("%v", args.RequirePasskeys))
+	}
+	if b.Len() > 23 {
+		b.WriteString(", ")
+	}
 	b.WriteString("siteId: ")
 	b.WriteString(quoteMemQL(args.SiteId))
 	if args.MaxPeople != 0 {

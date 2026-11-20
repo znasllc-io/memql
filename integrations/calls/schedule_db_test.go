@@ -192,8 +192,8 @@ func TestScheduleReturnsTwoLinksAndACalendarFile(t *testing.T) {
 	// With no title the calendar file says what it is in neutral words, and a title is
 	// kept on one line.
 	untitled := cw.booked(sess, 4*time.Hour, 30, "")
-	require.Empty(t, untitled.Title)
-	require.Contains(t, icsLines(untitled.ICS), "SUMMARY:"+defaultCallTitle)
+	require.Equal(t, callTitle("", untitled.Start), untitled.Title)
+	require.Contains(t, icsLines(untitled.ICS), "SUMMARY:"+callTitle("", untitled.Start))
 	tidy := cw.booked(sess, 6*time.Hour, 30, "  Weekly\n\tsync  ")
 	require.Equal(t, "Weekly sync", tidy.Title)
 	require.Contains(t, icsLines(tidy.ICS), "SUMMARY:Weekly sync")
@@ -276,7 +276,7 @@ func TestScheduleValidatesTheBookingAndWhoMayBook(t *testing.T) {
 	_, cohost, err := cw.joinBy(callrules.JoinBody{HostToken: started.Call.HostToken})
 	require.NoError(t, err)
 	_, err = cw.svc.Schedule(ctx, cohost, req)
-	require.ErrorIs(t, err, callrules.ErrForbidden, "a host link's session, which holds no key, booked a call")
+	require.ErrorIs(t, err, callrules.ErrForbidden, "a host link's unfunded guest key booked a call")
 	frozen := cw.host()
 	cw.asOwnerMutate(keyConcept, frozen.KeyID, "updateCallsKey", map[string]any{"keyId": frozen.KeyID, "status": "frozen"})
 	_, err = cw.svc.Schedule(ctx, frozen, req)
@@ -549,7 +549,7 @@ func TestCancelKillsBothLinks(t *testing.T) {
 // it. The first join inside the window opens the room, on the booking's key, LOCKED,
 // carrying the booking and its two links' digests, and the booking is marked started
 // with the room. A guest who opens it waits; whoever holds the host link is let in as a
-// host though the call is locked, and their session holds no key, so it starts and books
+// host though the call is locked, and their session holds only an unfunded guest key, so it starts and books
 // nothing. Later joins find the same room.
 func TestHostLinkGrantsHostAndCreatorNeedNotAttend(t *testing.T) {
 	cw := newCallWorld(t, "hostlink", 50)
@@ -593,7 +593,14 @@ func TestHostLinkGrantsHostAndCreatorNeedNotAttend(t *testing.T) {
 	require.True(t, hres.Host)
 	verifyPass(t, hres.Pass, testMediaConfig().APIKey, testAPISecret)
 	require.Equal(t, callrules.SessionHost, hsess.Kind)
-	require.Empty(t, hsess.KeyID, "a host link's session holds a key")
+	require.NotEmpty(t, hsess.KeyID, "an anonymous host link should retain its unclaimed guest key")
+	guestKey, err := cw.svc.store.keyByID(ctx, cw.owner, hsess.KeyID)
+	require.NoError(t, err)
+	require.NotNil(t, guestKey)
+	require.Equal(t, "guest", guestKey.Kind)
+	opensCalls, err := cw.svc.keyOpensCalls(ctx, cw.ref, hsess.KeyID)
+	require.NoError(t, err)
+	require.False(t, opensCalls, "an unclaimed guest key must not gain hosting entitlement from a host link")
 	require.Equal(t, roomID, hsess.RoomID)
 	hostSeat := cw.row(seatConcept, hsess.SeatID)
 	require.Equal(t, true, hostSeat["host"])

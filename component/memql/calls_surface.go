@@ -39,12 +39,18 @@ const (
 	// visitor's path: on a deployable's origin the surface is CallsInboundPath.
 	CallsSurfacePathPrefix = "/calls/"
 
+	// CallsAccountPath performs deployable-local passkey ceremonies and account management.
+	CallsAccountPath            = CallsSurfacePathPrefix + "account"
+	CallsAccountBodyBytes int64 = 64 << 10
+
 	// CallsUnlockPath trades a key for a host session (POST).
 	CallsUnlockPath = CallsSurfacePathPrefix + "unlock"
 	// CallsSessionPath says what the cookie presented holds (GET).
 	CallsSessionPath = CallsSurfacePathPrefix + "session"
 	// CallsStartPath opens a call on a key's session and seats its holder as host (POST).
 	CallsStartPath = CallsSurfacePathPrefix + "start"
+	// CallsHistoryPath reads or manages the authenticated key's private history.
+	CallsHistoryPath = CallsSurfacePathPrefix + "history"
 	// CallsSchedulePath books a call for later (POST).
 	CallsSchedulePath = CallsSurfacePathPrefix + "schedule"
 	// CallsReschedulePath moves a booked call and replaces its links (POST).

@@ -28,6 +28,7 @@ type Archive interface {
 }
 
 type Sweeper struct {
+	GateDB     func() *sql.DB
 	DB         *bun.DB
 	Concepts   memorynodes.Registry
 	Admit      func(context.Context, memorynodes.MemoryNode) bool
@@ -86,6 +87,9 @@ func (s *Sweeper) Run(ctx context.Context, dry bool) (Report, error) {
 	pass, cancel := context.WithTimeout(ctx, 4*time.Minute)
 	defer cancel()
 	var failures []error
+	if err := s.sweepCallHistory(pass, now, dry, &report); err != nil {
+		failures = append(failures, err)
+	}
 	for n, c := range concepts {
 		deadline, _ := pass.Deadline()
 		share := time.Until(deadline) / time.Duration(len(concepts)-n)

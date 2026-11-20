@@ -391,3 +391,187 @@ query invitationLink callsInvitationLinkById {
   filter row => row.id == args.id && row.siteId == args.siteId && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   shape callsInvitationLinkFull
 }
+
+/// Resolve one credential id for protocol verification. Only the cluster reads across sites; the service binds its site before use. actor.userId alone is not the wire gate: serverOnly is.
+@serverOnly
+@unbounded("credential digest is unique under the shared credential gate")
+@actor
+@cache(0)
+query credential callsCredentialByDigest {
+  args { credentialDigest string! @maxLength(64) @pattern("^[0-9a-f]{64}$") }
+  filter row => row.credentialDigest == args.credentialDigest && actor.isClusterOwner == true
+  shape callsCredentialFull
+}
+
+/// Resolve one credential row. actor.userId alone is not the wire gate: serverOnly is.
+@serverOnly
+@unbounded("credential primary id resolves at most one row")
+@actor
+@cache(0)
+query credential callsCredentialById {
+  args { id string! }
+  filter row => row.id == args.id && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  shape callsCredentialFull
+}
+
+/// Read a key's bounded active credential set. Revoked ids remain in the unique digest lookup. actor.userId alone is not the wire gate: serverOnly is.
+@serverOnly
+@unbounded("a key has at most 20 active credentials")
+@actor
+@cache(0)
+query credential callsCredentialsForKey {
+  args { keyId string! }
+  filter row => row.keyId == args.keyId && row.revokedAt == "" && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  shape callsCredentialFull
+}
+
+/// Internal exact-id read. actor.userId scoping is not the fix: only internal-origin calls reach this construct.
+@serverOnly
+@actor
+@cache(0)
+query history callsHistoryById {
+  args { id string! }
+  filter row => row.id == args.id && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  paginate 1
+  shape callsHistoryFull
+}
+
+/// Internal exact-id read. actor.userId scoping is not the fix: only internal-origin calls reach this construct.
+@serverOnly
+@actor
+@cache(0)
+query historyReceipt callsHistoryReceiptById {
+  args { id string! }
+  filter row => row.id == args.id && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  paginate 1
+  shape callsHistoryReceiptFull
+}
+
+/// Internal exact-id read. actor.userId scoping is not the fix: only internal-origin calls reach this construct.
+@serverOnly
+@actor
+@cache(0)
+query historySync callsHistorySyncById {
+  args { id string! }
+  filter row => row.id == args.id && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  paginate 1
+  shape callsHistorySyncFull
+}
+
+/// One bounded, stable private-history page. actor.userId scoping is not the fix: only internal-origin calls reach this construct.
+@serverOnly
+@actor
+@cache(0)
+query history callsHistoryForKey {
+  args {
+    siteId string!
+    keyId string!
+    afterKey string
+    archived bool!
+  }
+  filter row => row.siteId == args.siteId && row.keyId == args.keyId
+    && (args.afterKey == nil || args.afterKey == "" || row.orderKey < args.afterKey)
+    && ((args.archived == true && row.archivedAt != nil && row.archivedAt != "") || (args.archived == false && (row.archivedAt == nil || row.archivedAt == "")))
+    && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  sort "orderKey", "desc"
+  paginate 51
+  shape callsHistoryFull
+}
+
+/// Bounded key-scoped repair source. actor.userId scoping is not the fix: only internal-origin calls reach this construct.
+@serverOnly
+@actor
+@cache(0)
+query room callsHistorySourceRooms {
+  args {
+    siteId string!
+    keyId string!
+  }
+  filter row => row.siteId == args.siteId && row.keyId == args.keyId && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  sort "row.id", "asc"
+  paginate 20
+  shape callsRoomFull
+}
+
+/// Bounded key-scoped repair source. actor.userId scoping is not the fix: only internal-origin calls reach this construct.
+@serverOnly
+@actor
+@cache(0)
+query scheduledCall callsHistorySourceBookings {
+  args {
+    siteId string!
+    keyId string!
+  }
+  filter row => row.siteId == args.siteId && row.keyId == args.keyId && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  sort "row.id", "asc"
+  paginate 20
+  shape callsScheduledCallFull
+}
+
+/// Bounded key-scoped repair source. actor.userId scoping is not the fix: only internal-origin calls reach this construct.
+@serverOnly
+@actor
+@cache(0)
+query seat callsHistorySourceSeats {
+  args {
+    siteId string!
+    keyId string!
+  }
+  filter row => row.siteId == args.siteId && row.keyId == args.keyId && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  sort "row.id", "asc"
+  paginate 20
+  shape callsSeatFull
+}
+
+/// A bounded immediate revocation cleanup. Reconciliation durably retries every remaining room. actor.userId alone cannot establish the calls cookie and fresh assertion, so serverOnly is mandatory.
+@serverOnly
+@actor
+@cache(0)
+query seat callsSeatsForCredential {
+  args { credentialId string! }
+  filter row => row.credentialId == args.credentialId && row.status in ["waiting", "admitted", "in_call"] && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  paginate 50
+  shape callsSeatFull
+}
+
+/// Bounded authoritative dirty-source probe. actor.userId scoping is not the fix: only internal-origin calls may use this private projection marker.
+@serverOnly
+@actor
+@cache(0)
+query room callsHistoryPendingRooms {
+  args {
+    siteId string!
+    keyId string!
+  }
+  filter row => row.siteId == args.siteId && row.keyId == args.keyId && row.historyPending == true && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  paginate 1
+  shape callsRoomFull
+}
+
+/// Bounded authoritative dirty-source probe. actor.userId scoping is not the fix: only internal-origin calls may use this private projection marker.
+@serverOnly
+@actor
+@cache(0)
+query scheduledCall callsHistoryPendingBookings {
+  args {
+    siteId string!
+    keyId string!
+  }
+  filter row => row.siteId == args.siteId && row.keyId == args.keyId && row.historyPending == true && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  paginate 1
+  shape callsScheduledCallFull
+}
+
+/// Bounded authoritative dirty-source probe. actor.userId scoping is not the fix: only internal-origin calls may use this private projection marker.
+@serverOnly
+@actor
+@cache(0)
+query seat callsHistoryPendingSeats {
+  args {
+    siteId string!
+    keyId string!
+  }
+  filter row => row.siteId == args.siteId && row.keyId == args.keyId && row.historyPending == true && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  paginate 1
+  shape callsSeatFull
+}

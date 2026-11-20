@@ -136,7 +136,7 @@ func (i *Integration) sweep(ctx context.Context, args map[string]any, _ int) ([]
 		i.context.Logger.Info("concept retention sweep run by a person, as the maintenance principal", "caller", actor.UserId, "dryRun", dry)
 	}
 	ctx = auth.ContextWithAccess(ctx, maintenance)
-	s := Sweeper{DB: i.context.BunDB(), Concepts: i.context.Concepts, Admit: i.context.AdmitSourceRow, Invalidate: i.context.InvalidateConcept, Archive: i.archive, Container: i.container}
+	s := Sweeper{DB: i.context.BunDB(), GateDB: i.context.GateDB, Concepts: i.context.Concepts, Admit: i.context.AdmitSourceRow, Invalidate: i.context.InvalidateConcept, Archive: i.archive, Container: i.container}
 	report, err := s.Run(ctx, dry)
 	if err != nil {
 		return nil, err

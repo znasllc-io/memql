@@ -435,6 +435,7 @@ func TestNoCanonicalPatternOnArgs(t *testing.T) {
 // annotated fields = stored canonical (bare-ify on egress); exempted fields =
 // already bare / not a node id (leave alone) OR pending A2's coordinated flip.
 var idBearingFieldExemptions = map[string]string{
+	"calls/history.sourceId": "Polymorphic operational source selected by sourceKind: room or scheduledCall. The calls service verifies source ownership/site and never exposes a graph relationship through private history.",
 	// --- pack-owned target: v1:cognition:space (rides A2 #2441 partition_id->space_id) ---
 	// --- pack-owned target: v1:knowledge:* (moved to pack in decoupling P2) ---
 	"knowledge/documentChunk.documentId": "pack-owned-target v1:knowledge:document; A2 #2441",

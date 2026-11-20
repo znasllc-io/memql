@@ -75,6 +75,7 @@ builtin callsSiteEnable {
 @requiresCapability("execute", "app:deployables/calls")
 @description("Set any of a deployable's calls limits, which are per site; a limit not named keeps its value and one never set is the shipped default. Counts are whole numbers and durations are whole seconds, each held to the cluster's bounds so no site claims more than the cluster allows. Judged in the deployable's organization; refused for a deployable the caller cannot read, one with no owner, a caller who is not a person and any call inside a run. Returns the effective limits: {policyId, siteId, maxPeople, maxAgents, roomJoinsPerMinute, maxUpcomingScheduled, maxScheduledMinutes, hostLeftGrace, passTtl, scheduleHorizon, queueEntryTtl, queuePoll}.")
 builtin callsPolicySet {
+  requirePasskeys int @description("Require persistent passkey accounts at join: 0 legacy, 1 required.")
   siteId                string!  @description("The deployable the limits are for.")
   maxPeople             int      @description("People allowed in one room, 1 to 1000.")
   maxAgents             int      @description("Agents allowed in one room, 0 to 100.")

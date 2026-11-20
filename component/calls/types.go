@@ -25,6 +25,7 @@ const (
 // Policy carries every limit the rules consult. It is a value, not a global,
 // so a deployment can override it and a test can pin it.
 type Policy struct {
+	RequirePasskeys      bool
 	MaxPeople            int
 	MaxAgents            int
 	RoomJoinsPerMinute   int
@@ -179,6 +180,7 @@ type StartResult struct {
 // StartBody is what a host starts a call with: the host's display name and
 // the confirmation every seat records.
 type StartBody struct {
+	Title   string
 	Name    string
 	Confirm Confirmation
 }

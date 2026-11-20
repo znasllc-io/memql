@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	callhistory "github.com/znasllc-io/memql/component/calls"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -19,7 +20,7 @@ import (
 // A person's browser on a deployable's OWN origin: somebody with a key to trade for a
 // session, a call's link, or the session cookie one of them opened. They are nobody to
 // MemQL: no identity to open a stream with, and only an HTTP response can set an HttpOnly
-// cookie, so the other party dictates the wire. Ten method and path pairs, and nothing else:
+// cookie, so the other party dictates the wire. A fixed set of method and path pairs, and nothing else:
 //
 //	POST /_memql/calls/unlock      ->  bff POST /calls/unlock      {"key": "..."}
 //	GET  /_memql/calls/session     ->  bff GET  /calls/session
@@ -31,6 +32,8 @@ import (
 //	GET  /_memql/calls/queue       ->  bff GET  /calls/queue
 //	POST /_memql/calls/host        ->  bff POST /calls/host        {"action": "...", "seat": "..."}
 //	POST /_memql/calls/leave       ->  bff POST /calls/leave       {}
+//	GET/POST /_memql/calls/history ->  bff GET/POST /calls/history
+//	GET/POST /_memql/calls/account ->  bff GET/POST /calls/account
 //
 // # What this file owns
 //
@@ -38,17 +41,17 @@ import (
 // that is wrong, too big or too frequent never reaches the bff. The order is
 // serveAccessSurface's, with the switch added after the route:
 //
-//  1. THE ROUTE. Exactly the ten pairs, by method and path, never a prefix
+//  1. THE ROUTE. Exactly the fixed pairs, by method and path, never a prefix
 //     (callsRouteFor). Anything else under /_memql/calls is the generic proxy's, as it was
 //     before this surface existed.
 //  2. THE SWITCH. site.Calls, the deployable's own, off by default and independent of
-//     apiProxy. Off, every one of the ten answers the one 404 and nothing is forwarded, to
+//     apiProxy. Off, each route answers the one 404 and nothing is forwarded, to
 //     the surface's routes or to the generic proxy: "calls are off here" costs the bff
 //     nothing. The bff checks the switch again on the row it reads (calls_handler.go), so an
 //     edge whose cached copy of the site is older than a switch turned off forwards a request
 //     the bff then refuses; the edge is the cheap refusal, not the only one.
 //  3. THE SHAPE OF A POST: it must declare JSON and must not name another origin, and every
-//     body is capped by what is READ (1 KiB, 4 KiB for schedule and reschedule).
+//     body is capped by what is READ (the fixed per-route caps below).
 //  4. THE BUDGETS (callsLimits).
 //  5. THE STAMP, and the two reply headers. The site and owner this edge resolved are written
 //     after any copy the client sent is deleted, and every reply carries no-store and nosniff
@@ -61,7 +64,7 @@ import (
 //
 // IT DOES READ THE COOKIE'S NAME, on every way out of here. memql.CallsCookieName is a
 // __Host- cookie, so it has Path=/ and a browser sends it with every request to the
-// deployable: on the ten pairs the bff gets that cookie and no other credential a browser
+// deployable: on the fixed pairs the bff gets that cookie and no other credential a browser
 // holds (callsStamp), and every other way out takes it, and any stamp a client wrote, from
 // what it forwards (callsStripRequest, called by both reverse proxies).
 //
@@ -88,12 +91,14 @@ const (
 )
 
 // callsStampHeaders is every header this surface controls. Both reverse proxies delete them
-// from everything they forward, not only from the ten pairs, so a client cannot supply its
+// from everything they forward, not only from the fixed pairs, so a client cannot supply its
 // own on any path.
 var callsStampHeaders = []string{CallsStampSiteHeader, CallsStampOwnerHeader}
 
-// The ten operations. A fixed set, because the budget a request draws on is chosen by it.
+// The operations. A fixed set, because the budget a request draws on is chosen by it.
 const (
+	callsOpAccount    = "account"
+	callsOpHistory    = "history"
 	callsOpUnlock     = "unlock"
 	callsOpSession    = "session"
 	callsOpStart      = "start"
@@ -106,7 +111,7 @@ const (
 	callsOpLeave      = "leave"
 )
 
-// callsRoute is one of the ten method and path pairs and everything the edge needs to know
+// callsRoute is one of the fixed method and path pairs and everything the edge needs to know
 // about it: one table, so the routing decision and the forward cannot name different pairs.
 // A type of its own rather than accessRoute's, so neither surface's stamp can be handed the
 // other's route.
@@ -127,19 +132,23 @@ func callsInbound(upstream string) string {
 }
 
 var callsRoutes = [...]callsRoute{
+	{http.MethodGet, callsInbound(memql.CallsHistoryPath), memql.CallsHistoryPath, callsOpHistory, memql.CallsSmallBodyBytes},
+	{http.MethodPost, callsInbound(memql.CallsHistoryPath), memql.CallsHistoryPath, callsOpHistory, memql.CallsScheduleBodyBytes},
+	{http.MethodGet, callsInbound(memql.CallsAccountPath), memql.CallsAccountPath, callsOpAccount, memql.CallsSmallBodyBytes},
+	{http.MethodPost, callsInbound(memql.CallsAccountPath), memql.CallsAccountPath, callsOpAccount, memql.CallsAccountBodyBytes},
 	{http.MethodPost, callsInbound(memql.CallsUnlockPath), memql.CallsUnlockPath, callsOpUnlock, memql.CallsSmallBodyBytes},
 	{http.MethodGet, callsInbound(memql.CallsSessionPath), memql.CallsSessionPath, callsOpSession, memql.CallsSmallBodyBytes},
-	{http.MethodPost, callsInbound(memql.CallsStartPath), memql.CallsStartPath, callsOpStart, memql.CallsSmallBodyBytes},
+	{http.MethodPost, callsInbound(memql.CallsStartPath), memql.CallsStartPath, callsOpStart, memql.CallsScheduleBodyBytes},
 	{http.MethodPost, callsInbound(memql.CallsSchedulePath), memql.CallsSchedulePath, callsOpSchedule, memql.CallsScheduleBodyBytes},
 	{http.MethodPost, callsInbound(memql.CallsReschedulePath), memql.CallsReschedulePath, callsOpReschedule, memql.CallsScheduleBodyBytes},
 	{http.MethodPost, callsInbound(memql.CallsCancelPath), memql.CallsCancelPath, callsOpCancel, memql.CallsSmallBodyBytes},
 	{http.MethodPost, callsInbound(memql.CallsJoinPath), memql.CallsJoinPath, callsOpJoin, memql.CallsSmallBodyBytes},
 	{http.MethodGet, callsInbound(memql.CallsQueuePath), memql.CallsQueuePath, callsOpQueue, memql.CallsSmallBodyBytes},
-	{http.MethodPost, callsInbound(memql.CallsHostPath), memql.CallsHostPath, callsOpHost, memql.CallsSmallBodyBytes},
+	{http.MethodPost, callsInbound(memql.CallsHostPath), memql.CallsHostPath, callsOpHost, memql.CallsScheduleBodyBytes},
 	{http.MethodPost, callsInbound(memql.CallsLeavePath), memql.CallsLeavePath, callsOpLeave, memql.CallsSmallBodyBytes},
 }
 
-// callsRouteFor reports which of the ten pairs a request is, if it is one.
+// callsRouteFor reports which of the fixed pairs a request is, if it is one.
 //
 // AN EXACT MATCH ON BOTH, never a prefix. Claiming /_memql/calls/* would make
 // /_memql/calls/x and /_memql/callsign this file's business, and they are the generic
@@ -237,7 +246,7 @@ func (l *callsLimits) allow(op, siteID, address string) (bool, time.Duration) {
 	now := l.now()
 	key := siteID + "|" + address
 	switch op {
-	case callsOpUnlock:
+	case callsOpUnlock, callsOpAccount:
 		if !l.unlockAddress.allow(key, now) {
 			return false, callsTokenWait(callsUnlockPerMinutePerAddress)
 		}
@@ -379,6 +388,17 @@ func (h *Handler) serveCallsSurface(w http.ResponseWriter, r *http.Request, site
 		return
 	}
 
+	if route.op == callsOpHistory {
+		if r.Method == http.MethodGet {
+			if _, err := callhistory.ParseHistoryQuery(r.URL.RawQuery); err != nil {
+				writeCallsRefusal(w, callsRefusalInvalid)
+				return
+			}
+		} else if r.URL.RawQuery != "" {
+			writeCallsRefusal(w, callsRefusalInvalid)
+			return
+		}
+	}
 	if allowed, wait := h.callsRate.allow(route.op, site.ID, accessClientAddress(r)); !allowed {
 		w.Header().Set("Retry-After", strconv.Itoa(int((wait+time.Second-1)/time.Second)))
 		writeCallsRefusal(w, callsRefusalLimited(wait))
@@ -413,12 +433,11 @@ func (h *Handler) serveCallsSurface(w http.ResponseWriter, r *http.Request, site
 // THE PATH IS SET HERE, not by upstreamPath: the shared rewrite swaps the marker for the
 // bff's /memql root, and the bff serves these routes at its own root, under /calls/.
 //
-// NO QUERY STRING TRAVELS. The protocol carries every credential in a body or the cookie and
-// has no query parameters at all, so whatever a caller put after the question mark -- a
-// link's token pasted into a URL, say -- goes no further than the edge: not into the bff's
-// request line, and so not into anything that records the URL of what it served. The route is
-// chosen by the path alone, so nothing here depends on the query. ForceQuery is cleared with
-// RawQuery, since a bare "?" is carried by that flag.
+// HISTORY GET HAS THE ONLY QUERY ALLOWLIST: bounded filters and an opaque scoped
+// cursor, validated before the proxy and again by the BFF. Credentials remain in
+// the body/cookie; unknown names and duplicates are refused. Every other calls
+// route still drops query strings, so a pasted key or token goes no further.
+// ForceQuery is always cleared, since a bare "?" is carried by that flag.
 //
 // THE CALLS COOKIE, AND NO OTHER CREDENTIAL. The bff reads this one cookie and nothing else a
 // browser sends, so nothing else travels: not memql_auth, not the access surface's session,
@@ -439,12 +458,17 @@ func callsStamp(route callsRoute, siteID, owner string) func(*httputil.ProxyRequ
 		pr.Out.URL.Path = route.upstream
 		pr.Out.URL.RawPath = ""
 		pr.Out.URL.RawQuery = ""
+		if route.op == callsOpHistory && route.method == http.MethodGet {
+			if _, err := callhistory.ParseHistoryQuery(pr.In.URL.RawQuery); err == nil {
+				pr.Out.URL.RawQuery = pr.In.URL.RawQuery
+			}
+		}
 		pr.Out.URL.ForceQuery = false
 	}
 }
 
 // callsStripRequest takes the calls stamp and the calls cookie out of a request leaving the
-// edge for anywhere but the ten routes, and leaves the rest of the header as it was.
+// edge for anywhere but the fixed calls routes, and leaves the rest of the header as it was.
 //
 // EVERY WAY OUT CALLS THIS: the bff proxy's shared rewrite (newBFFProxy, ahead of any stamp)
 // and the identity proxy. A session token has no business in a request to the identity

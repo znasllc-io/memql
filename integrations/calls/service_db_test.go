@@ -545,6 +545,8 @@ func TestStartOpensOneCallPerKey(t *testing.T) {
 
 	hostSeat := cw.row(seatConcept, bare(room["hostSeatId"]))
 	require.Equal(t, roomID, bare(hostSeat["roomId"]))
+	require.Equal(t, sess.KeyID, bare(hostSeat["keyId"]), "an instant host seat must retain the authenticated key identity")
+	require.Empty(t, hostSeat["credentialId"], "a legacy host seat must not invent a passkey credential")
 	require.Equal(t, true, hostSeat["host"])
 	require.Equal(t, "admitted", hostSeat["status"])
 	require.Equal(t, "person", hostSeat["kind"])
@@ -559,6 +561,7 @@ func TestStartOpensOneCallPerKey(t *testing.T) {
 	require.Equal(t, roomID, resolved.RoomID)
 
 	// One call at a time per KEY: the same session, and a second session of the key.
+	versionsBeforeRefusal := cw.versions(roomConcept, roomID)
 	second, err := cw.svc.Start(ctx, resolved, callrules.StartBody{Name: "Host", Confirm: confirmed})
 	requireRefused(t, second.Join, err, callrules.ErrConflict, callrules.ReasonKeyInCall)
 	other, err := cw.svc.Unlock(ctx, cw.ref, cw.keyOf(sess))
@@ -567,7 +570,7 @@ func TestStartOpensOneCallPerKey(t *testing.T) {
 	requireRefused(t, third.Join, err, callrules.ErrConflict, callrules.ReasonKeyInCall)
 	require.Len(t, cw.rowsOf(roomConcept), 1, "a refused Start wrote a room")
 	require.Len(t, cw.media.rooms(), 1, "a refused Start opened a media room")
-	require.Equal(t, 1, cw.versions(roomConcept, roomID), "a refused Start wrote the open room")
+	require.Equal(t, versionsBeforeRefusal, cw.versions(roomConcept, roomID), "a refused Start wrote the open room")
 
 	// Without its three confirmations a Start is invalid and writes nothing.
 	fresh := cw.host()

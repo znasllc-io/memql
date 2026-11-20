@@ -23,7 +23,7 @@ Calls are off on every deployable until an operator turns them on
 servers are outside the cluster in every installation: locally three containers beside
 k3d ([The local media server](#the-local-media-server)), and for a cloud installation a
 rented server ([Production media server](#production-media-server)). How the edge serves
-a calls deployable -- its ten routes, their budgets, the session cookie and the page
+a calls deployable -- its routes, their budgets, the session cookie and the page
 policy -- is in [Calls on a deployable](site-hosting.md#calls-on-a-deployable).
 
 ## How a call works
@@ -225,7 +225,8 @@ server restart that a pass lands in the middle of, ends a call.
 ### Booked calls
 
 A key's session books a call (`POST /schedule`): a start, a length in minutes (at most
-`maxScheduledMinutes`, 480) and an optional title of up to 80 characters, at most
+`maxScheduledMinutes`, 480) and an optional title of up to 80 grapheme clusters and
+2,048 UTF-8 bytes, at most
 `scheduleHorizon` (30 days) ahead, at most `maxUpcomingScheduled` (20) upcoming per key,
 and not overlapping another booking of the key. The answer carries the call's two links,
 once, and a calendar file (`ics`) with the guest link.
@@ -436,7 +437,7 @@ repository.
 
 ## The routes
 
-A page calls ten routes on its own deployable's origin, under `/_memql/calls/`. Every
+A page calls the fixed routes on its own deployable's origin, under `/_memql/calls/`. Every
 POST sends a JSON object (`Content-Type: application/json`) from the deployable's own
 origin, holding no field the route does not take. Every answer carries
 `Cache-Control: no-store`, and every answer the bff or the edge's own checks give is JSON;
@@ -447,7 +448,7 @@ all, so a page must not assume a JSON body on a `5xx`.
 |---|---|---|
 | `POST /unlock` | `{"key"}` | the key's session, and sets the cookie |
 | `GET /session` | nothing | what the cookie holds; to a seat in an open call, whether it hosts it and, while the countdown runs, when the call ends; to a host, the roster too |
-| `POST /start` | `{"name", "confirm"}` | `{"call": {"id", "guestToken", "hostToken"}, "join"}` |
+| `POST /start` | `{"name", "confirm", "title"?}` | `{"call": {"id", "guestToken", "hostToken"}, "join"}` |
 | `POST /schedule` | `{"start", "minutes", "title"}` | the booking: `id`, `start`, `end`, `title`, `guestToken`, `hostToken`, `guestLink`, `hostLink`, `ics` |
 | `POST /reschedule` | `{"id", "start", "minutes", "title"}` | the booking, with new links |
 | `POST /cancel` | `{"id"}` | `204` |
@@ -455,6 +456,8 @@ all, so a page must not assume a JSON body on a `5xx`.
 | `GET /queue` | nothing | a join: a waiter's poll, or a fresh pass for a seat already in |
 | `POST /host` | `{"action", "seat"}` | `204` |
 | `POST /leave` | `{}` | `204`: the hang-up |
+| `GET /history` | bounded query parameters below | the authenticated key's private history and overview |
+| `POST /history` | a closed `rename`, `archive_preview`, `archive` or `restore` action | the updated history row or archive confirmation |
 
 `confirm` is `{"adult": true, "noMinors": true, "terms": "<version>"}`, and `start` an RFC
 3339 time. A session's answer is `{kind, keyId, seatId, roomId, expiresAt, expiresInMs}`,
@@ -466,7 +469,15 @@ An admitted or in-call seat also receives `openedAt`, the open room's persisted 
 in RFC 3339. Every participant receives the same start, including late joiners and
 reconnects, so elapsed call time uses this start and the server clock rather than the
 browser's join time. Waiting, departed and removed seats, ended rooms and sessions
-without a seat omit it. This is elapsed room time, not a billing counter. A
+without a seat omit it. This is elapsed room time, not a billing counter. A placed
+seat in an open room also receives its plain-text `title`, including while waiting.
+Titles collapse whitespace and control characters to spaces; invalid UTF-8 is
+refused. Instant start, schedule and rename all enforce 80 grapheme clusters and
+2,048 UTF-8 bytes. A blank title becomes `Call · 20 Nov 2026`, using the room's opening
+date or the booking's start date in UTC. `POST /host` with
+`{"action":"rename","title":"Review","identity":"<current media identity>"}`
+returns `{"title":"Review"}` only for the current occupying host. The identity
+prevents an old tab from renaming another call after its cookie changes. A
 join's answer is
 `{outcome, url, pass, identity, host, expiresInMs, retryAfterMs, position, reason}`:
 `admit` with the media server's address, the pass and the seat's media identity, or
@@ -501,6 +512,85 @@ The bff serves the routes at `/calls/*` and answers only what the edge forwards:
 stamps the deployable and its owner, and the bff reads the deployable again under that
 owner and requires its calls switch to be on before it reads anything else. Nothing is
 read until a key, a link or a cookie of a shape MemQL issues is presented.
+
+### Private call history and archive
+
+History belongs to the session's authenticated key, including an unclaimed guest key
+created by an anonymous join. A later passkey claim keeps that key and its history.
+It is not a deployable-wide roster: another key cannot read, rename, archive or restore
+its rows, even when both keys joined the same call. `accountId` is the opaque key id;
+neither key text, invitation tokens nor participant names are returned. A frozen key
+may read its history; expired or revoked session authority is refused.
+
+`GET /history` accepts only `archive=0|1`, `limit=1..50` (default 20),
+`period=7|30|90` (default 30), `search` (at most 256 UTF-8 bytes), `role=host|guest`,
+`status=active|ended|scheduled|cancelled`, RFC 3339 `from` inclusive and `to` exclusive,
+and an opaque `cursor` (at most 4,096 bytes). The complete query is at most 6,144 bytes;
+unknown or duplicate parameters are refused by both edge and BFF. This route forwards
+only this validated query; other calls routes do not forward query strings.
+
+The response is `{accountId,calls,nextCursor?,collecting,overview}`. A row has
+`{id,title,role,status,startedAt?,endedAt?,durationSeconds,costCents,canRename,canArchive,archivedAt?,deleteAt?}`.
+`host` means the key created or booked the call; later receiving host controls does
+not claim earlier hosted time. A scheduled call and its opened room use one history
+entry. Titles are plain text. `durationSeconds` is a completed room's elapsed time,
+not time attended or billable usage; `costCents` is unavailable (`null`). The active
+call's rename still requires its occupying host; an ended room or unopened booking
+can be renamed only by its original owning key. An archived title is a fixed snapshot
+until restored.
+
+Pages use an immutable source timestamp and opaque id tie-breaker, never an offset.
+A cursor is signed for this key, site and filters and expires after 30 minutes;
+`cursor_invalid` means restart the list. A new call appears on a refreshed first page
+without moving previously paged rows. A filtered page can be empty and still carry a
+`nextCursor`, so clients continue until the cursor is absent. Successful start, join
+and queue admission attempt their projection after releasing room/account gates,
+with a two-second bound. Bookings do the same. Every relevant
+source write atomically sets its private `historyPending` bit; only a successful
+projection of that exact source version clears it. A crash, timeout or competing
+update therefore leaves durable evidence that totals are incomplete on every replica.
+The service also observes the current or most recent seat immediately and repairs at
+most 20 older source records per read. While `collecting` is true, a client may continue
+bounded, non-overlapping reads. Overview totals remain unavailable until the first
+source cycle completes and all source bits are clear; pending sources are checked
+again after the aggregate read. Ended bookings that never opened a room count as no
+hosted call and have no duration.
+
+`overview` is independent of list filters and archive selection. It returns the
+requested `periodDays`, `currency:"USD"`, nullable `hostedCalls`, `joinedCalls` and
+`hostedSeconds`, and UTC daily `series` of `{date,calls,durationSeconds,costCents}`.
+Counts include retained active and ended hosted/joined calls in that period, not
+scheduled or cancelled bookings. Duration totals and daily durations include completed
+**hosted** rooms only. Archived history remains included until its deadline. A scan
+exceeding 1,000 retained rows in either history list returns unavailable totals rather
+than partial totals. Monetary fields `availableCents`, `reservedCents`, `spendCents`
+and daily costs are `null`: this projection does not invent wallet or billing records.
+
+To archive finished or cancelled history, first post
+`{"action":"archive_preview","id":"<history id>"}`. The server returns `deleteAt`
+and a signed `confirmationToken` bound to the key, row version and exact deadline.
+Display that deadline and require explicit acknowledgment, then post
+`{"action":"archive","id":"<history id>","confirmationToken":"...","acknowledged":true}`.
+The preview expires after five minutes; its deadline is exactly 30 days after preview
+creation and does not move when the request is retried. A changed row or stale
+confirmation returns `archive_changed`; get a fresh preview and ask again. Replaying
+the same successful archive is idempotent and returns the same deadline. Active or
+scheduled calls return `history_not_finished`.
+
+`{"action":"restore","id":"<history id>"}` restores metadata before the deadline;
+repeating it is harmless. At or after `deleteAt`, reads hide the row and restore returns
+`history_expired`. The bounded hourly retention pass physically removes every version
+of the expired history entry under the same cross-replica gate used by restore. It
+requires a matching suppression receipt and preserves records if that proof is
+missing. The receipt retains only an opaque keyed id, site/owner scope and deadline,
+so source repair cannot recreate deleted history. Operational room, seat, key,
+safety and wallet records are untouched; their separate retention policy still
+governs their titles and other operational data. Backup retention is also separate.
+
+`{"action":"rename","id":"<history id>","title":"Review"}` returns `{call:...}`
+after checking the source's owner and current live host authority. Archive and restore
+also return `{call:...}`; archive includes its unchanged `deleteAt`. Neither a claimed
+history role nor a browser-supplied account id is authorization.
 
 ## Environment
 
@@ -995,3 +1085,78 @@ MEMQL_E2E_DATABASE_DSN='postgres://memql:memql_dev@127.0.0.1:55433/memql?sslmode
 
 The machine it runs on has to trust the mkcert root (`mkcert -install`), since the media
 server's client trusts the system's roots alone.
+
+## Deployable key accounts and passkeys
+
+`GET /_memql/calls/account` returns an uncached account snapshot and capability
+flags. `POST` on the same path accepts one bounded action: `register_begin`,
+`register_finish`, `login_begin`, `login_finish`, `verify_begin`, `verify_finish`,
+`add_begin`, `add_finish`, `claim_begin`, `claim_finish`, `revoke`, or `logout`.
+This owner-authorized extension of the calls HTTP family is deployable-local;
+it neither creates a MemQL operator identity nor authenticates any other route.
+
+New deliberately created keys require discoverable WebAuthn credentials with
+user verification. The server derives the exact RP and origin from the site's
+persisted public hostname, never a request header, and verifies the actual
+attestation/assertion. Challenge state uses the existing shared Postgres
+WebAuthn substrate: five-minute expiry, ceremony/site binding, and atomic
+single-use consumption across replicas. Begin replies carry `challengeId`,
+`expiresAt`, and direct `creationOptions` or `requestOptions`; finish requests
+carry the challenge handle and the browser credential JSON.
+
+Account ids are opaque calls key ids. A separately random user handle identifies
+the key to the authenticator. All credentials for that key share its permissions
+and balance. Up to twenty active passkeys may be named (64 characters each).
+Adding or removing one requires a successful existing-passkey assertion within
+five minutes, bound to the same account and session. The last passkey cannot be
+removed. Removing the credential that authenticated the current session requires
+signing in with a different credential first. Re-verification refreshes the
+session's proof time without changing its original credential binding.
+
+Successful anonymous invitation admission creates an unclaimed, zero-balance
+`guest` key. It neither starts/schedules calls nor qualifies for automatic host
+handover. Its placeholder spelling is undisclosed and cannot unlock a session.
+The HttpOnly browser session may claim that same key after leaving the call;
+`claim_begin`/`claim_finish` require that session, a new verified passkey, and a
+single-winner account gate. Claim preserves the key id and history, rotates the
+placeholder digest to a visible key shown once, and invalidates unclaimed
+sessions. A key spelling or invitation alone never authorizes passkey enrollment.
+The optional `requirePasskeys` policy is off by default; setting it to `1`
+requires a current credential-backed session at join. Legacy key sessions and
+unclaimed guest sessions do not satisfy it, while `0` permits guest access.
+It is not necessary to enable that policy to secure created or claimed keys.
+
+Account snapshots include `authenticated`, `capabilities`, `account`, and
+`credentials`. Account metadata carries `accountId`, `keyId`, masked `keyLabel`,
+`createdAt`, `balanceCents`, `credentialCount`, `legacy`, `unclaimed`, and
+`canHost`. An unclaimed session is authenticated only as that browser-held
+unfunded guest key; it has no passkey or hosting entitlement. Legacy operator
+keys remain explicitly marked and retain their existing unlock path. A known
+legacy key at `login_begin` answers `legacy_key`; passkey-bound and guest keys
+are always refused by raw-key unlock. No payment or credit is created here:
+`payments` is false, guest balances are zero, and legacy balances are unknown.
+
+Logout and account replacement refuse an occupying or waiting seat with
+`in_another_call`; leave first. Successful replacement retires the previous
+cookie, using a session version fence against a concurrent join. Cookies remain
+Secure, HttpOnly, SameSite=Strict, and limited to the calls surface by the edge.
+The current session lifetime is 24 hours. An unclaimed guest has no recovery
+once that cookie is lost or expires; keeping it with a passkey before that point
+provides discoverable sign-in. Unclaimed-key inactivity deactivation remains a
+separate policy decision; no funded-balance expiry or account purge is introduced.
+
+Revoking a credential invalidates its stored sessions on every fresh read and
+binds cleanup to only its seats. The revoke response attempts media removal
+outside the account gate, within a three-second total budget. Durable room
+reconciliation also cancels its waiting seats and disconnects its live media
+identities on the normal thirty-second schedule, retrying provider failures.
+This cadence is not a hard guarantee during worker or provider outages.
+Previously issued media passes retain their cryptographic TTL (normally 120
+seconds); while a room remains open, reconciliation removes replayed identities
+that no longer hold a valid seat. Recovery codes and credential migration for
+legacy operator keys are not implemented.
+
+Regression evidence is in `integrations/calls/accounts_db_test.go` (real signed
+WebAuthn ceremonies, shared challenges, account isolation, first-claim races,
+revocation/media cleanup), `component/server/calls_account_handler_test.go`
+(stamps, body caps, cookie secrecy), and the account lookup/migration tests.

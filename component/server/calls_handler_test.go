@@ -938,7 +938,7 @@ func TestACallsBodyIsRefusedBeforeAnythingIsRead(t *testing.T) {
 		"a field nobody reads": {"/calls/start", "application/json", `{"name":"Ada","admin":true}`, http.StatusBadRequest, `{"error":"invalid"}`},
 		"a field of the wrong type": {"/calls/schedule", "application/json", `{"start":"2026-11-20T15:00:00Z","minutes":"thirty"}`,
 			http.StatusBadRequest, `{"error":"invalid"}`},
-		"a start over the small cap":    {"/calls/start", "application/json", big(int(memql.CallsSmallBodyBytes)), http.StatusRequestEntityTooLarge, `{"error":"too_large"}`},
+		"a start over its title cap":    {"/calls/start", "application/json", big(int(memql.CallsScheduleBodyBytes)), http.StatusRequestEntityTooLarge, `{"error":"too_large"}`},
 		"a join over the small cap":     {"/calls/join", "application/json", big(int(memql.CallsSmallBodyBytes)), http.StatusRequestEntityTooLarge, `{"error":"too_large"}`},
 		"a schedule over its cap":       {"/calls/schedule", "application/json", big(int(memql.CallsScheduleBodyBytes)), http.StatusRequestEntityTooLarge, `{"error":"too_large"}`},
 		"a reschedule over its cap":     {"/calls/reschedule", "application/json", big(int(memql.CallsScheduleBodyBytes)), http.StatusRequestEntityTooLarge, `{"error":"too_large"}`},
@@ -1931,7 +1931,7 @@ func TestCallsSurfaceDeclarations(t *testing.T) {
 	t.Run("the exact routes carry the base", func(t *testing.T) {
 		t.Setenv("MEMQL_SERVER_PUBLIC_PATH", "/tenant")
 		var want []string
-		for _, name := range []string{"unlock", "session", "start", "schedule", "reschedule", "cancel", "join", "queue", "host", "leave"} {
+		for _, name := range []string{"history", "account", "unlock", "session", "start", "schedule", "reschedule", "cancel", "join", "queue", "host", "leave"} {
 			want = append(want, "/calls/"+name, "/tenant/calls/"+name)
 		}
 		if got := CallsSelfAuthenticatedPaths(); !reflect.DeepEqual(got, want) {

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 	"unicode"
-	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/auth"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
@@ -181,6 +180,7 @@ func (s *Service) Schedule(ctx context.Context, sess callrules.Session, req call
 		return none, err
 	}
 	callID := id.NewShortId()
+	want.title = callTitle(want.title, span.Start)
 	n := newBooking{
 		ID: callID, SiteID: h.site.SiteID, KeyID: h.row.KeyID, Title: want.title, Start: span.Start, End: span.End,
 		GuestDigest: callrules.Digest(h.pepper, []byte(links.GuestToken)), HostDigest: callrules.Digest(h.pepper, []byte(links.HostToken)),
@@ -190,6 +190,7 @@ func (s *Service) Schedule(ctx context.Context, sess callrules.Session, req call
 	if err != nil {
 		return none, err
 	}
+	s.observeBookedHistory(ctx, h, callID)
 	return scheduledCall(callID, span, want.title, links, host, n.CalendarUID, now), nil
 }
 
@@ -545,10 +546,9 @@ type booking struct {
 // checkBooking holds a request to what any booking can be, before anything is read: a
 // length of a minute or more and a title of at most 80 characters.
 func checkBooking(req callrules.ScheduleRequest) (booking, error) {
-	title := tidyTitle(req.Title)
-	if utf8.RuneCountInString(title) > callrules.MaxScheduledTitleRunes {
-		return booking{}, callrules.Refuse(callrules.ErrInvalid, callrules.ReasonTitleTooLong,
-			fmt.Sprintf("a title is at most %d characters", callrules.MaxScheduledTitleRunes))
+	title, err := checkTitle(req.Title)
+	if err != nil {
+		return booking{}, err
 	}
 	if req.Minutes <= 0 {
 		return booking{}, callrules.Refuse(callrules.ErrInvalid, callrules.ReasonMinutesInvalid, "a call is booked for a minute or more")
@@ -705,7 +705,11 @@ type opening struct {
 // host link, carrying the booking's id and digests, and the booking marked started just
 // before the room is written.
 func (s *Service) openGated(ctx context.Context, site callrules.SiteRef, b bookingRow, server MediaServer, policy callrules.Policy, held *sessionRow, ask joinAsk, roomID, identity string) (opening, error) {
-	release, err := s.gates(ctx, bookingGate(b.ID), roomGate(roomID), serverGate(server.ID))
+	gateKeys := []string{bookingGate(b.ID), roomGate(roomID), serverGate(server.ID)}
+	if held != nil && held.KeyID != "" {
+		gateKeys = append([]string{accountGate(held.KeyID)}, gateKeys...)
+	}
+	release, err := s.gates(ctx, gateKeys...)
 	if err != nil {
 		return opening{out: held.stateOf(ask.token, site)}, err
 	}
@@ -734,8 +738,15 @@ func (s *Service) openGated(ctx context.Context, site callrules.SiteRef, b booki
 			return opening{}, err
 		}
 		if !held.usable(now) {
-			held = nil
+			return opening{}, callrules.Refuse(callrules.ErrConflict, "session_changed", "the session changed while joining")
 		}
+	}
+	latestPolicy, err := s.store.PolicyFor(fresh, owner, site.SiteID)
+	if err != nil {
+		return opening{}, err
+	}
+	if latestPolicy.RequirePasskeys && (held == nil || held.CredentialID == "") {
+		return opening{}, callrules.Refuse(callrules.ErrNoSession, "passkey_required", "sign in before joining")
 	}
 	out := held.stateOf(ask.token, site)
 	if refused, err := s.openRefusal(fresh, site, current.KeyID, held, false); err != nil {
@@ -758,7 +769,7 @@ func (s *Service) openGated(ctx context.Context, site callrules.SiteRef, b booki
 		// its waiting room on until its host lets people in; a full server queues the
 		// opener as a booked call that is due.
 		host: ask.asHost, locked: true, class: callrules.ClassScheduledDue,
-		guestDigest: guestDigest, hostDigest: hostDigest, scheduledCallID: current.ID,
+		guestDigest: guestDigest, hostDigest: hostDigest, scheduledCallID: current.ID, title: current.Title,
 	}, out, markStarted, now)
 	return opening{result: result, out: out, seat: seat}, err
 }
@@ -783,6 +794,7 @@ func bookingsAs(ctx context.Context, owner string) (context.Context, bool) {
 // bookingRow is one v1:calls:scheduledCall. Its ids are BARE; its digests are filtered
 // on and read back only by bookingDigests.
 type bookingRow struct {
+	HistoryPending                                        bool
 	ID, SiteID, KeyID, Title, Status, RoomID, CalendarUID string
 	Start, End                                            time.Time
 	Version                                               time.Time
@@ -798,16 +810,17 @@ func (r bookingRow) status() string {
 
 func bookingFromRow(r map[string]any) bookingRow {
 	return bookingRow{
-		ID:          memql.BareShortId(rowString(r, "id")),
-		SiteID:      memql.BareShortId(rowString(r, "siteId")),
-		KeyID:       memql.BareShortId(rowString(r, "keyId")),
-		Title:       rowString(r, "title"),
-		Status:      rowString(r, "status"),
-		RoomID:      memql.BareShortId(rowString(r, "roomId")),
-		CalendarUID: rowString(r, "calendarUid"),
-		Start:       rowTime(r, "start"),
-		End:         rowTime(r, "end"),
-		Version:     rowTime(r, "createdAt"),
+		HistoryPending: rowBool(r, "historyPending"),
+		ID:             memql.BareShortId(rowString(r, "id")),
+		SiteID:         memql.BareShortId(rowString(r, "siteId")),
+		KeyID:          memql.BareShortId(rowString(r, "keyId")),
+		Title:          rowString(r, "title"),
+		Status:         rowString(r, "status"),
+		RoomID:         memql.BareShortId(rowString(r, "roomId")),
+		CalendarUID:    rowString(r, "calendarUid"),
+		Start:          rowTime(r, "start"),
+		End:            rowTime(r, "end"),
+		Version:        rowTime(r, "createdAt"),
 	}
 }
 
@@ -887,6 +900,7 @@ type newBooking struct {
 
 func (s *Store) createBooking(ctx context.Context, owner string, n newBooking, versionTime time.Time) error {
 	args := map[string]any{
+		"historyPending":  true,
 		"scheduledCallId": n.ID,
 		"siteId":          n.SiteID,
 		"keyId":           n.KeyID,
@@ -914,6 +928,11 @@ func (s *Store) updateBooking(ctx context.Context, owner string, prior bookingRo
 			value = versionStamp(stamp)
 		}
 		args[name] = value
+	}
+	for _, field := range []string{"title", "status", "start", "end", "roomId"} {
+		if _, changed := fields[field]; changed {
+			args["historyPending"] = true
+		}
 	}
 	call, err := langparser.RenderCall("updateCallsScheduledCall", args)
 	return s.writeBooking(ctx, owner, at(scheduledCallConcept, prior.ID, prior.Version), "the booking", call, err)

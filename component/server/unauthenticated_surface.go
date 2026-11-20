@@ -343,8 +343,14 @@ func SelfAuthenticatedPaths() []string {
 // answers and the routes exempted for it cannot be two lists.
 func CallsSelfAuthenticatedPaths() []string {
 	var paths []string
+	seen := map[string]bool{}
 	for _, route := range callsRoutes {
-		paths = append(paths, pathsWithBase(route.path)...)
+		for _, path := range pathsWithBase(route.path) {
+			if !seen[path] {
+				paths = append(paths, path)
+				seen[path] = true
+			}
+		}
 	}
 	return paths
 }
