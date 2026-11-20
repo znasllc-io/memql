@@ -104,8 +104,9 @@ export interface FakeSeed {
   accounts?: Row[];
   /** File sharing (useSharing.ts): the people a file can go to
    *  (libraryShareDirectory), the caller's shares (librarySharesForArtifact
-   *  answers the active ones of the file it names), and the notices of files
-   *  shared with the caller (librarySharedWithMe). */
+   *  answers the active ones of the file it names, librarySharing all the
+   *  active ones), and the notices of files shared with the caller
+   *  (librarySharedWithMe). */
   shareDirectory?: Row[];
   shares?: Row[];
   sharedWithMe?: Row[];
@@ -167,6 +168,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       if (name === "clientAccountsAll") return rowsResult(seed.accounts ?? []);
       if (name === "libraryShareDirectory") return rowsResult(seed.shareDirectory ?? []);
       if (name === "librarySharesForArtifact") return rowsResult((seed.shares ?? []).filter(row => row.artifactId === args.artifactId && !row.revokedAt));
+      if (name === "librarySharing") return rowsResult((seed.shares ?? []).filter(row => !row.revokedAt));
       if (name === "librarySharedWithMe") return rowsResult(seed.sharedWithMe ?? []);
       if (name === "libraryShareFile") return rowsResult([{ shareId: "share-new", days: args.days, expiresAt: "2026-12-01T00:00:00Z" }]);
       if (name === "libraryShareStop") return rowsResult([{ shareId: args.shareId, stopped: true }]);

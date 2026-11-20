@@ -145,7 +145,7 @@ describe("Files workspace navigation", () => {
   h.connection = fakeConnection({folders:[folderRow({id:"research",name:"Research"})],artifacts:[artifactRow({id:"paper",title:"paper.md",folderId:"research"})]});
   await renderFiles();
   const rail=screen.getByRole("navigation",{name:"File locations"});
-  expect(placesIn(rail)).toEqual(["Library","Research","Desktop","Materializer","Shared with me","Bin"]);
+  expect(placesIn(rail)).toEqual(["Library","Research","Desktop","Materializer","Shared","Shared with me","Sharing","Bin"]);
   expect(within(rail).getByRole("button",{name:"Library"}).getAttribute("aria-current")).toBe("page");
   expect(screen.getByRole("button",{name:/paper.md/})).toBeTruthy();
   await click(within(rail).getByRole("button",{name:"Research"}));

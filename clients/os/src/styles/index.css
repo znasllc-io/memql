@@ -4619,6 +4619,21 @@ a.os-button {
 .os-files-share-state, .os-files-share-empty { margin: 0; font-size: var(--os-text-sm); color: var(--os-muted); }
 .os-files-share-error { margin: 0; font-size: var(--os-text-sm); color: var(--os-error); }
 .os-files-sharing-ava { display: inline-grid; place-items: center; flex: none; width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--os-line); font-size: 10.5px; color: var(--os-muted); }
+/* THE SHARING PLACE (Nov 19 2026): the caller's shares as record rows. The
+ * column names ride the record row's own grid, quiet and once, so "Shared
+ * with" and "Time left" stand over their columns; the Stop placeholder holds
+ * the actions column's width. On a narrow list the rows fold to two lines
+ * and the names would point at nothing, so they go. */
+.os-files-outgoing { display: grid; gap: 0; }
+.os-files-outgoing-columns .os-row.os-record-row { padding-block: 4px 0; }
+.os-files-outgoing-columns .os-row-name,
+.os-files-outgoing-columns .os-record-summary,
+.os-files-outgoing-columns .os-record-state { font-size: var(--os-text-sm); font-weight: 400; color: var(--os-muted); }
+.os-files-outgoing-columns .os-record-actions { padding-block: 0; }
+.os-files-outgoing-ghost { visibility: hidden; }
+@container os-record-list (max-width: 600px) { .os-files-outgoing-columns .os-record-entry { display: none; } }
+.os-files-outgoing-who,
+.os-files-outgoing-left { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; color: var(--os-muted); }
 @container os-files (max-width: 560px) {
   .os-files-browse > .os-files-main { grid-column: 1; grid-row: 2; }
   .os-files-browse:has(> .os-files-sharing) { grid-template-rows: auto auto minmax(0, 1fr); }

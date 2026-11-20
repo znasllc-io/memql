@@ -1,18 +1,22 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Concepts, getRowByConceptAndId, rowNumber, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useSessionIfPresent } from "../../chrome/access";
+import { useOsConnection } from "../../live/connection";
 import { flatten } from "../../kit/rows";
 import { useLiveCollection, type LiveCollectionHandle } from "../../live/useLiveCollection";
 import { holds } from "../../system/roles";
 import type { FileShare, SharePerson } from "./sharing";
 
-// FILE SHARING'S THREE READS (the engine's library sharing, Nov 2026).
+// FILE SHARING'S FOUR READS (the engine's library sharing, Nov 2026).
 //
 //   the directory   who a file can go to; read once per session, no events
 //                   (it is a computed answer over people, not a concept's rows)
 //   a file's shares v1:library:share, owned by the SHARER, so a share, a
 //                   renewal and a stop reach the sharer's stream as events
+//   sharing         the same rows across ALL the sharer's files: the Sharing
+//                   place (Jesús, Nov 19: "Shared" opens into "Shared with me"
+//                   and "Sharing"), live on the same events
 //   shared with me  v1:library:shareNotice, owned by the RECIPIENT, so a file
 //                   shared with them appears while they look
 //
@@ -124,4 +128,104 @@ export function useSharedWithMe(enabled: boolean): LiveCollectionHandle<Row> {
     inScope: (row) => noticeStands(noticeFromRow(row)),
     reread: async (id, signal) => ((await getRowByConceptAndId(connection.query, Concepts.LIBRARY_SHARE_NOTICE, id, { signal })) as Row) ?? null,
   }));
+}
+
+/** One of the caller's own active shares, as the Sharing place lists it. */
+export interface OutgoingShare {
+  id: string;
+  artifactId: string;
+  /** The file's name when it was shared; "" on a share made before shares carried it. */
+  title: string;
+  recipientUserId: string;
+  recipientDisplayName: string;
+  expiresAt: string;
+  revokedAt: string;
+  createdAt: string;
+}
+
+export function outgoingFromRow(raw: Row): OutgoingShare {
+  const row = flatten(raw);
+  return {
+    id: rowString(row, "id"),
+    artifactId: rowString(row, "artifactId"),
+    title: rowString(row, "title"),
+    recipientUserId: rowString(row, "recipientUserId"),
+    recipientDisplayName: rowString(row, "recipientDisplayName"),
+    expiresAt: rowString(row, "expiresAt"),
+    revokedAt: rowString(row, "revokedAt"),
+    createdAt: rowString(row, "createdAt"),
+  };
+}
+
+/** Whether a share still stands: not stopped, and not past its time. */
+export function shareStands(share: Pick<OutgoingShare, "revokedAt" | "expiresAt">, now = Date.now()): boolean {
+  return share.revokedAt === "" && Date.parse(share.expiresAt) > now;
+}
+
+/**
+ * Every file the caller is sharing, live, while the Sharing place is open.
+ *
+ * Through `executeNamed` rather than a generated method: librarySharing is
+ * newer than the SDK build a checkout may be linked against, and the call is
+ * the same string either way (the shell's path for a construct the bundled SDK
+ * does not know yet, as in settings/useLanguage.ts).
+ */
+export function useSharing(enabled: boolean): LiveCollectionHandle<Row> {
+  return useLiveCollection<Row>(enabled ? "files:sharing" : null, (connection) => ({
+    concept: Concepts.LIBRARY_SHARE,
+    seed: async (cursor, signal) => {
+      const result = await connection.query.executeNamed("librarySharing", "query librarySharing()", { signal, ...(cursor ? { cursor } : {}) });
+      return { rows: result.rows(), nextCursor: result.meta()?.cursor ?? "" };
+    },
+    // A stop is an update that sets revokedAt, and a renewal one that moves
+    // expiresAt: each lands on the row's own event.
+    inScope: (row) => shareStands(outgoingFromRow(row)),
+    reread: async (id, signal) => ((await getRowByConceptAndId(connection.query, Concepts.LIBRARY_SHARE, id, { signal })) as Row) ?? null,
+  }));
+}
+
+/**
+ * How long a share has left, in words: hours under a day ("18 hours left"),
+ * whole days above it, rounded UP so a share made a moment ago for 7 days
+ * reads "7 days left" and one with 90 minutes to go reads "2 hours left".
+ */
+export function timeLeftLabel(expiresAt: string, now: Date): string {
+  const ms = Date.parse(expiresAt) - now.getTime();
+  if (!Number.isFinite(ms) || ms <= 0) return "Ended";
+  const hours = Math.ceil(ms / 3_600_000);
+  if (hours < 24) return hours === 1 ? "1 hour left" : `${hours} hours left`;
+  const days = Math.ceil(ms / 86_400_000);
+  return days === 1 ? "1 day left" : `${days} days left`;
+}
+
+/**
+ * The names of the files behind shares made before shares carried one (Nov 20
+ * 2026), read once each from the caller's own Library -- the sharer owns every
+ * file they share, so their own by-id read answers. Shares with a title never
+ * reach here, so this costs nothing once those older shares have run out.
+ */
+export function useShareTitles(shares: readonly OutgoingShare[]): ReadonlyMap<string, string> {
+  const connection = useOsConnection();
+  const [titles, setTitles] = useState<ReadonlyMap<string, string>>(new Map());
+  const missing = [...new Set(shares.filter((share) => share.title === "" && share.artifactId !== "").map((share) => share.artifactId))]
+    .filter((id) => !titles.has(id)).sort();
+  const key = missing.join(",");
+  useEffect(() => {
+    const query = connection?.query ?? null;
+    if (query === null || key === "") return;
+    const abort = new AbortController();
+    void Promise.all(key.split(",").map(async (artifactId) => {
+      try {
+        const row = (await query.libraryArtifactById({ artifactId }, { signal: abort.signal })).rows()[0];
+        return [artifactId, row ? rowString(flatten(row), "title") : ""] as const;
+      } catch {
+        return [artifactId, ""] as const;
+      }
+    })).then((found) => {
+      if (abort.signal.aborted) return;
+      setTitles((prev) => new Map([...prev, ...found.filter(([, title]) => title !== "")]));
+    });
+    return () => abort.abort();
+  }, [connection, key]);
+  return titles;
 }

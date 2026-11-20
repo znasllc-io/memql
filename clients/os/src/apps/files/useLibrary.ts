@@ -43,9 +43,9 @@ export function useLibraryFeeds(filter: FilesFilter, desk: DeskMembership, enabl
   const sourceRefs = outputIds.flatMap(id => [id, `v1:library:file:${id}`]).sort();
   const args = libraryBrowseArgs(effectiveFilter, desk, sourceRefs);
   const argsKey = JSON.stringify(args);
-  // Shared with me lists other people's files from their notices
-  // (useSharing.ts); the caller's own Library is not read for it at all.
-  const ready = enabled && filter.place !== "shared" && (filter.place !== "materializer" || outputs.snapshot.state !== "seeding");
+  // Shared with me lists other people's files from their notices, and Sharing
+  // the caller's own shares (useSharing.ts); the Library is read for neither.
+  const ready = enabled && filter.place !== "shared" && filter.place !== "sharing" && (filter.place !== "materializer" || outputs.snapshot.state !== "seeding");
   // Newest first and Oldest first are the server's two page orders; Name,
   // Size and Kind read newest first and sort the whole place (below).
   const oldest = filter.sort === "oldest";

@@ -46,7 +46,9 @@ export type SourceFilter = "all" | (typeof SOURCE_VALUES)[number];
 // `shared` is what other people shared WITH the caller (Nov 2026). Its tiles are
 // share notices, read on their own feed (useSharing.ts): none of the caller's
 // own artifacts belongs to it, so the fold below keeps nothing there.
-export const FILES_PLACES = ["library", "desktop", "materializer", "shared", "bin"] as const;
+// `sharing` is the other half of the rail's "Shared" folder (Nov 19 2026): the
+// caller's own active shares, also on a feed of its own, so likewise nothing.
+export const FILES_PLACES = ["library", "desktop", "materializer", "shared", "sharing", "bin"] as const;
 export type FilesPlace = (typeof FILES_PLACES)[number];
 
 export function isFilesPlace(value: unknown): value is FilesPlace {
@@ -339,7 +341,7 @@ export function applyFilters(
       } else if (row.folderId !== filter.folderId) {
         return false;
       }
-    } else if (filter.place === "shared") {
+    } else if (filter.place === "shared" || filter.place === "sharing") {
       return false;
     } else if (filter.place === "materializer") {
       // ARCHIVED OUTPUTS ARE THE BIN'S, not this place's. One file offering

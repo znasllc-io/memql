@@ -16,6 +16,7 @@ vi.mock("../../src/apps/files/actions/download", async (importOriginal) => ({
 
 import { setEffectiveCapabilities } from "../../src/system/roles";
 import { installSeededAccess, seededAccessWithout } from "../seededAccess";
+import { timeLeftLabel } from "../../src/apps/files/useSharing";
 import { artifactRow, click, emit, fakeConnection, noticeRow, renderFiles, shareRow, type FakeConnection, type FakeSeed } from "./harness";
 
 // Wiring the Files app to the engine's file sharing (Nov 2026): the Share
@@ -214,5 +215,88 @@ describe("Shared with me", () => {
     const tile = await screen.findByRole("button", { name: /Budget 2027\.xlsx/ });
     await act(async () => { fireEvent.doubleClick(tile); });
     expect(h.download).toHaveBeenCalledWith(expect.objectContaining({ artifactId: "dana-budget", name: "Budget 2027.xlsx" }));
+  });
+});
+
+describe("the Shared folder and the Sharing place (Nov 19 2026)", () => {
+  const plan = artifactRow({ id: "a-2", title: "plan.md" });
+  const shares = [
+    shareRow({ id: "s-1", artifactId: "a-1", recipientUserId: "u-sam", recipientDisplayName: "Sam Lee", title: "brief.pdf", expiresAt: "2099-01-08T00:00:00Z", createdAt: "2026-11-18T12:00:00Z" }),
+    shareRow({ id: "s-2", artifactId: "a-2", recipientUserId: "u-dana", recipientDisplayName: "Dana Cole", title: "plan.md", createdAt: "2026-11-19T12:00:00Z" }),
+  ];
+
+  it("opens and closes like a folder, with Shared with me and Sharing inside", async () => {
+    connect({});
+    await renderFiles();
+    expect(within(rail()).getByRole("button", { name: "Shared with me" })).toBeTruthy();
+    expect(within(rail()).getByRole("button", { name: "Sharing" })).toBeTruthy();
+    // "Shared" is not a place: its name opens and shuts it, like its arrow.
+    await click(within(rail()).getByRole("button", { name: "Shared" }));
+    expect(within(rail()).queryByRole("button", { name: "Sharing" })).toBeNull();
+    expect(within(rail()).queryByRole("button", { name: "Shared with me" })).toBeNull();
+    await click(within(rail()).getByRole("button", { name: "Show Shared with me and Sharing" }));
+    expect(within(rail()).getByRole("button", { name: "Sharing" })).toBeTruthy();
+  });
+
+  it("lists every file you are sharing: the file, who has it, the time left and Stop", async () => {
+    const connection = connect({ artifacts: [brief, plan], shares });
+    await renderFiles();
+    const browsed = connection.callsNamed("libraryArtifactsBrowse").length;
+    await click(within(rail()).getByRole("button", { name: "Sharing" }));
+    expect(screen.getByRole("heading", { name: "Sharing" })).toBeTruthy();
+    const list = await screen.findByRole("list", { name: "Sharing" });
+    const rows = within(list).getAllByRole("listitem");
+    // Newest first, as the Head's sort says.
+    expect(rows.map((row) => row.textContent)).toEqual([
+      expect.stringContaining("plan.md"),
+      expect.stringContaining("brief.pdf"),
+    ]);
+    expect(rows[0]!.textContent).toContain("Dana Cole");
+    expect(rows[0]!.textContent).toMatch(/\d+ days left/);
+    expect(connection.callsNamed("librarySharing")).toEqual(["query librarySharing()"]);
+    // The Library is not read for this place.
+    expect(connection.callsNamed("libraryArtifactsBrowse")).toHaveLength(browsed);
+
+    await click(within(rows[1]!).getByRole("button", { name: "Stop sharing brief.pdf with Sam Lee" }));
+    expect(connection.callsNamed("libraryShareStop")).toEqual(['builtin libraryShareStop(shareId: "s-1")']);
+    // The stop lands on the share's own event, and the row leaves.
+    await emit(connection, "v1:library:share", { ...shares[0]!, revokedAt: "2026-11-20T10:00:00Z" });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    expect(within(screen.getByRole("list", { name: "Sharing" })).getAllByRole("listitem")).toHaveLength(1);
+  });
+
+  it("names a file shared before shares carried its name, from your own Library", async () => {
+    const old = shareRow({ id: "s-old", artifactId: "a-1", recipientUserId: "u-sam", recipientDisplayName: "Sam Lee" });
+    connect({ shares: [old] });
+    await renderFiles();
+    await click(within(rail()).getByRole("button", { name: "Sharing" }));
+    expect(await screen.findByRole("button", { name: "Stop sharing brief.pdf with Sam Lee" })).toBeTruthy();
+  });
+
+  it("says so in place when the engine refuses the stop", async () => {
+    connect({ shares, refuse: { libraryShareStop: "That share is not one of yours." } });
+    await renderFiles();
+    await click(within(rail()).getByRole("button", { name: "Sharing" }));
+    await click(await screen.findByRole("button", { name: "Stop sharing plan.md with Dana Cole" }));
+    expect(screen.getByText("Sharing did not stop.")).toBeTruthy();
+    expect(screen.getByText(/That share is not one of yours\./)).toBeTruthy();
+  });
+
+  it("says so when you are sharing nothing", async () => {
+    connect({ shares: [] });
+    await renderFiles();
+    await click(within(rail()).getByRole("button", { name: "Sharing" }));
+    expect(await screen.findByText("You are not sharing any files.")).toBeTruthy();
+  });
+});
+
+describe("timeLeftLabel", () => {
+  const now = new Date("2026-11-20T12:00:00Z");
+  it("says hours under a day and whole days above, rounded up", () => {
+    expect(timeLeftLabel("2026-11-27T12:00:00Z", now)).toBe("7 days left");
+    expect(timeLeftLabel("2026-11-21T12:00:00Z", now)).toBe("1 day left");
+    expect(timeLeftLabel("2026-11-21T06:00:00Z", now)).toBe("18 hours left");
+    expect(timeLeftLabel("2026-11-20T12:30:00Z", now)).toBe("1 hour left");
+    expect(timeLeftLabel("2026-11-20T11:00:00Z", now)).toBe("Ended");
   });
 });
