@@ -223,16 +223,26 @@ export function useSharing(enabled: boolean): LiveCollectionHandle<Row> {
 }
 
 /**
- * How long a share has left, in words: hours under a day ("18 hours left"),
- * whole days above it, rounded UP so a share made a moment ago for 7 days
- * reads "7 days left" and one with 90 minutes to go reads "2 hours left".
+ * How long a share has left, in words: hours under a day ("18 hours left",
+ * rounded up, so 90 minutes reads "2 hours left"), and days above it rounded
+ * to the NEAREST day, so sharing for 7 days reads "7 days left" (Jesús, Nov 20:
+ * "It should show the number that you're picking").
+ *
+ * Why nearest and not up: the engine ends a 7-day share exactly 7 x 24 hours
+ * after it was made (integrations/library/share.go, shareEnd), and the
+ * reading's clock (kit/useNow, one tick a minute) is up to a minute behind,
+ * as a cluster's clock can be ahead of this browser's. Either puts the end a
+ * little MORE than 7 days away, which rounding up read as "8 days left". Down
+ * would read "6 days left" a second after sharing. Nearest stays on 7 until
+ * 6.5 days remain, then 6, and so on; every place that counts a share's time
+ * (the share view's cards, Files > Sharing) reads it from here.
  */
 export function timeLeftLabel(expiresAt: string, now: Date): string {
   const ms = Date.parse(expiresAt) - now.getTime();
   if (!Number.isFinite(ms) || ms <= 0) return "Ended";
   const hours = Math.ceil(ms / 3_600_000);
   if (hours < 24) return hours === 1 ? "1 hour left" : `${hours} hours left`;
-  const days = Math.ceil(ms / 86_400_000);
+  const days = Math.max(1, Math.round(ms / 86_400_000));
   return days === 1 ? "1 day left" : `${days} days left`;
 }
 

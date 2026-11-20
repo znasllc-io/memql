@@ -426,11 +426,41 @@ describe("the Shared folder and the Sharing place (Nov 19 2026)", () => {
 
 describe("timeLeftLabel", () => {
   const now = new Date("2026-11-20T12:00:00Z");
-  it("says hours under a day and whole days above, rounded up", () => {
+  it("says hours under a day, rounded up, and days above it, to the nearest day", () => {
     expect(timeLeftLabel("2026-11-27T12:00:00Z", now)).toBe("7 days left");
     expect(timeLeftLabel("2026-11-21T12:00:00Z", now)).toBe("1 day left");
     expect(timeLeftLabel("2026-11-21T06:00:00Z", now)).toBe("18 hours left");
     expect(timeLeftLabel("2026-11-20T12:30:00Z", now)).toBe("1 hour left");
     expect(timeLeftLabel("2026-11-20T11:00:00Z", now)).toBe("Ended");
+    // 23.5 hours is "24 hours" rounded up: a day.
+    expect(timeLeftLabel("2026-11-21T11:30:00Z", now)).toBe("1 day left");
+    expect(timeLeftLabel("2026-11-21T23:00:00Z", now)).toBe("1 day left");
+  });
+
+  // Jesús, Nov 20: "It should show the number that you're picking."
+  it("reads 7 for a share made for 7 days, though the clock behind the reading lags", () => {
+    // The engine ends it 7 x 24 hours after it was made, and the reading's
+    // clock ticks once a minute (or the cluster's runs ahead): a little MORE
+    // than 7 days away, which rounding up read as "8 days left".
+    expect(timeLeftLabel("2026-11-27T12:00:59Z", now)).toBe("7 days left");
+    expect(timeLeftLabel("2026-11-27T11:00:00Z", now)).toBe("7 days left");
+    expect(timeLeftLabel("2026-11-27T00:00:01Z", now)).toBe("7 days left");
+    expect(timeLeftLabel("2026-11-26T23:00:00Z", now)).toBe("6 days left");
+    expect(timeLeftLabel("2026-12-20T12:00:30Z", now)).toBe("30 days left");
+  });
+
+  it("agrees in the share view and in Sharing, right after sharing for 7 days", async () => {
+    // As the engine stamps it, with its clock 40 seconds ahead of this one.
+    const fresh = shareRow({ id: "s-7", artifactId: "a-1", recipientUserId: "u-sam", recipientDisplayName: "Sam Lee", title: "brief.pdf",
+      expiresAt: new Date(Date.now() + 7 * 86_400_000 + 40_000).toISOString() });
+    connect({ shares: [fresh] });
+    await renderFiles();
+    await openShare();
+    const card = (await screen.findByRole("button", { name: /Sam Lee/ })).closest(".os-editable-card");
+    expect(card?.textContent).toContain("User · 7 days left");
+    // The rail stays beside the share view.
+    await click(within(rail()).getByRole("button", { name: "Sharing" }));
+    const list = await screen.findByRole("list", { name: "Sharing" });
+    expect(within(list).getAllByRole("listitem")[0]!.textContent).toContain("7 days left");
   });
 });
