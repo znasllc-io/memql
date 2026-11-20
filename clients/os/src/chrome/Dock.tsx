@@ -4,6 +4,7 @@ import { horizontalListSortingStrategy, SortableContext, useSortable } from "@dn
 import { LayoutGrid, LogOut, RefreshCw } from "lucide-react";
 
 import { useAsk } from "../ask/AskProvider";
+import { windowAskContext } from "./windowAsk";
 import { BIN_DROPPABLE_ID, type BinDropPayload } from "../apps/bin/concepts";
 import { decideBinDrop } from "../apps/bin/drop";
 import { LocalFilesSettingsStore } from "../apps/files/settings";
@@ -471,7 +472,12 @@ export function Dock({
       ))}
       <div className="os-dock-status">
         <RoamNotice notice={notice} />
-        {canAsk && <button type="button" className="os-ask-orb" aria-label="Ask" onClick={() => openAsk(null)}>
+        {canAsk && <button type="button" className="os-ask-orb" aria-label="Ask" onClick={() => {
+          // The focused window is the front one on the active desk (switchDesk
+          // refocuses its top window); none focused, Ask opens plain.
+          const at = windowAskContext(state.shell.focusedWindowId);
+          openAsk(at?.context ?? null, at?.label);
+        }}>
           <Mark className="os-ask-mark" />
         </button>}
         <span className="os-dock-desks" data-os-dock-desks />

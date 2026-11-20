@@ -12,7 +12,8 @@ import { StubAskTransport } from "../ask/stubTransport";
 // frame wired it to openAsk, so opening a run, a goal or a procedure in Nexus,
 // a Bin item, a Materializer composition or a Training upload threw the Ask
 // window over the app the person was using. It now only remembers, and
-// `contextTag` carries what it remembered (the phone's Ask orb reads it). `askAbout` is the one
+// `contextTag` carries what it remembered (the phone's Ask orb and the
+// desktop dock's Ask read it; dockAsk.test.tsx). `askAbout` is the one
 // that opens -- for an explicit "Ask about this" the person chose.
 
 function wrapper({ children }: { children: ReactNode }) {
