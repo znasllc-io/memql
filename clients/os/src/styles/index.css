@@ -520,6 +520,10 @@ button:not(:disabled):active {
   opacity: 0.4;
   cursor: default;
 }
+/* The one outlined Add (Files' Head, DESIGN.md rule 1): the accent's outline
+ * and plus, and its soft wash on hover and while its menu is open. */
+.os-icon-button.os-add-button-outlined { color: var(--os-accent); box-shadow: inset 0 0 0 1px var(--os-accent); }
+.os-icon-button.os-add-button-outlined:is(:hover, :focus-visible, [aria-expanded="true"]):not(:disabled) { color: var(--os-accent); background: var(--os-accent-soft); }
 .os-window-close:hover {
   background: var(--os-error);
   color: var(--os-glass-solid);
