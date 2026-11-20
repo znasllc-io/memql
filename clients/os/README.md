@@ -1423,9 +1423,11 @@ fallback uses the same response metadata. An HTML app fallback is never saved
 as the requested file. Ask's saved-file links and artifact actions use this same
 authenticated download path without navigating away or opening an empty tab.
 
-**Add to this folder** offers Upload files, New Markdown file, and New folder.
-New Markdown file opens Make a file on Name with Markdown, the current folder,
-and a way back to Files. Searching, Bin, Materializer and the Library root name
+**Add to this folder** offers Upload files, New folder and New file, with no
+heading. New file is not an action: hovering it (or Right arrow / Enter) opens a
+side menu of the kinds of file it can make, the kit's `Submenu`; today that is
+Markdown file. Markdown file opens Make a file on Name with Markdown, the
+current folder, and a way back to Files. Searching, Bin, Materializer and the Library root name
 no destination folder. The Markdown item is absent when Materializer cannot be
 opened.
 
@@ -2089,8 +2091,8 @@ archived and Offer every record type. File creation does not set goal budgets;
 the engine enforces the goal's accepted ceilings.
 
 A composition has one record and its output has one file. Materialized answers
-what was made and how; Files answers where the file is. Files' New Markdown file
-sends its current folder and return address. Open in Materializer opens the
+what was made and how; Files answers where the file is. Files' New file > Markdown
+file sends its current folder and return address. Open in Materializer opens the
 composition's page through `MATERIALIZER_MADE_SECTION`. A failed composition
 without an output has no Files placeholder. This app never edits a file tree;
 Files never edits a composition.
