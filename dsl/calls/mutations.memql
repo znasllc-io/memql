@@ -230,6 +230,9 @@ mutation seat updateCallsSeat {
     confirmNoMinors  bool
     termsVersion  string
     joinedAt  datetime
+    departureReceipt string
+    departureKeepRunning bool
+    departureWrapUpAt datetime
     leftAt  datetime
     lastSeenAt  datetime
     absentSince  datetime
@@ -237,7 +240,7 @@ mutation seat updateCallsSeat {
     waitingSince  datetime
   }
   update {
-    accept { historyPending, credentialId, displayName, host, status, confirmAdult, confirmNoMinors, termsVersion, joinedAt, leftAt, lastSeenAt, absentSince, letInAt, waitingSince }
+    accept { departureReceipt, departureKeepRunning, departureWrapUpAt, historyPending, credentialId, displayName, host, status, confirmAdult, confirmNoMinors, termsVersion, joinedAt, leftAt, lastSeenAt, absentSince, letInAt, waitingSince }
     stamp {
       id: args.seatId
       createdAt: args.versionTime ?? now

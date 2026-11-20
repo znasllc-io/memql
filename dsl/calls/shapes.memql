@@ -104,6 +104,9 @@ shape room callsRoomFull {
 /// The seat row as the calls integration reads it. No digest is projected.
 @row
 shape seat callsSeatFull {
+  departureReceipt
+  departureKeepRunning
+  departureWrapUpAt
   historyPending
   row.id
   row.createdAt

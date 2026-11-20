@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	callrules "github.com/znasllc-io/memql/component/calls"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 func enableFunding(t *testing.T, cw *callWorld) {
@@ -150,16 +151,31 @@ func TestFundingConcurrentReceiptsCapAndActivation(t *testing.T) {
 	run := func(request func(int) *callrules.AccountRequest) ([]callrules.AccountResult, []error) {
 		results := make([]callrules.AccountResult, 12)
 		errs := make([]error, 12)
+		requests := make([]*callrules.AccountRequest, 12)
 		var wg sync.WaitGroup
 		for i := range results {
+			requests[i] = request(i)
 			wg.Add(1)
 			go func(i int) {
 				defer wg.Done()
 				replica := *cw.svc
-				results[i], errs[i] = replica.Account(ctx, cw.ref, k.result.Session.Token, request(i))
+				results[i], errs[i] = replica.Account(ctx, cw.ref, k.result.Session.Token, requests[i])
 			}(i)
 		}
 		wg.Wait()
+		// The public write gate deliberately bounds its wait. A twelve-way burst
+		// on a slower database can answer Busy before attempting a write. Retry
+		// only that typed refusal, once, after the burst drains, with the identical
+		// operation. All receipt, balance, cap and activation assertions below stay
+		// exact; no arbitrary error or unlimited wait is hidden by this recovery.
+		retryCtx, cancel := context.WithTimeout(ctx, time.Minute)
+		defer cancel()
+		for i, err := range errs {
+			if errors.Is(err, memql.ErrWriteGateBusy) {
+				replica := *cw.svc
+				results[i], errs[i] = replica.Account(retryCtx, cw.ref, k.result.Session.Token, requests[i])
+			}
+		}
 		return results, errs
 	}
 	results, errs := run(func(int) *callrules.AccountRequest { return topupRequest(k, 1000, "concurrent-same-id") })

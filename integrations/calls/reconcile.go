@@ -501,13 +501,12 @@ func (s *Service) viewAgain(ctx context.Context, v roomView) (roomView, error) {
 	return roomView{room: *room, seats: seats, entries: entries, policy: v.policy}, nil
 }
 
-// endIfDue is the second gated phase of a host_left end (the file note's step 5): the
-// call read again, fresh, and ended only if the countdown still finds it due -- a host
-// back, a host joining the line, or a key holder come in, since the first phase keeps it
-// open. Those are the only things that change its answer: the first phase marked the
-// expired entries before it decided ("The two phases", in the file note). A call that
-// emptied meanwhile ends as empty when the empty-room rule ends it (host.go endsEmpty). It
-// answers whether the call ended here.
+// endIfDue is the second gated phase of a countdown end. It re-reads the
+// authoritative rows after provider deletion. The legacy host_left grace may
+// be cancelled by a host returning or a key-holder handover; an explicit firm
+// wrap_up cannot. A concurrent empty leave still uses the normal empty-room
+// rule, and endRows caps every settlement at any earlier firm deadline. Failed
+// provider deletion never settles; a later pass retries the same saved cutoff.
 func (s *Service) endIfDue(ctx context.Context, hint roomRow) (bool, error) {
 	release, err := s.gates(ctx, endGates(hint)...)
 	if err != nil {
@@ -534,6 +533,9 @@ func (s *Service) endIfDue(ctx context.Context, hint roomRow) (bool, error) {
 	verdict, err := s.hostLeft(fresh, v, now)
 	if err != nil || verdict.action != callrules.HostLeftEnd {
 		return false, err
+	}
+	if verdict.firm {
+		return true, s.endRows(fresh, v, callrules.EndReasonWrapUp, verdict.deadline)
 	}
 	return true, s.endRows(fresh, v, callrules.EndReasonHostLeft, now)
 }

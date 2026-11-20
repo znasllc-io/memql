@@ -996,6 +996,9 @@ func (s *Service) joinGated(ctx context.Context, site callrules.SiteRef, room ro
 	if !current.open() {
 		return refuseJoin("call_ended"), held.stateOf(ask.token, site), seatRow{}, fmt.Errorf("%w: the call has ended", callrules.ErrEnded)
 	}
+	if _, err := s.departureDeadline(fresh, *current, now); err != nil {
+		return refuseJoin(callrules.ReasonOf(err)), held.stateOf(ask.token, site), seatRow{}, err
+	}
 	if err := fundingRoomAllowed(*current, now); err != nil {
 		return refuseJoin(callrules.ReasonOf(err)), held.stateOf(ask.token, site), seatRow{}, err
 	}
@@ -1373,6 +1376,9 @@ func (s *Service) pollGated(ctx context.Context, site callrules.SiteRef, room ro
 	if !current.open() {
 		return refuseJoin("call_ended"), seatRow{}, fmt.Errorf("%w: the call has ended", callrules.ErrEnded)
 	}
+	if _, err := s.departureDeadline(fresh, *current, now); err != nil {
+		return refuseJoin(callrules.ReasonOf(err)), seatRow{}, err
+	}
 	if err := fundingRoomAllowed(*current, now); err != nil {
 		return refuseJoin(callrules.ReasonOf(err)), seatRow{}, err
 	}
@@ -1605,10 +1611,15 @@ func (s *Service) Leave(ctx context.Context, sess callrules.Session) error {
 	if err != nil || left == nil {
 		return err
 	}
+	s.finishLeave(ctx, *room, *left, ended)
+	return nil
+}
+
+func (s *Service) finishLeave(ctx context.Context, room roomRow, left seatRow, ended bool) {
 	// After the gates: a media server slow to answer must not hold up the server's
 	// admissions. Best effort, and logged by the room and seat only.
 	if left.occupying() {
-		if err := s.disconnect(ctx, *room, left.Identity); err != nil {
+		if err := s.disconnect(ctx, room, left.Identity); err != nil {
 			s.logger.Warn("calls: a seat left but its media identity could not be disconnected", "component", pluginName,
 				"room", room.ID, "seat", left.ID, "reason", failureReason(err))
 		}
@@ -1616,18 +1627,21 @@ func (s *Service) Leave(ctx context.Context, sess callrules.Session) error {
 	// Nobody is in an empty call by the rows' account, so its media room is cleared up
 	// rather than ended: best effort, as a media server closes an empty room itself.
 	if ended {
-		if err := s.deleteMediaRoom(ctx, *room); err != nil {
+		if err := s.deleteMediaRoom(ctx, room); err != nil {
 			s.logger.Warn("calls: a call ended empty but its media room could not be deleted", "component", pluginName,
 				"room", room.ID, "reason", failureReason(err))
 		}
 	}
-	return nil
 }
 
 // leaveGated writes a seat's leaving under its call's gates (host.go endGates, since the
 // leave may end the call), and answers the seat as it was, or nil when it had left
 // already, and whether the call ended with it.
 func (s *Service) leaveGated(ctx context.Context, owner string, room roomRow, seatID string) (*seatRow, bool, error) {
+	return s.leaveGatedOptions(ctx, owner, room, seatID, nil)
+}
+
+func (s *Service) leaveGatedOptions(ctx context.Context, owner string, room roomRow, seatID string, departure *departureWrite) (*seatRow, bool, error) {
 	release, err := s.gates(ctx, endGates(room)...)
 	if err != nil {
 		return nil, false, err
@@ -1636,20 +1650,50 @@ func (s *Service) leaveGated(ctx context.Context, owner string, room roomRow, se
 	fresh := memql.ContextWithFreshRead(ctx)
 	now := s.now()
 	seat, err := s.store.seatByID(fresh, owner, seatID)
-	if err != nil || seat == nil || !seat.placed() {
+	if err != nil || seat == nil {
 		return nil, false, err
 	}
-	if err := s.store.updateSeat(fresh, owner, *seat, map[string]any{"status": seatLeft, "leftAt": now}, memql.VersionTimeAfter(seat.Version, now)); err != nil {
+	current, err := s.store.roomByID(fresh, owner, room.ID)
+	if err != nil || current == nil {
 		return nil, false, err
+	}
+	fields := map[string]any{}
+	replay := false
+	if departure != nil {
+		fields, replay, err = s.departureFields(fresh, *current, *seat, *departure, now)
+		if err != nil {
+			return nil, false, err
+		}
+		// A replay must not start cleanup for an already-visible re-entry.
+		// An original provider removal racing a subsequent admission remains
+		// the stable-identity limitation documented in operate/calls.md.
+		if replay && (seat.placed() || !current.open()) {
+			return nil, false, nil
+		}
+	} else if !seat.placed() {
+		return nil, false, nil
+	}
+	if !replay {
+		leftAt := now
+		if departure != nil {
+			leftAt = memql.VersionTimeAfter(seat.LeftAt, now)
+		}
+		fields["status"], fields["leftAt"] = seatLeft, leftAt
+		if err := s.store.updateSeat(fresh, owner, *seat, fields, memql.VersionTimeAfter(seat.Version, now)); err != nil {
+			return nil, false, err
+		}
 	}
 	if seat.Status == seatWaiting {
 		if err := s.giveUpPlace(fresh, owner, room.ID, seat.ID, now); err != nil {
 			return nil, false, err
 		}
 	}
-	current, err := s.store.roomByID(fresh, owner, room.ID)
-	if err != nil || current == nil || !current.open() {
-		return seat, false, err
+	if !current.open() {
+		return seat, false, nil
+	}
+	// A replay resumes any interrupted empty-room settlement or media cleanup.
+	if replay {
+		seat.Status = seatAdmitted
 	}
 	// The call as the leave left it: the seat just written is out of it.
 	v, err := s.viewRoom(fresh, *current)

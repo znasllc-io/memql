@@ -809,11 +809,21 @@ func (h *callsHandler) serveHost(w http.ResponseWriter, r *http.Request, c calls
 // serveLeave is the hang-up: the session's seat leaves its call. The session itself stands
 // (the file note), so the cookie stays.
 func (h *callsHandler) serveLeave(w http.ResponseWriter, r *http.Request, c callsCall) {
-	var body struct{}
+	var body calls.LeaveRequest
 	if !h.decode(w, r, c, &body) || !h.requireSession(w, c) || !h.resolveSite(w, r, &c) {
 		return
 	}
-	if err := h.svc.Leave(r.Context(), c.session()); err != nil {
+	var err error
+	if body == (calls.LeaveRequest{}) {
+		err = h.svc.Leave(r.Context(), c.session())
+	} else if svc, ok := h.svc.(interface {
+		LeaveWithOptions(context.Context, calls.Session, calls.LeaveRequest) error
+	}); ok {
+		err = svc.LeaveWithOptions(r.Context(), c.session(), body)
+	} else {
+		err = calls.ErrInvalid
+	}
+	if err != nil {
 		h.refuse(w, c, err, calls.JoinResult{})
 		return
 	}
@@ -960,6 +970,9 @@ func setCallsRetryAfter(w http.ResponseWriter, d time.Duration) {
 // page the server's now (expiresAt less expiresInMs), which is what `countdownEndsAt` is
 // counted down from and an occupying seat's elapsed call time is measured from.
 type callsSessionReply struct {
+	Identity         string `json:"identity,omitempty"`
+	LeaveToken       string `json:"leaveToken,omitempty"`
+	CountdownKind    string `json:"countdownKind,omitempty"`
 	ParticipantLimit int    `json:"participantLimit,omitempty"`
 	DurationMinutes  int    `json:"durationMinutes,omitempty"`
 	ReservedCents    *int64 `json:"reservedCents,omitempty"`
@@ -977,9 +990,9 @@ type callsSessionReply struct {
 	// in-call seat of an open room. Rejoining never resets it.
 	OpenedAt string `json:"openedAt,omitempty"`
 	Title    string `json:"title,omitempty"`
-	// CountdownEndsAt is when the call ends unless a host is back first, in RFC 3339, while
-	// its host-left countdown runs (and once it has run out, until a pass ends the call), for
-	// any seat of the call; absent otherwise.
+	// CountdownEndsAt is the shared server deadline in RFC 3339. host_left is
+	// cancelled by host return; wrap_up is firm even with a host present. Both
+	// remain visible after expiry until reconciliation ends the room.
 	CountdownEndsAt string `json:"countdownEndsAt,omitempty"`
 	// AllowanceEndsAt is independent of host presence: returning to the room
 	// cannot extend its admitted simulated pass budget.
@@ -1019,14 +1032,17 @@ type callsRosterWaiterReply struct {
 
 func (h *callsHandler) sessionReply(sess calls.Session, call calls.SeatCall) callsSessionReply {
 	reply := callsSessionReply{
-		Kind:        sess.Kind,
-		KeyID:       memql.BareShortId(sess.KeyID),
-		SeatID:      memql.BareShortId(sess.SeatID),
-		RoomID:      memql.BareShortId(sess.RoomID),
-		ExpiresAt:   sess.ExpiresAt.UTC().Format(time.RFC3339Nano),
-		ExpiresInMs: callsMs(sess.ExpiresAt.Sub(h.now())),
-		Host:        call.Host,
-		Roster:      rosterReply(call.Roster),
+		Identity:      call.Identity,
+		LeaveToken:    call.LeaveToken,
+		CountdownKind: call.CountdownKind,
+		Kind:          sess.Kind,
+		KeyID:         memql.BareShortId(sess.KeyID),
+		SeatID:        memql.BareShortId(sess.SeatID),
+		RoomID:        memql.BareShortId(sess.RoomID),
+		ExpiresAt:     sess.ExpiresAt.UTC().Format(time.RFC3339Nano),
+		ExpiresInMs:   callsMs(sess.ExpiresAt.Sub(h.now())),
+		Host:          call.Host,
+		Roster:        rosterReply(call.Roster),
 	}
 	if !call.CountdownEndsAt.IsZero() {
 		reply.CountdownEndsAt = call.CountdownEndsAt.UTC().Format(time.RFC3339Nano)

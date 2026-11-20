@@ -99,6 +99,7 @@ func (s callsSecrets) all() map[string]string {
 
 // callsFakeCall is one call the handler made of the service, and what it was handed.
 type callsFakeCall struct {
+	leave          calls.LeaveRequest
 	op             string
 	site           calls.SiteRef  // the site the call was handed, as an argument or on its session
 	session        *calls.Session // the session it was handed, if any

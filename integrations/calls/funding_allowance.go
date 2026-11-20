@@ -430,6 +430,16 @@ func (s *Service) admittedWithFunding(ctx context.Context, owner string, server 
 	if err := fundingRoomAllowed(*room, s.now()); err != nil {
 		return refuseJoin(callrules.ReasonOf(err)), err
 	}
+	deadline, err := s.departureDeadline(memql.ContextWithFreshRead(ctx), *room, s.now())
+	if err != nil {
+		return refuseJoin(callrules.ReasonOf(err)), err
+	}
+	if !deadline.IsZero() {
+		policy.PassTTL = min(policy.PassTTL, deadline.Sub(s.now()))
+		if policy.PassTTL < time.Second {
+			return refuseJoin("wrap_up"), callrules.Refuse(callrules.ErrEnded, "wrap_up", "the host's wrap-up deadline has arrived")
+		}
+	}
 	if room.bounded() {
 		policy.PassTTL = min(policy.PassTTL, room.FundingDeadline.Sub(s.now()))
 		if policy.PassTTL < time.Second {

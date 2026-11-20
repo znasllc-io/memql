@@ -3,14 +3,14 @@ package calls
 import (
 	"fmt"
 	"testing"
-
-	"github.com/stretchr/testify/require"
 )
 
 func TestCallConfigurationBounds(t *testing.T) {
 	for _, people := range []int{1, 8, 25, 50, 100} {
 		for _, minutes := range []int{10, 15, 30, 180, 1425, 1440} {
-			require.True(t, ValidCallConfiguration(CallConfiguration{ParticipantLimit: people, DurationMinutes: minutes, RateVersion: PreviewRateVersion}))
+			if !ValidCallConfiguration(CallConfiguration{ParticipantLimit: people, DurationMinutes: minutes, RateVersion: PreviewRateVersion}) {
+				t.Fatalf("valid configuration rejected: %d people, %d minutes", people, minutes)
+			}
 		}
 	}
 	valid := CallConfiguration{ParticipantLimit: 100, DurationMinutes: 1440, RateVersion: PreviewRateVersion}
@@ -30,7 +30,9 @@ func TestCallConfigurationBounds(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			c := valid
 			change(&c)
-			require.False(t, ValidCallConfiguration(c))
+			if ValidCallConfiguration(c) {
+				t.Fatalf("invalid configuration accepted: %+v", c)
+			}
 		})
 	}
 }
@@ -43,14 +45,20 @@ func TestPreviewPricingUsesMarginalBandsAndCeilingReservation(t *testing.T) {
 		{-1, 0}, {0, 0}, {1, 2500}, {8, 20000}, {9, 21500},
 		{25, 45500}, {26, 46500}, {50, 70500}, {51, 71000}, {100, 95500}, {101, 0},
 	} {
-		t.Run(fmt.Sprint(tc.people), func(t *testing.T) { require.Equal(t, tc.rate, PreviewRate(tc.people)) })
+		t.Run(fmt.Sprint(tc.people), func(t *testing.T) {
+			if got := PreviewRate(tc.people); got != tc.rate {
+				t.Fatalf("rate=%d, want %d", got, tc.rate)
+			}
+		})
 	}
 	for _, tc := range []struct {
 		people, minutes int
 		cents           int64
 	}{{1, 10, 3}, {1, 15, 4}, {2, 60, 30}, {8, 60, 120}, {100, 10, 96}, {100, 1440, 13752}} {
 		c := CallConfiguration{ParticipantLimit: tc.people, DurationMinutes: tc.minutes, RateVersion: PreviewRateVersion}
-		require.Equal(t, tc.cents, PreviewReservation(c))
+		if got := PreviewReservation(c); got != tc.cents {
+			t.Fatalf("%+v reservation=%d, want %d", c, got, tc.cents)
+		}
 	}
 	// Every supported quote covers its unrounded maximum; no duration or band
 	// boundary can reserve less than the eventual full-room settlement.
@@ -62,9 +70,9 @@ func TestPreviewPricingUsesMarginalBandsAndCeilingReservation(t *testing.T) {
 			}
 			raw := PreviewRate(people) * int64(minutes)
 			reserved := PreviewReservation(c)
-			require.GreaterOrEqual(t, reserved*10000, raw)
-			require.Less(t, (reserved-1)*10000, raw)
-			require.LessOrEqual(t, reserved, int64(50000))
+			if reserved*10000 < raw || (reserved-1)*10000 >= raw || reserved > 50000 {
+				t.Fatalf("invalid reservation for %+v: %d cents, raw %d", c, reserved, raw)
+			}
 		}
 	}
 }

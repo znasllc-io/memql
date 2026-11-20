@@ -215,6 +215,53 @@ a simulated pass's expiry and room-time allowance still apply.
 call ends unless a host is back first (`countdownEndsAt`, below), the instant the
 reconcile pass ends it at, so every page can show the same countdown.
 
+**An explicit host departure can choose the room's policy.** The leave dialog
+sends `POST /leave` with `mode` (`keep_running` or `wrap_up`), the current
+session's opaque `leaveToken`, and a stable `idempotencyKey`. Guests can use the
+same bound request without `mode`. The token and operation key must stay unchanged
+through an uncertain reply; do not generate a new request to retry a timeout.
+The server verifies the session, seat, admission and host authority again under
+the room gates. A success is `204`; a stale or changed request is
+`409 leave_changed`, which requires a fresh deliberate choice. A guest promoted
+while confirming a mode-less bound leave receives `409 leave_choice_required`:
+refresh its host status and ask which continuation policy to use.
+
+- `keep_running` requires an existing finite `allowanceEndsAt`. It suppresses the
+  automatic host-absence grace, keeps charging the original payer under the same
+  reservation, and never changes that hard deadline. An empty room still ends by
+  the usual empty-room rule. Legacy unbounded rooms cannot select this option.
+- `wrap_up` commits a **firm five-minute deadline**, capped by the original hard
+  deadline if earlier. Another host staying, a host returning, a later Keep choice
+  and repeated requests cannot cancel or extend it. Every seat sees
+  `countdownKind: "wrap_up"` and the same `countdownEndsAt`; the legacy countdown
+  instead says `countdownKind: "host_left"` and still stops when a host returns.
+
+The policy and leave receipt are stored in the same version-fenced seat mutation
+as `status: left`. They survive replica changes and rejoining. The earliest firm
+commitment across seats wins. Seats retain these commitments for the room's
+lifetime. Admission and refreshed media tokens refuse an elapsed firm deadline;
+reconciliation disconnects the room, and settlement is capped at that exact
+saved instant even when reconciliation or media deletion was delayed. Existing
+connected media still depends on the reconciliation loop and provider deletion;
+a provider outage does not extend the billed interval. The unchanged `{}` leave
+body and involuntary disconnections retain the original host-left behavior.
+
+**Provider cleanup limitation:** completed receipt replays cannot deliberately
+leave an already-visible later admission. However, participant removal runs
+outside the write gates and the media provider removes by a stable participant
+identity. Another browser can rejoin that same seat after the leave commits but
+before the original removal finishes; that delayed removal can disconnect the
+new media connection. The calling page suppresses its own automatic reconnect
+while a leave is pending, which does not prevent another client's concurrent
+rejoin. Admission-specific media identities or a durable cleanup/admission
+barrier are required to close this existing cross-client race before production
+billing relies on uninterrupted re-entry. The receipt and saved deadline remain
+authoritative; this limitation does not duplicate a departure or extend the call.
+
+Regression coverage: `integrations/calls/departure_db_test.go` exercises concurrent
+cross-replica retries, host return/co-hosts, guest authority, immutable admission
+binding, failed writes, earlier hard deadlines, empty rooms and settlement cleanup.
+
 **A media disconnect is not a leave.** A browser disconnects from the media server the
 same way when its page is refreshed, its tab is closed or its call is hung up, so the
 media server's report of a disconnect only records the seat's last sign of life. Only
@@ -502,7 +549,7 @@ all, so a page must not assume a JSON body on a `5xx`.
 | `POST /join` | one of `{"token"}`, `{"hostToken"}` or authenticated `{"historyId"}`, with `"name"` and `"confirm"`; none, to rejoin on the session's current seat | a join, and the cookie of a new session |
 | `GET /queue` | nothing | a join: a waiter's poll, or a fresh pass for a seat already in |
 | `POST /host` | `{"action", "seat"}` | `204` |
-| `POST /leave` | `{}` | `204`: the hang-up |
+| `POST /leave` | `{}` (legacy), or `{ "leaveToken", "idempotencyKey", "mode"? }` | `204`: leave this admission; host mode optionally commits the room policy |
 | `GET /history` | bounded query parameters below | the authenticated key's private history and overview |
 | `POST /history` | a closed `rename`, `archive_preview`, `archive` or `restore` action | the updated history row or archive confirmation |
 
@@ -512,7 +559,10 @@ its ids bare, and never its token; to a seat in an open call it adds `host: true
 the seat hosts the call, `countdownEndsAt` (an RFC 3339 time) while the host-left
 countdown runs, and to a host the `roster`, each absent otherwise. `expiresAt` less
 `expiresInMs` is the server's clock, which a page counts `countdownEndsAt` down from.
-An admitted or in-call seat also receives `openedAt`, the open room's persisted start
+An admitted or in-call seat also receives its media `identity` and opaque
+`leaveToken`. Match `identity` to the displayed admission before accepting a token;
+never decode it in the client or use it without the session cookie. These fields
+are absent while waiting, after leaving, or after the room ends. The seat also receives `openedAt`, the open room's persisted start
 in RFC 3339. Every participant receives the same start, including late joiners and
 reconnects, so elapsed call time uses this start and the server clock rather than the
 browser's join time. Waiting, departed and removed seats, ended rooms and sessions

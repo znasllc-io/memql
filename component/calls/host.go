@@ -43,19 +43,36 @@ type RosterWaiter struct {
 	Since                   time.Time
 }
 
+// LeaveRequest is an admission-bound explicit leave. Empty preserves legacy behavior.
+// Mode is optional for guests; only occupying hosts may choose a room policy.
+type LeaveRequest struct {
+	Mode           string `json:"mode,omitempty"`
+	LeaveToken     string `json:"leaveToken,omitempty"`
+	IdempotencyKey string `json:"idempotencyKey,omitempty"`
+}
+
+const (
+	LeaveKeepRunning = "keep_running"
+	LeaveWrapUp      = "wrap_up"
+)
+
 // SeatCall is what a session seated in an open call is told about that call when it asks
 // after itself, which every seat's page does while it is in the call (design section 8,
 // "End": the host-left countdown is shown on screen). Host is whether the seat hosts the
 // call now: a host seat admitted or in the call, which is how a key holder the call was
 // handed to learns it is theirs, since a hand-over hands out no new pass. CountdownEndsAt
-// is when the call ends unless a host is back first, while the host-left countdown runs:
-// HostLeft's deadline, the same instant for every seat, and still said once it has passed
+// is the shared host-left or firm wrap-up deadline: the same instant for every seat, and still said once it has passed
 // until a pass has ended the call; the zero time when no countdown runs. Roster is the
 // call as its host controls name it, for a host and nobody else. The zero SeatCall is
 // what a session seated nowhere, a seat that left or was removed, and a seat of an ended
 // call are told. OpenedAt is the room's persisted start, shared by every admitted or
 // in-call seat across late joins and reconnects; waiting seats are not given it.
+// CountdownKind distinguishes a firm wrap_up from the legacy host_left grace.
+// Identity and LeaveToken are given only to an occupying seat.
 type SeatCall struct {
+	Identity         string
+	LeaveToken       string
+	CountdownKind    string
 	ParticipantLimit int
 	DurationMinutes  int
 	ReservedCents    *int64
@@ -97,6 +114,8 @@ const (
 	// EndReasonHostLeft: nobody hosting it was in it for the host-left grace
 	// (HostLeft), and nobody entitled to took over.
 	EndReasonHostLeft = "host_left"
+	// EndReasonWrapUp: an explicit firm host departure deadline arrived.
+	EndReasonWrapUp = "wrap_up"
 	// EndReasonEmpty: the last person in it left, and nobody was waiting to come in.
 	EndReasonEmpty = "empty"
 )

@@ -301,7 +301,7 @@ func (s *Service) SessionCall(ctx context.Context, sess callrules.Session) (call
 	}
 	fresh := memql.ContextWithFreshRead(ctx)
 	now := s.now()
-	row, _, err := s.session(fresh, site, sess.Token, now)
+	row, pepper, err := s.session(fresh, site, sess.Token, now)
 	if err != nil {
 		return none, err
 	}
@@ -335,16 +335,19 @@ func (s *Service) SessionCall(ctx context.Context, sess callrules.Session) (call
 	}
 	if seat.occupying() {
 		out.OpenedAt = room.OpenedAt
+		out.Identity = seat.Identity
+		out.LeaveToken = leaveToken(pepper, site.SiteID, *row, *seat)
 	}
 	if seat.Host && seat.occupying() {
 		out.Host = true
 		out.Roster = rosterOf(*room, v.seats, v.entries)
 	}
-	if v.hostPresent() {
-		return out, nil
-	}
-	if v.policy, err = s.store.PolicyFor(fresh, owner, room.SiteID); err != nil {
-		return none, err
+	// A present host needs no automatic-grace policy read, but must still see a
+	// firm wrap-up selected by another host. That commitment lives in the seats.
+	if !v.hostPresent() {
+		if v.policy, err = s.store.PolicyFor(fresh, owner, room.SiteID); err != nil {
+			return none, err
+		}
 	}
 	verdict, err := s.hostLeft(fresh, v, now)
 	if err != nil {
@@ -352,6 +355,10 @@ func (s *Service) SessionCall(ctx context.Context, sess callrules.Session) (call
 	}
 	if verdict.action == callrules.HostLeftCountdown || verdict.action == callrules.HostLeftEnd {
 		out.CountdownEndsAt = verdict.deadline
+		out.CountdownKind = "host_left"
+		if verdict.firm {
+			out.CountdownKind = callrules.LeaveWrapUp
+		}
 	}
 	return out, nil
 }
@@ -761,6 +768,12 @@ func endGates(room roomRow) []string {
 // the file note gives: every seat in the call or waiting leaves now, every waiting queue
 // entry expires, the booking is marked ended, and the room is written last.
 func (s *Service) endRows(ctx context.Context, v roomView, reason string, now time.Time) error {
+	// A delayed pass, empty leave, or later host End cannot charge time after a
+	// committed firm wrap-up. The same cutoff applies to every settlement path.
+	if _, deadline := departurePolicy(v.room, v.seats); !deadline.IsZero() && !now.Before(deadline) {
+		now, reason = deadline, callrules.EndReasonWrapUp
+	}
+
 	owner := v.room.OwnerUserID
 	for _, seat := range v.seats {
 		if !seat.placed() {
@@ -796,6 +809,7 @@ func (s *Service) endRows(ctx context.Context, v roomView, reason string, now ti
 // do, the deadline while a countdown runs and once it has run out, and the seat a
 // hand-over goes to.
 type hostLeftVerdict struct {
+	firm     bool
 	action   callrules.HostLeftAction
 	deadline time.Time
 	to       *seatRow
@@ -834,6 +848,17 @@ type hostLeftVerdict struct {
 // holder in the call takes it over at once all the same.
 func (s *Service) hostLeft(ctx context.Context, v roomView, now time.Time) (hostLeftVerdict, error) {
 	none := hostLeftVerdict{action: callrules.HostLeftNone}
+	keep, deadline := departurePolicy(v.room, v.seats)
+	if !deadline.IsZero() {
+		action := callrules.HostLeftCountdown
+		if !now.Before(deadline) {
+			action = callrules.HostLeftEnd
+		}
+		return hostLeftVerdict{action: action, deadline: deadline, firm: true}, nil
+	}
+	if keep {
+		return none, nil
+	}
 	if v.hostPresent() {
 		return none, nil
 	}

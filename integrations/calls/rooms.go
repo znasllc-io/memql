@@ -455,6 +455,9 @@ func (s *Store) updateRoom(ctx context.Context, owner string, prior roomRow, fie
 // webhook about it: events.go), AbsentSince when a pass first found it missing there
 // (reconcile.go, calls.SeatAbsent), and LetInAt a host's admission past the call's lock.
 type seatRow struct {
+	DepartureReceipt                                                     string
+	DepartureKeepRunning                                                 bool
+	DepartureWrapUpAt                                                    time.Time
 	HistoryPending                                                       bool
 	ID, RoomID, Identity, Kind, DisplayName, Status, TermsVersion, KeyID string
 	CredentialID                                                         string
@@ -480,26 +483,29 @@ func (r seatRow) passesLock() bool { return r.Host || !r.LetInAt.IsZero() }
 
 func seatFromRow(r map[string]any) seatRow {
 	return seatRow{
-		HistoryPending:  rowBool(r, "historyPending"),
-		ID:              memql.BareShortId(rowString(r, "id")),
-		RoomID:          memql.BareShortId(rowString(r, "roomId")),
-		Identity:        rowString(r, "identity"),
-		CredentialID:    rowString(r, "credentialId"),
-		Kind:            rowString(r, "kind"),
-		DisplayName:     rowString(r, "displayName"),
-		Status:          rowString(r, "status"),
-		TermsVersion:    rowString(r, "termsVersion"),
-		KeyID:           memql.BareShortId(rowString(r, "keyId")),
-		Host:            rowBool(r, "host"),
-		ConfirmAdult:    rowBool(r, "confirmAdult"),
-		ConfirmNoMinors: rowBool(r, "confirmNoMinors"),
-		JoinedAt:        rowTime(r, "joinedAt"),
-		LeftAt:          rowTime(r, "leftAt"),
-		LastSeenAt:      rowTime(r, "lastSeenAt"),
-		AbsentSince:     rowTime(r, "absentSince"),
-		LetInAt:         rowTime(r, "letInAt"),
-		WaitingSince:    rowTime(r, "waitingSince"),
-		Version:         rowTime(r, "createdAt"),
+		DepartureReceipt:     rowString(r, "departureReceipt"),
+		DepartureKeepRunning: rowBool(r, "departureKeepRunning"),
+		DepartureWrapUpAt:    rowTime(r, "departureWrapUpAt"),
+		HistoryPending:       rowBool(r, "historyPending"),
+		ID:                   memql.BareShortId(rowString(r, "id")),
+		RoomID:               memql.BareShortId(rowString(r, "roomId")),
+		Identity:             rowString(r, "identity"),
+		CredentialID:         rowString(r, "credentialId"),
+		Kind:                 rowString(r, "kind"),
+		DisplayName:          rowString(r, "displayName"),
+		Status:               rowString(r, "status"),
+		TermsVersion:         rowString(r, "termsVersion"),
+		KeyID:                memql.BareShortId(rowString(r, "keyId")),
+		Host:                 rowBool(r, "host"),
+		ConfirmAdult:         rowBool(r, "confirmAdult"),
+		ConfirmNoMinors:      rowBool(r, "confirmNoMinors"),
+		JoinedAt:             rowTime(r, "joinedAt"),
+		LeftAt:               rowTime(r, "leftAt"),
+		LastSeenAt:           rowTime(r, "lastSeenAt"),
+		AbsentSince:          rowTime(r, "absentSince"),
+		LetInAt:              rowTime(r, "letInAt"),
+		WaitingSince:         rowTime(r, "waitingSince"),
+		Version:              rowTime(r, "createdAt"),
 	}
 }
 
