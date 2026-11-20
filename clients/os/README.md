@@ -132,7 +132,9 @@ or client-visible session authority.
 - **Ask** is chrome, not a module: the dock orb and the desk widget open the
   same streaming surface. A window's title bar carries neither Ask nor a
   search button (José, Nov 19 2026): search lives in each app's page, on its
-  `Refine` control. It takes dictation (#4747):
+  `Refine` control. The dock's Ask opens with the focused window's context
+  (what its app noted through `askContext`, e.g. a selected Bin item, plus the
+  visible page's declared data); the phone's orb does the same for the open app. It takes dictation (#4747):
   hold the mic to talk, tap it to keep listening. Each turn uses the same durable
   work engine as Nexus. Its goals remain visible in Nexus; message menus offer
   copying and activity inspection. Explicit Stop cancels the durable goal; closing a viewer

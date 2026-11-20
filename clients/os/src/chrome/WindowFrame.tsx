@@ -32,7 +32,8 @@ import { useAppSetupMark } from "./useAppSetupMark";
 import { useOs } from "./state";
 import { WindowErrorBoundary } from "./WindowErrorBoundary";
 import { ContextMenu } from "./ContextMenu";
-import { useWindowAsk } from "./windowAsk";
+import { registerWindowAsk, useWindowAsk, type WindowAskContext } from "./windowAsk";
+import { visiblePageContext, visiblePageLabel } from "../kit/pageContext";
 
 // The window (spec A): glass frame on a token-carrying root, computed rect
 // (the desk animates BETWEEN rects; during a drag dnd-kit's transform
@@ -41,7 +42,8 @@ import { useWindowAsk } from "./windowAsk";
 // navigate sections inside this one.
 //
 // NO ASK AND NO SEARCH IN THE TITLE BAR (José, Nov 19 2026; Jesús picked the
-// clean bar on Nov 20): Ask lives in the dock, one place for every app, and
+// clean bar on Nov 20): Ask lives in the dock, one place for every app (it
+// carries the focused window's context, registered below), and
 // search lives inside the apps that need it -- each section's own `Refine`
 // draws its search button in the page, where the list it searches is.
 
@@ -122,10 +124,16 @@ export function WindowFrame({
   const Icon = manifest.icon;
   const Body = manifest.component;
   const contextTag = `app:${manifest.id}${current ? ` section:${current.id}` : ""}`;
-  // `askAbout` opens Ask about one chosen thing. What `askContext` notes is
-  // no longer read on the desktop: it rode on the title bar's Ask button,
-  // which is gone (the phone's Ask orb still reads its own copy).
+  // `askAbout` opens Ask about one chosen thing. What `askContext` notes, plus
+  // the visible page's declared data, rides on the dock's Ask while this
+  // window is focused (what the title bar's Ask carried before Nov 2026).
   const windowAsk = useWindowAsk(contextTag);
+  const readAsk = useRef<() => WindowAskContext>(null!);
+  readAsk.current = () => ({
+    context: visiblePageContext(content.current, windowAsk.contextTag()),
+    label: visiblePageLabel(content.current, `${manifest.name} / ${current?.name ?? ""}`),
+  });
+  useEffect(() => registerWindowAsk(win.id, () => readAsk.current()), [win.id]);
   // What the size button does next (desks.ts cycleWindowMode): alone, window
   // -> borderless -> full screen -> window on this desk; shared, full screen
   // on a desk of its own, and back to its half while that desk has room.
