@@ -1397,8 +1397,9 @@ a matching Materializer composition and recorded generation sources take
 precedence over machine upload attribution. Version entries without recorded
 upload attribution say "Saved in MemQL" rather than inferring a browser upload.
 Labels follow their description and input in details; file list rows do not show
-label chips. The browse no longer filters by label, source or client: those
-facets left with Refine when the search panel replaced it (Nov 2026). Open remains a text action; desktop,
+label chips. The browse filters by label, source and client from the search
+panel's kind menu, as groups under the kinds of file (Jesús, Nov 20 2026; closing
+the panel clears them). Open remains a text action; desktop,
 download and Delete use named icons. Delete moves the file to the Bin, where it
 can be restored until purged.
 

@@ -352,8 +352,8 @@ export function Inspector({
           Details; they are editable now, so they take a group of their own
           for the reason Clients does -- an editable thing on a surface that
           is otherwise a reading is not a fact row. The browse's label FACET
-          asks a different question of the same field and lives behind Refine
-          (DESIGN.md rule 2); this is where the value is set. */}
+          asks a different question of the same field and lives in the search
+          panel's kind menu; this is where the value is set. */}
       <div className="os-files-group">
         <Subhead>Labels</Subhead>
         <LabelEditor artifactId={row.id} labels={row.labels} />

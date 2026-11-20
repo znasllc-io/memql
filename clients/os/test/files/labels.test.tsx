@@ -14,8 +14,8 @@ import { ARTIFACT_CONCEPT } from "../../src/apps/files/concepts";
 import { artifactRow, click, emit, fakeConnection, renderFiles, openDetails } from "./harness";
 
 // Artifact labels in Files (epic memql#5009): the editor in the inspector.
-// The label FACET left with Refine (José, Nov 19 2026: the search panel holds
-// search, kind of file, sort and Added only).
+// The label FACET is a group in the search panel's kind menu (Jesús, Nov 20
+// 2026), tested in places.test.tsx.
 
 beforeEach(() => {
   h.connection = null;

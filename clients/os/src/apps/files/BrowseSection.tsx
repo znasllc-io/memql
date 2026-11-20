@@ -62,7 +62,6 @@ import {
   type FilesFilter,
   type FilesPlace,
   type FilesSort,
-  type FileType,
 } from "./filters";
 import type { FolderRow } from "./rows";
 import type { FolderTree, MaterializedRail, TreeNode } from "./fold";
@@ -77,7 +76,10 @@ import {
   type ArtifactRow,
   type CompositionRow,
 } from "./rows";
-import { ACCOUNT_ANY, LABEL_ANY } from "./filters";
+import { ACCOUNT_ANY, ACCOUNT_NONE, filterMenuPick, filterMenuValue, LABEL_ANY, otherFiltersOn, SOURCE_LABELS } from "./filters";
+import { SOURCE_VALUES } from "./concepts";
+import { accountIsArchived, accountName } from "../accounts/rows";
+import { useAccountOptions } from "../accounts/tie";
 import { Inspector } from "./Inspector";
 import type { UploadTask, UploadTasksApi } from "./useUploadTasks";
 
@@ -111,6 +113,7 @@ export function BrowseSection({
   list,
   artifacts,
   counts,
+  labelOptions,
   facetsError,
   files,
   foldersState,
@@ -136,6 +139,8 @@ export function BrowseSection({
   list: LiveView<ArtifactRow> | null;
   artifacts: LibraryArtifactsFeed;
   counts: ReadonlyMap<string, number> | null;
+  /** The labels in the place, for the kind menu's Label group. */
+  labelOptions: readonly string[];
   facetsError: string;
   files: readonly Row[];
   foldersState: LiveState;
@@ -769,8 +774,45 @@ export function BrowseSection({
   // The window's own search (its title-bar button) opens this panel, as it
   // opened Refine before it.
   useWindowSearchTarget(mainRef, () => { setSearchOpen(true); searchInput.current?.focus(); });
+  // Read only while the panel is open: the Client group is the one reader.
+  const accountOptions = useAccountOptions(searchOpen);
+  // THE KIND MENU (Jesús, Nov 20 2026, draft p17 Option C): the kinds of
+  // file, then Label, Source and Client as more groups, each its own single
+  // choice with its own check (filters.ts `filterMenuPick`). The button reads the
+  // kind, plus "+N" while N of the other three are on: the drawing shows only
+  // the kind, and this is the least that still says something else narrows
+  // the files. Shared with me lists other people's notices, which carry no
+  // label, source or client, so it keeps the kinds alone (as Refine was
+  // absent there).
+  const otherOn = shared ? 0 : otherFiltersOn(filter);
+  const kindName = FILE_TYPES.find(([type]) => type === filter.type)?.[1] ?? filter.type;
+  const option = (group: Parameters<typeof filterMenuValue>[0], value: string, name: string, checked: boolean) =>
+    <option key={value} value={filterMenuValue(group, value)} data-checked={checked}>{name}</option>;
+  const filterMenu = <>
+    <optgroup label="Kind">{FILE_TYPES.map(([type, name]) => option("type", type, name, filter.type === type))}</optgroup>
+    {shared ? null : <>
+      {/* ABSENT WHEN NOTHING IS LABELLED (the old Refine's rule): a group
+          offering only "Any label" is a question with no answers. */}
+      {labelOptions.length === 0 && filter.label === LABEL_ANY ? null : <optgroup label="Label">
+        {option("label", LABEL_ANY, "Any label", filter.label === LABEL_ANY)}
+        {labelOptions.map((label) => option("label", label, label, filter.label === label))}
+      </optgroup>}
+      <optgroup label="Source">
+        {option("source", "all", SOURCE_LABELS.all, filter.source === "all")}
+        {SOURCE_VALUES.map((source) => option("source", source, SOURCE_LABELS[source], filter.source === source))}
+      </optgroup>
+      {/* "No client" is its own answer: what still needs filing (epic memql#4800). */}
+      <optgroup label="Client">
+        {option("client", ACCOUNT_ANY, "Any client", filter.accountId === ACCOUNT_ANY)}
+        {option("client", ACCOUNT_NONE, "No client", filter.accountId === ACCOUNT_NONE)}
+        {accountOptions.map((account) => option("client", account.id,
+          accountIsArchived(account) ? `${accountName(account)} (archived)` : accountName(account), filter.accountId === account.id))}
+      </optgroup>
+    </>}
+  </>;
+  // Label, source and client are in the kind menu, so they end with it too.
   const toggleSearch = () => {
-    if (searchOpen) patch({ search: "", type: "all", added: "any" });
+    if (searchOpen) patch({ search: "", type: "all", added: "any", label: LABEL_ANY, source: "all", accountId: ACCOUNT_ANY });
     setSearchOpen(!searchOpen);
   };
 
@@ -865,7 +907,13 @@ export function BrowseSection({
               inputRef={searchInput}
               inputProps={{ "aria-label": "Search" }}
               clearLabel="Clear the search"
-              mode={{ label: "Kind of file", value: filter.type, options: FILE_TYPES, onChange: (type) => patch({ type: type as FileType }) }}
+              mode={{
+                label: "Filter files",
+                value: filterMenuValue("type", filter.type),
+                display: otherOn > 0 ? `${kindName} +${otherOn}` : kindName,
+                children: filterMenu,
+                onChange: (picked) => patch(filterMenuPick(picked)),
+              }}
             />
             <div className="os-files-search-order">
               <Select id={`${searchPanelId}-sort`} label="Sort" icon={<ArrowUpDown size={13} aria-hidden />} value={filter.sort} onChange={(sort) => patch({ sort: sort as FilesSort })}>

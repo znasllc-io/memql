@@ -7,7 +7,10 @@ import {
   compareRows,
   DEFAULT_FILTER,
   fileKindOf,
+  filterMenuPick,
+  filterMenuValue,
   needsWholePlace,
+  otherFiltersOn,
   labelsOf,
   LABEL_ANY,
   type FilesFilter,
@@ -225,5 +228,22 @@ describe("the search panel's kind of file, Added window and sorts", () => {
     expect(needsWholePlace({ ...DEFAULT_FILTER, sort: "name" })).toBe(true);
     expect(needsWholePlace({ ...DEFAULT_FILTER, type: "images" })).toBe(true);
     expect(needsWholePlace({ ...DEFAULT_FILTER, added: "7d" })).toBe(true);
+  });
+});
+
+describe("the kind menu's four single choices (Jesús, Nov 20 2026, draft p17 C)", () => {
+  it("turns an option back into the one field it sets, splitting at the first colon only", () => {
+    expect(filterMenuPick(filterMenuValue("type", "documents"))).toEqual({ type: "documents" });
+    expect(filterMenuPick(filterMenuValue("label", "client:acme"))).toEqual({ label: "client:acme" });
+    expect(filterMenuPick(filterMenuValue("label", LABEL_ANY))).toEqual({ label: "" });
+    expect(filterMenuPick(filterMenuValue("source", "pipeline"))).toEqual({ source: "pipeline" });
+    expect(filterMenuPick(filterMenuValue("client", "none"))).toEqual({ accountId: "none" });
+    expect(filterMenuPick("nonsense")).toEqual({});
+  });
+
+  it("counts label, source and client, never the kind", () => {
+    expect(otherFiltersOn(DEFAULT_FILTER)).toBe(0);
+    expect(otherFiltersOn({ ...DEFAULT_FILTER, label: "x", source: "uploaded" })).toBe(2);
+    expect(otherFiltersOn({ ...DEFAULT_FILTER, accountId: "none" })).toBe(1);
   });
 });

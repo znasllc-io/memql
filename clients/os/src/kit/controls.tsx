@@ -351,6 +351,15 @@ export interface SelectOption {
    * "Manage routes" -- so it does not read as one more choice.
    */
   separated: boolean;
+  /**
+   * From `data-checked`: whether the check mark is drawn, when the caller
+   * says so rather than leaving it to `value`. For ONE menu holding several
+   * single choices side by side (Files' kind menu: one kind AND one label AND
+   * one source AND one client, Jesús's Nov 20 pick), where each group has its
+   * own current answer and `value` can name only one of them. Undefined means
+   * the usual rule: checked when it is `value`.
+   */
+  checked?: boolean;
 }
 
 /** Everything an `<option>` or `<optgroup>` element can hand the walk. */
@@ -361,6 +370,7 @@ interface OptionLikeProps {
   children?: ReactNode;
   "data-hint"?: string;
   "data-separated"?: boolean;
+  "data-checked"?: boolean;
 }
 
 /**
@@ -413,7 +423,8 @@ function walkOptions(node: ReactNode, group: string, into: SelectOption[]): void
     // HTML's own rule: an option with no `value` is worth its own text.
     const value = props.value === undefined ? label : String(props.value);
     const hint = typeof props["data-hint"] === "string" ? props["data-hint"].trim() : "";
-    into.push({ value, label, disabled: props.disabled === true, group, hint, separated: props["data-separated"] === true });
+    into.push({ value, label, disabled: props.disabled === true, group, hint, separated: props["data-separated"] === true,
+      ...(typeof props["data-checked"] === "boolean" ? { checked: props["data-checked"] } : {}) });
   }
 }
 
@@ -507,6 +518,7 @@ export function Select({
   tone = "field",
   icon,
   title,
+  display,
 }: {
   value: string;
   onChange: (next: string) => void;
@@ -531,6 +543,11 @@ export function Select({
   icon?: ReactNode;
   /** The trigger's tooltip: what the control chooses. */
   title?: string;
+  /**
+   * What the closed trigger reads, when the selected option's label alone
+   * would not say it (Files' kind menu adds how many other filters are on).
+   */
+  display?: string;
 }) {
   const options = selectOptionsFrom(children);
   const [open, setOpen] = useState(false);
@@ -772,7 +789,7 @@ export function Select({
   // WHICH value is unresolved, where a blank box says only that something is
   // wrong. An empty value with no empty option to name it reads as the em dash
   // every absent value in this shell reads as.
-  const display = selected !== undefined ? selected.label : value === "" ? "--" : value;
+  const shown = display ?? (selected !== undefined ? selected.label : value === "" ? "--" : value);
 
   const place =
     placement ??
@@ -813,7 +830,7 @@ export function Select({
         >
           {icon ? <span className="os-select-icon" aria-hidden>{icon}</span> : null}
           <span className="os-select-value" data-placeholder={selected === undefined || undefined}>
-            {display}
+            {shown}
           </span>
         </button>
         <ChevronDown size={12} className="os-select-chevron" aria-hidden />
@@ -851,7 +868,7 @@ export function Select({
                     key={`${index}:${option.value}`}
                     id={optionId(index)}
                     role="option"
-                    aria-selected={option.value === value}
+                    aria-selected={option.checked ?? option.value === value}
                     aria-disabled={option.disabled || undefined}
                     data-active={index === active || undefined}
                     className="os-select-option"
@@ -862,7 +879,7 @@ export function Select({
                     onClick={() => commit(index)}
                   >
                     <span className="os-select-check" aria-hidden>
-                      {option.value === value ? <CheckGlyph size={12} /> : null}
+                      {(option.checked ?? option.value === value) ? <CheckGlyph size={12} /> : null}
                     </span>
                     {option.hint === "" ? (
                       <span className="os-select-option-label">{option.label}</span>
