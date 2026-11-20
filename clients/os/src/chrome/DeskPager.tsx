@@ -1,3 +1,4 @@
+import { osScale } from "../system/scale";
 import { useEffect, useRef } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { Plus } from "lucide-react";
@@ -58,7 +59,7 @@ function useNearDots(nav: React.RefObject<HTMLElement | null>) {
     const measure = (x: number, y: number) => {
       nav.current?.querySelectorAll<HTMLElement>(".os-pager-dot").forEach((dot) => {
         const r = dot.getBoundingClientRect();
-        const d = Math.hypot(x - (r.left + r.width / 2), y - (r.top + r.height / 2));
+        const d = Math.hypot(x - (r.left + r.width / 2), y - (r.top + r.height / 2)) / osScale();
         dot.style.setProperty("--os-near", Math.max(0, 1 - d / NEAR_PX).toFixed(3));
       });
     };

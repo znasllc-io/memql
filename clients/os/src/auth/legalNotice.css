@@ -7,7 +7,7 @@
   inset-inline: max(12px, env(safe-area-inset-left));
   top: calc(12px + env(safe-area-inset-top));
   width: fit-content;
-  max-width: min(40rem, calc(100vw - 24px));
+  max-width: min(40rem, calc(calc(100vw / var(--os-scale, 1)) - 24px));
   margin-inline: auto;
 }
 .os-root[data-role-test] .os-legal-notice { top: calc(64px + 12px + env(safe-area-inset-top)); }

@@ -1,3 +1,4 @@
+import { osScale } from "../system/scale";
 import { useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 
@@ -38,10 +39,12 @@ export function AnchoredPicker({ anchor, owner, popupRef, onClose, children }: {
         const below = Math.max(0, topEdge + height - rect.bottom - 8), above = Math.max(0, rect.top - topEdge - 8);
         const up = below < 280 && above > below;
         const popupWidth = Math.min(rect.width, Math.max(0, width - 16));
-        popup.style.left = `${Math.max(leftEdge + 8, Math.min(rect.left, leftEdge + width - popupWidth - 8))}px`;
-        popup.style.width = `${popupWidth}px`;
-        popup.style.maxHeight = `${Math.min(320, up ? above : below)}px`;
-        popup.style.top = `${up ? rect.top + 1 : rect.bottom - 1}px`;
+        // Measured in screen pixels; drawn in the zoomed page's CSS pixels.
+        const s = osScale();
+        popup.style.left = `${Math.max(leftEdge + 8, Math.min(rect.left, leftEdge + width - popupWidth - 8)) / s}px`;
+        popup.style.width = `${popupWidth / s}px`;
+        popup.style.maxHeight = `${Math.min(320 * s, up ? above : below) / s}px`;
+        popup.style.top = `${(up ? rect.top + 1 : rect.bottom - 1) / s}px`;
         popup.style.transform = up ? "translateY(-100%)" : "none";
         popup.dataset.side = up ? "above" : "below";
         input.dataset.pickerSide = popup.dataset.side;

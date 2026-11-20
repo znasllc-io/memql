@@ -18,6 +18,7 @@ import {
 import { MODULE_DESCRIPTIONS } from "../system/modules";
 import { deskHasVacancy } from "../system/desks";
 import type { Rect } from "../system/placement";
+import { dragTranslate } from "../system/scale";
 import {
   allRequirementsFor,
   canOpen,
@@ -146,7 +147,7 @@ export function WindowFrame({
     top: rect.y,
     width: rect.w,
     height: rect.h,
-    transform: transform ? `translate(${transform.x}px, ${transform.y}px)` : undefined,
+    transform: dragTranslate(transform),
     ...(slide ? { "--os-slide-dx": `${slideDx}px` } : null),
   } as React.CSSProperties;
 

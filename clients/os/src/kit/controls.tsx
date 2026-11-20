@@ -1,3 +1,4 @@
+import { osScale } from "../system/scale";
 import { Breadcrumbs, type Breadcrumb } from "./Breadcrumbs";
 import { usePageNavigation } from "./pageNavigation";
 import { IconButton } from "./IconButton";
@@ -826,7 +827,8 @@ export function Select({
               aria-label={label}
               className="os-select-list"
               data-above={place.above || undefined}
-              style={{ left: place.left, top: place.top, minWidth: place.minWidth }}
+              // Placed in screen pixels; drawn in the zoomed page's CSS pixels.
+              style={{ left: place.left / osScale(), top: place.top / osScale(), minWidth: place.minWidth / osScale() }}
               onContextMenu={(event) => event.preventDefault()}
             >
               {options.length === 0 ? (

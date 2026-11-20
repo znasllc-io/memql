@@ -1,3 +1,4 @@
+import { osScale } from "../system/scale";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, PointerEvent, RefObject } from "react";
 
@@ -95,9 +96,17 @@ export function usePanZoom(fit: FitRequest): PanZoom {
    */
   const touched = useRef(false);
 
+  // POINTER AND RECTS ARE SCREEN PIXELS, THE MAP IS CSS PIXELS. On a scaled
+  // desktop (system/scale.ts) the page is zoomed, so a screen distance is
+  // divided by the scale before it moves or frames the map; the drag
+  // threshold stays in screen pixels, as documented above.
   const localPoint = useCallback((clientX: number, clientY: number) => {
     const box = frameRef.current?.getBoundingClientRect();
-    return { x: clientX - (box?.left ?? 0), y: clientY - (box?.top ?? 0) };
+    return { x: (clientX - (box?.left ?? 0)) / osScale(), y: (clientY - (box?.top ?? 0)) / osScale() };
+  }, []);
+  const frameSize = useCallback(() => {
+    const box = frameRef.current?.getBoundingClientRect();
+    return box ? { width: box.width / osScale(), height: box.height / osScale() } : null;
   }, []);
 
   const onPointerDown = useCallback((e: PointerEvent<SVGSVGElement>) => {
@@ -148,7 +157,7 @@ export function usePanZoom(fit: FitRequest): PanZoom {
       const dy = e.clientY - previous.y;
       travelled.current += Math.abs(dx) + Math.abs(dy);
       if (travelled.current > DRAG_THRESHOLD_PX) captureSteeringPointer(e);
-      setView((v) => panBy(v, dx, dy));
+      setView((v) => panBy(v, dx / osScale(), dy / osScale()));
     },
     [localPoint],
   );
@@ -159,28 +168,28 @@ export function usePanZoom(fit: FitRequest): PanZoom {
   }, []);
 
   const reset = useCallback(() => {
-    const box = frameRef.current?.getBoundingClientRect();
+    const box = frameSize();
     touched.current = false;
     setView(box ? fitTo(width, height, box.width, box.height, maxFit) : IDENTITY);
-  }, [width, height, maxFit]);
+  }, [width, height, maxFit, frameSize]);
 
   const zoom = useCallback((factor: number) => {
     touched.current = true;
-    const box = frameRef.current?.getBoundingClientRect();
+    const box = frameSize();
     setView(v => zoomAt(v, factor, (box?.width ?? 0) / 2, (box?.height ?? 0) / 2));
-  }, []);
+  }, [frameSize]);
 
   const reveal = useCallback((bounds: DOMRect) => {
     const frame = frameRef.current?.getBoundingClientRect();
     if (!frame || frame.width <= 0 || frame.height <= 0 || bounds.width <= 0 || bounds.height <= 0) return;
-    const inset = 12;
+    const inset = 12 * osScale();
     const shift = (start: number, end: number, low: number, high: number) =>
       start < low || end - start > high - low ? low - start : end > high ? high - end : 0;
     const dx = shift(bounds.left, bounds.right, frame.left + inset, frame.right - inset);
     const dy = shift(bounds.top, bounds.bottom, frame.top + inset, frame.bottom - inset);
     if (dx === 0 && dy === 0) return;
     touched.current = true;
-    setView(view => panBy(view, dx, dy));
+    setView(view => panBy(view, dx / osScale(), dy / osScale()));
   }, []);
 
   const onKeyDown = useCallback((e: KeyboardEvent<SVGSVGElement>) => {
@@ -190,7 +199,7 @@ export function usePanZoom(fit: FitRequest): PanZoom {
     // fallback: a map you can only reach with a mouse is a map somebody cannot
     // read at all, and on both surfaces this is the app's signature picture.
     const centre = () => {
-      const box = frameRef.current?.getBoundingClientRect();
+      const box = frameSize();
       return { x: (box?.width ?? 0) / 2, y: (box?.height ?? 0) / 2 };
     };
     switch (e.key) {
@@ -226,7 +235,7 @@ export function usePanZoom(fit: FitRequest): PanZoom {
     }
     if (e.key !== "0") touched.current = true;
     e.preventDefault();
-  }, [reset]);
+  }, [reset, frameSize]);
 
   // ==========================================================================
   // FIT UNTIL SOMEBODY STEERS, THEN NEVER AGAIN
@@ -261,9 +270,9 @@ export function usePanZoom(fit: FitRequest): PanZoom {
     if (!frame) return;
     const fitFrame = () => {
       if (touched.current) return;
-      const box = frame.getBoundingClientRect();
+      const box = frameSize();
       // Hidden panes have no size yet. A later resize fits their visible frame.
-      if (box.width <= 0 || box.height <= 0) return;
+      if (!box || box.width <= 0 || box.height <= 0) return;
       const next = fitTo(width, height, box.width, box.height, maxFit);
       setView(previous => previous.x === next.x && previous.y === next.y && previous.scale === next.scale ? previous : next);
     };
@@ -273,7 +282,7 @@ export function usePanZoom(fit: FitRequest): PanZoom {
     const observer = new ResizeObserver(fitFrame);
     observer.observe(frame);
     return () => observer.disconnect();
-  }, [ready, width, height, maxFit]);
+  }, [ready, width, height, maxFit, frameSize]);
 
   return {
     view,

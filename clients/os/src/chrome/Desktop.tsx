@@ -17,6 +17,7 @@ import { holdOf, useDeskFileStates, type DeskLine, type Hold } from "../items/de
 import type { UploadProvider } from "../items/upload";
 import { accessAdmits, widgetById, widgetsFor } from "../system/registry";
 import { borderlessArea, halvesOf, placeWindows, type PlacementTokens, type Rect } from "../system/placement";
+import { dragTranslate, osScale } from "../system/scale";
 import { emptySurface, placeFileAt, type DeskSurface, type DesktopItem, type FileEntry, type GridPos } from "../system/desktop";
 import { FileGlyph } from "../apps/files/Tiles";
 import type { Desk } from "../system/desks";
@@ -503,9 +504,10 @@ export function Desktop({
       }
       const pos = surface?.positions[itemId];
       if (!pos) return;
+      // dnd-kit's delta is in screen pixels; the grid is in CSS pixels.
       const target: GridPos = {
-        col: pos.col + Math.round(event.delta.x / CELL_W),
-        row: pos.row + Math.round(event.delta.y / CELL_H),
+        col: pos.col + Math.round(event.delta.x / osScale() / CELL_W),
+        row: pos.row + Math.round(event.delta.y / osScale() / CELL_H),
       };
       actions.moveSurfaceItem(itemId, target);
     }
@@ -711,13 +713,15 @@ export function Desktop({
   );
 }
 
-/** Which snapping edge the pointer is at, relative to the desktop's own box. */
-function snapZoneOf(event: DragMoveEvent | DragEndEvent, desktop: HTMLElement | null, width: number): SnapZone | null {
+/** Which snapping edge the pointer is at, relative to the desktop's own box.
+ *  The pointer and the box are screen pixels; `width` and SNAP_EDGE are CSS
+ *  pixels, so the offset is divided by the desktop's scale. */
+export function snapZoneOf(event: DragMoveEvent | DragEndEvent, desktop: HTMLElement | null, width: number): SnapZone | null {
   const activator = event.activatorEvent as PointerEvent | undefined;
   if (!activator || typeof activator.clientX !== "number") return null;
   const box = desktop?.getBoundingClientRect();
-  const x = activator.clientX + event.delta.x - (box?.left ?? 0);
-  const y = activator.clientY + event.delta.y - (box?.top ?? 0);
+  const x = (activator.clientX + event.delta.x - (box?.left ?? 0)) / osScale();
+  const y = (activator.clientY + event.delta.y - (box?.top ?? 0)) / osScale();
   if (x <= SNAP_EDGE) return "left";
   if (x >= width - SNAP_EDGE) return "right";
   if (y <= SNAP_EDGE) return "top";
@@ -728,19 +732,27 @@ function rectStyle(rect: Rect): React.CSSProperties {
   return { left: rect.x, top: rect.y, width: rect.w, height: rect.h };
 }
 
+/** The pointer's x in the desktop's CSS pixels (the desktop starts at the left edge). */
 function pointerXOf(event: DragEndEvent): number | null {
   const activator = event.activatorEvent as PointerEvent | undefined;
   if (activator && typeof activator.clientX === "number") {
-    return activator.clientX + event.delta.x;
+    return (activator.clientX + event.delta.x) / osScale();
   }
   return null;
 }
 
-function pxToCell(event: React.DragEvent, grid: { cols: number; rows: number }): GridPos {
+/** The plate cell under a pointer event (screen pixels in, grid cell out). */
+function pxToCell(event: React.MouseEvent, grid: { cols: number; rows: number }): GridPos {
   const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+  return cellAt(event.clientX - rect.left, event.clientY - rect.top, grid);
+}
+
+/** The grid cell at a screen-pixel offset from a plate's corner. */
+export function cellAt(dx: number, dy: number, grid: { cols: number; rows: number }): GridPos {
+  const s = osScale();
   return {
-    col: Math.max(0, Math.min(grid.cols - 1, Math.floor((event.clientX - rect.left - SURFACE_PAD) / CELL_W))),
-    row: Math.max(0, Math.min(grid.rows - 1, Math.floor((event.clientY - rect.top - SURFACE_PAD) / CELL_H))),
+    col: Math.max(0, Math.min(grid.cols - 1, Math.floor((dx / s - SURFACE_PAD) / CELL_W))),
+    row: Math.max(0, Math.min(grid.rows - 1, Math.floor((dy / s - SURFACE_PAD) / CELL_H))),
   };
 }
 
@@ -783,7 +795,7 @@ function DeskPlate({
   onHostDrop: (event: React.DragEvent) => void;
   onBackgroundClick: () => void;
 }) {
-  const { state, registry } = useOs();
+  const { state, registry, grid } = useOs();
   const { setNodeRef } = useDroppable({ id: active ? "surface" : `plate:${desk.id}` });
 
   const windows = desk.windows.flatMap((id) => {
@@ -818,15 +830,7 @@ function DeskPlate({
       onContextMenu={(event) => {
         if (event.target !== event.currentTarget) return;
         event.preventDefault();
-        onMenu({
-          x: event.clientX,
-          y: event.clientY,
-          kind: "desk",
-          cell: {
-            col: Math.max(0, Math.floor((event.clientX - SURFACE_PAD) / CELL_W)),
-            row: Math.max(0, Math.floor((event.clientY - SURFACE_PAD) / CELL_H)),
-          },
-        });
+        onMenu({ x: event.clientX, y: event.clientY, kind: "desk", cell: pxToCell(event, grid) });
       }}
       onDragOver={(event) => {
         if (event.dataTransfer.types.includes("Files")) event.preventDefault();
@@ -920,9 +924,7 @@ function SurfaceItem({
     top,
     width: item.kind === "widget" ? item.w * CELL_W - 12 : undefined,
     height: item.kind === "widget" ? item.h * CELL_H - 12 : undefined,
-    transform: draggable.transform
-      ? `translate(${draggable.transform.x}px, ${draggable.transform.y}px)`
-      : undefined,
+    transform: dragTranslate(draggable.transform),
   };
 
   const ref = (node: HTMLElement | null) => {
@@ -1112,26 +1114,22 @@ function DeskFileDrop() {
     const plate = document.querySelector<HTMLElement>(`[data-os-desk="${CSS.escape(state.shell.activeDeskId)}"]`);
     const hit = document.elementsFromPoint(x, y).find((el) => !el.closest(".os-desk-ghost"));
     if (!plate || !hit || !plate.contains(hit) || hit.closest(".os-window")) return null;
+    // Screen pixels throughout (pointer, plate, covers); the grid's CSS
+    // pixels are multiplied by the desktop's scale to meet them.
+    const s = osScale();
     const rect = plate.getBoundingClientRect();
     const covers = [...document.querySelectorAll(".os-window, [data-os-dock]")].map((el) => el.getBoundingClientRect());
     const hidden: GridPos[] = [];
     for (let col = 0; col < grid.cols; col += 1) {
       for (let row = 0; row < grid.rows; row += 1) {
-        const left = rect.left + SURFACE_PAD + col * CELL_W;
-        const top = rect.top + SURFACE_PAD + row * CELL_H;
-        if (covers.some((c) => c.width > 0 && left < c.right && left + CELL_W > c.left && top < c.bottom && top + CELL_H > c.top)) {
+        const left = rect.left + (SURFACE_PAD + col * CELL_W) * s;
+        const top = rect.top + (SURFACE_PAD + row * CELL_H) * s;
+        if (covers.some((c) => c.width > 0 && left < c.right && left + CELL_W * s > c.left && top < c.bottom && top + CELL_H * s > c.top)) {
           hidden.push({ col, row });
         }
       }
     }
-    return {
-      plate,
-      hidden,
-      cell: {
-        col: Math.max(0, Math.min(grid.cols - 1, Math.floor((x - rect.left - SURFACE_PAD) / CELL_W))),
-        row: Math.max(0, Math.min(grid.rows - 1, Math.floor((y - rect.top - SURFACE_PAD) / CELL_H))),
-      },
-    };
+    return { plate, hidden, cell: cellAt(x - rect.left, y - rect.top, grid) };
   };
 
   // Where the icon would land: the very function the drop runs, so the spot
@@ -1191,9 +1189,11 @@ function DeskFileDrop() {
 
   return (
     <>
-      <DragOverlay dropAnimation={null} className="os-desk-ghost">
+      {/* dnd-kit places the overlay in screen pixels (the tile's measured box),
+          so it is un-zoomed and the tile inside zoomed back to the desk's size. */}
+      <DragOverlay dropAnimation={null} className="os-desk-ghost" style={{ zoom: 1 / osScale() }}>
         {ghost ? (
-          <div className="os-files-tile">
+          <div className="os-files-tile" style={{ zoom: osScale() }}>
             <span className="os-files-tile-icon">
               <FileGlyph label={ghost.glyph} />
             </span>
