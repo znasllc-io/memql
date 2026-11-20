@@ -919,6 +919,16 @@ button:not(:disabled):active {
   color: var(--os-muted);
   cursor: default;
 }
+/* An act that takes something away ("Remove sharing"), set off by a hairline
+   (ContextMenu's `separated` and `tone`). */
+.os-menu-item[data-tone="danger"]:not(:disabled) {
+  color: var(--os-error);
+}
+.os-menu-separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--os-line);
+}
 
 .os-menu-modes {
   display: flex;

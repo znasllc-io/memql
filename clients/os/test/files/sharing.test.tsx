@@ -136,10 +136,64 @@ describe("the share view", () => {
     fireEvent.focus(searchBox());
     expect(screen.queryByRole("option", { name: "Sam Lee" })).toBeNull();
     expect(screen.getByRole("option", { name: "Dana Cole" })).toBeTruthy();
-    const card = screen.getByRole("button", { name: "Remove sharing with Sam Lee" });
-    expect(card.closest(".os-editable-card")?.textContent).toMatch(/User · \d+ days left/);
-    await click(card);
+    const actions = screen.getByRole("button", { name: "Actions for Sam Lee" });
+    expect(actions.closest(".os-editable-card")?.textContent).toMatch(/User · \d+ days left/);
+    // The card's bin moved into its "⋯" menu (Nov 20, draft p18 Option C).
+    expect(screen.queryByRole("button", { name: /^Remove sharing/ })).toBeNull();
+    await click(actions);
+    const menu = screen.getByRole("menu", { name: "Actions for Sam Lee" });
+    expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Renew for 7 days", "Remove sharing"]);
+    // A hairline sets "Remove sharing" apart, in the danger colour.
+    expect(menu.querySelector('[role="separator"] + [role="menuitem"]')?.textContent).toBe("Remove sharing");
+    expect(within(menu).getByRole("menuitem", { name: "Remove sharing" }).getAttribute("data-tone")).toBe("danger");
+    await click(within(menu).getByRole("menuitem", { name: "Remove sharing" }));
     expect(connection.callsNamed("libraryShareStop")).toEqual(['builtin libraryShareStop(shareId: "s-1")']);
+    expect(connection.callsNamed("libraryShareFile")).toEqual([]);
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("renews a person's share for the length chosen in Expires, from the card's menu", async () => {
+    const connection = connect({});
+    await renderFiles();
+    await openShare();
+    chooseOption(expires(), "30 days");
+    await click(screen.getByRole("button", { name: "Actions for Sam Lee" }));
+    await click(screen.getByRole("menuitem", { name: "Renew for 30 days" }));
+    // A re-share: the engine renews the share in place.
+    expect(connection.callsNamed("libraryShareFile")).toEqual([
+      'builtin libraryShareFile(artifactId: "a-1", recipientUserId: "u-sam", days: 30)',
+    ]);
+    expect(connection.callsNamed("libraryShareStop")).toEqual([]);
+  });
+
+  it("renews a group's share until a picked day", async () => {
+    const groupShare = shareRow({ id: "s-g", artifactId: "a-1", recipientUserId: "", recipientGroupId: "g-fylo", recipientDisplayName: "Fylo" });
+    const connection = connect({ shares: [groupShare] });
+    await renderFiles();
+    await openShare();
+    chooseOption(expires(), "Pick a date…");
+    const calendar = screen.getByRole("dialog", { name: "Pick the day the share ends" });
+    const today = new Date();
+    const inTwo = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 2);
+    if (inTwo.getMonth() !== today.getMonth()) await click(within(calendar).getByRole("button", { name: "Next month" }));
+    await click(within(calendar).getByRole("button", { name: inTwo.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" }) }));
+    const words = inTwo.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+    await click(screen.getByRole("button", { name: "Actions for Fylo" }));
+    await click(screen.getByRole("menuitem", { name: `Renew until ${words}` }));
+    const end = new Date(inTwo.getFullYear(), inTwo.getMonth(), inTwo.getDate(), 23, 59, 59, 999).toISOString();
+    expect(connection.callsNamed("libraryShareFile")).toEqual([
+      `builtin libraryShareFile(artifactId: "a-1", recipientGroupId: "g-fylo", until: "${end}")`,
+    ]);
+  });
+
+  it("says in place when the engine refuses a renewal", async () => {
+    connect({ refuse: { libraryShareFile: "this share has ended" } });
+    await renderFiles();
+    await openShare();
+    await click(screen.getByRole("button", { name: "Actions for Sam Lee" }));
+    await click(screen.getByRole("menuitem", { name: "Renew for 7 days" }));
+    expect(screen.getByText("Sharing could not be updated.")).toBeTruthy();
+    expect(screen.getByText("this share has ended")).toBeTruthy();
   });
 
   it("names a group share with its group", async () => {
@@ -147,7 +201,7 @@ describe("the share view", () => {
     connect({ shares: [groupShare] });
     await renderFiles();
     await openShare();
-    const remove = await screen.findByRole("button", { name: "Remove sharing with Fylo" });
+    const remove = await screen.findByRole("button", { name: "Actions for Fylo" });
     expect(remove.closest(".os-editable-card")?.textContent).toMatch(/Group · \d+ days left/);
   });
 
@@ -456,7 +510,7 @@ describe("timeLeftLabel", () => {
     connect({ shares: [fresh] });
     await renderFiles();
     await openShare();
-    const card = (await screen.findByRole("button", { name: /Sam Lee/ })).closest(".os-editable-card");
+    const card = (await screen.findByRole("button", { name: "Actions for Sam Lee" })).closest(".os-editable-card");
     expect(card?.textContent).toContain("User · 7 days left");
     // The rail stays beside the share view.
     await click(within(rail()).getByRole("button", { name: "Sharing" }));

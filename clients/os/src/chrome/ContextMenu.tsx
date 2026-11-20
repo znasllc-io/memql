@@ -1,5 +1,5 @@
 import { osScale } from "../system/scale";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 // One context menu for the whole shell: real menu semantics (role=menu,
@@ -77,6 +77,11 @@ export interface MenuEntry {
   id: string;
   label: string;
   disabled?: boolean;
+  /** A thin line above the entry, setting it apart from those before it. */
+  separated?: boolean;
+  /** "danger": drawn in the error colour, for an act that takes something
+   *  away (the share view's "Remove sharing", Jesús's Nov 20 pick). */
+  tone?: "danger";
   /** May return the act's promise: an entry drawn as a kit button elsewhere
    *  (Files' Head icons) then takes no second press until it settles. */
   onSelect: () => unknown;
@@ -183,19 +188,22 @@ export function ContextMenu({
       onContextMenu={(e) => e.preventDefault()}
     >
       {entries.map((entry) => (
-        <button
-          key={entry.id}
-          type="button"
-          role="menuitem"
-          className="os-menu-item"
-          disabled={entry.disabled}
-          onClick={() => {
-            onClose();
-            entry.onSelect();
-          }}
-        >
-          {entry.label}
-        </button>
+        <Fragment key={entry.id}>
+          {entry.separated ? <div role="separator" className="os-menu-separator" /> : null}
+          <button
+            type="button"
+            role="menuitem"
+            className="os-menu-item"
+            data-tone={entry.tone}
+            disabled={entry.disabled}
+            onClick={() => {
+              onClose();
+              entry.onSelect();
+            }}
+          >
+            {entry.label}
+          </button>
+        </Fragment>
       ))}
     </div>,
     document.body,
