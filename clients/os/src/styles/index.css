@@ -2270,7 +2270,7 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
  * long free-text label ellipsizes instead of widening the list off screen.
  * The list is portalled, so it is reached by its accessible name. Height is
  * the kit's own cap: many labels or clients scroll inside the list. */
-.os-select-list[aria-label="Filter files"] { max-width: min(280px, calc(100vw - 16px)); }
+.os-select-list[aria-label="Filter files"] { max-width: min(280px, calc(calc(100vw / var(--os-scale, 1)) - 16px)); }
 .os-select-list[aria-label="Filter files"] .os-select-group { text-transform: uppercase; letter-spacing: 0.06em; }
 .os-select-list[aria-label="Filter files"] .os-select-option-label { min-width: 0; }
 .os-files-search-order { display: flex; flex-wrap: wrap; gap: 8px; }
