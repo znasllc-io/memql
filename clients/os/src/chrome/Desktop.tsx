@@ -578,8 +578,9 @@ export function Desktop({
         {
           id: "open",
           label: "Open in VS Code",
-          // Offline: refused, never queued (deskFileState.ts), so not offered.
-          disabled: item.uploadState === "failed" || holds.get(item.id) === "offline",
+          // Uploading, failed or offline: an open is refused, never queued
+          // (deskFileState.ts), so it is not offered.
+          disabled: (holds.get(item.id) ?? null) !== null,
           onSelect: () => fileStates.ask(item.id, "open"),
         },
         {

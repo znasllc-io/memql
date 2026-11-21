@@ -9,9 +9,8 @@ import type { FileEntry } from "../system/desktop";
 // at the one size the Library uses too (José, Nov 19 call; Jesús picked
 // Draft B, Nov 20 2026), so a file looks the same in both places. No dot: a
 // file that cannot open yet is drawn dim, with one line under its name saying
-// why or what happens next (items/deskFileState.ts holds the rules).
+// why (items/deskFileState.ts holds the rules).
 const LINES: Record<Exclude<DeskLine, "failed" | null>, string> = {
-  opening: "Opening when done",
   offline: "Computer offline",
   ready: "Ready",
 };

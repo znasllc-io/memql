@@ -16,7 +16,9 @@ import type { UploadProvider, UploadResult } from "../../src/items/upload";
 
 // The desk's upload states, end to end through the shell (Nov 19 item 10):
 // a file dropped from the computer is dim and has no dot while it uploads,
-// can still be picked, waits to open if opened, and a failure drops the wait.
+// can still be picked, and opening it does nothing: nothing is queued, so
+// nothing opens later outside a click (Safari's pop-up blocker refuses that,
+// Jesús, Nov 20 evening). Once it lands it says Ready and opens when opened.
 // The rules themselves are unit-tested in deskFileState.test.tsx.
 
 const CONFIG: OsRuntimeConfig = {
@@ -85,7 +87,7 @@ beforeEach(() => {
 afterEach(() => opened.mockRestore());
 
 describe("a file uploading onto the desk", () => {
-  it("is dim with no dot, can be picked, and opens by itself once it lands if it was opened", async () => {
+  it("is dim with no dot, can be picked, does nothing when opened, and opens once it has landed", async () => {
     const uploads = heldUploads();
     const { button, icon } = await dropOnDesk(uploads.provider);
     expect(icon.hasAttribute("data-dim")).toBe(true);
@@ -95,24 +97,28 @@ describe("a file uploading onto the desk", () => {
     expect(icon.hasAttribute("data-selected")).toBe(true);
 
     fireEvent.doubleClick(button);
-    expect(screen.getByText("Opening when done")).toBeTruthy();
+    fireEvent.keyDown(button, { key: "Enter" });
+    expect(screen.queryByText("Opening when done")).toBeNull();
     expect(opened).not.toHaveBeenCalled();
+    fireEvent.contextMenu(button);
+    expect((screen.getByRole("menuitem", { name: "Open in VS Code" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
 
     await uploads.land(0);
     expect(icon.hasAttribute("data-dim")).toBe(false);
-    expect(screen.queryByText("Opening when done")).toBeNull();
-    expect(screen.queryByText("Ready")).toBeNull();
+    expect(screen.getByText("Ready")).toBeTruthy();
+    expect(opened).not.toHaveBeenCalled();
+
+    fireEvent.doubleClick(button);
     expect(opened).toHaveBeenCalledOnce();
   });
 
-  it("drops the waiting open when the upload fails; the retry that lands just says Ready", async () => {
+  it("offers the retry line when the upload fails; the retry that lands says Ready and opens nothing", async () => {
     const uploads = heldUploads();
     const { button } = await dropOnDesk(uploads.provider);
     fireEvent.keyDown(button, { key: "Enter" });
-    expect(screen.getByText("Opening when done")).toBeTruthy();
 
     await uploads.fail(0, "The cluster refused the upload.");
-    expect(screen.queryByText("Opening when done")).toBeNull();
     expect(screen.getByRole("alert").textContent).toBe("The cluster refused the upload.");
 
     fireEvent.click(screen.getByRole("button", { name: "Upload failed -- retry" }));
