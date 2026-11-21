@@ -8077,6 +8077,11 @@ a.os-button {
   -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 calc(var(--os-boot-r) - var(--os-boot-soft)), transparent var(--os-boot-r));
   mask-image: radial-gradient(circle at 50% 50%, #000 calc(var(--os-boot-r) - var(--os-boot-soft)), transparent var(--os-boot-r));
   animation: os-entry-arrive 160ms ease-out;
+  /* Starts on the built-in dark ground and eases into the person's theme when
+     it arrives with their desktop (~200ms in): a screen turning on, not a cut
+     (Jesús, Nov 20 2026). Only the curtain fades; a theme preview stays
+     instant. test/kit/loadingThemeFade.test.ts */
+  transition: background-color 500ms ease-out;
 }
 .os-boot-curtain[data-leaving] {
   pointer-events: none; --os-boot-r: 0px; opacity: 0;
@@ -8105,7 +8110,7 @@ a.os-button {
 @keyframes os-boot-step-in { from { opacity: 0; transform: translateY(-.6em); } }
 @media (prefers-reduced-motion: reduce) {
   .os-boot-curtain, .os-boot-step { animation: none; }
-  .os-boot-curtain *, .os-boot-curtain[data-leaving] { transition: none; }
+  .os-boot-curtain, .os-boot-curtain *, .os-boot-curtain[data-leaving] { transition: none; }
   .os-entry-pending-mark { animation: none; opacity: 1; }
   .os-entry-pending, .os-entry-pending[data-leaving] { animation: none; }
   .os-entry-layout .os-signin-content,
