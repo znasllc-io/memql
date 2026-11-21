@@ -98,6 +98,17 @@ export function documentFromState(
  * active desk, no orphan surfaces or positions, and no "uploading" file --
  * an upload cannot survive a reload, so it comes back as "failed" rather
  * than as a spinner that spins forever.
+ *
+ * A file's `uploadState` is "failed" or absent, and nothing else. A landed
+ * upload sets it to `undefined` (chrome/Desktop.tsx); the SDK renders an
+ * undefined value as `nil`, and the engine stored a `nil` inside the document
+ * as an empty object, so rows saved that way (Nov 20 2026) read back
+ * `uploadState: {}`. That came back different from what was sent, so the dock
+ * said "Desktop updated on another device" after every upload, and `{}` is
+ * truthy, so the file looked mid-upload and would not open. Dropping any
+ * other value here fixes both directions: the save sends no key (the store
+ * sends the sanitized document) and a row already stored with `{}` heals on
+ * read.
  */
 export function sanitizeDocument(raw: unknown): DesktopDocument | null {
   if (raw === null || typeof raw !== "object") return null;
@@ -131,8 +142,9 @@ export function sanitizeDocument(raw: unknown): DesktopDocument | null {
     };
     for (const [id, item] of Object.entries(surface.items ?? {})) {
       if (!item || typeof item !== "object" || (item as { id?: unknown }).id !== id) continue;
-      if (item.kind === "file" && item.uploadState === "uploading") {
-        items[id] = { ...item, uploadState: "failed" };
+      if (item.kind === "file") {
+        const { uploadState, ...entry } = item;
+        items[id] = uploadState === "uploading" || uploadState === "failed" ? { ...entry, uploadState: "failed" } : entry;
       } else if (item.kind === "folder") {
         // TWO SHAPES UNDER ONE KIND (design D4). The unified shortcut carries
         // `folderId` and holds nothing; the foundation's icon-group carried
@@ -167,7 +179,7 @@ export function sanitizeDocument(raw: unknown): DesktopDocument | null {
             });
           }
         }
-      } else if (item.kind === "file" || item.kind === "widget") {
+      } else if (item.kind === "widget") {
         items[id] = item;
       }
     }

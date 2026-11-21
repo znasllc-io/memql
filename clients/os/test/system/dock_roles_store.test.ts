@@ -159,6 +159,24 @@ describe("desktop store", () => {
     expect(clean.surfaces[deskId]!.positions.ghost).toBeUndefined();
   });
 
+  it("sanitize keeps a failed upload and drops any other upload state, so a row stored with {} heals", () => {
+    // Nov 20 2026, from the database: a landed upload was stored as
+    // `uploadState: {}` (its undefined went over the wire as nil). Truthy, so
+    // the file read as mid-upload and would not open.
+    const doc = sampleDocument();
+    const deskId = doc.activeDeskId;
+    const stateOf = (value: unknown) => {
+      const raw = JSON.parse(JSON.stringify(doc)) as DesktopDocument;
+      (raw.surfaces[deskId]!.items.f1 as unknown as Record<string, unknown>).uploadState = value;
+      return sanitizeDocument(raw)!.surfaces[deskId]!.items.f1!;
+    };
+    expect(stateOf({})).not.toHaveProperty("uploadState");
+    expect(stateOf(undefined)).not.toHaveProperty("uploadState");
+    expect(stateOf("done")).not.toHaveProperty("uploadState");
+    expect(stateOf("failed")).toMatchObject({ uploadState: "failed" });
+    expect(stateOf({})).toMatchObject({ kind: "file", id: "f1" });
+  });
+
   it("sanitize repairs a dangling activeDeskId", () => {
     const doc = sampleDocument();
     const raw = { ...doc, activeDeskId: "desk-elsewhere" };
