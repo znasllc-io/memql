@@ -327,6 +327,60 @@ describe("GraphDesktopStore: writes", () => {
   });
 });
 
+describe("GraphDesktopStore: a finished upload", () => {
+  const landing = (uploadState: "uploading" | undefined) =>
+    doc({
+      surfaces: {
+        "desk-1": {
+          items: {
+            "up-1": {
+              kind: "file",
+              id: "up-1",
+              artifactId: uploadState ? "" : "art-1",
+              title: "report.pdf",
+              fileKind: "file",
+              source: "uploaded",
+              // What the desk's landing patch leaves behind: the key, undefined.
+              uploadState,
+            },
+          },
+          positions: { "up-1": { col: 0, row: 0 } },
+        },
+      },
+    });
+  // The wire as it was on Nov 20 2026: the SDK renders an undefined value as
+  // `nil` and the engine stored a nil inside the document as {}.
+  const overTheWire = (d: DesktopDocument): unknown =>
+    JSON.parse(JSON.stringify(d, (_key, value: unknown) => (value === undefined ? {} : value)));
+
+  it("comes back as our own echo, not as 'Desktop updated on another device'", async () => {
+    const gateway = new FakeGateway();
+    const { store, events } = build(gateway);
+    store.save(landing("uploading"));
+    await settle();
+    store.save(landing(undefined));
+    await settle();
+    expect(gateway.writes).toHaveLength(2);
+    expect(gateway.writes[1]?.document.surfaces["desk-1"]?.items["up-1"]).not.toHaveProperty("uploadState");
+
+    gateway.arrive(2, overTheWire(gateway.writes[1]!.document)); // our own save, echoed
+    await settle();
+
+    expect(events.filter((e) => e.kind === "document")).toHaveLength(0);
+    expect(gateway.writes).toHaveLength(2);
+  });
+
+  it("stored as {} by the old wire, reads back as a plain file that opens", async () => {
+    const gateway = new FakeGateway();
+    gateway.stored = { revision: 7, document: overTheWire(landing(undefined)) };
+    const { events } = build(gateway);
+    await settle();
+
+    const adopted = events[0]?.kind === "document" ? events[0].document : null;
+    expect(adopted?.surfaces["desk-1"]?.items["up-1"]).not.toHaveProperty("uploadState");
+  });
+});
+
 describe("canonicalDocument", () => {
   it("ignores key order, so a round-tripped document compares equal", () => {
     // JSONB does not preserve key order and neither does the engine's value
