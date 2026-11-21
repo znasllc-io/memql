@@ -1,6 +1,7 @@
 // Window placement is computed, never freehand (spec D2). Given the desk's
 // visible windows and the viewport, return a rect per window: a solo window
-// centers at a generous clamp, a solo borderless (maximized) one covers the
+// centers at a generous clamp, or takes its half when it rests on one (a side
+// drop, Jesús Nov 20 2026), a solo borderless (maximized) one covers the
 // area above the dock, a solo fullscreen one covers the entire viewport, and
 // two windows split the borderless area edge to edge, whatever mode each was
 // in (Jesús, Nov 2026). The chrome animates BETWEEN these rects (FLIP); tests
@@ -84,6 +85,7 @@ export function placeWindows(
   }
   if (first.mode === "maximized") return { [first.id]: borderlessArea(viewport, t) };
   if (first.mode === "fullscreen") return { [first.id]: { x: 0, y: 0, w: viewport.w, h: viewport.h } };
+  if (first.half !== undefined) return { [first.id]: halvesOf(viewport, t)[first.half] };
   const area = deskArea(viewport, t);
   const w = Math.min(area.w, t.maxSoloWidth);
   return { [first.id]: { x: area.x + (area.w - w) / 2, y: area.y, w, h: area.h } };

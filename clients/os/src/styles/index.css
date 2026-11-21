@@ -394,13 +394,15 @@ button:not(:disabled):active {
   transition: none;
   z-index: 50;
 }
-/* Two windows split the borderless area edge to edge (Jesús, Nov 2026). */
+/* Two windows split the borderless area edge to edge, and a lone window
+ * resting on a half sits the same way (Jesús, Nov 2026). */
 .os-window[data-split] {
   border-radius: 0;
 }
 
 /* Window snapping: the edge a dragged window would take, and the picker on
- * the other half. Under the dragged window, over every other; no motion. */
+ * the other half. Under the dragged window, over every other; no motion but
+ * the picker's fade when it is dismissed. */
 .os-snap-zone {
   position: absolute;
   z-index: 40;
@@ -418,6 +420,12 @@ button:not(:disabled):active {
   gap: 12px;
   padding: 24px;
   background: rgba(0, 0, 0, 0.45);
+}
+/* Dismissed: a short fade, then gone; the desk under it takes clicks at once.
+   Reduced motion sets the duration to 0ms (tokens.css). */
+.os-snap-picker[data-leaving] {
+  pointer-events: none;
+  animation: os-entry-leave var(--os-duration-fast) ease-in forwards;
 }
 .os-snap-pick {
   display: grid;

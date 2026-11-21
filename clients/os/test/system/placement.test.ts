@@ -36,6 +36,14 @@ describe("placement", () => {
     expect(rects.b).toEqual({ x: VIEW.w / 2, y: 0, w: VIEW.w / 2, h });
   });
 
+  // Jesús, Nov 20 2026: a lone window dropped on a side rests on that half.
+  it.each([0, 1] as const)("puts a lone window resting on half %s there, even beside a minimized one", half => {
+    const h = VIEW.h - T.dockReserve;
+    const want = { x: half * VIEW.w / 2, y: 0, w: VIEW.w / 2, h };
+    expect(placeWindows([{ ...win("a"), half }], VIEW, T).a).toEqual(want);
+    expect(placeWindows([{ ...win("a"), half }, win("b", "minimized")], VIEW, T).a).toEqual(want);
+  });
+
   it("gives no rect to a minimized window, and its sibling goes solo", () => {
     const rects = placeWindows([win("a"), win("b", "minimized")], VIEW, T);
     expect(rects.b).toBeUndefined();

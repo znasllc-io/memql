@@ -145,12 +145,35 @@ export function deskHasVacancy(desk: Desk, state: ShellState): boolean {
   });
 }
 
-/** The window in `mode`, off any dedicated desk's return slot. */
+/** The window in `mode`, off any dedicated desk's return slot and off its half. */
 function withMode(state: ShellState, windowId: WindowId, mode: OsWindow["mode"]): ShellState {
   const win = state.windows[windowId];
   if (!win) return state;
-  const { expandedReturn: _return, minimizedFrom: _minimized, ...rest } = win;
+  const { expandedReturn: _return, minimizedFrom: _minimized, half: _half, ...rest } = win;
   return { ...state, windows: { ...state.windows, [windowId]: { ...rest, mode } } };
+}
+
+/**
+ * Where a window joining `desk` sits: beside a lone window resting on a half,
+ * the empty half (Jesús, Nov 20 2026: a second app fills it); otherwise
+ * `otherwise`, by default after the windows already there.
+ */
+function joinAt(state: ShellState, desk: Desk, otherwise = desk.windows.length): number {
+  const half = desk.windows.length === 1 ? state.windows[desk.windows[0]!]?.half : undefined;
+  return half === undefined ? otherwise : 1 - half;
+}
+
+/**
+ * Put `ids` on `desk`, left to right. A window resting on a half takes the
+ * half it now sits on, so it stays on that side once its partner leaves.
+ */
+function seat(state: ShellState, desk: Desk, ids: WindowId[]): ShellState {
+  const windows = { ...state.windows };
+  ids.forEach((id, index) => {
+    const win = windows[id];
+    if (win?.half !== undefined && ids.length === DESK_CAP) windows[id] = { ...win, half: index as 0 | 1 };
+  });
+  return replaceDesk({ ...state, windows }, { ...desk, windows: ids });
 }
 
 /**
@@ -192,10 +215,9 @@ export function openApp(
   const win = newWindow(nextId("win"), appId, sectionId, intent);
   const current = activeDesk(state);
   if (deskHasVacancy(current, state)) {
-    const next = replaceDesk(
-      { ...state, windows: { ...state.windows, [win.id]: win }, focusedWindowId: win.id },
-      { ...current, windows: [...current.windows, win.id] },
-    );
+    const ids = [...current.windows];
+    ids.splice(joinAt(state, current), 0, win.id);
+    const next = seat({ ...state, windows: { ...state.windows, [win.id]: win }, focusedWindowId: win.id }, current, ids);
     return { state: next, effect: { kind: "placed", deskId: current.id, windowId: win.id } };
   }
 
@@ -286,9 +308,10 @@ export function setWindowSection(state: ShellState, windowId: WindowId, sectionI
 
 /**
  * The size button (Jesús, Nov 2026). Alone on its desk: window → borderless
- * (maximized, above the dock) → full screen → window, all on that desk.
- * Sharing a desk: straight to full screen on a desk of its own, and back to
- * its half while the old desk has room.
+ * (maximized, above the dock) → full screen → window, all on that desk; a
+ * window resting on a half is a window, so it goes borderless next and comes
+ * back centred. Sharing a desk: straight to full screen on a desk of its own,
+ * and back to its half while the old desk has room.
  */
 export function cycleWindowMode(state: ShellState, windowId: WindowId, deskHasSurfaceContent?: (deskId: DeskId) => boolean): ShellState {
   const win = state.windows[windowId];
@@ -300,9 +323,9 @@ export function cycleWindowMode(state: ShellState, windowId: WindowId, deskHasSu
     let next: ShellState = { ...state, windows: { ...state.windows, [windowId]: { ...rest, mode: "normal" } }, focusedWindowId: windowId, activeDeskId: from.id };
     if (target && target.id !== from.id && deskHasVacancy(target, state)) {
       const ids = [...target.windows];
-      ids.splice(Math.min(expandedReturn!.index, ids.length), 0, windowId);
+      ids.splice(joinAt(state, target, Math.min(expandedReturn!.index, ids.length)), 0, windowId);
       next = replaceDesk(next, { ...from, windows: from.windows.filter(id => id !== windowId) });
-      next = replaceDesk(next, { ...target, windows: ids });
+      next = seat(next, target, ids);
       next.activeDeskId = target.id;
     }
     // A filled return desk leaves this app on its current desk, without
@@ -310,13 +333,14 @@ export function cycleWindowMode(state: ShellState, windowId: WindowId, deskHasSu
     return gcAutoDesks(next, deskHasSurfaceContent);
   }
   if (from.windows.length === 1) {
-    return { ...state, activeDeskId: from.id, focusedWindowId: windowId, windows: { ...state.windows, [windowId]: { ...win, mode: win.mode === "normal" ? "maximized" : "fullscreen" } } };
+    return { ...withMode(state, windowId, win.mode === "normal" ? "maximized" : "fullscreen"), activeDeskId: from.id, focusedWindowId: windowId };
   }
   const dedicated: Desk = { id: nextDeskId(state), createdBy: "auto", windows: [windowId] };
   const at = state.desks.findIndex(d => d.id === from.id) + 1;
   const desks = state.desks.map(d => d.id === from.id ? { ...d, windows: d.windows.filter(id => id !== windowId) } : d);
   desks.splice(at, 0, dedicated);
-  return { ...state, desks, activeDeskId: dedicated.id, focusedWindowId: windowId, windows: { ...state.windows, [windowId]: { ...win, mode: "fullscreen", expandedReturn: { deskId: from.id, index: from.windows.indexOf(windowId) } } } };
+  const { half: _half, ...kept } = win;
+  return { ...state, desks, activeDeskId: dedicated.id, focusedWindowId: windowId, windows: { ...state.windows, [windowId]: { ...kept, mode: "fullscreen", expandedReturn: { deskId: from.id, index: from.windows.indexOf(windowId) } } } };
 }
 
 /** Swap the two windows of a desk (left <-> right). No-op on a solo desk. */
@@ -325,7 +349,7 @@ export function swapSides(state: ShellState, deskId: DeskId): ShellState {
   if (!desk) return state;
   const [left, right] = desk.windows;
   if (!left || !right) return state;
-  return replaceDesk(state, { ...desk, windows: [right, left] });
+  return seat(state, desk, [right, left]);
 }
 
 /**
@@ -351,7 +375,9 @@ export function throwToDesk(state: ShellState, windowId: WindowId, target: DeskI
   next = replaceDesk(next, { ...from, windows: from.windows.filter((id) => id !== windowId) });
   const landed = deskById(next, targetDesk.id);
   if (!landed) throw new Error("shell invariant: throw target vanished");
-  next = replaceDesk(next, { ...landed, windows: [...landed.windows, windowId] });
+  const ids = [...landed.windows];
+  ids.splice(joinAt(next, landed), 0, windowId);
+  next = seat(next, landed, ids);
   next = { ...next, activeDeskId: landed.id, focusedWindowId: windowId };
   const moved = next.windows[windowId];
   if (moved?.expandedReturn || moved?.mode === "fullscreen") next = withMode(next, windowId, "normal");
@@ -359,8 +385,9 @@ export function throwToDesk(state: ShellState, windowId: WindowId, target: DeskI
 }
 
 /**
- * Drag to the top (Jesús, Nov 2026): a lone window fills the borderless area
- * on its own desk. A pair already splits that area, so it stays as it is.
+ * Drag to the top (Jesús, Nov 2026): a lone window, resting on a half or not,
+ * fills the borderless area on its own desk. A pair already splits that
+ * area, so it stays as it is.
  */
 export function makeBorderless(state: ShellState, windowId: WindowId): ShellState {
   if (deskOfWindow(state, windowId)?.windows.length !== 1) return state;
@@ -396,8 +423,20 @@ export function toggleBorderless(state: ShellState, windowId: WindowId): ShellSt
 export function pairWindows(state: ShellState, keepId: WindowId, side: 0 | 1, bringId: WindowId): ShellState {
   const desk = deskOfWindow(state, keepId);
   if (!desk || desk.windows.length !== 1 || !state.windows[bringId]) return state;
-  const next = throwToDesk(withMode(withMode(state, keepId, "normal"), bringId, "normal"), bringId, desk.id).state;
-  return deskById(next, desk.id)?.windows[side] === keepId ? next : swapSides(next, desk.id);
+  // Resting on `side`, keepId's empty half is where the newcomer sits (joinAt).
+  return throwToDesk(withMode(restOnHalf(state, keepId, side), bringId, "normal"), bringId, desk.id).state;
+}
+
+/**
+ * Drag a lone window to a side (Jesús, Nov 20 2026): it rests on that half
+ * (0 left, 1 right) as a window, out of borderless, full screen and any
+ * dedicated desk, and the other half stays empty with the desk showing. A
+ * pair already splits the area and takes sides by swapping instead.
+ */
+export function restOnHalf(state: ShellState, windowId: WindowId, side: 0 | 1): ShellState {
+  if (deskOfWindow(state, windowId)?.windows.length !== 1) return state;
+  const next = withMode(state, windowId, "normal");
+  return { ...next, windows: { ...next.windows, [windowId]: { ...next.windows[windowId]!, half: side } }, focusedWindowId: windowId };
 }
 
 export interface SwitchDeskOptions {

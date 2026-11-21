@@ -53,6 +53,9 @@ const DESK_DRAG_PREFIXES = ["window:", "item:"] as const;
 // to snap (Jesús, Nov 2026): a side takes that half, the top the whole area.
 const SNAP_EDGE = 24;
 type SnapZone = "left" | "right" | "top";
+// The picker's fade when it is dismissed: --os-duration-fast, which reduced
+// motion sets to 0ms; there it goes at once.
+const PICKER_FADE_MS = 140;
 
 export const CELL_W = 96;
 export const CELL_H = 104;
@@ -102,9 +105,9 @@ export function Desktop({
   const [dockDesks, setDockDesks] = useState<HTMLElement | null>(null);
   useEffect(() => { setDockDesks(document.querySelector<HTMLElement>("[data-os-dock-desks]")); }, []);
   const [snapZone, setSnapZone] = useState<SnapZone | null>(null);
-  // A lone window dropped on a side waits on that half while the other half
-  // offers the apps open on other desks.
-  const [picker, setPicker] = useState<{ windowId: string; side: 0 | 1 } | null>(null);
+  // A lone window dropped on a side rests on that half; while other apps are
+  // open the empty half offers them. `leaving` is the dismissal's fade.
+  const [picker, setPicker] = useState<{ windowId: string; side: 0 | 1; leaving?: boolean } | null>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
   const [noAnswerFor, setNoAnswerFor] = useState<string | null>(null);
   // The desk's own error line (create/rename/move refusals): in-surface, at
@@ -458,9 +461,11 @@ export function Desktop({
         return;
       }
       if (desk && desk.windows.length === 1 && zone) {
-        // Alone: take that half and offer the other; nothing to offer, fill.
-        if (Object.keys(state.shell.windows).length > 1) setPicker({ windowId, side: zone === "left" ? 0 : 1 });
-        else actions.makeBorderless(windowId);
+        // Alone: rest on that half, the other half empty; with apps open on
+        // other desks, that half offers them too.
+        const side = zone === "left" ? 0 : 1;
+        actions.restOnHalf(windowId, side);
+        if (Object.keys(state.shell.windows).length > 1) setPicker({ windowId, side });
         return;
       }
       // Two windows on the desk: dropping past the center line swaps.
@@ -521,14 +526,19 @@ export function Desktop({
     if (picker && !pickerLive) setPicker(null);
   }, [picker, pickerLive]);
   useEffect(() => {
-    if (!picker || !pickerLive) return;
-    // Dismissed, the lone window fills the borderless area.
+    if (!picker || !pickerLive || picker.leaving) return;
+    // Dismissed (Jesús, Nov 20 2026): the options fade away and the window
+    // stays on its half, the other half empty with the desk showing. Any
+    // press but one on an option dismisses, the darkened half included.
     const dismiss = () => {
-      setPicker(null);
-      actions.makeBorderless(picker.windowId);
+      if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) setPicker(null);
+      else setPicker({ ...picker, leaving: true });
     };
     const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") dismiss(); };
-    const onDown = (event: PointerEvent) => { if (!pickerRef.current?.contains(event.target as Node)) dismiss(); };
+    const onDown = (event: PointerEvent) => {
+      const option = (event.target as Element | null)?.closest?.(".os-snap-pick") ?? null;
+      if (!pickerRef.current?.contains(option)) dismiss();
+    };
     pickerRef.current?.querySelector("button")?.focus();
     window.addEventListener("keydown", onKey);
     document.addEventListener("pointerdown", onDown, true);
@@ -536,7 +546,12 @@ export function Desktop({
       window.removeEventListener("keydown", onKey);
       document.removeEventListener("pointerdown", onDown, true);
     };
-  }, [picker, pickerLive, actions]);
+  }, [picker, pickerLive]);
+  useEffect(() => {
+    if (!picker?.leaving) return;
+    const timer = setTimeout(() => setPicker(null), PICKER_FADE_MS);
+    return () => clearTimeout(timer);
+  }, [picker]);
   const halves = halvesOf(viewport, placement);
 
   // ---- context menus ----
@@ -659,12 +674,11 @@ export function Desktop({
           const manifest = registry.apps.find(a => a.id === win.appId);
           if (!desk || !manifest) return null;
           const peers = desk.windows.flatMap(id => state.shell.windows[id] ? [state.shell.windows[id]!] : []);
-          const waiting = pickerLive && picker.windowId === win.id;
-          const rect = waiting ? halves[picker.side] : placeWindows(peers, viewport, placement)[win.id]
+          const rect = placeWindows(peers, viewport, placement)[win.id]
             ?? placeWindows([{ ...win, mode: "normal" }], viewport, placement)[win.id]!;
           const leaving = !!slide && desk.id === slide.fromDeskId && desk.id !== state.shell.activeDeskId;
           const arriving = !!slide && desk.id === state.shell.activeDeskId;
-          const split = waiting || peers.filter((w) => w.mode !== "minimized").length === 2;
+          const split = (win.mode === "normal" && win.half !== undefined) || peers.filter((w) => w.mode !== "minimized").length === 2;
           return <WindowFrame key={win.id} win={win} manifest={manifest} rect={rect} split={split}
             hidden={(desk.id !== state.shell.activeDeskId && !leaving) || win.mode === "minimized"}
             slide={leaving ? "out" : arriving ? "in" : undefined} slideDx={slide?.dx}
@@ -676,6 +690,7 @@ export function Desktop({
         ) : null}
         {pickerLive ? (
           <div ref={pickerRef} className="os-snap-picker" role="group" aria-label="Choose an app for the other half"
+            data-leaving={picker.leaving || undefined} aria-hidden={picker.leaving || undefined}
             style={rectStyle(halves[picker.side === 0 ? 1 : 0])}>
             {desks.flatMap((d) => (d.id === pickerDesk.id ? [] : d.windows)).map((otherId) => {
               const other = registry.apps.find((a) => a.id === state.shell.windows[otherId]?.appId);

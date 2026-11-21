@@ -136,8 +136,9 @@ export function WindowFrame({
   });
   useEffect(() => registerWindowAsk(win.id, () => readAsk.current()), [win.id]);
   // What the size button does next (desks.ts cycleWindowMode): alone, window
-  // -> borderless -> full screen -> window on this desk; shared, full screen
-  // on a desk of its own, and back to its half while that desk has room.
+  // (centred or resting on a half) -> borderless -> full screen -> centred
+  // window on this desk; shared, full screen on a desk of its own, and back
+  // to its half while that desk has room.
   const shared = (ownDesk?.windows.length ?? 0) > 1;
   const returnDesk = win.expandedReturn && state.shell.desks.find(d => d.id === win.expandedReturn!.deskId);
   const sizeAction = win.mode === "fullscreen"
