@@ -114,8 +114,9 @@ new verification of the original hosted email. No competing claim can replace a
 reserved owner. The setup table is private authentication state, never graph data
 or client-visible session authority.
 
-- **Desks** hold at most two auto-placed windows (solo centered or
-  borderless, two-up split of the borderless area, swap/throw/snap by drag);
+- **Desks** hold at most two auto-placed windows (solo centered, borderless
+  or resting on one half, two-up split of the borderless area,
+  swap/throw/snap by drag);
   a third app spills onto a new desk. Windows minimize to the dock,
   full-screen, close; apps navigate sections inside their one window. The
   rules are in DESIGN.md, "Windows on a desk".

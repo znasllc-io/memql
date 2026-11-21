@@ -26,6 +26,7 @@ import {
   nextIdAvoiding,
   openApp as openAppFn,
   pairWindows as pairWindowsFn,
+  restOnHalf as restOnHalfFn,
   setWindowMode,
   setWindowSection,
   swapSides as swapSidesFn,
@@ -123,6 +124,8 @@ export interface OsActions {
   makeBorderless: (id: WindowId) => void;
   /** Bring `bringId` beside the lone `keepId`, which takes `side`. */
   pairWindows: (keepId: WindowId, side: 0 | 1, bringId: WindowId) => void;
+  /** A lone window rests on `side` (0 left, 1 right); the other half stays empty. */
+  restOnHalf: (id: WindowId, side: 0 | 1) => void;
   throwToDesk: (id: WindowId, target: DeskId | "new") => ShellEffect;
   switchDesk: (deskId: DeskId) => void;
   switchDeskBy: (delta: 1 | -1) => void;
@@ -626,6 +629,7 @@ export function OsProvider({
       swapSides: (deskId) => set((s) => ({ ...s, shell: swapSidesFn(s.shell, deskId) })),
       makeBorderless: (id) => set((s) => ({ ...s, shell: makeBorderlessFn(s.shell, id) })),
       pairWindows: (keepId, side, bringId) => set((s) => ({ ...s, shell: pairWindowsFn(s.shell, keepId, side, bringId) })),
+      restOnHalf: (id, side) => set((s) => ({ ...s, shell: restOnHalfFn(s.shell, id, side) })),
       throwToDesk: (id, target) => {
         lastEffect = { kind: "none" };
         set((s) => {

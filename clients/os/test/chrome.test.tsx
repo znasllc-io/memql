@@ -261,10 +261,13 @@ describe("dragging a window to an edge (Jesús, Nov 2026)", () => {
     expect(screen.getByText("Desk 2 of 2")).toBeTruthy();
   });
 
+  // Jesús, Nov 20 2026: the options fade away and the app stays on its half,
+  // the other half left empty with the desk showing.
   it.each([
     ["Escape", () => fireEvent.keyDown(window, { key: "Escape" })],
     ["a click elsewhere", () => fireEvent.pointerDown(document.body)],
-  ] as const)("%s dismisses the picker and the lone app goes borderless", async (_, dismiss) => {
+    ["a click on the darkened half", () => fireEvent.pointerDown(screen.getByRole("group", { name: PICKER }))],
+  ] as const)("%s fades the options away and the lone app stays on its half", async (_, dismiss) => {
     renderShell();
     openFromLauncher("Files");
     openFromLauncher("Fleet");
@@ -273,15 +276,59 @@ describe("dragging a window to an edge (Jesús, Nov 2026)", () => {
     expect(screen.getByRole("group", { name: PICKER })).toBeTruthy();
     dismiss();
     expect(screen.queryByRole("group", { name: PICKER })).toBeNull();
-    expect(screen.getByRole("dialog", { name: "Deployables" }).hasAttribute("data-maximized")).toBe(true);
+    expect(document.querySelector(".os-snap-picker[data-leaving]")).not.toBeNull();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 200)));
+    expect(document.querySelector(".os-snap-picker")).toBeNull();
+    const lone = screen.getByRole("dialog", { name: "Deployables" });
+    const half = `${window.innerWidth / 2}px`;
+    expect([lone.style.left, lone.style.width]).toEqual([half, half]);
+    expect(lone.hasAttribute("data-maximized")).toBe(false);
+    expect(lone.hasAttribute("data-split")).toBe(true);
   });
 
-  it("with no other app open, a side drop goes straight to borderless", async () => {
+  it("under reduced motion the options go at once", async () => {
+    const original = window.matchMedia;
+    vi.stubGlobal("matchMedia", (query: string) => query === "(prefers-reduced-motion: reduce)"
+      ? { ...original(query), matches: true }
+      : original(query));
+    try {
+      renderShell();
+      openFromLauncher("Files");
+      openFromLauncher("Fleet");
+      openFromLauncher("Deployables");
+      await dragWindow("Deployables", { x: 5, y: 300 });
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(document.querySelector(".os-snap-picker")).toBeNull();
+      const lone = screen.getByRole("dialog", { name: "Deployables" });
+      expect([lone.style.left, lone.style.width]).toEqual(["0px", `${window.innerWidth / 2}px`]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("with no other app open, a side drop rests the app on that half with no picker", async () => {
     renderShell();
     openFromLauncher("Files");
     await dragWindow("Files", { x: 5, y: 300 });
     expect(screen.queryByRole("group", { name: PICKER })).toBeNull();
-    expect(screen.getByRole("dialog", { name: "Files" }).hasAttribute("data-maximized")).toBe(true);
+    const files = screen.getByRole("dialog", { name: "Files" });
+    expect([files.style.left, files.style.width]).toEqual(["0px", `${window.innerWidth / 2}px`]);
+    expect(files.hasAttribute("data-maximized")).toBe(false);
+    // Its size button says the next step, borderless, and takes it.
+    fireEvent.click(screen.getByRole("button", { name: "Make Files borderless" }));
+    expect(files.hasAttribute("data-maximized")).toBe(true);
+  });
+
+  it("a second app opened on that desk fills the empty half", async () => {
+    renderShell();
+    openFromLauncher("Files");
+    await dragWindow("Files", { x: window.innerWidth - 5, y: 300 });
+    openFromLauncher("Fleet");
+    const half = `${window.innerWidth / 2}px`;
+    const files = screen.getByRole("dialog", { name: "Files" });
+    const fleet = screen.getByRole("dialog", { name: "Fleet" });
+    expect(fleet.getAttribute("data-os-window-desk")).toBe(files.getAttribute("data-os-window-desk"));
+    expect([fleet.style.left, files.style.left]).toEqual(["0px", half]);
   });
 
   it("a top drop lights the whole area and makes a lone app borderless on its desk", async () => {

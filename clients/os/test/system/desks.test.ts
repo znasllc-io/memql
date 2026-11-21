@@ -14,6 +14,7 @@ import {
   openApp,
   pairWindows,
   resetIdsForTest,
+  restOnHalf,
   setWindowMode,
   setWindowSection,
   swapSides,
@@ -423,5 +424,91 @@ describe("window rules", () => {
     s = pairWindows(throwToDesk(s, a, "new").state, a, 1, b);
     expect(activeDesk(s).windows).toEqual([b, a]);
     expect(s.windows[b]?.mode).toBe("normal");
+  });
+});
+
+describe("a lone window resting on a half (Jesús, Nov 20 2026)", () => {
+  it.each([0, 1] as const)("a side drop rests a lone window on half %s as a window, out of full screen", side => {
+    let s = openMany(initialShell(), "files");
+    const id = windowForApp(s, "files")!.id;
+    s = cycleWindowMode(cycleWindowMode(s, id), id);
+    expect(s.windows[id]?.mode).toBe("fullscreen");
+    s = restOnHalf(s, id, side);
+    expect(s.windows[id]).toMatchObject({ mode: "normal", half: side });
+    expect(s.desks).toHaveLength(1);
+  });
+
+  it("leaves a pair as it is", () => {
+    const pair = openMany(initialShell(), "files", "fleet");
+    expect(restOnHalf(pair, windowForApp(pair, "files")!.id, 1)).toBe(pair);
+  });
+
+  it("the size button and a top drop make it borderless; a drop on the other side moves it", () => {
+    let s = openMany(initialShell(), "files");
+    const id = windowForApp(s, "files")!.id;
+    s = restOnHalf(s, id, 0);
+    for (const next of [cycleWindowMode(s, id), makeBorderless(s, id)]) {
+      expect(next.windows[id]?.mode).toBe("maximized");
+      expect(next.windows[id]?.half).toBeUndefined();
+    }
+    // Round the size cycle, it comes back a centred window.
+    const round = cycleWindowMode(cycleWindowMode(cycleWindowMode(s, id), id), id);
+    expect(round.windows[id]).toMatchObject({ mode: "normal" });
+    expect(round.windows[id]?.half).toBeUndefined();
+    expect(restOnHalf(s, id, 1).windows[id]?.half).toBe(1);
+  });
+
+  it.each([
+    [0, (files: string, other: string) => [files, other]],
+    [1, (files: string, other: string) => [other, files]],
+  ] as const)("a second app opened beside it fills the empty half (resting on %s), and it keeps its half when that app closes", (side, order) => {
+    let s = openMany(initialShell(), "files");
+    const files = windowForApp(s, "files")!.id;
+    s = restOnHalf(s, files, side);
+    s = openApp(s, "fleet").state;
+    const fleet = windowForApp(s, "fleet")!.id;
+    expect(activeDesk(s).windows).toEqual(order(files, fleet));
+    s = closeWindow(s, fleet).state;
+    expect(s.windows[files]).toMatchObject({ mode: "normal", half: side });
+  });
+
+  it("swapping a pair carries the half with the window, so it stays where it was left", () => {
+    let s = openMany(initialShell(), "files");
+    const files = windowForApp(s, "files")!.id;
+    s = openApp(restOnHalf(s, files, 1), "fleet").state; // [fleet, files]
+    s = swapSides(s, s.activeDeskId); // [files, fleet]
+    s = closeWindow(s, windowForApp(s, "fleet")!.id).state;
+    expect(s.windows[files]?.half).toBe(0);
+  });
+
+  it("a window thrown onto its desk fills the empty half", () => {
+    let s = openMany(initialShell(), "a", "b", "c"); // desk1(a,b) desk2(c)
+    const a = s.desks[0]!.windows[0]!;
+    const c = activeDesk(s).windows[0]!;
+    s = restOnHalf(s, c, 1);
+    s = throwToDesk(s, a, activeDesk(s).id).state;
+    expect(activeDesk(s).windows).toEqual([a, c]);
+  });
+
+  it("a full-screen app returning to its desk fills the empty half", () => {
+    let s = openMany(initialShell(), "files", "fleet"); // [files, fleet]
+    const origin = s.activeDeskId;
+    const files = windowForApp(s, "files")!.id;
+    const fleet = windowForApp(s, "fleet")!.id;
+    s = cycleWindowMode(s, files); // files: full screen on a desk of its own
+    s = restOnHalf(switchDesk(s, origin), fleet, 0);
+    s = cycleWindowMode(switchDesk(s, s.desks.find(d => d.windows.includes(files))!.id), files);
+    expect(s.activeDeskId).toBe(origin);
+    expect(activeDesk(s).windows).toEqual([fleet, files]);
+  });
+
+  it("a pick keeps the lone window on its half once the picked app leaves again", () => {
+    let s = openMany(initialShell(), "a", "b", "c"); // desk1(a,b) desk2(c)
+    const a = s.desks[0]!.windows[0]!;
+    const c = activeDesk(s).windows[0]!;
+    s = pairWindows(restOnHalf(s, c, 1), c, 1, a);
+    expect(activeDesk(s).windows).toEqual([a, c]);
+    s = closeWindow(s, a).state;
+    expect(s.windows[c]).toMatchObject({ mode: "normal", half: 1 });
   });
 });

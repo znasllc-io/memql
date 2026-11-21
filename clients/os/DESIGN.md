@@ -782,15 +782,27 @@ placement is computed, never dragged freehand or resized (`system/placement.ts`,
   full screen on a new desk of its own, and pressed again back to its half if
   that desk still has room. Its label always says what the next press does.
 - **Drag to a side** (pointer within 24px of the left or right edge) lights
-  that half. Dropped there, a window with a partner takes that side; a lone
-  window takes that half while the other half darkens and offers, as app
-  icons, the apps open on other desks. A pick moves that app into the empty
-  half (out of full screen first); Escape or a click elsewhere leaves the lone
-  app borderless. With nothing else open there is no picker: it goes borderless.
+  that half. Dropped there, a window with a partner takes that side. A lone
+  window rests on that half as a window (out of borderless or full screen),
+  and the other half stays empty, the desk and its icons showing and usable
+  there (Jesús, Nov 20 2026). With apps open on other desks, the empty half
+  darkens and offers them as app icons: a pick moves that app into the empty
+  half (out of full screen first); Escape or a press anywhere but an option,
+  the darkened half included, fades the options away and leaves the half
+  empty. With nothing else open there is no picker.
+- **A lone window resting on a half** stays there until something moves it.
+  It counts as a window: its size button makes it borderless (the label says
+  so), and so does a drag to the top. A drag to the other side moves it to
+  that half. A second app opened on, thrown to or brought back to its desk
+  fills the empty half; while it shares, the pair's order decides the sides,
+  and when the partner leaves it stays on the half it then holds. Like every
+  window placement, it is session state and does not survive a reload.
 - **Drag to the top** (within 24px) lights the whole area and makes a lone
   window borderless on its desk. A pair is already borderless and stays as it is.
-- Snap highlights and the picker are static fills: no animation, so reduced
-  motion adds none. The phone layout has no desks or windows.
+- Snap highlights and the picker are static fills. The one motion is the
+  picker's fade when it is dismissed (`--os-duration-fast`), which reduced
+  motion removes: the options simply go. The phone layout has no desks or
+  windows.
 
 ### One trail row, and the window draws it
 
