@@ -455,6 +455,7 @@ func (s *Store) updateRoom(ctx context.Context, owner string, prior roomRow, fie
 // webhook about it: events.go), AbsentSince when a pass first found it missing there
 // (reconcile.go, calls.SeatAbsent), and LetInAt a host's admission past the call's lock.
 type seatRow struct {
+	AgentData                                                            string
 	DepartureReceipt                                                     string
 	DepartureKeepRunning                                                 bool
 	DepartureWrapUpAt                                                    time.Time
@@ -485,6 +486,7 @@ func (r seatRow) passesLock() bool { return r.Host || !r.LetInAt.IsZero() }
 
 func seatFromRow(r map[string]any) seatRow {
 	return seatRow{
+		AgentData:            rowString(r, "agentData"),
 		DepartureReceipt:     rowString(r, "departureReceipt"),
 		DepartureKeepRunning: rowBool(r, "departureKeepRunning"),
 		DepartureWrapUpAt:    rowTime(r, "departureWrapUpAt"),
@@ -566,6 +568,9 @@ func (s *Store) createSeat(ctx context.Context, owner string, n newSeat, version
 		"authorityAccepted": n.Confirm.AuthorityAccepted,
 		"termsVersion":      n.Confirm.Terms,
 		"versionTime":       versionStamp(versionTime),
+	}
+	if data := agentPresentation(ctx); data != "" && n.Kind == string(callrules.KindAgent) {
+		args["agentData"] = data
 	}
 	// A seat that waits has not been taken yet, and begins waiting as it is written: every
 	// path that seats somebody waiting (a join, or the opening of a call) writes it here.

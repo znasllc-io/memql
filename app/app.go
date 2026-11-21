@@ -72,9 +72,10 @@ type Overrides struct {
 
 // App holds the shared state accumulated across bootstrap phases.
 type App struct {
-	Logger       *slog.Logger
-	Version      string
-	Dependencies []common.Dependency
+	callsPortraitStorage *callsPortraitBlobStore
+	Logger               *slog.Logger
+	Version              string
+	Dependencies         []common.Dependency
 
 	overrides Overrides
 

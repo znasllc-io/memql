@@ -7,6 +7,28 @@
 
 use common.traits.{ isOpen, isActiveRecord }
 
+/// actor.userId scoping is not the fix: only native portrait authorization may read this row.
+@serverOnly
+@actor
+@cache(0)
+query agentPortrait callsPortraitById {
+ args { id string! }
+ filter row => row.id == args.id && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ paginate 1
+ shape callsPortraitFull
+}
+
+/// actor.userId scoping is not the fix: this bounded private inventory enforces upload limits.
+@serverOnly
+@actor
+@cache(0)
+query agentPortrait callsPortraitsForKey {
+ args { siteId string! keyId string! }
+ filter row => row.siteId == args.siteId && row.keyId == args.keyId && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ paginate 33
+ shape callsPortraitFull
+}
+
 /// The newest complete simulated state, not an aggregate. actor.userId scoping is not the fix: only internal-origin calls reach this construct.
 @serverOnly
 @actor
@@ -785,4 +807,87 @@ query familyState callsFamilyForRoom {
  filter row => row.siteId == args.siteId && row.roomId == args.roomId && row.kind == "invitation" && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
  paginate 101
  shape callsFamilyFull
+}
+
+/// actor.userId scoping is not the fix: native authority and internal origin are required.
+@serverOnly
+@actor
+@cache(0)
+query agentAdmissionState callsAgentAdmissionById {
+ args { id string! }
+ filter row => row.id == args.id && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ paginate 1
+ shape callsAgentAdmissionFull
+}
+
+/// Bounded fair guest lifecycle inventory. The native gate rechecks every eligibility condition.
+/// actor.userId scoping is not the fix: only internal cluster-origin reconciliation can enumerate it.
+@serverOnly
+@actor
+@cache(0)
+query key callsGuestRetirementCandidates {
+ filter row => actor.isClusterOwner == true && row.kind == "guest" && row.status == "active" && (row.userHandle == nil || row.userHandle == "")
+ sort "row.id", "asc"
+ paginate 50
+ shape callsKeyFull
+}
+
+/// Any recent authenticated activity or still-valid cookie protects an unclaimed guest.
+/// actor.userId scoping is not the fix: only the internal lifecycle gate reaches this query.
+@serverOnly
+@actor
+@cache(0)
+query session callsGuestRecentSessions {
+ args { keyId string! cutoff datetime! asOf datetime! }
+ filter row => row.keyId == args.keyId && (row.createdAt > args.cutoff || row.verifiedAt > args.cutoff || (row.endedAt == nil && row.expiresAt > args.asOf)) && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ paginate 1
+ shape callsSessionFull
+}
+
+/// Recent joins, media liveness or departures count as activity even after the cookie expires.
+/// actor.userId scoping is not the fix: the internal lifecycle gate is mandatory.
+@serverOnly
+@actor
+@cache(0)
+query seat callsGuestRecentSeats {
+ args { keyId string! cutoff datetime! }
+ filter row => row.keyId == args.keyId && (row.createdAt > args.cutoff || row.lastSeenAt > args.cutoff || row.joinedAt > args.cutoff) && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ paginate 1
+ shape callsSeatFull
+}
+
+/// Active seats are checked against their room under the account/key gates; a full page fails closed.
+/// actor.userId scoping is not the fix: only internal-origin calls can use this inventory.
+@serverOnly
+@actor
+@cache(0)
+query seat callsGuestActiveSeats {
+ args { keyId string! }
+ filter row => row.keyId == args.keyId && (row.status == "waiting" || row.status == "admitted" || row.status == "in_call") && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ paginate 101
+ shape callsSeatFull
+}
+
+/// An unexpired or running booking prevents retirement independently of payment eligibility.
+/// actor.userId scoping is not the fix: the internal lifecycle gate must recheck this under key lock.
+@serverOnly
+@actor
+@cache(0)
+query scheduledCall callsGuestHeldBookings {
+ args { keyId string! asOf datetime! }
+ filter row => row.keyId == args.keyId && row.status != "cancelled" && row.status != "ended" && (row.end > args.asOf || row.status == "started") && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ paginate 1
+ shape callsScheduledCallFull
+}
+
+/// An open sponsored room prevents retirement even if its last seat is being reconciled.
+/// actor.userId scoping is not the fix: only the internal lifecycle gate reaches this query.
+@serverOnly
+@actor
+@cache(0)
+query room callsGuestHeldRooms {
+ args { keyId string! }
+ filter row => row.keyId == args.keyId && row.status != "ended" && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ paginate 1
+ shape callsRoomFull
 }

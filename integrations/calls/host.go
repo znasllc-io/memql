@@ -174,6 +174,12 @@ import (
 func (s *Service) Host(ctx context.Context, sess callrules.Session, req callrules.HostActionRequest) error {
 	ctx = context.WithValue(ctx, agentScopeContext{}, "control")
 	action := strings.TrimSpace(req.Action)
+	if action == "agent_approve" || action == "agent_reject" {
+		return s.reviewGuestAgent(ctx, sess, req)
+	}
+	if req.RequestID != "" || req.ReviewDigest != "" {
+		return callrules.ErrInvalid
+	}
 	if !callrules.IsHostAction(action) {
 		return fmt.Errorf("%w: no host control has that name", callrules.ErrInvalid)
 	}
@@ -355,10 +361,21 @@ func (s *Service) SessionCall(ctx context.Context, sess callrules.Session) (call
 		out.OpenedAt = room.OpenedAt
 		out.Identity = seat.Identity
 		out.LeaveToken = leaveToken(pepper, site.SiteID, *row, *seat)
+		for _, member := range v.seats {
+			if member.occupying() && member.Kind == string(callrules.KindAgent) {
+				agent := parseAgentPresentation(member.AgentData)
+				agent.Seat, agent.Identity, agent.Name = member.ID, member.Identity, member.DisplayName
+				out.Agents = append(out.Agents, agent)
+			}
+		}
 	}
 	if seat.Host && seat.occupying() {
 		out.Host = true
 		out.Roster = rosterOf(*room, v.seats, v.entries)
+		out.PendingAgents, err = s.pendingGuestAgents(fresh, site, *room, *seat)
+		if err != nil {
+			return none, err
+		}
 	}
 	// A present host needs no automatic-grace policy read, but must still see a
 	// firm wrap-up selected by another host. That commitment lives in the seats.
@@ -1014,7 +1031,7 @@ func (s *Service) keyHolderIn(ctx context.Context, v roomView) (*seatRow, error)
 	var to *seatRow
 	for i := range v.seats {
 		seat := v.seats[i]
-		if !seat.occupying() || seat.Host || seat.KeyID == "" {
+		if !seat.occupying() || seat.Host || seat.KeyID == "" || seat.Kind == string(callrules.KindAgent) {
 			continue
 		}
 		if to != nil && (to.JoinedAt.Before(seat.JoinedAt) || (to.JoinedAt.Equal(seat.JoinedAt) && to.ID < seat.ID)) {
@@ -1036,6 +1053,9 @@ func (s *Service) keyHolderIn(ctx context.Context, v roomView) (*seatRow, error)
 // call, and reconciliation's next pass clears the countdown it finds beside one.
 func (s *Service) handOver(ctx context.Context, v roomView, to seatRow, now time.Time) error {
 	owner := v.room.OwnerUserID
+	if to.Kind == string(callrules.KindAgent) {
+		return accountRefusal("human_host_required")
+	}
 	if err := s.store.updateSeat(ctx, owner, to, map[string]any{"host": true}, memql.VersionTimeAfter(to.Version, now)); err != nil {
 		return err
 	}

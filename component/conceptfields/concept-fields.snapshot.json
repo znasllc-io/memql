@@ -716,6 +716,55 @@
       }
     },
     {
+      "concept": "v1:calls:agentAdmissionState",
+      "file": "calls/concepts.memql",
+      "fields": [
+        "accountId",
+        "ownerUserId",
+        "roomId",
+        "siteId",
+        "stateData"
+      ],
+      "required": [
+        "ownerUserId",
+        "roomId",
+        "siteId",
+        "stateData"
+      ]
+    },
+    {
+      "concept": "v1:calls:agentPortrait",
+      "file": "calls/concepts.memql",
+      "fields": [
+        "accountId",
+        "blobRef",
+        "digest",
+        "height",
+        "issuedAt",
+        "keyId",
+        "mimeType",
+        "ownerUserId",
+        "siteId",
+        "width"
+      ],
+      "required": [
+        "digest",
+        "height",
+        "issuedAt",
+        "keyId",
+        "mimeType",
+        "ownerUserId",
+        "siteId",
+        "width"
+      ],
+      "enums": {
+        "mimeType": [
+          "image/jpeg",
+          "image/png"
+        ]
+      }
+    },
+    {
       "concept": "v1:calls:commerceState",
       "file": "calls/concepts.memql",
       "fields": [
@@ -988,7 +1037,8 @@
         "status": [
           "active",
           "banned",
-          "frozen"
+          "frozen",
+          "retired"
         ]
       }
     },
@@ -1018,6 +1068,7 @@
       "fields": [
         "accountId",
         "callConfiguration",
+        "guestInactiveDays",
         "hostLeftGrace",
         "maxAgents",
         "maxPeople",
@@ -1186,6 +1237,7 @@
       "fields": [
         "absentSince",
         "accountId",
+        "agentData",
         "authorityAccepted",
         "confirmAdult",
         "confirmNoMinors",
@@ -1281,7 +1333,8 @@
         "passTotalSeconds",
         "plan",
         "requestDigest",
-        "siteId"
+        "siteId",
+        "usageRemainderUnits"
       ],
       "required": [
         "balanceCents",

@@ -299,7 +299,9 @@ func TestMeteredHostLeftGraceAndHardDeadlineSettleProvenIntervals(t *testing.T) 
 			require.NotNil(t, room.UsageCostCents)
 			want := int64(5)
 			if hostLeaves {
-				want = 2
+				want = 1 // The remaining 0.75 cent carries to the next call.
+				wallet := remainderWallet(t, cw, k)
+				require.EqualValues(t, usageUnitsPerCent*3/4, wallet.UsageRemainderUnits)
 			}
 			require.Equal(t, want, *room.UsageCostCents)
 			account, err := cw.svc.Account(ctx, cw.ref, host.Token, nil)

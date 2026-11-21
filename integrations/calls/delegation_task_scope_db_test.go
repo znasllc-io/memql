@@ -24,18 +24,18 @@ func TestDelegationTaskScopeDatabasePinsScheduleAndRecipientBeforeEffects(t *tes
 	grant.ScheduleStart = cw.clock.Now().Add(10 * time.Minute)
 	grant.MaxCalls = 1
 	credential, grantID := delegationTestGrant(t, cw, k, grant)
-	quoted, err := cw.svc.Agent(ctx, cw.ref, credential, callrules.AgentRequest{Action: "quote", ParticipantLimit: 2, DurationMinutes: 60})
+	quoted, err := delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, credential, callrules.AgentRequest{Action: "quote", ParticipantLimit: 2, DurationMinutes: 60})
 	require.NoError(t, err)
 	quote := quoted.(*callrules.CallQuote)
 	request := callrules.AgentRequest{Action: "schedule", IdempotencyKey: "task-approved-booking", QuoteID: quote.QuoteID, Start: grant.ScheduleStart.Add(time.Minute)}
-	_, err = cw.svc.Agent(ctx, cw.ref, credential, request)
+	_, err = delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, credential, request)
 	require.ErrorContains(t, err, "delegation_schedule_scope")
 	request.Action = "start"
-	_, err = cw.svc.Agent(ctx, cw.ref, credential, request)
+	_, err = delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, credential, request)
 	require.ErrorContains(t, err, "delegation_schedule_scope")
 	require.Empty(t, cw.media.rooms())
 	request.Action, request.Start = "schedule", grant.ScheduleStart
-	result, err := cw.svc.Agent(ctx, cw.ref, credential, request)
+	result, err := delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, credential, request)
 	require.NoError(t, err)
 	booking := result.(callrules.ScheduledCall)
 	sender := &invitationMail{}
@@ -80,9 +80,9 @@ func TestDelegationTaskScopeDatabaseNarrowedHostAuthorityStopsRetainedSession(t 
 	commerceVerified(t, cw, k)
 	ctx := context.Background()
 	credential, grantID := delegationTestGrant(t, cw, k, delegationTestRequest(cw))
-	quoted, err := cw.svc.Agent(ctx, cw.ref, credential, callrules.AgentRequest{Action: "quote", ParticipantLimit: 2, DurationMinutes: 60})
+	quoted, err := delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, credential, callrules.AgentRequest{Action: "quote", ParticipantLimit: 2, DurationMinutes: 60})
 	require.NoError(t, err)
-	_, err = cw.svc.Agent(ctx, cw.ref, credential, callrules.AgentRequest{Action: "start", Name: "Agent", QuoteID: quoted.(*callrules.CallQuote).QuoteID, IdempotencyKey: "narrowed-host-room"})
+	_, err = delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, credential, callrules.AgentRequest{Action: "start", Name: "Agent", QuoteID: quoted.(*callrules.CallQuote).QuoteID, IdempotencyKey: "narrowed-host-room"})
 	require.NoError(t, err)
 	d, pepper, err := cw.svc.agentAuthority(ctx, cw.ref, credential)
 	require.NoError(t, err)
@@ -104,7 +104,7 @@ func TestDelegationTaskScopeDatabaseNarrowedHostAuthorityStopsRetainedSession(t 
 
 func TestProposalRejectsDecorativeScheduleAndUnapprovedParticipantMailbox(t *testing.T) {
 	now := time.Date(2026, 11, 20, 0, 0, 0, 0, time.UTC)
-	grant := callrules.DelegationRequest{Action: "create", Label: "Task", Terms: "test", Participation: "adults_only", Scopes: []string{"schedule", "invite"}, InvitationRecipients: []string{"guest@example.test"}, MaxCallCents: 1000, PeriodLimitCents: 1000, LifetimeLimitCents: 1000, MaxParticipants: 2, MaxDurationMinutes: 60, ExpiresAt: now.Add(24 * time.Hour), MaxCalls: 1}
+	grant := callrules.DelegationRequest{Action: "create", Label: "Task", Terms: callrules.AgentTermsVersion, Purpose: "Help with the approved conversation", ConductVersion: callrules.AgentConductVersion, Participation: "adults_only", Scopes: []string{"schedule", "invite"}, InvitationRecipients: []string{"guest@example.test"}, MaxCallCents: 1000, PeriodLimitCents: 1000, LifetimeLimitCents: 1000, MaxParticipants: 2, MaxDurationMinutes: 60, ExpiresAt: now.Add(24 * time.Hour), MaxCalls: 1}
 	p := callrules.AgentProposalRequest{Label: "Interview", Grant: grant, Start: now.Add(time.Hour)}
 	require.False(t, validProposal(p, now))
 	p.Grant.ScheduleStart = p.Start

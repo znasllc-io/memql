@@ -532,6 +532,15 @@ func (h *callsHandler) serveSession(w http.ResponseWriter, r *http.Request, c ca
 	if !h.requireSession(w, c) || !h.resolveSite(w, r, &c) {
 		return
 	}
+	portrait, err := calls.PortraitQuery(r.URL.RawQuery)
+	if err != nil {
+		h.refuse(w, c, err, calls.JoinResult{})
+		return
+	}
+	if portrait != "" {
+		h.servePortrait(w, r, c, portrait)
+		return
+	}
 	sess, err := h.svc.Session(r.Context(), c.site, c.cookie.token)
 	if err != nil {
 		h.refuse(w, c, err, calls.JoinResult{})
@@ -750,12 +759,14 @@ func (h *callsHandler) serveQueue(w http.ResponseWriter, r *http.Request, c call
 // and that capability, and the service chooses the fixed template and transport.
 func (h *callsHandler) serveHost(w http.ResponseWriter, r *http.Request, c callsCall) {
 	var body struct {
-		Action   string  `json:"action"`
-		Seat     *string `json:"seat"`
-		Email    *string `json:"email"`
-		Token    *string `json:"token"`
-		Identity *string `json:"identity"`
-		Title    *string `json:"title"`
+		Action       string  `json:"action"`
+		RequestID    *string `json:"requestId"`
+		ReviewDigest *string `json:"reviewDigest"`
+		Seat         *string `json:"seat"`
+		Email        *string `json:"email"`
+		Token        *string `json:"token"`
+		Identity     *string `json:"identity"`
+		Title        *string `json:"title"`
 	}
 	if !h.decode(w, r, c, &body) {
 		return
@@ -763,8 +774,11 @@ func (h *callsHandler) serveHost(w http.ResponseWriter, r *http.Request, c calls
 	inviting := body.Action == "invite"
 	recovering := body.Action == "invitation_link"
 	renaming := body.Action == "rename"
+	reviewing := body.Action == "agent_approve" || body.Action == "agent_reject"
 	invalid := false
 	switch {
+	case reviewing:
+		invalid = body.RequestID == nil || body.ReviewDigest == nil || body.Title != nil || body.Seat != nil || body.Identity != nil || body.Email != nil || body.Token != nil
 	case inviting:
 		invalid = body.Title != nil || body.Seat != nil || body.Identity != nil || body.Email == nil || body.Token == nil
 		if !invalid {
@@ -782,6 +796,9 @@ func (h *callsHandler) serveHost(w http.ResponseWriter, r *http.Request, c calls
 		}
 	default:
 		invalid = body.Title != nil || body.Email != nil || body.Token != nil || body.Identity != nil
+	}
+	if !reviewing && (body.RequestID != nil || body.ReviewDigest != nil) {
+		invalid = true
 	}
 	if invalid {
 		h.refuse(w, c, calls.ErrInvalid, calls.JoinResult{})
@@ -835,7 +852,14 @@ func (h *callsHandler) serveHost(w http.ResponseWriter, r *http.Request, c calls
 	if body.Seat != nil {
 		seat = *body.Seat
 	}
-	if err := h.svc.Host(r.Context(), c.session(), calls.HostActionRequest{Action: body.Action, Seat: seat}); err != nil {
+	requestID, reviewDigest := "", ""
+	if body.RequestID != nil {
+		requestID = *body.RequestID
+	}
+	if body.ReviewDigest != nil {
+		reviewDigest = *body.ReviewDigest
+	}
+	if err := h.svc.Host(r.Context(), c.session(), calls.HostActionRequest{Action: body.Action, Seat: seat, RequestID: requestID, ReviewDigest: reviewDigest}); err != nil {
 		h.refuse(w, c, err, calls.JoinResult{})
 		return
 	}
@@ -1039,7 +1063,9 @@ type callsSessionReply struct {
 	AllowanceEndsAt string `json:"allowanceEndsAt,omitempty"`
 	FundingMode     string `json:"fundingMode,omitempty"`
 	// Roster is there for a host seat in an open call and absent for every other session.
-	Roster *callsRosterReply `json:"roster,omitempty"`
+	Roster        *callsRosterReply        `json:"roster,omitempty"`
+	PendingAgents []calls.PendingAgent     `json:"pendingAgents,omitempty"`
+	Agents        []calls.AgentParticipant `json:"agents,omitempty"`
 }
 
 // callsRosterReply is a host's roster on the wire: whether the call is locked, the seat ids
@@ -1084,6 +1110,8 @@ func (h *callsHandler) sessionReply(sess calls.Session, call calls.SeatCall) cal
 		ExpiresInMs:   callsMs(sess.ExpiresAt.Sub(h.now())),
 		Host:          call.Host,
 		Roster:        rosterReply(call.Roster),
+		Agents:        call.Agents,
+		PendingAgents: call.PendingAgents,
 	}
 	if !call.CountdownEndsAt.IsZero() {
 		reply.CountdownEndsAt = call.CountdownEndsAt.UTC().Format(time.RFC3339Nano)

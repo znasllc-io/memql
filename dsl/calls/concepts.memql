@@ -27,7 +27,7 @@ concept key {
   keySuffix string @maxLength(4) @description("Last four symbols for a masked account label, never the key.")
   issuedAt datetime @description("Original account creation time, unchanged by later key versions.")
   kind  enum("test", "paid", "guest")  @description("Whether the key spends real balance. Absent reads as test.")
-  status  enum("active", "frozen", "banned")  @description("Absent reads as active.")
+  status  enum("active", "frozen", "banned", "retired")  @description("Absent reads as active. Retired revokes an inactive unfunded unclaimed guest without deleting financial or evidence records.")
   accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="references", as="forSite", field="siteId", target=site, direction="outgoing")
@@ -47,6 +47,7 @@ concept simulatedWalletEntry {
   keyId string! @description("The authenticated v1:calls:key that owns this simulated balance.")
   kind enum("topup", "activation", "settlement")!
   requestDigest string! @maxLength(64) @pattern("^[0-9a-f]{64}$") @description("Canonical non-secret request digest. The row id separately binds site, key and idempotency nonce, independent of session-secret rotation.")
+  usageRemainderUnits int @description("Unbilled measured usage: microdollars times milliseconds, 0..599999999. One cent is 600000000 units. Carried by every wallet receipt; absent on old receipts means zero.")
   balanceCents int! @description("Complete resulting simulated USD balance, bounded by the native invariant to 0..50000 cents.")
   creditedCents int! @description("Simulated cents credited by this immutable receipt; zero for activation.")
   debitedCents int! @description("Simulated cents debited by this immutable receipt; zero for top-up.")
@@ -178,6 +179,7 @@ concept room {
 @displayCard(primary="displayName", secondary="roomId", status="status")
 @belongsTo(account, via="siteId")
 concept seat {
+	agentData string @description("Server-written public agent purpose, approved policy version and approval revision for this admission. No credentials or private spending limits.")
   historyPending bool @description("Atomically marks source changes not yet durably projected into private history; only a version-fenced successful projection clears it.")
   siteId  string!  @description("The v1:platform:site (deployable) this row belongs to.")
   ownerUserId  string!  @description("The v1:identity:user who owns the site -- the row-authz key. STAMPED from the actor the write runs as and never an argument: the calls integration writes as the site's owner (borrowed authority), so this is the site's owner and never a visitor.")
@@ -302,6 +304,7 @@ concept mediaServer {
 @displayCard(primary="siteId")
 @belongsTo(account, via="siteId")
 concept policy {
+  guestInactiveDays int @description("Unfunded unclaimed guest inactivity before access retirement, in days. Default 30; operator may lengthen to 365. Never retires funded or Passkey-secured accounts.")
   siteId  string!  @description("The v1:platform:site (deployable) these limits apply to. One policy per site.")
   ownerUserId  string!  @description("The v1:identity:user who owns the site -- the row-authz key. STAMPED from the actor the write runs as and never an argument: the calls integration writes as the site's owner (borrowed authority), so this is the site's owner and never the operator who set the limits.")
   requirePasskeys int @description("0 preserves optional guest access; 1 requires a currently credential-backed session at join.")
@@ -553,4 +556,41 @@ concept familyState {
  @relationship(type="references", as="familySite", field="siteId", target=site, direction="outgoing")
  @relationship(type="references", as="familyKey", field="keyId", target=key, direction="outgoing")
  @relationship(type="references", as="familyRoom", field="roomId", target=room, direction="outgoing")
+}
+
+/// Native room-scoped agent review journal. No bearer secrets or media stored.
+// @no-displayCard: private host review and one-admission receipts.
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@belongsTo(account, via="siteId", stays="signin")
+@retention(ttl="30d", keepLatest=false, archive="none")
+concept agentAdmissionState {
+ siteId string!
+ ownerUserId string!
+ roomId string!
+ stateData string! @maxLength(262144)
+ accountId string
+ @relationship(type="references", as="agentAdmissionSite", field="siteId", target=site, direction="outgoing")
+ @relationship(type="references", as="agentAdmissionRoom", field="roomId", target=room, direction="outgoing")
+}
+
+/// Canonical raster portrait metadata. Bytes stay in the private quota-metered
+/// blob lane; a bounded native key inventory prevents unbounded abandoned assets.
+// @no-displayCard: private agent appearance; access is through the Calls surface.
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@belongsTo(account, via="siteId", stays="signin")
+concept agentPortrait {
+ siteId string!
+ ownerUserId string!
+ keyId string!
+ digest string! @maxLength(64) @pattern("^[0-9a-f]{64}$")
+ mimeType enum("image/png", "image/jpeg")!
+ width int!
+ height int!
+ blobRef string @maxLength(2048)
+ issuedAt datetime!
+ accountId string
+ @relationship(type="references", as="portraitSite", field="siteId", target=site, direction="outgoing")
+ @relationship(type="references", as="portraitKey", field="keyId", target=key, direction="outgoing")
 }

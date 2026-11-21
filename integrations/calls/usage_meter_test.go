@@ -28,39 +28,39 @@ func TestUsageCostBillsOnlyProvenIntervals(t *testing.T) {
 	for name, tc := range map[string]struct {
 		rows []usageInterval
 		end  time.Duration
-		want int64
+		want float64
 	}{
 		"no connection":                         {[]usageInterval{}, time.Hour, 0},
 		"admission is not elapsed media":        {[]usageInterval{interval("a", "host", 0, 0)}, time.Hour, 0},
-		"one minute rounds at settlement":       {[]usageInterval{interval("a", "host", 0, time.Minute)}, time.Hour, 0},
-		"round once across gaps":                {[]usageInterval{interval("a", "host", 0, time.Minute), interval("b", "host", 10*time.Minute, 11*time.Minute)}, time.Hour, 1},
-		"through does not extrapolate":          {[]usageInterval{interval("a", "host", 0, 10*time.Minute)}, time.Hour, 3},
-		"overlapping reconnect unions identity": {[]usageInterval{interval("a", "host", 0, 10*time.Minute), interval("b", "host", 5*time.Minute, 15*time.Minute)}, time.Hour, 4},
+		"one minute retains fractional usage":   {[]usageInterval{interval("a", "host", 0, time.Minute)}, time.Hour, .25},
+		"fractional usage across gaps":          {[]usageInterval{interval("a", "host", 0, time.Minute), interval("b", "host", 10*time.Minute, 11*time.Minute)}, time.Hour, .5},
+		"through does not extrapolate":          {[]usageInterval{interval("a", "host", 0, 10*time.Minute)}, time.Hour, 2.5},
+		"overlapping reconnect unions identity": {[]usageInterval{interval("a", "host", 0, 10*time.Minute), interval("b", "host", 5*time.Minute, 15*time.Minute)}, time.Hour, 3.75},
 		"distinct identities both count":        {[]usageInterval{interval("a", "host", 0, 10*time.Minute), interval("b", "guest", 0, 10*time.Minute)}, time.Hour, 5},
-		"end truncates interval":                {[]usageInterval{interval("a", "host", 0, time.Hour)}, 10 * time.Minute, 3},
+		"end truncates interval":                {[]usageInterval{interval("a", "host", 0, time.Hour)}, 10 * time.Minute, 2.5},
 		"opened and deadline bound interval":    {[]usageInterval{interval("a", "host", -time.Hour, 2*time.Hour)}, 2 * time.Hour, 15},
 		"end before opened costs zero":          {[]usageInterval{interval("a", "host", 0, time.Hour)}, -time.Minute, 0},
-		"same timestamp boundaries":             {[]usageInterval{interval("a", "host", 0, 10*time.Minute), interval("b", "host", 10*time.Minute, 20*time.Minute), interval("c", "guest", 10*time.Minute, 20*time.Minute)}, time.Hour, 8},
+		"same timestamp boundaries":             {[]usageInterval{interval("a", "host", 0, 10*time.Minute), interval("b", "host", 10*time.Minute, 20*time.Minute), interval("c", "guest", 10*time.Minute, 20*time.Minute)}, time.Hour, 7.5},
 	} {
 		t.Run(name, func(t *testing.T) {
 			room := meterTestRoom(t, tc.rows)
-			cost, err := usageCost(room, start.Add(tc.end))
+			cost, err := usageUnits(room, start.Add(tc.end))
 			require.NoError(t, err)
-			require.Equal(t, tc.want, cost)
+			require.Equal(t, int64(tc.want*float64(usageUnitsPerCent)), cost)
 			// Provider delivery order must not alter a settled charge.
 			for i, j := 0, len(tc.rows)-1; i < j; i, j = i+1, j-1 {
 				tc.rows[i], tc.rows[j] = tc.rows[j], tc.rows[i]
 			}
-			cost, err = usageCost(meterTestRoom(t, tc.rows), start.Add(tc.end))
+			cost, err = usageUnits(meterTestRoom(t, tc.rows), start.Add(tc.end))
 			require.NoError(t, err)
-			require.Equal(t, tc.want, cost)
+			require.Equal(t, int64(tc.want*float64(usageUnitsPerCent)), cost)
 		})
 	}
 	row := interval("late", "host", 0, 30*time.Minute)
 	row.End = start.Add(10 * time.Minute)
-	cost, err := usageCost(meterTestRoom(t, []usageInterval{row}), start.Add(time.Hour))
+	cost, err := usageUnits(meterTestRoom(t, []usageInterval{row}), start.Add(time.Hour))
 	require.NoError(t, err)
-	require.EqualValues(t, 3, cost, "a signed late disconnect shortens a previous observation")
+	require.EqualValues(t, usageUnitsPerCent*5/2, cost, "a signed late disconnect shortens a previous observation")
 }
 
 func TestUsageCostRepricesConcurrentPeopleAndHonorsReservation(t *testing.T) {
@@ -74,17 +74,17 @@ func TestUsageCostRepricesConcurrentPeopleAndHonorsReservation(t *testing.T) {
 		rows[i] = usageInterval{SID: fmt.Sprint(i), Identity: fmt.Sprint(i), Start: room.OpenedAt, Through: through}
 	}
 	room = meterTestRoom(t, rows)
-	cost, err := usageCost(room, room.FundingDeadline)
+	cost, err := usageUnits(room, room.FundingDeadline)
 	require.NoError(t, err)
-	require.EqualValues(t, 302, cost, "100 people for 30 minutes plus two for 30 minutes: $3.015 rounds once")
+	require.EqualValues(t, usageUnitsPerCent*603/2, cost, "100 people for 30 minutes plus two for 30 minutes retains $3.015 exactly")
 	room.FundingMaxPeople = 8
-	cost, err = usageCost(room, room.FundingDeadline)
+	cost, err = usageUnits(room, room.FundingDeadline)
 	require.NoError(t, err)
-	require.EqualValues(t, 75, cost, "stray provider identities cannot bill beyond admitted capacity")
+	require.EqualValues(t, usageUnitsPerCent*75, cost, "stray provider identities cannot bill beyond admitted capacity")
 	room.UsageReservedCents = 10
-	cost, err = usageCost(room, room.FundingDeadline)
+	cost, err = usageUnits(room, room.FundingDeadline)
 	require.NoError(t, err)
-	require.EqualValues(t, 10, cost, "the ceiling is never exceeded")
+	require.EqualValues(t, usageUnitsPerCent*10, cost, "the ceiling is never exceeded")
 }
 
 func TestUsageMeterRejectsMalformedJournal(t *testing.T) {
@@ -98,7 +98,7 @@ func TestUsageMeterRejectsMalformedJournal(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			room.UsageMeter = raw
-			_, err := usageCost(room, room.FundingDeadline)
+			_, err := usageUnits(room, room.FundingDeadline)
 			require.Equal(t, "allowance_unavailable", callrules.ReasonOf(err))
 		})
 	}

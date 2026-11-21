@@ -25,6 +25,9 @@ type usageInterval struct {
 
 const usageIntervalLimit = 4096
 
+// 60,000 milliseconds per minute and 10,000 USD microdollars per cent.
+const usageUnitsPerCent int64 = 600000000
+
 func optionalRoomCents(r map[string]any, name string) *int64 {
 	n, ok := rowIntPresent(r, name)
 	if !ok {
@@ -157,10 +160,10 @@ func (s *Service) meterPresence(ctx context.Context, room roomRow, seats []seatR
 	return s.writeUsageMeter(ctx, room, rows)
 }
 
-// usageCost is a sweep over retained connection intervals. Identity overlap is
+// usageUnits is a sweep over retained connection intervals. Identity overlap is
 // unioned, so reordered reconnects never count one seat twice. Concurrent-count
 // pricing is recalculated at each boundary, never over historical elapsed time.
-func usageCost(room roomRow, end time.Time) (int64, error) {
+func usageUnits(room roomRow, end time.Time) (int64, error) {
 	configuration, configErr := decodeUsageConfig(room.UsageConfig)
 	if configErr != nil {
 		return 0, configErr
@@ -206,9 +209,10 @@ func usageCost(room roomRow, end time.Time) (int64, error) {
 			people--
 		}
 	}
-	// USD microdollars × milliseconds / 60,000 / 10,000 = cents. Round only
-	// once, at final settlement; the reservation always rounds its maximum up.
-	return min(room.UsageReservedCents, (units+300000000)/600000000), nil
+	// Retain USD microdollars × milliseconds exactly. Settlement combines this
+	// amount with the wallet remainder before debiting whole cents; no call can
+	// evade metering by ending just before a per-call rounding threshold.
+	return min(room.UsageReservedCents*usageUnitsPerCent, units), nil
 }
 func usageSettlementID(room roomRow) string {
 	return callrules.HistoryDigest(nil, "simulated-room-settlement", room.SiteID, room.KeyID, room.ID)[:32]
@@ -233,7 +237,7 @@ func (s *Service) settleUsage(ctx context.Context, room roomRow, end time.Time) 
 		v := prior.DebitedCents
 		return &v, nil
 	}
-	cost, err := usageCost(room, end)
+	units, err := usageUnits(room, end)
 	if err != nil {
 		return nil, err
 	}
@@ -241,10 +245,15 @@ func (s *Service) settleUsage(ctx context.Context, room roomRow, end time.Time) 
 	if err != nil {
 		return nil, err
 	}
-	if wallet == nil || wallet.BalanceCents < cost {
+	if wallet == nil {
 		return nil, allowanceUnavailable()
 	}
-	entry := simulationWalletEntry{ID: operation, SiteID: room.SiteID, KeyID: room.KeyID, Kind: "settlement", RequestDigest: callrules.HistoryDigest(nil, "simulated-room-cost", room.ID, room.UsageConfig), Version: memql.VersionTimeAfter(wallet.Version, s.now()), BalanceCents: wallet.BalanceCents - cost, DebitedCents: cost, Pass: wallet.Pass}
+	totalUnits := units + wallet.UsageRemainderUnits
+	cost, remainder := totalUnits/usageUnitsPerCent, totalUnits%usageUnitsPerCent
+	if wallet.BalanceCents < cost || cost > room.UsageReservedCents {
+		return nil, allowanceUnavailable()
+	}
+	entry := simulationWalletEntry{ID: operation, SiteID: room.SiteID, KeyID: room.KeyID, Kind: "settlement", RequestDigest: callrules.HistoryDigest(nil, "simulated-room-cost", room.ID, room.UsageConfig), Version: memql.VersionTimeAfter(wallet.Version, s.now()), BalanceCents: wallet.BalanceCents - cost, DebitedCents: cost, UsageRemainderUnits: remainder, Pass: wallet.Pass}
 	if err = s.store.createSimulatedWalletEntry(ctx, room.OwnerUserID, entry); err != nil {
 		return nil, err
 	}

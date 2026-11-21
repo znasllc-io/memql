@@ -63,6 +63,9 @@ func (s *Service) agentProposal(ctx context.Context, site callrules.SiteRef, tok
 	if req.Proposal == nil || !fundingOperationID.MatchString(req.IdempotencyKey) || !validProposal(*req.Proposal, s.now()) {
 		return none, callrules.ErrInvalid
 	}
+	if err = s.approvedPortrait(fresh, site, d.KeyID, req.Proposal.Grant); err != nil {
+		return none, err
+	}
 	raw, _ := json.Marshal(req.Proposal)
 	digest := callrules.HistoryDigest(nil, "proposal", string(raw))
 	for _, p := range d.State.Proposals {
@@ -77,7 +80,7 @@ func (s *Service) agentProposal(ctx context.Context, site callrules.SiteRef, tok
 		return none, accountRefusal("proposal_limit")
 	}
 	proposalID := d.ID + "." + id.NewShortId()
-	p := callrules.AgentProposal{AgentProposalRequest: *req.Proposal, ID: proposalID, RequestingAgent: d.State.Request.Label, Status: "pending", ExpiresAt: s.now().Add(30 * time.Minute), ApprovalPath: "/?approval=" + proposalID}
+	p := callrules.AgentProposal{AgentProposalRequest: *req.Proposal, ID: proposalID, RequestingAgent: d.State.Request.Label, Status: "pending", ExpiresAt: s.now().Add(30 * time.Minute), ApprovalPath: "/?approval=" + proposalID, ReviewDigest: digest}
 	d.State.Proposals = append(d.State.Proposals, delegationProposal{Proposal: p, OperationID: req.IdempotencyKey, Digest: digest})
 	if err = s.store.saveDelegation(fresh, site.OwnerUserID, d, s.now()); err != nil {
 		return none, err
@@ -91,7 +94,7 @@ func proposalView(p callrules.AgentProposal, now time.Time) callrules.AgentPropo
 	return p
 }
 func (s *Service) reviewAgentProposal(ctx context.Context, site callrules.SiteRef, token string, h keyHolder, req callrules.DelegationRequest) (callrules.DelegationResult, error) {
-	out := callrules.DelegationResult{Grants: []callrules.DelegationInfo{}}
+	out := callrules.DelegationResult{Grants: []callrules.DelegationInfo{}, Policy: callrules.CurrentAgentPolicy()}
 	parts := strings.Split(req.ProposalID, ".")
 	if len(parts) != 2 || !callrules.ValidWorkflowID(parts[0]) || !callrules.ValidWorkflowID(parts[1]) || (req.Action != "proposal_review" && req.Action != "proposal_approve" && req.Action != "proposal_reject") {
 		return out, callrules.ErrInvalid
@@ -131,6 +134,9 @@ func (s *Service) reviewAgentProposal(ctx context.Context, site callrules.SiteRe
 	if view.Status != "pending" {
 		return out, accountRefusal("proposal_not_pending")
 	}
+	if req.ReviewDigest == "" || req.ReviewDigest != entry.Digest {
+		return out, accountRefusal("proposal_review_changed")
+	}
 	recent, key, _, err := s.recentlyVerified(fresh, site, token)
 	if err != nil {
 		return out, err
@@ -145,6 +151,9 @@ func (s *Service) reviewAgentProposal(ctx context.Context, site callrules.SiteRe
 			return out, err
 		}
 		grant := entry.Proposal.Grant
+		if err = s.approvedPortrait(fresh, site, key.ID, grant); err != nil {
+			return out, err
+		}
 		if !validProposal(entry.Proposal.AgentProposalRequest, s.now()) {
 			return out, accountRefusal("proposal_expired")
 		}
@@ -166,6 +175,8 @@ func (s *Service) reviewAgentProposal(ctx context.Context, site callrules.SiteRe
 			d.State.CustomerID, d.State.PaymentMethodID = funds.CustomerID, funds.PaymentMethodID
 		}
 		d.State.Request = grant
+		d.State.ApprovalRevision++
+		d.State.ApprovalPolicyDigest = callrules.AgentConductDigest
 		d.State.ApprovedAt = s.now()
 		d.State.CredentialID = recent.row.CredentialID
 		entry.Proposal.Status = "approved"

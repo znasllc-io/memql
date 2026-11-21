@@ -52,7 +52,11 @@ func (a *App) callsSurface() server.CallsService {
 			"component", memql.ComponentName)
 		return nil
 	}
-	return &callsSurface{Service: integration.Service().WithInvitationSender(a.campaignEmailSender), engine: &callsEngineAdapter{engine: a.engine}}
+	svc := integration.Service().WithInvitationSender(a.campaignEmailSender)
+	if a.callsPortraitStorage != nil {
+		svc = svc.WithPortraitStorage(a.callsPortraitStorage)
+	}
+	return &callsSurface{Service: svc, engine: &callsEngineAdapter{engine: a.engine}}
 }
 
 // callsSurface adapts integrations/calls to server.CallsService.

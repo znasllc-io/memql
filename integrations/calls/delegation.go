@@ -6,6 +6,7 @@ import (
 	"crypto/hmac"
 	"encoding/hex"
 	"encoding/json"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -30,7 +31,7 @@ func delegationGate(id string) string { return "calls.delegation." + id }
 // method with its credential; only a recent user-verified passkey assertion can
 // grant spending, saved-method charging, or revoke existing authority.
 func (s *Service) Delegation(ctx context.Context, site callrules.SiteRef, token string, req *callrules.DelegationRequest) (callrules.DelegationResult, error) {
-	out := callrules.DelegationResult{Grants: []callrules.DelegationInfo{}}
+	out := callrules.DelegationResult{Grants: []callrules.DelegationInfo{}, Policy: callrules.CurrentAgentPolicy()}
 	site, err := checkSite(site)
 	if err != nil {
 		return out, err
@@ -48,6 +49,12 @@ func (s *Service) Delegation(ctx context.Context, site callrules.SiteRef, token 
 			out.Grants = append(out.Grants, delegationInfo(d, s.now()))
 		}
 		return out, nil
+	}
+	if req.Action == "portrait_upload" {
+		return s.humanPortraitUpload(ctx, site, token, *req)
+	}
+	if req.PortraitData != "" {
+		return out, callrules.ErrInvalid
 	}
 	if strings.HasPrefix(req.Action, "proposal_") {
 		return s.reviewAgentProposal(ctx, site, token, h, *req)
@@ -89,6 +96,10 @@ func (s *Service) Delegation(ctx context.Context, site callrules.SiteRef, token 
 			release()
 			return out, err
 		}
+		if err = s.approvedPortrait(fresh, site, k.ID, *req); err != nil {
+			release()
+			return out, err
+		}
 		if req.Topup.Enabled {
 			funds, e := s.store.commerceState(fresh, site.OwnerUserID, site.SiteID, k.ID)
 			if e != nil {
@@ -117,7 +128,7 @@ func (s *Service) Delegation(ctx context.Context, site callrules.SiteRef, token 
 		}
 		grantID := id.NewShortId()
 		credential := grantID + "." + secret
-		d := &delegationRow{ID: grantID, SiteID: site.SiteID, KeyID: k.ID, TokenDigest: callrules.Digest(h.pepper, []byte(credential)), State: delegationState{Request: *req, CreatedAt: s.now(), CredentialID: h.row.CredentialID, Operations: []delegatedOperation{}}}
+		d := &delegationRow{ID: grantID, SiteID: site.SiteID, KeyID: k.ID, TokenDigest: callrules.Digest(h.pepper, []byte(credential)), State: delegationState{Request: *req, ApprovalRevision: 1, ApprovalPolicyDigest: callrules.AgentConductDigest, CreatedAt: s.now(), CredentialID: h.row.CredentialID, Operations: []delegatedOperation{}}}
 		d.State.CustomerID, d.State.PaymentMethodID = customerID, paymentMethodID
 		err = s.store.saveDelegation(fresh, site.OwnerUserID, d, s.now())
 		release()
@@ -149,7 +160,9 @@ func (s *Service) Delegation(ctx context.Context, site callrules.SiteRef, token 
 	// Revocation is durable before best-effort media cleanup. Subsequent calls
 	// and token renewals fail even if the media provider is temporarily down.
 	sess := delegationSession(site, d, h.pepper)
-	_ = s.Host(ctx, sess, callrules.HostActionRequest{Action: callrules.HostEnd})
+	if err := s.Host(ctx, sess, callrules.HostActionRequest{Action: callrules.HostEnd}); err != nil {
+		_ = s.Leave(ctx, sess) // Guest grants cannot end another host's call.
+	}
 	cancelled := map[string]bool{}
 	for _, op := range d.State.Operations {
 		if op.BookingID != "" && !cancelled[op.BookingID] {
@@ -212,13 +225,21 @@ func minTime(a, b time.Time) time.Time {
 
 func agentScope(action string) string {
 	switch action {
+	case "portrait_upload":
+		return "portraits_write"
+	case "portrait_get":
+		return "read"
+	case "authority", "leave":
+		return "authority"
+	case "request_join", "join_status", "guest_join":
+		return "join"
 	case "balance", "quote", "session", "history", "proposal", "proposal_status":
 		return "read"
 	case "start", "join":
 		return "host"
 	case "schedule", "reschedule", "cancel":
 		return "schedule"
-	case "host", "leave", "invitation_link", "rename", "archive_preview", "archive", "restore":
+	case "host", "invitation_link", "rename", "archive_preview", "archive", "restore":
 		return "control"
 	case "invite":
 		return "invite"
@@ -257,6 +278,17 @@ func (s *Service) agentAuthority(ctx context.Context, site callrules.SiteRef, to
 // A persisted reservation precedes every effect. Ambiguous outcomes retain their
 // reservation and retry the same operation; no retry creates fresh authority.
 func (s *Service) Agent(ctx context.Context, site callrules.SiteRef, token string, req callrules.AgentRequest) (any, error) {
+	if req.Action == "portrait_upload" {
+		if !reflect.DeepEqual(req, callrules.AgentRequest{Action: req.Action, PortraitData: req.PortraitData}) {
+			return nil, callrules.ErrInvalid
+		}
+	} else if req.Action == "portrait_get" {
+		if !reflect.DeepEqual(req, callrules.AgentRequest{Action: req.Action, PortraitID: req.PortraitID}) {
+			return nil, callrules.ErrInvalid
+		}
+	} else if req.PortraitData != "" || req.PortraitID != "" {
+		return nil, callrules.ErrInvalid
+	}
 	site, err := checkSite(site)
 	if err != nil {
 		return nil, err
@@ -272,16 +304,46 @@ func (s *Service) Agent(ctx context.Context, site callrules.SiteRef, token strin
 	if err != nil {
 		return nil, err
 	}
-	if !slices.Contains(d.State.Request.Scopes, scope) {
+	if scope != "authority" && !slices.Contains(d.State.Request.Scopes, scope) {
 		return nil, accountRefusal("delegation_scope")
 	}
+	// A client cannot accept a later proposal by racing its old request through
+	// a newly broadened grant. Native effects recheck this exact approval.
+	ctx = context.WithValue(ctx, agentApprovalContext{}, delegationApprovalDigest(d))
 	sess, err := s.delegationSessionReady(ctx, site, d, pepper)
 	if err != nil {
 		return nil, err
 	}
 	ctx = context.WithValue(ctx, agentCallContext{}, d.ID)
 	ctx = context.WithValue(ctx, agentScopeContext{}, scope)
+	ctx = context.WithValue(ctx, agentPresentationContext{}, callrules.AgentParticipant{Purpose: d.State.Request.Purpose, ApprovalRevision: d.State.ApprovalRevision, ConductVersion: d.State.Request.ConductVersion, PortraitID: d.State.Request.PortraitID, PortraitDigest: d.State.Request.PortraitDigest})
+	if req.Action == "authority" {
+		return callrules.AgentAuthority{Grant: delegationInfo(d, s.now()), Policy: callrules.CurrentAgentPolicy()}, nil
+	}
+	if req.Action == "guest_join" || req.Action == "start" || req.Action == "join" || req.Action == "schedule" || req.Action == "reschedule" || req.Action == "topup" {
+		if err = checkAgentAcceptance(d, req.Acceptance); err != nil {
+			return nil, err
+		}
+		ctx = context.WithValue(ctx, agentAcceptedContext{}, *req.Acceptance)
+	}
+	if req.Action == "start" {
+		release, e := s.gates(ctx, "calls.agent-admission."+d.ID)
+		if e != nil {
+			return nil, e
+		}
+		defer release()
+	}
 	switch req.Action {
+	case "portrait_upload":
+		return s.uploadPortrait(ctx, sess, req.PortraitData)
+	case "portrait_get":
+		return s.Portrait(ctx, sess, req.PortraitID)
+	case "request_join":
+		return s.agentRequestJoin(ctx, site, token, d, req, pepper)
+	case "join_status":
+		return s.agentJoinStatus(ctx, site, d, req)
+	case "guest_join":
+		return s.agentGuestJoin(ctx, site, token, d, sess, req, pepper)
 	case "invite":
 		return s.Invite(ctx, sess, *req.Invitation)
 	case "proposal", "proposal_status":
@@ -311,7 +373,7 @@ func (s *Service) Agent(ctx context.Context, site callrules.SiteRef, token strin
 	case "session":
 		return s.SessionCall(ctx, sess)
 	case "join":
-		return s.agentJoin(ctx, site, d, sess, req, pepper)
+		return s.agentJoinAccepted(ctx, site, token, d, sess, req, pepper)
 	case "invitation_link":
 		current, e := s.SessionCall(ctx, sess)
 		if e != nil {
@@ -344,6 +406,9 @@ func (s *Service) Agent(ctx context.Context, site callrules.SiteRef, token strin
 		return nil, callrules.ErrInvalid
 	}
 	if req.Action == "topup" {
+		if err = s.recordAgentAcceptance(ctx, site, token, req); err != nil {
+			return nil, err
+		}
 		return s.agentTopup(ctx, site, token, d, sess, req)
 	}
 	h, err := s.authenticatedKey(ctx, sess)
@@ -382,6 +447,14 @@ func (s *Service) Agent(ctx context.Context, site callrules.SiteRef, token strin
 			return nil, err
 		}
 	}
+	if req.Action != "start" && !d.State.Request.ScheduleStart.IsZero() && !req.Start.Truncate(time.Second).Equal(d.State.Request.ScheduleStart.Truncate(time.Second)) {
+		return nil, accountRefusal("delegation_schedule_scope")
+	}
+	if req.Action == "start" || req.Action == "schedule" || req.Action == "reschedule" {
+		if err = s.recordAgentAcceptance(ctx, site, token, req); err != nil {
+			return nil, err
+		}
+	}
 	amount := callrules.PreviewReservation(config)
 	op, err := s.reserveDelegated(ctx, site, token, req, "usage", amount)
 	if err != nil {
@@ -406,6 +479,9 @@ func (s *Service) Agent(ctx context.Context, site callrules.SiteRef, token strin
 	switch req.Action {
 	case "start":
 		r, e := s.Start(ctx, sess, callrules.StartBody{QuoteID: req.QuoteID, IdempotencyKey: operation, Name: req.Name, Title: req.Title, Confirm: confirm})
+		if e == nil && (r.Join.Outcome == callrules.OutcomeAdmit || r.Join.Outcome == callrules.OutcomeWait || r.Join.Outcome == callrules.OutcomeQueue) {
+			e = s.finishAgentAdmission(ctx, site, d, sess, req)
+		}
 		r.Call.HostToken = ""
 		result, err, roomID = r, e, r.Call.ID
 	case "schedule", "reschedule":
@@ -590,6 +666,14 @@ func (s *Service) delegatedEffectAllowed(ctx context.Context, site callrules.Sit
 	}
 	if d == nil || d.KeyID != key || d.SiteID != site.SiteID || !d.State.RevokedAt.IsZero() || !s.now().Before(d.State.Request.ExpiresAt) {
 		return accountRefusal("delegation_inactive")
+	}
+	if digest, ok := ctx.Value(agentApprovalContext{}).(string); ok && digest != delegationApprovalDigest(d) {
+		return accountRefusal("agent_approval_changed")
+	}
+	if accepted, ok := ctx.Value(agentAcceptedContext{}).(callrules.AgentAcceptance); ok {
+		if err := checkAgentAcceptance(d, &accepted); err != nil {
+			return err
+		}
 	}
 	if scope, ok := ctx.Value(agentScopeContext{}).(string); ok && !slices.Contains(d.State.Request.Scopes, scope) {
 		return accountRefusal("delegation_scope")

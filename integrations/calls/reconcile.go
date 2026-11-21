@@ -151,7 +151,7 @@ func (s *Service) Reconcile(ctx context.Context) error {
 	tally := &reconcileTally{}
 	failed := 0
 	var first error
-	for _, reconcile := range []func(context.Context) error{s.ReconcileResources, s.ReconcileWorkflows} {
+	for _, reconcile := range []func(context.Context) error{s.ReconcileResources, s.ReconcileWorkflows, s.ReconcileGuestKeys} {
 		if err := reconcile(ctx); err != nil && first == nil {
 			first = err
 			failed++

@@ -24,6 +24,12 @@ type SkillVersionAuthority struct {
 }
 
 type DelegationRequest struct {
+	PortraitID     string `json:"portraitId,omitempty"`
+	PortraitDigest string `json:"portraitDigest,omitempty"`
+	PortraitData   string `json:"portraitData,omitempty"`
+	Purpose        string `json:"purpose,omitempty"`
+	ConductVersion string `json:"conductVersion,omitempty"`
+	ReviewDigest   string `json:"reviewDigest,omitempty"`
 	// Communication and booking authority are explicit. A proposed participant
 	// label is not proof of identity or permission to email arbitrary recipients.
 	InvitationRecipients []string                `json:"invitationRecipients,omitempty"`
@@ -52,6 +58,8 @@ type DelegationRequest struct {
 
 type DelegationInfo struct {
 	DelegationRequest
+	ApprovalRevision      int       `json:"approvalRevision"`
+	ApprovalDigest        string    `json:"approvalDigest"`
 	ID                    string    `json:"id"`
 	Status                string    `json:"status"`
 	CreatedAt             time.Time `json:"createdAt"`
@@ -62,6 +70,8 @@ type DelegationInfo struct {
 }
 
 type DelegationResult struct {
+	Portrait   *PortraitInfo    `json:"portrait,omitempty"`
+	Policy     AgentPolicy      `json:"policy"`
 	Grants     []DelegationInfo `json:"grants"`
 	Proposal   *AgentProposal   `json:"proposal,omitempty"`
 	Credential string           `json:"credential,omitempty"`
@@ -70,6 +80,11 @@ type DelegationResult struct {
 // AgentRequest exposes named product operations, never an arbitrary HTTP, SQL,
 // shell, or engine call. The bearer credential cannot perform account ceremonies.
 type AgentRequest struct {
+	PortraitID        string                `json:"portraitId,omitempty"`
+	PortraitData      string                `json:"portraitData,omitempty"`
+	Acceptance        *AgentAcceptance      `json:"acceptance,omitempty"`
+	GuestToken        string                `json:"guestToken,omitempty"`
+	RequestID         string                `json:"requestId,omitempty"`
 	Invitation        *InviteRequest        `json:"invitation,omitempty"`
 	Proposal          *AgentProposalRequest `json:"proposal,omitempty"`
 	ProposalID        string                `json:"proposalId,omitempty"`
@@ -95,9 +110,12 @@ type AgentRequest struct {
 	Acknowledged      bool                  `json:"acknowledged,omitempty"`
 }
 
-var DelegationScopes = []string{"read", "host", "schedule", "control", "topup", "skills_read", "skills_write", "skills_control", "resources_read", "resources_publish", "resources_control", "invite"}
+var DelegationScopes = []string{"read", "join", "host", "schedule", "control", "topup", "skills_read", "skills_write", "skills_control", "resources_read", "resources_publish", "resources_control", "invite", "portraits_write"}
 
 func ValidDelegation(r DelegationRequest, now time.Time) bool {
+	if r.PortraitData != "" || !ValidPortraitReference(r.PortraitID, r.PortraitDigest) {
+		return false
+	}
 	if r.Terms == "" || len(r.Terms) > 64 || (r.Participation != "adults_only" && r.Participation != "children_present") || (r.Participation == "children_present" && !r.AuthorityAccepted) {
 		return false
 	}
@@ -160,7 +178,7 @@ func ValidDelegation(r DelegationRequest, now time.Time) bool {
 // Older persisted invite grants remain readable/revocable, but an empty recipient
 // policy grants no delivery authority. Every new approval chooses it explicitly.
 func ValidDelegationApproval(r DelegationRequest, now time.Time) bool {
-	return ValidDelegation(r, now) && (!slices.Contains(r.Scopes, "invite") || r.AllowAnyRecipient || len(r.InvitationRecipients) > 0)
+	return ValidDelegation(r, now) && ValidAgentPurpose(r.Purpose) && r.Terms == AgentTermsVersion && r.ConductVersion == AgentConductVersion && r.ReviewDigest == "" && (!slices.Contains(r.Scopes, "invite") || r.AllowAnyRecipient || len(r.InvitationRecipients) > 0)
 }
 
 // DelegationRecipientAllowed does not infer permission from a participant name,

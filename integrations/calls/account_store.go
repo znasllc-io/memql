@@ -118,6 +118,15 @@ func (s *Service) authenticatedKey(ctx context.Context, sess callrules.Session) 
 // authentication. A revoke cannot leave a queue poll or media-token renewal
 // using a session that was read before the credential changed.
 func (s *Store) checkedSessionRow(ctx context.Context, owner string, row *sessionRow) (*sessionRow, error) {
+	if row.KeyID != "" {
+		key, err := s.keyByID(ctx, owner, row.KeyID)
+		if err != nil {
+			return nil, err
+		}
+		if key != nil && key.Status == "retired" {
+			return nil, nil
+		}
+	}
 	if row.CredentialID == "" {
 		if row.KeyID != "" {
 			key, err := s.keyByID(ctx, owner, row.KeyID)

@@ -698,6 +698,8 @@ export interface CallsPolicySetArgs {
   maxAgents?: number;
   /** Join attempts allowed per room per minute, 1 to 10000. */
   roomJoinsPerMinute?: number;
+  /** Unfunded unclaimed guest retirement after 30 to 365 days without use; default 30. Funded and Passkey-secured accounts are excluded. */
+  guestInactiveDays?: number;
   /** Upcoming scheduled calls allowed per key, 0 to 1000. */
   maxUpcomingScheduled?: number;
   /** The longest a scheduled call may be, in minutes, 1 to 1440. */
@@ -724,6 +726,7 @@ export function buildCallsPolicySet(args: CallsPolicySetArgs): string {
   if (args.maxPeople !== undefined) parts.push("maxPeople: " + renderMemQLValue(args.maxPeople));
   if (args.maxAgents !== undefined) parts.push("maxAgents: " + renderMemQLValue(args.maxAgents));
   if (args.roomJoinsPerMinute !== undefined) parts.push("roomJoinsPerMinute: " + renderMemQLValue(args.roomJoinsPerMinute));
+  if (args.guestInactiveDays !== undefined) parts.push("guestInactiveDays: " + renderMemQLValue(args.guestInactiveDays));
   if (args.maxUpcomingScheduled !== undefined) parts.push("maxUpcomingScheduled: " + renderMemQLValue(args.maxUpcomingScheduled));
   if (args.maxScheduledMinutes !== undefined) parts.push("maxScheduledMinutes: " + renderMemQLValue(args.maxScheduledMinutes));
   if (args.hostLeftGrace !== undefined) parts.push("hostLeftGrace: " + renderMemQLValue(args.hostLeftGrace));

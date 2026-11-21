@@ -1056,9 +1056,9 @@ func TestALockedCallDoesNotHoldUpTheServersQueue(t *testing.T) {
 	require.Equal(t, callrules.OutcomeAdmit, in.Outcome)
 }
 
-// TestRejoinReusesTheSeat: a person who joins again keeps their seat and their media
-// identity: while seated they get a fresh pass for the same seat, after leaving they
-// take the same seat again, and a removed seat stays shut. A rejoin is NEVER REFUSED AS
+// TestRejoinReusesTheSeat: a person who joins again keeps their seat. While seated
+// they refresh the same media identity; after leaving they take the same seat with
+// a new media identity, and a removed seat stays shut. A rejoin is NEVER REFUSED AS
 // FULL, in a call holding the policy's people or on a media server with no free seat,
 // because the person already holds the seat. A session seated in one open call cannot
 // join another.
@@ -1098,7 +1098,7 @@ func TestRejoinReusesTheSeat(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, callrules.OutcomeAdmit, back.Outcome)
 	require.Equal(t, guest.SeatID, backSess.SeatID, "coming back after leaving took a new seat")
-	require.Equal(t, first.Identity, back.Identity)
+	require.NotEqual(t, first.Identity, back.Identity, "a new admission reused a retired media identity")
 	require.Equal(t, "admitted", cw.row(seatConcept, guest.SeatID)["status"])
 	require.Len(t, cw.seatsIn(roomID), 2)
 
@@ -1124,7 +1124,7 @@ func TestRejoinReusesTheSeat(t *testing.T) {
 	require.NoError(t, err, "a rejoin to a full call was refused")
 	require.Equal(t, callrules.OutcomeAdmit, inFull.Outcome)
 	require.Equal(t, guest.SeatID, keptSess.SeatID, "a rejoin to a full call took a new seat")
-	require.Equal(t, first.Identity, inFull.Identity, "a rejoin to a full call changed the media identity")
+	require.Equal(t, back.Identity, inFull.Identity, "a rejoin to a full call changed the media identity")
 	require.Len(t, cw.seatsIn(roomID), seats, "a rejoin to a full call wrote a seat")
 
 	// A rejoin on a media server with no free seat, in a call that is not full: the other

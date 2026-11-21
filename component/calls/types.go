@@ -33,6 +33,7 @@ type Policy struct {
 	MaxAgents            int
 	RoomJoinsPerMinute   int
 	MaxUpcomingScheduled int
+	GuestInactiveDays    int
 	MaxScheduledMinutes  int
 
 	HostLeftGrace   time.Duration
@@ -49,6 +50,7 @@ func DefaultPolicy() Policy {
 		MaxAgents:            2,
 		RoomJoinsPerMinute:   30,
 		MaxUpcomingScheduled: 20,
+		GuestInactiveDays:    30,
 		MaxScheduledMinutes:  480,
 		HostLeftGrace:        5 * time.Minute,
 		PassTTL:              120 * time.Second,

@@ -26,6 +26,9 @@ type delegationRow struct {
 	State                          delegationState
 }
 type delegationState struct {
+	ApprovalPolicyDigest        string
+	ApprovalRevision            int
+	Acceptances                 []delegationAcceptance
 	Proposals                   []delegationProposal
 	ApprovedAt                  time.Time
 	Request                     callrules.DelegationRequest
@@ -38,7 +41,7 @@ type delegationState struct {
 func delegationFromRow(r map[string]any) (*delegationRow, error) {
 	d := &delegationRow{ID: memql.BareShortId(rowString(r, "id")), SiteID: memql.BareShortId(rowString(r, "siteId")), KeyID: memql.BareShortId(rowString(r, "keyId")), TokenDigest: rowString(r, "tokenDigest"), Version: rowTime(r, "createdAt")}
 	data := rowString(r, "stateData")
-	if len(data) > 1<<20 || json.Unmarshal([]byte(data), &d.State) != nil || d.ID == "" || d.SiteID == "" || d.KeyID == "" || len(d.TokenDigest) != 64 || d.State.CredentialID == "" || !callrules.ValidDelegation(d.State.Request, delegationApprovedAt(d)) || len(d.State.Operations) > 1000 || len(d.State.Proposals) > 20 {
+	if len(data) > 1<<20 || json.Unmarshal([]byte(data), &d.State) != nil || d.ID == "" || d.SiteID == "" || d.KeyID == "" || len(d.TokenDigest) != 64 || d.State.CredentialID == "" || !callrules.ValidDelegation(d.State.Request, delegationApprovedAt(d)) || len(d.State.Operations) > 1000 || len(d.State.Proposals) > 20 || len(d.State.Acceptances) > 1000 || d.State.ApprovalRevision < 0 {
 		return nil, accountRefusal("delegation_state_unavailable")
 	}
 	for _, op := range d.State.Operations {
@@ -115,7 +118,7 @@ func delegationInfo(d *delegationRow, now time.Time) callrules.DelegationInfo {
 	}
 	r := d.State.Request
 	r.Action = ""
-	return callrules.DelegationInfo{DelegationRequest: r, ID: d.ID, Status: status, CreatedAt: d.State.CreatedAt, SpentCents: t, PeriodSpentCents: p, TopupSpentCents: ft, TopupPeriodSpentCents: fp}
+	return callrules.DelegationInfo{DelegationRequest: r, ApprovalRevision: d.State.ApprovalRevision, ApprovalDigest: delegationApprovalDigest(d), ID: d.ID, Status: status, CreatedAt: d.State.CreatedAt, SpentCents: t, PeriodSpentCents: p, TopupSpentCents: ft, TopupPeriodSpentCents: fp}
 }
 
 func delegationApprovedAt(d *delegationRow) time.Time {

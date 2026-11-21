@@ -14,8 +14,10 @@ import (
 // HostActionRequest is one host control: what to do, and the seat it is done to. Lock,
 // unlock and end act on the call and name no seat.
 type HostActionRequest struct {
-	Action string
-	Seat   string
+	Action       string
+	Seat         string
+	RequestID    string
+	ReviewDigest string
 }
 
 // Roster is a call as a host seat in it sees it: what the host controls name. Locked is
@@ -70,6 +72,8 @@ const (
 // CountdownKind distinguishes a firm wrap_up from the legacy host_left grace.
 // Identity and LeaveToken are given only to an occupying seat.
 type SeatCall struct {
+	PendingAgents     []PendingAgent
+	Agents            []AgentParticipant
 	ParticipationMode string
 	Family            *FamilySession
 	RoomID            string

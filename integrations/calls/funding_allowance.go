@@ -430,6 +430,18 @@ func (s *Service) admittedWithFunding(ctx context.Context, owner string, server 
 	if room == nil || !room.open() {
 		return refuseJoin(callrules.ReasonCallEnded), fmt.Errorf("%w: the call has ended", callrules.ErrEnded)
 	}
+	// Media-room creation can be delayed while another replica processes Leave,
+	// Remove or a new admission. Never return a pass for the earlier generation.
+	current, err := s.store.seatByID(memql.ContextWithFreshRead(ctx), owner, seat.ID)
+	if err != nil {
+		return callrules.JoinResult{}, err
+	}
+	if current == nil || !current.occupying() || current.RoomID != room.ID || current.Identity != seat.Identity {
+		return refuseJoin("admission_changed"), callrules.Refuse(callrules.ErrConflict, "admission_changed", "the admission changed while connecting; rejoin the call")
+	}
+	if err := s.agentSeatAllowed(ctx, *room, seat); err != nil {
+		return refuseJoin(callrules.ReasonOf(err)), err
+	}
 	if err := s.familySeatAllowed(ctx, *room, seat); err != nil {
 		return refuseJoin(callrules.ReasonOf(err)), err
 	}

@@ -1205,6 +1205,17 @@ cache invalidation delays, unavailable networks, and unfinished forms can
 extend that window. Automatic publishing determines *which* release is live;
 this browser mechanism makes an already loaded page follow it.
 
+Applications with non-form activity can defer an automatic refresh without
+disabling release detection. Immediately before replacing the document, the
+monitor dispatches the cancelable `memql:before-site-refresh` event on `window`.
+Call `event.preventDefault()` while a live call, recording or upload is in progress,
+and remove that listener when the activity ends. The decision is checked again
+for every attempt, including route changes and restored pages. This does not
+block a visitor's manual reload or navigation. Keep the listener for reconnecting
+and recovered calls too: a newly restored call may have no edited form to trigger
+the ordinary dirty-state protection. `site_refresh_test.cjs` covers cancellation,
+route/history restoration and release after activity ends.
+
 This takes effect once a browser loads HTML containing the monitor. A server
 cannot retroactively execute code in an old, already open page. An application
 that installs its own service worker must allow network access for this version

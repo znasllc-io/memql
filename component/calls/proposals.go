@@ -24,4 +24,5 @@ type AgentProposal struct {
 	Status          string    `json:"status"`
 	ExpiresAt       time.Time `json:"expiresAt"`
 	ApprovalPath    string    `json:"approvalPath"`
+	ReviewDigest    string    `json:"reviewDigest"`
 }

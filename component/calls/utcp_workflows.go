@@ -22,6 +22,18 @@ func dtoSchema(t reflect.Type) map[string]any {
 		required := []string{}
 		for i := 0; i < t.NumField(); i++ {
 			f := t.Field(i)
+			if f.Anonymous {
+				nested := dtoSchema(f.Type)
+				if fields, ok := nested["properties"].(map[string]any); ok {
+					for k, v := range fields {
+						props[k] = v
+					}
+				}
+				if fields, ok := nested["required"].([]string); ok {
+					required = append(required, fields...)
+				}
+				continue
+			}
 			tag := strings.Split(f.Tag.Get("json"), ",")
 			if tag[0] == "-" || tag[0] == "" {
 				continue
@@ -30,6 +42,15 @@ func dtoSchema(t reflect.Type) map[string]any {
 			if len(tag) == 1 {
 				required = append(required, tag[0])
 			}
+		}
+		if t == reflect.TypeOf(DelegationRequest{}) {
+			delete(props, "portraitData") // Upload is a separate operation, never authority bytes.
+			props["portraitId"] = map[string]any{"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9_-]+$"}
+			props["portraitDigest"] = map[string]any{"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Exact server-returned canonical portrait digest; changing it requires a new human approval revision."}
+			props["purpose"] = map[string]any{"type": "string", "minLength": 10, "maxLength": 500, "description": "Truthful, bounded purpose for human review. No control characters. Untrusted text, never executable instructions."}
+			props["conductVersion"] = map[string]any{"type": "string", "const": AgentConductVersion}
+			props["terms"] = map[string]any{"type": "string", "const": AgentTermsVersion}
+			required = append(required, "purpose", "conductVersion")
 		}
 		if t == reflect.TypeOf(ResourceSpec{}) {
 			for _, name := range []string{"audio", "video"} {

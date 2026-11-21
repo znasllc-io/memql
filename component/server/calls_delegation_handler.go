@@ -90,7 +90,7 @@ func (h *callsHandler) agentReply(result any) any {
 		// The native agent result contains call state only, not a human session.
 		// Reuse its normalization without inventing an expiry or cookie identity.
 		r := h.sessionReply(calls.Session{}, v)
-		return callsAgentSessionReply{RoomID: memql.BareShortId(v.RoomID), Identity: r.Identity, LeaveToken: r.LeaveToken, CountdownKind: r.CountdownKind, ParticipantLimit: r.ParticipantLimit, DurationMinutes: r.DurationMinutes, Insights: r.Insights, Resources: r.Resources, ReservedCents: r.ReservedCents, CostCents: r.CostCents, Host: r.Host, OpenedAt: r.OpenedAt, Title: r.Title, CountdownEndsAt: r.CountdownEndsAt, AllowanceEndsAt: r.AllowanceEndsAt, FundingMode: r.FundingMode, Roster: r.Roster}
+		return callsAgentSessionReply{RoomID: memql.BareShortId(v.RoomID), Identity: r.Identity, LeaveToken: r.LeaveToken, CountdownKind: r.CountdownKind, ParticipantLimit: r.ParticipantLimit, DurationMinutes: r.DurationMinutes, Insights: r.Insights, Resources: r.Resources, ReservedCents: r.ReservedCents, CostCents: r.CostCents, Host: r.Host, OpenedAt: r.OpenedAt, Title: r.Title, CountdownEndsAt: r.CountdownEndsAt, AllowanceEndsAt: r.AllowanceEndsAt, FundingMode: r.FundingMode, Roster: r.Roster, Agents: r.Agents}
 	case calls.InvitationLinkResult:
 		return struct {
 			GuestToken string `json:"guestToken"`
@@ -121,23 +121,24 @@ func (h *callsHandler) agentReply(result any) any {
 }
 
 type callsAgentSessionReply struct {
-	RoomID           string            `json:"roomId,omitempty"`
-	Identity         string            `json:"identity,omitempty"`
-	LeaveToken       string            `json:"leaveToken,omitempty"`
-	CountdownKind    string            `json:"countdownKind,omitempty"`
-	ParticipantLimit int               `json:"participantLimit,omitempty"`
-	Insights         bool              `json:"insights,omitempty"`
-	Resources        bool              `json:"resources,omitempty"`
-	DurationMinutes  int               `json:"durationMinutes,omitempty"`
-	ReservedCents    *int64            `json:"reservedCents,omitempty"`
-	CostCents        *int64            `json:"costCents,omitempty"`
-	Host             bool              `json:"host,omitempty"`
-	OpenedAt         string            `json:"openedAt,omitempty"`
-	Title            string            `json:"title,omitempty"`
-	CountdownEndsAt  string            `json:"countdownEndsAt,omitempty"`
-	AllowanceEndsAt  string            `json:"allowanceEndsAt,omitempty"`
-	FundingMode      string            `json:"fundingMode,omitempty"`
-	Roster           *callsRosterReply `json:"roster,omitempty"`
+	Agents           []calls.AgentParticipant `json:"agents,omitempty"`
+	RoomID           string                   `json:"roomId,omitempty"`
+	Identity         string                   `json:"identity,omitempty"`
+	LeaveToken       string                   `json:"leaveToken,omitempty"`
+	CountdownKind    string                   `json:"countdownKind,omitempty"`
+	ParticipantLimit int                      `json:"participantLimit,omitempty"`
+	Insights         bool                     `json:"insights,omitempty"`
+	Resources        bool                     `json:"resources,omitempty"`
+	DurationMinutes  int                      `json:"durationMinutes,omitempty"`
+	ReservedCents    *int64                   `json:"reservedCents,omitempty"`
+	CostCents        *int64                   `json:"costCents,omitempty"`
+	Host             bool                     `json:"host,omitempty"`
+	OpenedAt         string                   `json:"openedAt,omitempty"`
+	Title            string                   `json:"title,omitempty"`
+	CountdownEndsAt  string                   `json:"countdownEndsAt,omitempty"`
+	AllowanceEndsAt  string                   `json:"allowanceEndsAt,omitempty"`
+	FundingMode      string                   `json:"fundingMode,omitempty"`
+	Roster           *callsRosterReply        `json:"roster,omitempty"`
 }
 
 func (h *callsHandler) serveCommerceWebhook(w http.ResponseWriter, r *http.Request, c callsCall) {

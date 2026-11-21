@@ -63,7 +63,7 @@ func (s *Service) roomFromHistory(ctx context.Context, site callrules.SiteRef, h
 }
 
 // recoverHistorySeat runs under the account, key, room and admission gates.
-// Reuse the same key-bound identity across fresh sessions and replicas, rather
+// Reuse the same key-bound seat across fresh sessions and replicas, rather
 // than creating a seat on every dashboard click. Operational seat authority wins
 // over history metadata; a removed seat stays removed and another live call is
 // never abandoned. The fresh session's credential becomes the recovered seat's

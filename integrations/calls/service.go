@@ -150,6 +150,8 @@ const (
 // Service is the calls service. New builds it beside the integration's operator acts,
 // over the same store, gate pool, pepper, clock and randomness.
 type Service struct {
+	portraitStorage  PortraitStorage
+	guestRetirement  *guestRetirementScan
 	commerce         func() CommerceConfig
 	store            *Store
 	gateDB           func() *sql.DB
@@ -640,6 +642,7 @@ func (s *Service) openRoom(ctx context.Context, site callrules.SiteRef, server M
 	joinedAt := time.Time{}
 	if decision.Outcome == callrules.OutcomeAdmit {
 		seat.Status, joinedAt = seatAdmitted, now
+		seat.JoinedAt = joinedAt
 		if funding.bounded() {
 			funding.FundingStartedAt, funding.FundingDeadline = now, allowance.AvailableUntil
 		}
@@ -1040,6 +1043,14 @@ func (s *Service) joinGated(ctx context.Context, site callrules.SiteRef, room ro
 	if err := s.familyJoinAllowed(fresh, *current, held, ask.asHost); err != nil {
 		return refuseJoin(callrules.ReasonOf(err)), held.stateOf(ask.token, site), seatRow{}, err
 	}
+	if held != nil {
+		if err := s.delegatedEffectAllowed(fresh, site, held.KeyID); err != nil {
+			return refuseJoin(callrules.ReasonOf(err)), held.stateOf(ask.token, site), seatRow{}, err
+		}
+	}
+	if err := s.guestAgentAdmissionAllowed(fresh, site, *current, held, ask.asHost); err != nil {
+		return refuseJoin(callrules.ReasonOf(err)), held.stateOf(ask.token, site), seatRow{}, err
+	}
 	policy = fundedPolicy(policy, current.roomFunding)
 	// THE ATTEMPT IS COUNTED BEFORE ANYTHING IS DECIDED, and past the limit nothing is
 	// written at all.
@@ -1172,13 +1183,18 @@ func (s *Service) joinGated(ctx context.Context, site callrules.SiteRef, room ro
 		DisplayName: ask.name, Status: seatWaiting, Host: host, KeyID: held.keyHeld(), CredentialID: held.credentialHeld(),
 	}
 	if reentry {
-		taken.ID, taken.Identity, taken.KeyID, taken.LetInAt = seat.ID, seat.Identity, seat.KeyID, seat.LetInAt
-	} else if taken.Identity, err = callrules.NewToken(s.random, identityBytes); err != nil {
+		taken.ID, taken.KeyID, taken.LetInAt = seat.ID, seat.KeyID, seat.LetInAt
+	}
+	// A connection refresh keeps the identity above. An actual new admission
+	// always gets a new one: delayed provider cleanup and webhooks from the
+	// previous admission must never target this connection, even across replicas.
+	if taken.Identity, err = callrules.NewToken(s.random, identityBytes); err != nil {
 		return callrules.JoinResult{}, out, seatRow{}, err
 	}
 	joinedAt := time.Time{}
 	if decision.Outcome == callrules.OutcomeAdmit {
 		taken.Status, joinedAt = seatAdmitted, now
+		taken.JoinedAt = joinedAt
 	}
 
 	// The session first: a session pointing at a seat that was never written is seated
@@ -1189,7 +1205,7 @@ func (s *Service) joinGated(ctx context.Context, site callrules.SiteRef, room ro
 	}
 	taken.KeyID = out.KeyID
 	if reentry {
-		fields := map[string]any{"status": taken.Status, "host": taken.Host}
+		fields := map[string]any{"status": taken.Status, "host": taken.Host, "identity": taken.Identity, "lastSeenAt": "", "absentSince": ""}
 		if !joinedAt.IsZero() {
 			fields["joinedAt"] = joinedAt
 		}
@@ -1305,6 +1321,13 @@ func (s *Service) recordJoin(ctx context.Context, owner string, seat seatRow, as
 	if fields == nil {
 		fields = map[string]any{}
 	}
+	// Preserve the approved purpose throughout one admission. A deliberate new
+	// entry captures the newly approved purpose; token refresh does not rewrite it.
+	if _, reentry := fields["joinedAt"]; reentry && seat.Kind == string(callrules.KindAgent) {
+		if data := agentPresentation(ctx); data != "" {
+			fields["agentData"], seat.AgentData = data, data
+		}
+	}
 	if seat.DisplayName != ask.name {
 		fields["displayName"], seat.DisplayName = ask.name, ask.name
 	}
@@ -1319,6 +1342,12 @@ func (s *Service) recordJoin(ctx context.Context, owner string, seat seatRow, as
 	}
 	if status, ok := fields["status"].(string); ok {
 		seat.Status = status
+	}
+	if identity, ok := fields["identity"].(string); ok {
+		seat.Identity = identity
+	}
+	if joinedAt, ok := fields["joinedAt"].(time.Time); ok {
+		seat.JoinedAt = joinedAt
 	}
 	if host, ok := fields["host"].(bool); ok {
 		seat.Host = host
@@ -1427,6 +1456,11 @@ func (s *Service) pollGated(ctx context.Context, site callrules.SiteRef, room ro
 	if err != nil {
 		return callrules.JoinResult{}, seatRow{}, err
 	}
+	if seat != nil {
+		if err := s.delegatedEffectAllowed(fresh, site, seat.KeyID); err != nil {
+			return refuseJoin(callrules.ReasonOf(err)), seatRow{}, err
+		}
+	}
 	switch {
 	case seat == nil:
 		return callrules.JoinResult{}, seatRow{}, fmt.Errorf("%w: the seat is gone", callrules.ErrNotFound)
@@ -1492,7 +1526,7 @@ func (s *Service) answerWaiting(ctx context.Context, site callrules.SiteRef, roo
 	switch decision.Outcome {
 	case callrules.OutcomeAdmit:
 		admittedSeat := seat
-		admittedSeat.Status = seatAdmitted
+		admittedSeat.Status, admittedSeat.JoinedAt = seatAdmitted, now
 		if err := s.store.updateSeat(ctx, owner, seat, map[string]any{"status": seatAdmitted, "joinedAt": now}, memql.VersionTimeAfter(seat.Version, now)); err != nil {
 			return callrules.JoinResult{}, seatRow{}, err
 		}
@@ -1708,8 +1742,7 @@ func (s *Service) leaveGatedOptions(ctx context.Context, owner string, room room
 			return nil, false, err
 		}
 		// A replay must not start cleanup for an already-visible re-entry.
-		// An original provider removal racing a subsequent admission remains
-		// the stable-identity limitation documented in operate/calls.md.
+		// Original cleanup targets the previous admission's media identity.
 		if replay && (seat.placed() || !current.open()) {
 			return nil, false, nil
 		}

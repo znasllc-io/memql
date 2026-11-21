@@ -83,6 +83,7 @@ builtin callsPolicySet {
   maxPeople             int      @description("People allowed in one room, 1 to 1000.")
   maxAgents             int      @description("Agents allowed in one room, 0 to 100.")
   roomJoinsPerMinute    int      @description("Join attempts allowed per room per minute, 1 to 10000.")
+  guestInactiveDays int @description("Unfunded unclaimed guest retirement after 30 to 365 days without use; default 30. Funded and Passkey-secured accounts are excluded.")
   maxUpcomingScheduled  int      @description("Upcoming scheduled calls allowed per key, 0 to 1000.")
   maxScheduledMinutes   int      @description("The longest a scheduled call may be, in minutes, 1 to 1440.")
   hostLeftGrace         int      @description("How long a room outlives its host, in seconds, 0 to 86400.")

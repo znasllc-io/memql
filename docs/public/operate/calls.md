@@ -249,21 +249,22 @@ connected media still depends on the reconciliation loop and provider deletion;
 a provider outage does not extend the billed interval. The unchanged `{}` leave
 body and involuntary disconnections retain the original host-left behavior.
 
-**Provider cleanup limitation:** completed receipt replays cannot deliberately
-leave an already-visible later admission. However, participant removal runs
-outside the write gates and the media provider removes by a stable participant
-identity. Another browser can rejoin that same seat after the leave commits but
-before the original removal finishes; that delayed removal can disconnect the
-new media connection. The calling page suppresses its own automatic reconnect
-while a leave is pending, which does not prevent another client's concurrent
-rejoin. Admission-specific media identities or a durable cleanup/admission
-barrier are required to close this existing cross-client race before production
-billing relies on uninterrupted re-entry. The receipt and saved deadline remain
-authoritative; this limitation does not duplicate a departure or extend the call.
+**Admission-specific media identities:** reconnecting an occupied seat refreshes
+its existing media identity. Leaving and returning preserves the seat/history but
+creates a fresh random media identity. Provider cleanup and late webhooks from an
+earlier admission therefore cannot target the new connection. A delayed media-room
+creation response must also recheck that the seat still occupies the room under
+the same identity before returning a media pass. Provider I/O remains outside the
+shared write gates; another room's admission never waits on this cleanup. Old
+unexpired tokens remain subject to webhook/reconciliation removal and cannot take
+over the later identity. Departure receipts and firm deadlines survive re-entry.
 
 Regression coverage: `integrations/calls/departure_db_test.go` exercises concurrent
 cross-replica retries, host return/co-hosts, guest authority, immutable admission
 binding, failed writes, earlier hard deadlines, empty rooms and settlement cleanup.
+`integrations/calls/admission_generation_db_test.go` blocks provider removal or
+creation while a second replica leaves/rejoins, then checks the surviving new
+connection and refusal to issue a retired admission's pass.
 
 **A media disconnect is not a leave.** A browser disconnects from the media server the
 same way when its page is refreshed, its tab is closed or its call is hung up, so the

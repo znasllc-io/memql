@@ -47,6 +47,11 @@
     if (dirty || navigating || document.visibilityState === "hidden") return;
     var now = Date.now();
     if (now - lastReload < cooldown) return;
+    // An application may have non-form work (a live call, recording or upload).
+    // Ask at the last moment, including after SPA navigation or BFCache restore.
+    // Cancellation defers this attempt only: subsequent probes still discover
+    // releases, and ordinary updates resume once the activity releases its listener.
+    if (!window.dispatchEvent(new Event("memql:before-site-refresh", { cancelable: true }))) return;
     lastReload = now;
     try { sessionStorage.setItem(key, String(now)); } catch (_) {}
     var next = new URL(location.href);

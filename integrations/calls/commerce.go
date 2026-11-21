@@ -288,6 +288,7 @@ func (s *Service) creditCommerceCheckout(ctx context.Context, site callrules.Sit
 	}
 	entry := simulationWalletEntry{ID: id, SiteID: site.SiteID, KeyID: v.KeyID, Kind: "topup", RequestDigest: o.RequestDigest, CreditedCents: o.AmountCents, Version: s.now().UTC().Truncate(time.Microsecond)}
 	if previous != nil {
+		entry.UsageRemainderUnits = previous.UsageRemainderUnits
 		entry.BalanceCents = previous.BalanceCents
 		entry.Pass = previous.Pass
 		entry.Version = memql.VersionTimeAfter(previous.Version, entry.Version)

@@ -105,6 +105,7 @@ func (s *Service) accountFunding(ctx context.Context, site callrules.SiteRef, to
 	now := s.now().UTC().Truncate(time.Microsecond)
 	entry := simulationWalletEntry{ID: id, SiteID: site.SiteID, KeyID: h.row.KeyID, RequestDigest: digest, Version: now}
 	if previous != nil {
+		entry.UsageRemainderUnits = previous.UsageRemainderUnits
 		entry.BalanceCents, entry.Pass = previous.BalanceCents, previous.Pass
 		entry.Version = memql.VersionTimeAfter(previous.Version, now)
 	}

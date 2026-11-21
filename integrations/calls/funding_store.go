@@ -19,6 +19,7 @@ type simulationWalletEntry struct {
 	ID, SiteID, KeyID, Kind, Plan, RequestDigest string
 	Version                                      time.Time
 	BalanceCents, CreditedCents, DebitedCents    int64
+	UsageRemainderUnits                          int64
 	Pass                                         *callrules.AccountPass
 }
 
@@ -30,6 +31,14 @@ func simulationWalletFrom(row map[string]any) (*simulationWalletEntry, error) {
 			return nil, invalidSimulationWallet(name)
 		}
 		*target = int64(v)
+	}
+	// Older receipts carry no remainder and migrate as zero, without rebilling.
+	if raw, exists := row["usageRemainderUnits"]; exists && raw != nil {
+		n, ok := rowIntPresent(row, "usageRemainderUnits")
+		if !ok || n < 0 || int64(n) >= usageUnitsPerCent {
+			return nil, invalidSimulationWallet("usage remainder")
+		}
+		e.UsageRemainderUnits = int64(n)
 	}
 	if e.ID == "" || e.SiteID == "" || e.KeyID == "" || e.Version.IsZero() || len(e.RequestDigest) != 64 {
 		return nil, invalidSimulationWallet("identity")
@@ -86,7 +95,7 @@ func (s *Store) simulatedWalletEntryByID(ctx context.Context, owner, id string) 
 }
 
 func (s *Store) createSimulatedWalletEntry(ctx context.Context, owner string, e simulationWalletEntry) error {
-	args := map[string]any{"entryId": e.ID, "siteId": e.SiteID, "keyId": e.KeyID, "kind": e.Kind, "requestDigest": e.RequestDigest, "balanceCents": e.BalanceCents, "creditedCents": e.CreditedCents, "debitedCents": e.DebitedCents, "versionTime": versionStamp(e.Version)}
+	args := map[string]any{"entryId": e.ID, "siteId": e.SiteID, "keyId": e.KeyID, "kind": e.Kind, "requestDigest": e.RequestDigest, "balanceCents": e.BalanceCents, "creditedCents": e.CreditedCents, "debitedCents": e.DebitedCents, "usageRemainderUnits": e.UsageRemainderUnits, "versionTime": versionStamp(e.Version)}
 	if e.Plan != "" {
 		args["plan"] = e.Plan
 	}

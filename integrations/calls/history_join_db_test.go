@@ -72,7 +72,7 @@ func TestHistoryJoinRecoversHostAcrossSessionsAndReplicasWithoutAnotherSeat(t *t
 	joined, _, err := historyJoin(t, replica, *signed.Session, page.Calls[0].ID)
 	require.NoError(t, err)
 	require.True(t, joined.Host)
-	require.Equal(t, started.Join.Identity, joined.Identity)
+	require.NotEqual(t, started.Join.Identity, joined.Identity, "returning after Leave starts a new media admission")
 	require.True(t, rowTime(cw.row(roomConcept, started.Call.ID), "hostLeftAt").IsZero())
 	require.Len(t, cw.rowsOf(seatConcept), 2)
 }

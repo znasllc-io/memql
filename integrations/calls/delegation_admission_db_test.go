@@ -23,13 +23,13 @@ func TestDelegationStartValidationPrecedesReservationAndAutomaticTopup(t *testin
 	grant.Scopes = append(grant.Scopes, "topup")
 	grant.Topup = callrules.AutoTopupLimit{Enabled: true, AmountCents: 1000, ThresholdCents: 1000, PerChargeLimitCents: 1000, PeriodLimitCents: 1000, LifetimeLimitCents: 1000}
 	credential, grantID := delegationTestGrant(t, cw, k, grant)
-	quoted, err := cw.svc.Agent(ctx, cw.ref, credential, callrules.AgentRequest{Action: "quote", ParticipantLimit: 4, DurationMinutes: 1440})
+	quoted, err := delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, credential, callrules.AgentRequest{Action: "quote", ParticipantLimit: 4, DurationMinutes: 1440})
 	require.NoError(t, err)
 	quote := quoted.(*callrules.CallQuote)
 	before, err := cw.svc.Account(ctx, cw.ref, k.result.Session.Token, nil)
 	require.NoError(t, err)
 	require.Greater(t, quote.MaxCostCents, *before.Account.AvailableCents, "the valid request must need automatic funding")
-	request := callrules.AgentRequest{Action: "start", IdempotencyKey: "agent-validation-before-cost", QuoteID: quote.QuoteID, Name: "Assistant", Terms: confirmed.Terms, Participation: "adults_only"}
+	request := callrules.AgentRequest{Action: "start", IdempotencyKey: "agent-validation-before-cost", QuoteID: quote.QuoteID, Name: "Assistant", Terms: callrules.AgentTermsVersion, Participation: "adults_only"}
 	for _, tc := range []struct {
 		name, reason string
 		change       func(*callrules.AgentRequest)
@@ -42,7 +42,7 @@ func TestDelegationStartValidationPrecedesReservationAndAutomaticTopup(t *testin
 		t.Run(tc.name, func(t *testing.T) {
 			rejected := request
 			tc.change(&rejected)
-			_, err := cw.svc.Agent(ctx, cw.ref, credential, rejected)
+			_, err := delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, credential, rejected)
 			if tc.reason != "" {
 				require.ErrorContains(t, err, tc.reason)
 			} else {
@@ -73,7 +73,7 @@ func TestDelegationStartValidationPrecedesReservationAndAutomaticTopup(t *testin
 	legacyCredential, legacyID := delegationTestGrant(t, cw, k, legacy)
 	legacyRequest := request
 	legacyRequest.Participation = "children_present"
-	_, err = cw.svc.Agent(ctx, cw.ref, legacyCredential, legacyRequest)
+	_, err = delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, legacyCredential, legacyRequest)
 	require.ErrorContains(t, err, "family_consent_required")
 	legacyStored, err := cw.svc.store.delegation(memql.ContextWithFreshRead(ctx), cw.owner, legacyID)
 	require.NoError(t, err)
@@ -88,7 +88,7 @@ func TestDelegationStartValidationPrecedesReservationAndAutomaticTopup(t *testin
 	familyQuote := commerceDo(t, cw, k, callrules.AccountRequest{Action: "quote_call", ParticipantLimit: 4, DurationMinutes: 1440, ParticipationMode: familyMode})
 	familyRequest := request
 	familyRequest.QuoteID = familyQuote.Quote.QuoteID
-	_, err = cw.svc.Agent(ctx, cw.ref, credential, familyRequest)
+	_, err = delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, credential, familyRequest)
 	require.ErrorContains(t, err, "family_features_unavailable")
 	unfunded, err := cw.svc.store.delegation(memql.ContextWithFreshRead(ctx), cw.owner, grantID)
 	require.NoError(t, err)
@@ -99,10 +99,10 @@ func TestDelegationStartValidationPrecedesReservationAndAutomaticTopup(t *testin
 	require.Equal(t, *before.Account.AvailableCents, *unchanged.Account.AvailableCents)
 	// Refusal consumed neither the nonce nor the top-up mandate: the corrected
 	// request can fund and start once, and an exact retry cannot charge twice.
-	result, err := cw.svc.Agent(ctx, cw.ref, credential, request)
+	result, err := delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, credential, request)
 	require.NoError(t, err)
 	started := result.(callrules.StartResult)
-	replay, err := cw.svc.Agent(ctx, cw.ref, credential, request)
+	replay, err := delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, credential, request)
 	require.NoError(t, err)
 	require.Equal(t, started.Call.ID, replay.(callrules.StartResult).Call.ID)
 	stored, err := cw.svc.store.delegation(memql.ContextWithFreshRead(ctx), cw.owner, grantID)

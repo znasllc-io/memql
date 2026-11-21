@@ -17,6 +17,7 @@ import (
 // the registry and asserts it equals this, so an additional concept fails here until it is
 // listed and carries both properties.
 var callsConcepts = []string{
+	"v1:calls:agentAdmissionState", "v1:calls:agentPortrait",
 	"v1:calls:commerceState",
 	"v1:calls:credential", "v1:calls:delegationState", "v1:calls:familyState", "v1:calls:history", "v1:calls:historyReceipt", "v1:calls:historySync",
 	"v1:calls:invitationBudget", "v1:calls:invitationLink", "v1:calls:invitationReceipt",

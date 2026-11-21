@@ -11,9 +11,9 @@ async function browser({ stored = 0, blocked = false, url = 'https://shop.exampl
     const history = { state: null, replaceState(state, unused, url) { this.state = state; location.href = new URL(url, location.href).href; return 'kept'; }, pushState(state, unused, url) { this.state = state; location.href = new URL(url, location.href).href; return 'kept'; } };
     const on = (name, fn) => (events[name] ??= []).push(fn);
     const document = { currentScript: { getAttribute: () => A }, visibilityState: 'visible', addEventListener: on };
-    const window = { addEventListener: on };
+    const window = { addEventListener: on, dispatchEvent(event) { for (const fn of events[event.type] ?? []) fn(event); return !event.defaultPrevented; } };
     function timer(fn, ms, repeat = 0) { timers.set(++id, { fn, at: now + ms, repeat }); return id; }
-    const context = vm.createContext({ window, document, location, history, URL, AbortController,
+    const context = vm.createContext({ window, document, location, history, URL, AbortController, Event,
         Date: { now: () => now }, sessionStorage: { getItem() { if (blocked)
                 throw Error('blocked'); return stored; }, setItem(k, v) { if (blocked)
                 throw Error('blocked'); stored = Number(v); } },
@@ -37,7 +37,7 @@ async function browser({ stored = 0, blocked = false, url = 'https://shop.exampl
         t.fn();
         await settle();
     } now = end; await settle(); }
-    return { document, history, location, reloads, tick, get requests() { return requests; }, set latest(v) { latest = v; }, set fail(v) { fail = v; }, emit: async (name, event = {}) => { for (const fn of events[name] ?? [])
+    return { document, history, location, reloads, tick, on, get requests() { return requests; }, set latest(v) { latest = v; }, set fail(v) { fail = v; }, emit: async (name, event = {}) => { for (const fn of events[name] ?? [])
             fn(event); await settle(); }, rerun: () => vm.runInContext(source, context) };
 }
 test('unchanged pages and duplicate installation do not reload', async () => { const b = await browser(); b.rerun(); await b.tick(30000); await b.emit('pageshow', { persisted: true }); assert.deepEqual(b.reloads, []); assert.equal(b.requests, 1); });
@@ -75,6 +75,24 @@ test('hash and query routers release deferred updates after navigation', async (
         assert.equal(b.reloads.length, 1);
         assert.equal(new URL(b.reloads[0]).hash, new URL(route, b.location.href).hash);
     }
+});
+test('active non-form work defers refresh across routes and restored pages until released', async () => {
+    const b = await browser();
+    let active = true, attempts = 0;
+    b.on('memql:before-site-refresh', event => { attempts++; if (active) event.preventDefault(); });
+    b.latest = B;
+    await b.tick(32500);
+    assert.equal(attempts, 1);
+    assert.equal(b.reloads.length, 0);
+    await b.tick(2100);
+    b.history.pushState({}, '', '/call?panel=chat');
+    await b.tick(2500);
+    await b.emit('pageshow', { persisted: true });
+    assert.equal(b.reloads.length, 0);
+    active = false;
+    await b.tick(30000);
+    assert.equal(b.reloads.length, 1);
+    assert.equal(new URL(b.reloads[0]).pathname, '/call');
 });
 test('initial pages and ordinary links do not start redundant probes', async () => {
     const b = await browser();

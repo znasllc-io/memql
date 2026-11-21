@@ -15,7 +15,23 @@ import (
 )
 
 func delegationTestRequest(cw *callWorld) callrules.DelegationRequest {
-	return callrules.DelegationRequest{Action: "create", Label: "Local test agent", Scopes: []string{"read", "host", "schedule", "control"}, Terms: confirmed.Terms, Participation: "adults_only", MaxCallCents: 1000, PeriodLimitCents: 1000, LifetimeLimitCents: 5000, MaxParticipants: 4, MaxDurationMinutes: 60, ExpiresAt: cw.clock.Now().Add(24 * time.Hour)}
+	return callrules.DelegationRequest{Action: "create", Label: "Local test agent", Scopes: []string{"read", "host", "schedule", "control"}, Terms: callrules.AgentTermsVersion, Purpose: "Help with the approved conversation", ConductVersion: callrules.AgentConductVersion, Participation: "adults_only", MaxCallCents: 1000, PeriodLimitCents: 1000, LifetimeLimitCents: 5000, MaxParticipants: 4, MaxDurationMinutes: 60, ExpiresAt: cw.clock.Now().Add(24 * time.Hour)}
+}
+
+// Existing behavior tests opt in to the explicit admission contract. Negative
+// conduct tests call Service.Agent directly so missing acceptance stays covered.
+func delegationTestAgent(t *testing.T, cw *callWorld, svc *Service, ctx context.Context, site callrules.SiteRef, credential string, req callrules.AgentRequest) (any, error) {
+	t.Helper()
+	if req.Action == "start" || req.Action == "schedule" || req.Action == "reschedule" || req.Action == "join" || req.Action == "topup" {
+		d, _, err := svc.agentAuthority(ctx, site, credential)
+		if err == nil {
+			req.Acceptance = &callrules.AgentAcceptance{ApprovalRevision: d.State.ApprovalRevision, ApprovalDigest: delegationApprovalDigest(d), ConductVersion: callrules.AgentConductVersion, Terms: d.State.Request.Terms}
+			if req.Action == "join" && req.IdempotencyKey == "" {
+				req.IdempotencyKey = "test-join-" + req.CallID
+			}
+		}
+	}
+	return svc.Agent(ctx, site, credential, req)
 }
 func delegationTestGrant(t *testing.T, cw *callWorld, k accountTestKey, r callrules.DelegationRequest) (string, string) {
 	t.Helper()
@@ -179,7 +195,7 @@ func TestDelegationRevocationClosesNativeEffectAfterEarlierAuthentication(t *tes
 	require.NoError(t, err)
 	sess, err := cw.svc.delegationSessionReady(ctx, cw.ref, d, pepper)
 	require.NoError(t, err)
-	quoted, err := cw.svc.Agent(ctx, cw.ref, credential, callrules.AgentRequest{Action: "quote", ParticipantLimit: 2, DurationMinutes: 60})
+	quoted, err := delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, credential, callrules.AgentRequest{Action: "quote", ParticipantLimit: 2, DurationMinutes: 60})
 	require.NoError(t, err)
 	quote, ok := quoted.(*callrules.CallQuote)
 	require.True(t, ok)
@@ -192,7 +208,7 @@ func TestDelegationRevocationClosesNativeEffectAfterEarlierAuthentication(t *tes
 	_, err = cw.svc.Start(late, sess, callrules.StartBody{Name: "Late agent", Confirm: confirmed, QuoteID: quote.QuoteID, IdempotencyKey: "late-native-start-001"})
 	require.ErrorContains(t, err, "delegation_inactive")
 	require.Empty(t, cw.media.rooms(), "revocation must win before creating media")
-	_, err = cw.svc.Agent(ctx, cw.ref, credential, callrules.AgentRequest{Action: "balance"})
+	_, err = delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, credential, callrules.AgentRequest{Action: "balance"})
 	require.ErrorContains(t, err, "delegation_inactive")
 }
 func TestDelegationAgentStartReplayLabelsAgentAndHidesHostBearer(t *testing.T) {
@@ -204,11 +220,11 @@ func TestDelegationAgentStartReplayLabelsAgentAndHidesHostBearer(t *testing.T) {
 	commerceVerified(t, cw, k)
 	credential, _ := delegationTestGrant(t, cw, k, delegationTestRequest(cw))
 	ctx := context.Background()
-	quoted, err := cw.svc.Agent(ctx, cw.ref, credential, callrules.AgentRequest{Action: "quote", ParticipantLimit: 2, DurationMinutes: 60})
+	quoted, err := delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, credential, callrules.AgentRequest{Action: "quote", ParticipantLimit: 2, DurationMinutes: 60})
 	require.NoError(t, err)
 	quote := quoted.(*callrules.CallQuote)
-	request := callrules.AgentRequest{Action: "start", IdempotencyKey: "agent-host-first-001", QuoteID: quote.QuoteID, Name: "Assistant", Terms: confirmed.Terms, Participation: "adults_only"}
-	result, err := cw.svc.Agent(ctx, cw.ref, credential, request)
+	request := callrules.AgentRequest{Action: "start", IdempotencyKey: "agent-host-first-001", QuoteID: quote.QuoteID, Name: "Assistant", Terms: callrules.AgentTermsVersion, Participation: "adults_only"}
+	result, err := delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, credential, request)
 	require.NoError(t, err)
 	started := result.(callrules.StartResult)
 	require.NotEmpty(t, started.Call.ID)
@@ -216,11 +232,11 @@ func TestDelegationAgentStartReplayLabelsAgentAndHidesHostBearer(t *testing.T) {
 	for _, seat := range cw.seatsIn(started.Call.ID) {
 		require.Equal(t, string(callrules.KindAgent), rowString(seat, "kind"))
 	}
-	replay, err := cw.svc.Agent(ctx, cw.ref, credential, request)
+	replay, err := delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, credential, request)
 	require.NoError(t, err)
 	require.Equal(t, started.Call.ID, replay.(callrules.StartResult).Call.ID)
 	require.Empty(t, replay.(callrules.StartResult).Call.HostToken)
-	_, err = cw.svc.Agent(ctx, cw.ref, credential, callrules.AgentRequest{Action: "quote", ParticipantLimit: 5, DurationMinutes: 60})
+	_, err = delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, credential, callrules.AgentRequest{Action: "quote", ParticipantLimit: 5, DurationMinutes: 60})
 	require.ErrorContains(t, err, "delegation_call_limit")
 }
 func TestDelegationAutomaticTopupsRespectSeparateCapsAndConcurrentThreshold(t *testing.T) {
@@ -242,7 +258,7 @@ func TestDelegationAutomaticTopupsRespectSeparateCapsAndConcurrentThreshold(t *t
 		wg.Add(1)
 		go func(i int, svc *Service) {
 			defer wg.Done()
-			_, err := svc.Agent(context.Background(), cw.ref, credential, callrules.AgentRequest{Action: "topup", IdempotencyKey: fmt.Sprintf("concurrent-topup-%04d", i)})
+			_, err := delegationTestAgent(t, cw, svc, context.Background(), cw.ref, credential, callrules.AgentRequest{Action: "topup", IdempotencyKey: fmt.Sprintf("concurrent-topup-%04d", i)})
 			answers <- err
 		}(i, svc)
 	}
@@ -282,10 +298,10 @@ func TestDelegationScheduledAgentJoinAndRevokedGuestOpening(t *testing.T) {
 			commerceVerified(t, cw, k)
 			credential, grant := delegationTestGrant(t, cw, k, delegationTestRequest(cw))
 			ctx := context.Background()
-			quoted, err := cw.svc.Agent(ctx, cw.ref, credential, callrules.AgentRequest{Action: "quote", ParticipantLimit: 2, DurationMinutes: 60})
+			quoted, err := delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, credential, callrules.AgentRequest{Action: "quote", ParticipantLimit: 2, DurationMinutes: 60})
 			require.NoError(t, err)
 			quote := quoted.(*callrules.CallQuote)
-			response, err := cw.svc.Agent(ctx, cw.ref, credential, callrules.AgentRequest{Action: "schedule", IdempotencyKey: "agent-booking-000001", QuoteID: quote.QuoteID, Title: "Agent lesson", Start: cw.clock.Now().Add(time.Hour)})
+			response, err := delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, credential, callrules.AgentRequest{Action: "schedule", IdempotencyKey: "agent-booking-000001", QuoteID: quote.QuoteID, Title: "Agent lesson", Start: cw.clock.Now().Add(time.Hour)})
 			require.NoError(t, err)
 			booking := response.(callrules.ScheduledCall)
 			require.Empty(t, booking.HostToken)
@@ -303,7 +319,7 @@ func TestDelegationScheduledAgentJoinAndRevokedGuestOpening(t *testing.T) {
 				require.ErrorContains(t, err, "cancelled")
 				require.Empty(t, cw.media.rooms(), "a guest invitation cannot revive a revoked spending grant")
 			} else {
-				joined, err := cw.svc.Agent(ctx, cw.ref, credential, callrules.AgentRequest{Action: "join", CallID: booking.ID, Name: "Teaching assistant"})
+				joined, err := delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, credential, callrules.AgentRequest{Action: "join", CallID: booking.ID, Name: "Teaching assistant"})
 				require.NoError(t, err)
 				result := joined.(callrules.JoinResult)
 				require.Equal(t, callrules.OutcomeAdmit, result.Outcome)
@@ -324,34 +340,34 @@ func TestDelegationBookingAndHistoryMutationsStayWithinGrant(t *testing.T) {
 	credential, _ := delegationTestGrant(t, cw, k, delegationTestRequest(cw))
 	other, _ := delegationTestGrant(t, cw, k, delegationTestRequest(cw))
 	ctx := context.Background()
-	quoted, err := cw.svc.Agent(ctx, cw.ref, credential, callrules.AgentRequest{Action: "quote", ParticipantLimit: 2, DurationMinutes: 60})
+	quoted, err := delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, credential, callrules.AgentRequest{Action: "quote", ParticipantLimit: 2, DurationMinutes: 60})
 	require.NoError(t, err)
 	quote := quoted.(*callrules.CallQuote)
-	response, err := cw.svc.Agent(ctx, cw.ref, credential, callrules.AgentRequest{Action: "schedule", IdempotencyKey: "scope-booking-000001", QuoteID: quote.QuoteID, Start: cw.clock.Now().Add(time.Hour)})
+	response, err := delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, credential, callrules.AgentRequest{Action: "schedule", IdempotencyKey: "scope-booking-000001", QuoteID: quote.QuoteID, Start: cw.clock.Now().Add(time.Hour)})
 	require.NoError(t, err)
 	booking := response.(callrules.ScheduledCall)
-	_, err = cw.svc.Agent(ctx, cw.ref, other, callrules.AgentRequest{Action: "cancel", CallID: booking.ID})
+	_, err = delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, other, callrules.AgentRequest{Action: "cancel", CallID: booking.ID})
 	require.ErrorContains(t, err, "delegation_booking_scope")
-	_, err = cw.svc.Agent(ctx, cw.ref, other, callrules.AgentRequest{Action: "reschedule", IdempotencyKey: "scope-reschedule-001", CallID: booking.ID, QuoteID: quote.QuoteID, Start: cw.clock.Now().Add(2 * time.Hour)}) // gitleaks:allow -- public idempotency fixture, not an authorization credential.
+	_, err = delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, other, callrules.AgentRequest{Action: "reschedule", IdempotencyKey: "scope-reschedule-001", CallID: booking.ID, QuoteID: quote.QuoteID, Start: cw.clock.Now().Add(2 * time.Hour)}) // gitleaks:allow -- public idempotency fixture, not an authorization credential.
 	require.ErrorContains(t, err, "delegation_booking_scope")
-	_, err = cw.svc.Agent(ctx, cw.ref, credential, callrules.AgentRequest{Action: "cancel", CallID: booking.ID})
+	_, err = delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, credential, callrules.AgentRequest{Action: "cancel", CallID: booking.ID})
 	require.NoError(t, err)
-	listed, err := cw.svc.Agent(ctx, cw.ref, credential, callrules.AgentRequest{Action: "history"})
+	listed, err := delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, credential, callrules.AgentRequest{Action: "history"})
 	require.NoError(t, err)
 	page := listed.(callrules.HistoryPage)
 	require.Len(t, page.Calls, 1)
 	historyID := page.Calls[0].ID
-	_, err = cw.svc.Agent(ctx, cw.ref, other, callrules.AgentRequest{Action: "archive_preview", CallID: historyID})
+	_, err = delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, other, callrules.AgentRequest{Action: "archive_preview", CallID: historyID})
 	require.ErrorContains(t, err, "delegation_call_scope")
-	_, err = cw.svc.Agent(ctx, cw.ref, credential, callrules.AgentRequest{Action: "archive", CallID: historyID})
+	_, err = delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, credential, callrules.AgentRequest{Action: "archive", CallID: historyID})
 	require.ErrorIs(t, err, callrules.ErrInvalid, "standing permission does not bypass archive preview")
-	preview, err := cw.svc.Agent(ctx, cw.ref, credential, callrules.AgentRequest{Action: "archive_preview", CallID: historyID})
+	preview, err := delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, credential, callrules.AgentRequest{Action: "archive_preview", CallID: historyID})
 	require.NoError(t, err)
 	confirmation := preview.(callrules.HistoryActionResult)
 	require.NotEmpty(t, confirmation.ConfirmationToken)
-	_, err = cw.svc.Agent(ctx, cw.ref, credential, callrules.AgentRequest{Action: "archive", CallID: historyID, ConfirmationToken: confirmation.ConfirmationToken, Acknowledged: true})
+	_, err = delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, credential, callrules.AgentRequest{Action: "archive", CallID: historyID, ConfirmationToken: confirmation.ConfirmationToken, Acknowledged: true})
 	require.NoError(t, err)
-	_, err = cw.svc.Agent(ctx, cw.ref, credential, callrules.AgentRequest{Action: "restore", CallID: historyID})
+	_, err = delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, credential, callrules.AgentRequest{Action: "restore", CallID: historyID})
 	require.NoError(t, err)
 }
 
@@ -383,7 +399,7 @@ func TestDelegationSavedCardReplacementRequiresFreshMandate(t *testing.T) {
 	state, err = cw.svc.store.commerceState(ctx, cw.owner, cw.site, k.result.Account.AccountID)
 	require.NoError(t, err)
 	require.Equal(t, "pm_replacement_for_test", state.PaymentMethodID, "old payment events must not restore an old card")
-	_, err = cw.svc.Agent(ctx, cw.ref, credential, callrules.AgentRequest{Action: "topup", IdempotencyKey: "old-card-mandate-001"})
+	_, err = delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, credential, callrules.AgentRequest{Action: "topup", IdempotencyKey: "old-card-mandate-001"})
 	require.ErrorContains(t, err, "payment_method_changed")
 	state, err = cw.svc.store.commerceState(ctx, cw.owner, cw.site, k.result.Account.AccountID)
 	require.NoError(t, err)
@@ -391,6 +407,6 @@ func TestDelegationSavedCardReplacementRequiresFreshMandate(t *testing.T) {
 		require.NotEqual(t, "auto_topup", op.Kind, "changed card cannot dispatch a provider charge")
 	}
 	newCredential, _ := delegationTestGrant(t, cw, k, req)
-	_, err = cw.svc.Agent(ctx, cw.ref, newCredential, callrules.AgentRequest{Action: "topup", IdempotencyKey: "new-card-mandate-001"})
+	_, err = delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, newCredential, callrules.AgentRequest{Action: "topup", IdempotencyKey: "new-card-mandate-001"})
 	require.NoError(t, err)
 }

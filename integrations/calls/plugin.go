@@ -149,7 +149,7 @@ func New(d Deps) *Integration {
 	}
 	i.service = &Service{
 		store: i.store, gateDB: i.gateDB, pepper: i.pepper, random: i.random,
-		now: i.now, media: media, logger: i.logger,
+		now: i.now, media: media, logger: i.logger, guestRetirement: &guestRetirementScan{},
 	}
 	return i
 }

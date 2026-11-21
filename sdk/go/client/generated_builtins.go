@@ -820,6 +820,8 @@ type CallsPolicySetArgs struct {
 	MaxAgents int
 	// Join attempts allowed per room per minute, 1 to 10000.
 	RoomJoinsPerMinute int
+	// Unfunded unclaimed guest retirement after 30 to 365 days without use; default 30. Funded and Passkey-secured accounts are excluded.
+	GuestInactiveDays int
 	// Upcoming scheduled calls allowed per key, 0 to 1000.
 	MaxUpcomingScheduled int
 	// The longest a scheduled call may be, in minutes, 1 to 1440.
@@ -895,6 +897,13 @@ func CallsPolicySetBuild(args CallsPolicySetArgs) string {
 		}
 		b.WriteString("roomJoinsPerMinute: ")
 		b.WriteString(fmt.Sprintf("%v", args.RoomJoinsPerMinute))
+	}
+	if args.GuestInactiveDays != 0 {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("guestInactiveDays: ")
+		b.WriteString(fmt.Sprintf("%v", args.GuestInactiveDays))
 	}
 	if args.MaxUpcomingScheduled != 0 {
 		if b.Len() > 23 {

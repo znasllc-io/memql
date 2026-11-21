@@ -418,6 +418,12 @@ func (h *Handler) serveCallsSurface(w http.ResponseWriter, r *http.Request, site
 			return
 		}
 	}
+	if route.op == callsOpSession {
+		if _, err := callhistory.PortraitQuery(r.URL.RawQuery); err != nil {
+			writeCallsRefusal(w, callsRefusalInvalid)
+			return
+		}
+	}
 	budget := route.op
 	// Only account POST needs its bounded body before choosing a budget. A small,
 	// unambiguous logout uses the exit/control budget, so reading the account or
@@ -608,6 +614,11 @@ func callsStamp(route callsRoute, siteID, owner string) func(*httputil.ProxyRequ
 		pr.Out.URL.Path = route.upstream
 		pr.Out.URL.RawPath = ""
 		pr.Out.URL.RawQuery = ""
+		if route.op == callsOpSession {
+			if portrait, err := callhistory.PortraitQuery(pr.In.URL.RawQuery); err == nil && portrait != "" {
+				pr.Out.URL.RawQuery = "portrait=" + portrait
+			}
+		}
 		if route.op == callsOpHistory && route.method == http.MethodGet {
 			if _, err := callhistory.ParseHistoryQuery(pr.In.URL.RawQuery); err == nil {
 				pr.Out.URL.RawQuery = pr.In.URL.RawQuery

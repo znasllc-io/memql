@@ -49,6 +49,7 @@ shape simulatedWalletEntry callsSimulatedWalletEntryFull {
   kind
   requestDigest
   balanceCents
+  usageRemainderUnits
   creditedCents
   debitedCents
   plan
@@ -104,6 +105,7 @@ shape room callsRoomFull {
 /// The seat row as the calls integration reads it. No digest is projected.
 @row
 shape seat callsSeatFull {
+  agentData
   departureReceipt
   departureKeepRunning
   departureWrapUpAt
@@ -214,6 +216,7 @@ shape policy callsPolicyFull {
   maxAgents
   roomJoinsPerMinute
   maxUpcomingScheduled
+  guestInactiveDays
   maxScheduledMinutes
   hostLeftGrace
   passTtl
@@ -376,4 +379,29 @@ shape familyState callsFamilyFull {
  tokenDigest
  sessionId
  stateData
+}
+
+/// Native-only agent review journal; never exposed directly.
+@row
+shape agentAdmissionState callsAgentAdmissionFull {
+ row.id
+ row.createdAt
+ siteId
+ roomId
+ stateData
+}
+
+/// Native-only canonical portrait metadata. Blob references never leave the service.
+@row
+shape agentPortrait callsPortraitFull {
+ row.id
+ row.createdAt
+ siteId
+ keyId
+ digest
+ mimeType
+ width
+ height
+ blobRef
+ issuedAt
 }

@@ -20,7 +20,7 @@ func TestDelegationBudgetCountsPendingAndDoesNotOverflow(t *testing.T) {
 
 func TestDelegationRequiresSeparateTopupAuthority(t *testing.T) {
 	now := time.Date(2026, 11, 20, 0, 0, 0, 0, time.UTC)
-	r := DelegationRequest{Action: "create", Terms: "test-terms", Participation: "adults_only", Label: "Assistant", Scopes: []string{"read", "host"}, MaxCallCents: 1000, PeriodLimitCents: 5000, LifetimeLimitCents: 10000, MaxParticipants: 4, MaxDurationMinutes: 60, ExpiresAt: now.Add(24 * time.Hour)}
+	r := DelegationRequest{Action: "create", Terms: AgentTermsVersion, Purpose: "Help with the approved conversation", ConductVersion: AgentConductVersion, Participation: "adults_only", Label: "Assistant", Scopes: []string{"read", "host"}, MaxCallCents: 1000, PeriodLimitCents: 5000, LifetimeLimitCents: 10000, MaxParticipants: 4, MaxDurationMinutes: 60, ExpiresAt: now.Add(24 * time.Hour)}
 	if !ValidDelegation(r, now) {
 		t.Fatal("valid grant refused")
 	}
@@ -40,7 +40,7 @@ func TestDelegationRequiresSeparateTopupAuthority(t *testing.T) {
 
 func TestDelegationInvitationApprovalIsExplicitAndOldGrantIsReadable(t *testing.T) {
 	now := time.Date(2026, 11, 20, 0, 0, 0, 0, time.UTC)
-	r := DelegationRequest{Action: "create", Terms: "test-terms", Participation: "adults_only", Label: "Assistant", Scopes: []string{"read", "invite", "schedule"}, MaxCallCents: 1000, PeriodLimitCents: 5000, LifetimeLimitCents: 10000, MaxParticipants: 4, MaxDurationMinutes: 60, ExpiresAt: now.Add(24 * time.Hour)}
+	r := DelegationRequest{Action: "create", Terms: AgentTermsVersion, Purpose: "Help with the approved conversation", ConductVersion: AgentConductVersion, Participation: "adults_only", Label: "Assistant", Scopes: []string{"read", "invite", "schedule"}, MaxCallCents: 1000, PeriodLimitCents: 5000, LifetimeLimitCents: 10000, MaxParticipants: 4, MaxDurationMinutes: 60, ExpiresAt: now.Add(24 * time.Hour)}
 	if !ValidDelegation(r, now) || ValidDelegationApproval(r, now) || DelegationRecipientAllowed(r, "guest@example.test") {
 		t.Fatal("legacy grant must stay readable but cannot send or be approved with implicit recipients")
 	}
