@@ -36,8 +36,12 @@ export interface PlacementTokens {
   maxSoloWidth: number;
 }
 
-/** The gap between a window's bottom edge and the dock's top (Draft B: 16px). */
-export const DOCK_GAP = 16;
+/**
+ * The gap between a window's bottom edge and the dock's top. Draft B had 16px;
+ * Jesús closed it to 4px on Nov 20 2026, after seeing it live ("let's close
+ * that ... make it four pixels"), so the app and the dock nearly touch.
+ */
+export const DOCK_GAP = 4;
 
 /** The dock's band: `.os-dock` floats 12px up and is `--os-dock-h` (64px) tall. */
 const DOCK_BAND = 12 + 64;
