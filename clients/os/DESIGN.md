@@ -123,13 +123,16 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    act's promise takes no further press until it settles (`kit/oneAtATime`):
    a labelled button says its busy word ("Saving…"), then, given a
    `doneLabel`, its done word with a tick ("Saved ✓") for two seconds, still
-   taking no press; an icon-only button just dims. Resolve `false` when the act
+   taking no press; an icon-only button just dims. Either way a press holds
+   the button for at least half a second, however fast the act finishes (a
+   local download takes a few hundredths of a second, so a hold that ended
+   with the act let a burst through). Resolve `false` when the act
    did not happen, so the button never says it did. Hand the promise back
    (`onClick={() => save(file)}`, not `void save(file)`); the engine refuses
    the same save while one runs, for agents with no button.
    Download is one of these acts (Head icon, right-click, Shared with me, a
-   version's icon): a burst downloads once, the icon dims while the file is
-   prepared, and the rail says `Downloaded "name".` for five seconds, as it
+   version's icon): a burst downloads once, the icon dims for at least half a
+   second, and longer while the file is prepared, and the rail says `Downloaded "name".` for five seconds, as it
    says `Saved ...` after Save.
 
 7. **Say it once.** A scope is named in one place. The rail highlights it,
