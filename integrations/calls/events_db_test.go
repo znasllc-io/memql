@@ -337,18 +337,23 @@ func TestALateOrRepeatedMediaEventChangesNothing(t *testing.T) {
 	back, guest, err := cw.rejoin(guest, "")
 	require.NoError(t, err)
 	require.Equal(t, callrules.OutcomeAdmit, back.Outcome, "the guest was not let back in")
+	require.NotEqual(t, in.Identity, back.Identity, "a new admission must retire the previous media identity")
 	reentered := cw.row(seatConcept, guest.SeatID)
 	versions := cw.versions(seatConcept, guest.SeatID)
 
-	require.Equal(t, outcomeOld, cw.deliver(eventBody(t, eventParticipantLeft, room, in.Identity, firstStintEnd, nil)),
+	require.Equal(t, outcomeIgnored, cw.deliver(eventBody(t, eventParticipantLeft, room, in.Identity, firstStintEnd, nil)),
 		"a disconnect from the seat's earlier stint was applied to its new one")
 	sameSecond := rowTime(reentered, "joinedAt").Truncate(time.Second)
-	require.Equal(t, outcomeOld, cw.deliver(eventBody(t, eventParticipantJoined, room, in.Identity, sameSecond, nil)),
+	require.Equal(t, outcomeOld, cw.deliver(eventBody(t, eventParticipantJoined, room, back.Identity, sameSecond, nil)),
 		"an event in the same second as the seat's last change was applied")
 	require.Equal(t, versions, cw.versions(seatConcept, guest.SeatID), "an old event wrote the seat")
 	require.Equal(t, "admitted", cw.row(seatConcept, guest.SeatID)["status"])
 
-	body := eventBody(t, eventParticipantJoined, room, in.Identity, cw.tick(), nil)
+	// A late connection using the retired token is removed, without touching the
+	// newer admission. Time ordering still applies within the current identity.
+	require.Equal(t, outcomeRemoved, cw.deliver(eventBody(t, eventParticipantJoined, room, in.Identity, cw.tick(), nil)))
+	require.Equal(t, versions, cw.versions(seatConcept, guest.SeatID))
+	body := eventBody(t, eventParticipantJoined, room, back.Identity, cw.tick(), nil)
 	id := cw.stage("", body, true, "registered", WebhookSource)
 	reply, err := cw.applyDelivery(id)
 	require.NoError(t, err)
