@@ -136,6 +136,7 @@ func (i *Integration) handleProcessingPublish(ctx context.Context, args map[stri
 	}
 	return i.node("processingPublish", receipt)
 }
+
 // narrowing: GUARDED -- the float arm requires 0 <= x <= 1e12 before either
 // int64 conversion, then refuses fractional values. Invalid numbers are rejected,
 // not saturated or interpreted as an unset zero; callers apply operation bounds.
