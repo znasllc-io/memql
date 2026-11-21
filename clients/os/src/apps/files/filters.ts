@@ -35,9 +35,9 @@ import { artifactName, isContentKind, type ArtifactRow } from "./rows";
 // `planArchive` -- because it is the engine's mutation. What a person reads
 // is "Delete" (José, Nov 18 2026), and the Bin is where a deleted file waits.
 
-/** No client constraint. */
+/** No account constraint. */
 export const ACCOUNT_ANY = "all";
-/** Only rows tied to no client at all. */
+/** Only rows tied to no account at all. */
 export const ACCOUNT_NONE = "none";
 
 export type KindFilter = "all" | (typeof CONTENT_KINDS)[number];
@@ -70,7 +70,7 @@ export const EMPTY_DESK: DeskMembership = {
 
 /**
  * `source`, `accountId` AND `label` WERE REFINE'S FACETS, and they are back
- * (Jesús, Nov 20 2026, Option C of draft p17): Label, Source and Client are
+ * (Jesús, Nov 20 2026, Option C of draft p17): Label, Source and Account are
  * groups in the search panel's kind menu, under the kinds of file (see
  * `filterMenuPick`). `kind` (the artifact's index kind) has no control and stays
  * at its default.
@@ -414,11 +414,24 @@ export function labelsOf(rows: readonly ArtifactRow[]): string[] {
   return [...seen].sort((a, b) => a.localeCompare(b));
 }
 
+/**
+ * The sources at least one of these rows has, in the concept's own order: the
+ * Source group offers only these, the way the Label group is absent when
+ * nothing is labelled. ponytail: folds the rows LOADED so far (labels come from
+ * a server facet read; sources have none), so a source only on a not-yet-loaded
+ * page appears once its page loads; add a facet to libraryBrowseFacets if needed.
+ */
+export function sourcesOf(rows: readonly Pick<ArtifactRow, "source">[], picked: SourceFilter = "all"): (typeof SOURCE_VALUES)[number][] {
+  const seen = new Set<string>(rows.map((row) => row.source));
+  // The one picked stays listed, so the person can see it and undo it.
+  return SOURCE_VALUES.filter((source) => seen.has(source) || source === picked);
+}
+
 // ===========================================================================
 // THE KIND MENU HOLDS FOUR SINGLE CHOICES (Jesús, Nov 20 2026, draft p17 C)
 // ===========================================================================
 // Label, source and client came back INSIDE the search panel's kind menu, as
-// groups under the kinds of file: Kind, Label, Source, Client. Each group is
+// groups under the kinds of file: Kind, Label, Source, Account. Each group is
 // its own single choice -- one kind AND one label AND one source AND one
 // client can be on together -- so one option value carries its group in front
 // of a colon ("label:invoices") and `filterMenuPick` turns it back into the
@@ -435,6 +448,8 @@ export const SOURCE_LABELS: Record<SourceFilter, string> = {
   derived: "Derived",
   user_created: "Written here",
   live: "Live",
+  app_session: "Recorded from an app session",
+  vision_input: "Image sent to an app",
   pipeline: "Pipeline",
 };
 

@@ -79,8 +79,7 @@ import {
   type ArtifactRow,
   type CompositionRow,
 } from "./rows";
-import { ACCOUNT_ANY, ACCOUNT_NONE, filterMenuPick, filterMenuValue, LABEL_ANY, otherFiltersOn, SOURCE_LABELS } from "./filters";
-import { SOURCE_VALUES } from "./concepts";
+import { ACCOUNT_ANY, ACCOUNT_NONE, filterMenuPick, filterMenuValue, LABEL_ANY, otherFiltersOn, SOURCE_LABELS, sourcesOf } from "./filters";
 import { accountIsArchived, accountName } from "../accounts/rows";
 import { useAccountOptions } from "../accounts/tie";
 import { Inspector } from "./Inspector";
@@ -821,10 +820,10 @@ export function BrowseSection({
   const mainRef = useRef<HTMLDivElement | null>(null);
   const searchPanelId = useId();
   useEffect(() => { if (searchOpen) searchInput.current?.focus(); }, [searchOpen]);
-  // Read only while the panel is open: the Client group is the one reader.
+  // Read only while the panel is open: the Account group is the one reader.
   const accountOptions = useAccountOptions(searchOpen);
   // THE KIND MENU (Jesús, Nov 20 2026, draft p17 Option C): the kinds of
-  // file, then Label, Source and Client as more groups, each its own single
+  // file, then Label, Source and Account as more groups, each its own single
   // choice with its own check (filters.ts `filterMenuPick`). The button reads the
   // kind, plus "+N" while N of the other three are on: the drawing shows only
   // the kind, and this is the least that still says something else narrows
@@ -835,6 +834,8 @@ export function BrowseSection({
   const kindName = FILE_TYPES.find(([type]) => type === filter.type)?.[1] ?? filter.type;
   const option = (group: Parameters<typeof filterMenuValue>[0], value: string, name: string, checked: boolean) =>
     <option key={value} value={filterMenuValue(group, value)} data-checked={checked}>{name}</option>;
+  // Only the sources some loaded file has (filters.ts `sourcesOf`).
+  const shownSources = sourcesOf(content, filter.source);
   const filterMenu = <>
     <optgroup label="Kind">{FILE_TYPES.map(([type, name]) => option("type", type, name, filter.type === type))}</optgroup>
     {shared ? null : <>
@@ -846,12 +847,13 @@ export function BrowseSection({
       </optgroup>}
       <optgroup label="Source">
         {option("source", "all", SOURCE_LABELS.all, filter.source === "all")}
-        {SOURCE_VALUES.map((source) => option("source", source, SOURCE_LABELS[source], filter.source === source))}
+        {shownSources.map((source) => option("source", source, SOURCE_LABELS[source], filter.source === source))}
       </optgroup>
-      {/* "No client" is its own answer: what still needs filing (epic memql#4800). */}
-      <optgroup label="Client">
-        {option("client", ACCOUNT_ANY, "Any client", filter.accountId === ACCOUNT_ANY)}
-        {option("client", ACCOUNT_NONE, "No client", filter.accountId === ACCOUNT_NONE)}
+      {/* "No account" is its own answer: what still needs filing (epic memql#4800).
+          Called Account, not Client (Jesús, Nov 20 2026): it is the Accounts app's list. */}
+      <optgroup label="Account">
+        {option("client", ACCOUNT_ANY, "Any account", filter.accountId === ACCOUNT_ANY)}
+        {option("client", ACCOUNT_NONE, "No account", filter.accountId === ACCOUNT_NONE)}
         {accountOptions.map((account) => option("client", account.id,
           accountIsArchived(account) ? `${accountName(account)} (archived)` : accountName(account), filter.accountId === account.id))}
       </optgroup>
