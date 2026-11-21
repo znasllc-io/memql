@@ -488,6 +488,24 @@ shape reportAccessAudit callsReportAudit {
 }
 
 @row
-shape messageReceipt callsMessageReceiptFull { row.id, row.createdAt, siteId, ownerUserId, roomId, seatId, identity, joinedAt, expiresAt, receiptData }
+shape messageReceipt callsMessageReceiptFull {
+ row.id
+ row.createdAt
+ siteId
+ ownerUserId
+ roomId
+ seatId
+ identity
+ joinedAt
+ expiresAt
+ receiptData
+}
 @row
-shape messageRate callsMessageRateFull { row.id, row.createdAt, ownerUserId, scope, targetId, rateData }
+shape messageRate callsMessageRateFull {
+ row.id
+ row.createdAt
+ ownerUserId
+ scope
+ targetId
+ rateData
+}
