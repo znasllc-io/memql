@@ -13,8 +13,11 @@ import {
   otherFiltersOn,
   labelsOf,
   LABEL_ANY,
+  sourcesOf,
+  SOURCE_LABELS,
   type FilesFilter,
 } from "../../src/apps/files/filters";
+import { SOURCE_VALUES } from "../../src/apps/files/concepts";
 import { artifactFromRow, type ArtifactRow } from "../../src/apps/files/rows";
 
 // The list derivation (design D1): kind / source / archived / search / folder
@@ -245,5 +248,20 @@ describe("the kind menu's four single choices (Jesús, Nov 20 2026, draft p17 C)
     expect(otherFiltersOn(DEFAULT_FILTER)).toBe(0);
     expect(otherFiltersOn({ ...DEFAULT_FILTER, label: "x", source: "uploaded" })).toBe(2);
     expect(otherFiltersOn({ ...DEFAULT_FILTER, accountId: "none" })).toBe(1);
+  });
+});
+
+describe("the Source group lists only the sources some file has (Jesús, Nov 20 2026)", () => {
+  it("keeps the concept's order, drops the rest, and keeps the one picked", () => {
+    const rows = [{ source: "derived" }, { source: "uploaded" }, { source: "uploaded" }];
+    expect(sourcesOf(rows)).toEqual(["uploaded", "derived"]);
+    expect(sourcesOf([])).toEqual([]);
+    expect(sourcesOf(rows, "pipeline")).toEqual(["uploaded", "derived", "pipeline"]);
+  });
+
+  it("has a plain word for every source value, the engine's two newest included", () => {
+    expect(SOURCE_VALUES).toContain("app_session");
+    expect(SOURCE_VALUES).toContain("vision_input");
+    for (const value of SOURCE_VALUES) expect(SOURCE_LABELS[value]).toBeTruthy();
   });
 });

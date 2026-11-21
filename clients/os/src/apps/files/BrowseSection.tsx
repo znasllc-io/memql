@@ -76,8 +76,7 @@ import {
   type ArtifactRow,
   type CompositionRow,
 } from "./rows";
-import { ACCOUNT_ANY, ACCOUNT_NONE, filterMenuPick, filterMenuValue, LABEL_ANY, otherFiltersOn, SOURCE_LABELS } from "./filters";
-import { SOURCE_VALUES } from "./concepts";
+import { ACCOUNT_ANY, ACCOUNT_NONE, filterMenuPick, filterMenuValue, LABEL_ANY, otherFiltersOn, SOURCE_LABELS, sourcesOf } from "./filters";
 import { accountIsArchived, accountName } from "../accounts/rows";
 import { useAccountOptions } from "../accounts/tie";
 import { Inspector } from "./Inspector";
@@ -788,6 +787,8 @@ export function BrowseSection({
   const kindName = FILE_TYPES.find(([type]) => type === filter.type)?.[1] ?? filter.type;
   const option = (group: Parameters<typeof filterMenuValue>[0], value: string, name: string, checked: boolean) =>
     <option key={value} value={filterMenuValue(group, value)} data-checked={checked}>{name}</option>;
+  // Only the sources some loaded file has (filters.ts `sourcesOf`).
+  const shownSources = sourcesOf(content, filter.source);
   const filterMenu = <>
     <optgroup label="Kind">{FILE_TYPES.map(([type, name]) => option("type", type, name, filter.type === type))}</optgroup>
     {shared ? null : <>
@@ -799,7 +800,7 @@ export function BrowseSection({
       </optgroup>}
       <optgroup label="Source">
         {option("source", "all", SOURCE_LABELS.all, filter.source === "all")}
-        {SOURCE_VALUES.map((source) => option("source", source, SOURCE_LABELS[source], filter.source === source))}
+        {shownSources.map((source) => option("source", source, SOURCE_LABELS[source], filter.source === source))}
       </optgroup>
       {/* "No client" is its own answer: what still needs filing (epic memql#4800). */}
       <optgroup label="Client">

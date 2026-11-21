@@ -412,6 +412,19 @@ export function labelsOf(rows: readonly ArtifactRow[]): string[] {
   return [...seen].sort((a, b) => a.localeCompare(b));
 }
 
+/**
+ * The sources at least one of these rows has, in the concept's own order: the
+ * Source group offers only these, the way the Label group is absent when
+ * nothing is labelled. ponytail: folds the rows LOADED so far (labels come from
+ * a server facet read; sources have none), so a source only on a not-yet-loaded
+ * page appears once its page loads; add a facet to libraryBrowseFacets if needed.
+ */
+export function sourcesOf(rows: readonly Pick<ArtifactRow, "source">[], picked: SourceFilter = "all"): (typeof SOURCE_VALUES)[number][] {
+  const seen = new Set<string>(rows.map((row) => row.source));
+  // The one picked stays listed, so the person can see it and undo it.
+  return SOURCE_VALUES.filter((source) => seen.has(source) || source === picked);
+}
+
 // ===========================================================================
 // THE KIND MENU HOLDS FOUR SINGLE CHOICES (Jesús, Nov 20 2026, draft p17 C)
 // ===========================================================================
@@ -433,6 +446,8 @@ export const SOURCE_LABELS: Record<SourceFilter, string> = {
   derived: "Derived",
   user_created: "Written here",
   live: "Live",
+  app_session: "Recorded from an app session",
+  vision_input: "Image sent to an app",
   pipeline: "Pipeline",
 };
 

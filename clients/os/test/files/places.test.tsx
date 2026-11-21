@@ -184,8 +184,8 @@ describe("the Head line and its hidden search panel (José, Nov 19 2026)", () =>
     // Kind first, then Source and Client (no Label group: nothing is labelled).
     const kinds = openSelect(within(panel).getByLabelText("Filter files"));
     expect([...kinds.querySelectorAll(".os-select-group")].map((g) => g.textContent)).toEqual(["Kind", "Source", "Client"]);
-    expect(within(kinds).getAllByRole("option").map((o) => o.textContent).slice(0, 9))
-      .toEqual(["All", "Folders", "Documents", "Images", "Media", "Sheets", "Archives", "Misc", "Any source"]);
+    expect(within(kinds).getAllByRole("option").map((o) => o.textContent).slice(0, 10))
+      .toEqual(["All", "Folders", "Documents", "Images", "Media", "Sheets", "Archives", "Misc", "Any source", "Uploaded"]);
     expect(within(openSelect(within(panel).getByLabelText("Sort"))).getAllByRole("option").map((o) => o.textContent))
       .toEqual(["Name", "Newest first", "Oldest first", "Size", "Kind"]);
     expect(within(openSelect(within(panel).getByLabelText("Added"))).getAllByRole("option").map((o) => o.textContent))
@@ -258,6 +258,9 @@ describe("the Head line and its hidden search panel (José, Nov 19 2026)", () =>
     const list = openSelect(menu());
     expect([...list.querySelectorAll(".os-select-group")].map((g) => g.textContent)).toEqual(["Kind", "Label", "Source", "Client"]);
     expect(within(list).getByRole("option", { name: "Made by an agent" })).toBeTruthy();
+    // Only the sources some file has: uploaded and agent-made here, nothing else.
+    expect(within(list).queryByRole("option", { name: "Derived" })).toBeNull();
+    expect(within(list).queryByRole("option", { name: "Pipeline" })).toBeNull();
     expect(within(list).getByRole("option", { name: "No client" })).toBeTruthy();
     // Every group starts on its "any" answer, each with its own check.
     expect(checked()).toEqual(["All", "Any label", "Any source", "Any client"]);
