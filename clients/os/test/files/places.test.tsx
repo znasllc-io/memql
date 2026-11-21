@@ -181,9 +181,9 @@ describe("the Head line and its hidden search panel (José, Nov 19 2026)", () =>
     expect(selectedLabel(within(panel).getByLabelText("Sort"))).toBe("Newest first");
     expect(selectedLabel(within(panel).getByLabelText("Added"))).toBe("Any time");
     expect(within(panel).queryByRole("button", { name: /^Add/ })).toBeNull();
-    // Kind first, then Source and Client (no Label group: nothing is labelled).
+    // Kind first, then Source and Account (no Label group: nothing is labelled).
     const kinds = openSelect(within(panel).getByLabelText("Filter files"));
-    expect([...kinds.querySelectorAll(".os-select-group")].map((g) => g.textContent)).toEqual(["Kind", "Source", "Client"]);
+    expect([...kinds.querySelectorAll(".os-select-group")].map((g) => g.textContent)).toEqual(["Kind", "Source", "Account"]);
     expect(within(kinds).getAllByRole("option").map((o) => o.textContent).slice(0, 10))
       .toEqual(["All", "Folders", "Documents", "Images", "Media", "Sheets", "Archives", "Misc", "Any source", "Uploaded"]);
     expect(within(openSelect(within(panel).getByLabelText("Sort"))).getAllByRole("option").map((o) => o.textContent))
@@ -238,7 +238,7 @@ describe("the Head line and its hidden search panel (José, Nov 19 2026)", () =>
     expect(selectedLabel(screen.getByLabelText("Sort"))).toBe("Name");
   });
 
-  it("puts Label, Source and Client in the kind menu as single choices that stack, and closing clears them (Jesús, Nov 20 2026, p17 C)", { timeout: 20000 }, async () => {
+  it("puts Label, Source and Account in the kind menu as single choices that stack, and closing clears them (Jesús, Nov 20 2026, p17 C)", { timeout: 20000 }, async () => {
     h.connection = fakeConnection({
       accounts: [{ id: "acme", name: "Acme Consulting", status: "active", createdAt: "2026-08-01T00:00:00Z" }],
       artifacts: [
@@ -256,14 +256,14 @@ describe("the Head line and its hidden search panel (José, Nov 19 2026)", () =>
     const checked = () => within(openSelect(menu())).getAllByRole("option").filter((o) => o.getAttribute("aria-selected") === "true").map((o) => o.textContent);
 
     const list = openSelect(menu());
-    expect([...list.querySelectorAll(".os-select-group")].map((g) => g.textContent)).toEqual(["Kind", "Label", "Source", "Client"]);
+    expect([...list.querySelectorAll(".os-select-group")].map((g) => g.textContent)).toEqual(["Kind", "Label", "Source", "Account"]);
     expect(within(list).getByRole("option", { name: "Made by an agent" })).toBeTruthy();
     // Only the sources some file has: uploaded and agent-made here, nothing else.
     expect(within(list).queryByRole("option", { name: "Derived" })).toBeNull();
     expect(within(list).queryByRole("option", { name: "Pipeline" })).toBeNull();
-    expect(within(list).getByRole("option", { name: "No client" })).toBeTruthy();
+    expect(within(list).getByRole("option", { name: "No account" })).toBeTruthy();
     // Every group starts on its "any" answer, each with its own check.
-    expect(checked()).toEqual(["All", "Any label", "Any source", "Any client"]);
+    expect(checked()).toEqual(["All", "Any label", "Any source", "Any account"]);
     fireEvent.keyDown(menu(), { key: "Escape" });
 
     chooseOption(menu(), "invoices");
@@ -290,7 +290,7 @@ describe("the Head line and its hidden search panel (José, Nov 19 2026)", () =>
     await waitFor(() => expect(tiles()).toHaveLength(4));
     await click(toggle);
     expect(selectedLabel(menu())).toBe("All");
-    expect(checked()).toEqual(["All", "Any label", "Any source", "Any client"]);
+    expect(checked()).toEqual(["All", "Any label", "Any source", "Any account"]);
   });
 
   it("reads every page before sorting by name, so the first tile is the Library's first name", async () => {

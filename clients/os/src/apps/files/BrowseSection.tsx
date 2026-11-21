@@ -773,10 +773,10 @@ export function BrowseSection({
   // The window's own search (its title-bar button) opens this panel, as it
   // opened Refine before it.
   useWindowSearchTarget(mainRef, () => { setSearchOpen(true); searchInput.current?.focus(); });
-  // Read only while the panel is open: the Client group is the one reader.
+  // Read only while the panel is open: the Account group is the one reader.
   const accountOptions = useAccountOptions(searchOpen);
   // THE KIND MENU (Jesús, Nov 20 2026, draft p17 Option C): the kinds of
-  // file, then Label, Source and Client as more groups, each its own single
+  // file, then Label, Source and Account as more groups, each its own single
   // choice with its own check (filters.ts `filterMenuPick`). The button reads the
   // kind, plus "+N" while N of the other three are on: the drawing shows only
   // the kind, and this is the least that still says something else narrows
@@ -802,10 +802,11 @@ export function BrowseSection({
         {option("source", "all", SOURCE_LABELS.all, filter.source === "all")}
         {shownSources.map((source) => option("source", source, SOURCE_LABELS[source], filter.source === source))}
       </optgroup>
-      {/* "No client" is its own answer: what still needs filing (epic memql#4800). */}
-      <optgroup label="Client">
-        {option("client", ACCOUNT_ANY, "Any client", filter.accountId === ACCOUNT_ANY)}
-        {option("client", ACCOUNT_NONE, "No client", filter.accountId === ACCOUNT_NONE)}
+      {/* "No account" is its own answer: what still needs filing (epic memql#4800).
+          Called Account, not Client (Jesús, Nov 20 2026): it is the Accounts app's list. */}
+      <optgroup label="Account">
+        {option("client", ACCOUNT_ANY, "Any account", filter.accountId === ACCOUNT_ANY)}
+        {option("client", ACCOUNT_NONE, "No account", filter.accountId === ACCOUNT_NONE)}
         {accountOptions.map((account) => option("client", account.id,
           accountIsArchived(account) ? `${accountName(account)} (archived)` : accountName(account), filter.accountId === account.id))}
       </optgroup>

@@ -35,9 +35,9 @@ import { artifactName, isContentKind, type ArtifactRow } from "./rows";
 // `planArchive` -- because it is the engine's mutation. What a person reads
 // is "Delete" (José, Nov 18 2026), and the Bin is where a deleted file waits.
 
-/** No client constraint. */
+/** No account constraint. */
 export const ACCOUNT_ANY = "all";
-/** Only rows tied to no client at all. */
+/** Only rows tied to no account at all. */
 export const ACCOUNT_NONE = "none";
 
 export type KindFilter = "all" | (typeof CONTENT_KINDS)[number];
@@ -68,7 +68,7 @@ export const EMPTY_DESK: DeskMembership = {
 
 /**
  * `source`, `accountId` AND `label` WERE REFINE'S FACETS, and they are back
- * (Jesús, Nov 20 2026, Option C of draft p17): Label, Source and Client are
+ * (Jesús, Nov 20 2026, Option C of draft p17): Label, Source and Account are
  * groups in the search panel's kind menu, under the kinds of file (see
  * `filterMenuPick`). `kind` (the artifact's index kind) has no control and stays
  * at its default.
@@ -429,7 +429,7 @@ export function sourcesOf(rows: readonly Pick<ArtifactRow, "source">[], picked: 
 // THE KIND MENU HOLDS FOUR SINGLE CHOICES (Jesús, Nov 20 2026, draft p17 C)
 // ===========================================================================
 // Label, source and client came back INSIDE the search panel's kind menu, as
-// groups under the kinds of file: Kind, Label, Source, Client. Each group is
+// groups under the kinds of file: Kind, Label, Source, Account. Each group is
 // its own single choice -- one kind AND one label AND one source AND one
 // client can be on together -- so one option value carries its group in front
 // of a colon ("label:invoices") and `filterMenuPick` turns it back into the
