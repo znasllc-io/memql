@@ -86,6 +86,7 @@ import (
 var embedInventory = map[string]int{
 	"github.com/znasllc-io/memql/cockpit/internal/desktopmenu":      1,  // Embedded icon; measured after Cockpit consolidation.
 	"github.com/znasllc-io/memql/cockpit/internal/worker/workbench": 1,  // Embedded workbench launcher; measured after consolidation.
+	"github.com/znasllc-io/memql/component/calls":                   1,  // reaction_identifiers.json: exact public/native relay catalog, measured with go list.
 	"github.com/znasllc-io/memql/component/compose":                 14, // Actual renderer sources + pinned module files + license for reproducible source ZIPs.
 	"github.com/znasllc-io/memql/component/compose/emaildoc":        24, // the built-in email layouts: the four of #6032 plus twenty more for email composition (2026-11-05), measured by the gate
 	"github.com/znasllc-io/memql/core/costestimate":                 1,  // prices.json: measured API-equivalent price evidence.
