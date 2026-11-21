@@ -70,6 +70,10 @@ func (h *callsHandler) serveDelegated(w http.ResponseWriter, r *http.Request, c 
 		h.refuse(w, c, err, calls.JoinResult{})
 		return
 	}
+	if message, ok := result.(calls.MessageResult); ok {
+		h.writeMessage(w, message)
+		return
+	}
 	if c.route.op == callsOpAgent {
 		result = h.agentReply(result)
 	}
@@ -90,7 +94,7 @@ func (h *callsHandler) agentReply(result any) any {
 		// The native agent result contains call state only, not a human session.
 		// Reuse its normalization without inventing an expiry or cookie identity.
 		r := h.sessionReply(calls.Session{}, v)
-		return callsAgentSessionReply{Spotlight: r.Spotlight, Reports: r.Reports, Processing: r.Processing, RoomID: memql.BareShortId(v.RoomID), Identity: r.Identity, LeaveToken: r.LeaveToken, CountdownKind: r.CountdownKind, ParticipantLimit: r.ParticipantLimit, DurationMinutes: r.DurationMinutes, Insights: r.Insights, Resources: r.Resources, ReservedCents: r.ReservedCents, CostCents: r.CostCents, Host: r.Host, OpenedAt: r.OpenedAt, Title: r.Title, CountdownEndsAt: r.CountdownEndsAt, AllowanceEndsAt: r.AllowanceEndsAt, FundingMode: r.FundingMode, Roster: r.Roster, Agents: r.Agents}
+		return callsAgentSessionReply{Messages: r.Messages, Spotlight: r.Spotlight, Reports: r.Reports, Processing: r.Processing, RoomID: memql.BareShortId(v.RoomID), Identity: r.Identity, LeaveToken: r.LeaveToken, CountdownKind: r.CountdownKind, ParticipantLimit: r.ParticipantLimit, DurationMinutes: r.DurationMinutes, Insights: r.Insights, Resources: r.Resources, ReservedCents: r.ReservedCents, CostCents: r.CostCents, Host: r.Host, OpenedAt: r.OpenedAt, Title: r.Title, CountdownEndsAt: r.CountdownEndsAt, AllowanceEndsAt: r.AllowanceEndsAt, FundingMode: r.FundingMode, Roster: r.Roster, Agents: r.Agents}
 	case calls.InvitationLinkResult:
 		return struct {
 			GuestToken string `json:"guestToken"`
@@ -121,6 +125,7 @@ func (h *callsHandler) agentReply(result any) any {
 }
 
 type callsAgentSessionReply struct {
+	Messages         *calls.MessageStatus     `json:"messages,omitempty"`
 	Spotlight        *calls.Spotlight         `json:"spotlight,omitempty"`
 	Reports          calls.ReportCapabilities `json:"reports"`
 	Processing       *calls.ProcessingStatus  `json:"processing,omitempty"`

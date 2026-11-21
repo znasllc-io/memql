@@ -53,9 +53,79 @@ policy -- is in [Calls on a deployable](site-hosting.md#calls-on-a-deployable).
 - **A pass** is what a participant connects to the media server with: a LiveKit token
   for one seat in one room, signed with the server's key pair and good for `passTtl`
   (120 seconds) to connect with. A person's pass grants the microphone, the camera, the
-  screen share and its sound, and data messages, and never the right to rename itself. A
-  pass cannot be revoked once it is handed out, so the seat it was for is what decides:
-  the media server's participants are held to the seats (below).
+  screen share and its sound, and never the right to rename itself. New relay-enabled
+  rooms explicitly disable peer data publishing; bounded application messages use the
+  native relay below. Existing room/token grants are not silently upgraded or revoked.
+  A previously issued pass may still reconnect, and LiveKit can refresh token lifetime:
+  native seat reconciliation is not immediate transport revocation.
+
+### Ephemeral application messages
+
+New rooms carry `callkey.application.v1`. Their participant tokens explicitly set
+`canPublishData:false`, including agent and avatar seats. The general `MintPass` API
+keeps its prior contract for unrelated consumers; existing rooms keep their old grants.
+A client must fail closed when `session.messages.available` is false and explain that
+legacy calls need a new call to use the relay. Do not terminate or recreate a user's
+call automatically. Already issued JWTs are not retroactively invalidated.
+
+The browser uses `POST /_memql/calls/messages`; an agent uses `callkey_message` with
+explicitly approved `message` scope. Both accept only current `roomId`, media `identity`,
+positive integer `sequence`, and one closed variant: `kind:"chat"` with plain `text`,
+`kind:"reaction"` with an exact catalog `reaction`, or `kind:"hand"` with `raised`.
+Chat allows 2000 UTF-16 units / 8000 UTF-8 bytes; controls except tab/newline are refused.
+The immutable reaction catalog is available at `/reaction-identifiers.json`; its
+SHA-256 is advertised in both UTCP `application_messages` and session capabilities.
+There are no arbitrary topics, recipients, claimed sender names, or message history API.
+
+An admission has one shared sequence across these three variants. Use exactly
+`messages.nextSequence`. The server attributes the event to the current native seat
+and selects current admitted recipients, excluding known revoked credentials/grants.
+Recipients are an authorization snapshot, not a replacement for transport revocation.
+The room and sender gates remain held through a bounded two-second provider send.
+Per-admission limits are one chat/second, one reaction/second and one hand change/400 ms.
+Shared version-fenced counters allow at most 20 attempts/second per room and 32/second
+per media server, with respectively 2 MiB and 8 MiB of payload multiplied by recipient
+count in each one-second window. A conflict or uncertain counter write can spend quota
+without delivery; it never grants additional quota. Counter conflicts retry at most
+three times and otherwise refuse without fanout. Provider packets are capped at 10 KiB.
+
+A native opaque attempted receipt is persisted before provider I/O. `published` means
+the provider accepted the send, not that every participant received it. A timeout returns
+`delivery_uncertain`; retry only the same sequence and exact body. `duplicate` means
+that this attempt was already recorded and is **not** delivery confirmation. No duplicate
+redispatch occurs. `stale` requires a fresh session snapshot; `rate_limited` supplies
+`retryAfterMs` and HTTP `Retry-After`. `unavailable` and `delivery_uncertain` use HTTP 503,
+`stale` uses 409 and `rate_limited` uses 429. An explicit new user intent may use a fresh
+sequence after reconciling the current session; automatic new-sequence retry is unsafe.
+
+The fixed data topic and protocol are `callkey.application.v1`. Packet `publishedAt`
+and `expiresAt` are Unix seconds with a 30-second lifetime. Trust only a genuine server
+packet: in the pinned browser SDK the participant object must be absent **and** the
+raw sixth callback identity must be exactly the empty string. Unknown peer identities
+can also have an absent participant object, so that check alone is insufficient.
+Deduplicate the server `eventId`. The session's `hands` and `handSequences` expose
+current identities and their last native hand sequence, including lowered hands;
+ignore a delayed hand event at or below its snapshot sequence. `observedAt` is Unix
+milliseconds. A fresh admission has fresh identity, receipt and sequence.
+
+Message text and reactions exist only in process/provider memory, never DSL rows or
+run journals. Each admission's compact receipt stores keyed body/event digests, the
+last attempted sequence, rate timestamps and current hand state (at most 1024 bytes of
+receipt JSON). Hand toggles do not append seat versions. Old receipt and shared counter
+versions have a one-hour retention policy; latest receipt metadata remains through an
+immutable deadline 25 hours after room opening. Sending stops by hour 24 or any earlier
+call deadline. Scheduled maintenance then removes **all** receipt versions in bounded
+256-row transactions, retaining the latest until the final batch. Counter latest versions
+also expire after one hour. Maintenance delay delays physical reclamation; it cannot
+reset an active admission or reopen an expired room. A missing active receipt fails
+closed. Database indexes, WAL and backup overhead remain deployment capacity costs.
+
+A dedicated pinned LiveKit 1.13.7 fixture verified raw `RTCDataChannel.send` user packets,
+stream headers and stream chunks are not delivered from restricted tokens, while an
+allowed control and native `SendData` still work. This closes accepted application-message
+and recipient-fanout bypasses. It does **not** establish hostile ingress-byte/CPU shaping,
+per-publisher AV bitrate ceilings, or revocation of old media tokens; those remain
+separate qualification gates.
 
 ### Seats, the lock and the line
 

@@ -66,6 +66,7 @@ shape simulatedWalletEntry callsSimulatedWalletEntryFull {
 /// The room row as the calls integration reads it. No digest is projected.
 @row
 shape room callsRoomFull {
+  messageProtocol
   spotlightData
   usageConfig
   usageOperation
@@ -106,6 +107,7 @@ shape room callsRoomFull {
 /// The seat row as the calls integration reads it. No digest is projected.
 @row
 shape seat callsSeatFull {
+  messageIdentity
   agentData
   departureReceipt
   departureKeepRunning
@@ -471,3 +473,8 @@ shape reportAccessAudit callsReportAudit {
  recordedAt
  revision
 }
+
+@row
+shape messageReceipt callsMessageReceiptFull { row.id, row.createdAt, siteId, ownerUserId, roomId, seatId, identity, joinedAt, expiresAt, receiptData }
+@row
+shape messageRate callsMessageRateFull { row.id, row.createdAt, ownerUserId, scope, targetId, rateData }

@@ -44,6 +44,7 @@ var callsPairs = []struct {
 	{"join", http.MethodPost, "/_memql/calls/join", "/calls/join", 1 << 10},
 	{"queue", http.MethodGet, "/_memql/calls/queue", "/calls/queue", 1 << 10},
 	{"host", http.MethodPost, "/_memql/calls/host", "/calls/host", 4 << 10},
+	{"messages", http.MethodPost, "/_memql/calls/messages", "/calls/messages", 12 << 10},
 	{"leave", http.MethodPost, "/_memql/calls/leave", "/calls/leave", 1 << 10},
 }
 

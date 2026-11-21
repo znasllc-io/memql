@@ -42,6 +42,9 @@ const MaxPassTTL = 15 * time.Minute
 // The TTL must be positive and at most MaxPassTTL: a zero TTL is not "expired" to
 // LiveKit's SDK, it is SIX HOURS (its default), so it is refused rather than passed on.
 func MintPass(key, secret string, kind callrules.SeatKind, room, identity, name string, attrs map[string]string, ttl time.Duration) (string, error) {
+	return mintPass(key, secret, kind, room, identity, name, attrs, ttl, true)
+}
+func mintPass(key, secret string, kind callrules.SeatKind, room, identity, name string, attrs map[string]string, ttl time.Duration, peerData bool) (string, error) {
 	switch {
 	case strings.TrimSpace(key) == "":
 		return "", errors.New("calls: a pass is signed with the media server's API key, and there is none")
@@ -80,7 +83,7 @@ func MintPass(key, secret string, kind callrules.SeatKind, room, identity, name 
 	}
 	video.SetCanPublish(spec.CanPublish)
 	video.SetCanSubscribe(spec.CanSubscribe)
-	video.SetCanPublishData(spec.CanPublishData)
+	video.SetCanPublishData(spec.CanPublishData && peerData)
 	video.SetCanUpdateOwnMetadata(spec.CanUpdateOwnMetadata)
 	video.SetCanSubscribeMetrics(false)
 	video.SetCanManageAgentSession(false)

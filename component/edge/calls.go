@@ -100,6 +100,7 @@ var callsStampHeaders = []string{CallsStampSiteHeader, CallsStampOwnerHeader, me
 
 // The operations. A fixed set, because the budget a request draws on is chosen by it.
 const (
+	callsOpMessages    = "messages"
 	callsOpWorkflows   = "workflows"
 	callsOpAgent       = "agent"
 	callsOpWebhook     = "provider-webhook"
@@ -142,6 +143,7 @@ func callsInbound(upstream string) string {
 }
 
 var callsRoutes = [...]callsRoute{
+	{http.MethodPost, callsInbound(memql.CallsMessagesPath), memql.CallsMessagesPath, callsOpMessages, memql.CallsMessageBodyBytes},
 	{http.MethodPost, callsInbound(memql.CallsFamilyPath), memql.CallsFamilyPath, callsOpFamily, memql.CallsSmallBodyBytes},
 	{http.MethodPost, callsInbound(memql.CallsWorkflowsPath), memql.CallsWorkflowsPath, callsOpWorkflows, memql.CallsWorkflowBodyBytes},
 	{http.MethodGet, callsInbound(memql.CallsDelegationPath), memql.CallsDelegationPath, callsOpAccountRead, memql.CallsSmallBodyBytes},

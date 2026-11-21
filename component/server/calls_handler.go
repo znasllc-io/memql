@@ -159,6 +159,7 @@ type CallsService interface {
 // request sent.
 const (
 	callsOpDelegation    = "delegation"
+	callsOpMessages      = "messages"
 	callsOpWorkflows     = "workflows"
 	callsOpAgent         = "agent"
 	callsOpUTCP          = "utcp"
@@ -192,6 +193,7 @@ type callsRoute struct {
 // THE CAPS ARE ENFORCED WHILE READING, before anything is decoded: the edge's cap is the
 // edge's.
 var callsRoutes = []callsRoute{
+	{http.MethodPost, memql.CallsMessagesPath, callsOpMessages, memql.CallsMessageBodyBytes},
 	{http.MethodPost, memql.CallsFamilyPath, callsOpFamily, memql.CallsSmallBodyBytes},
 	{http.MethodPost, memql.CallsWorkflowsPath, callsOpWorkflows, memql.CallsWorkflowBodyBytes},
 	{http.MethodGet, memql.CallsDelegationPath, callsOpDelegation, memql.CallsSmallBodyBytes},
@@ -294,6 +296,8 @@ func (h *callsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch route.op {
+	case callsOpMessages:
+		h.serveMessage(w, r, c)
 	case callsOpFamily:
 		h.serveFamily(w, r, c)
 	case callsOpWorkflows:
@@ -1042,6 +1046,7 @@ func setCallsRetryAfter(w http.ResponseWriter, d time.Duration) {
 // page the server's now (expiresAt less expiresInMs), which is what `countdownEndsAt` is
 // counted down from and an occupying seat's elapsed call time is measured from.
 type callsSessionReply struct {
+	Messages          *calls.MessageStatus     `json:"messages,omitempty"`
 	Spotlight         *calls.Spotlight         `json:"spotlight,omitempty"`
 	Reports           calls.ReportCapabilities `json:"reports"`
 	ParticipationMode string                   `json:"participationMode,omitempty"`
@@ -1113,6 +1118,7 @@ type callsRosterWaiterReply struct {
 
 func (h *callsHandler) sessionReply(sess calls.Session, call calls.SeatCall) callsSessionReply {
 	reply := callsSessionReply{
+		Messages:          call.Messages,
 		Spotlight:         call.Spotlight,
 		ParticipationMode: call.ParticipationMode, Family: call.Family,
 		Identity:      call.Identity,

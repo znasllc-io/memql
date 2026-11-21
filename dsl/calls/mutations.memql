@@ -107,6 +107,7 @@ mutation session updateCallsSession {
 @serverOnly
 mutation room createCallsRoom {
   args {
+    messageProtocol string @maxLength(64)
     usageConfig string
     usageOperation string
     usageDigest string
@@ -138,7 +139,7 @@ mutation room createCallsRoom {
     joinWindowCount  int
   }
   insert {
-    accept { usageConfig, usageOperation, usageDigest, usageReservedCents, usageMeter, usageCostCents, fundingMode, fundingPassId, fundingStartedAt, fundingDeadline, fundingMaxPeople, historyPending, title, siteId, deployable, keyId, mediaServerId, mediaRoom, locked, hostSeatId, scheduledCallId, guestDigest, hostDigest, openedAt, joinWindowStartedAt, joinWindowCount }
+    accept { messageProtocol, usageConfig, usageOperation, usageDigest, usageReservedCents, usageMeter, usageCostCents, fundingMode, fundingPassId, fundingStartedAt, fundingDeadline, fundingMaxPeople, historyPending, title, siteId, deployable, keyId, mediaServerId, mediaRoom, locked, hostSeatId, scheduledCallId, guestDigest, hostDigest, openedAt, joinWindowStartedAt, joinWindowCount }
     stamp {
       id: args.roomId
       ownerUserId: actor.userId
@@ -223,6 +224,7 @@ mutation seat createCallsSeat {
 @serverOnly
 mutation seat updateCallsSeat {
   args {
+    messageIdentity string @maxLength(128)
 		 identity string
 		 agentData string
     historyPending bool
@@ -248,7 +250,7 @@ mutation seat updateCallsSeat {
     waitingSince  datetime
   }
   update {
-    accept { identity, agentData, departureReceipt, departureKeepRunning, departureWrapUpAt, historyPending, credentialId, displayName, host, status, confirmAdult, confirmNoMinors, participation, authorityAccepted, termsVersion, joinedAt, leftAt, lastSeenAt, absentSince, letInAt, waitingSince }
+    accept { messageIdentity, identity, agentData, departureReceipt, departureKeepRunning, departureWrapUpAt, historyPending, credentialId, displayName, host, status, confirmAdult, confirmNoMinors, participation, authorityAccepted, termsVersion, joinedAt, leftAt, lastSeenAt, absentSince, letInAt, waitingSince }
     stamp {
       id: args.seatId
       createdAt: args.versionTime ?? now
@@ -1052,4 +1054,37 @@ mutation reportAccessAudit createCallsReportAudit {
  accept { siteId, caseId, actorId, action, recordedAt, expiresAt, revision }
  stamp { id: args.auditId, ownerUserId: actor.userId, createdAt: args.recordedAt }
  }
+}
+
+/// Native fenced ephemeral metadata. actor.userId scoping is not the fix.
+@serverOnly
+@actor
+mutation messageReceipt saveCallsMessageReceipt {
+ args {
+ stateId string!
+ versionTime datetime!
+ siteId string!
+ roomId string!
+ seatId string!
+ identity string!
+ joinedAt datetime!
+ expiresAt datetime!
+ receiptData string!
+ }
+ insert { accept { siteId, roomId, seatId, identity, joinedAt, expiresAt, receiptData }
+ stamp { id: args.stateId, ownerUserId: actor.userId, createdAt: args.versionTime } }
+}
+/// Native fenced short-lived counters. actor.userId scoping is not the fix.
+@serverOnly
+@actor
+mutation messageRate saveCallsMessageRate {
+ args {
+ stateId string!
+ versionTime datetime!
+ scope string!
+ targetId string!
+ rateData string!
+ }
+ insert { accept { scope, targetId, rateData }
+ stamp { id: args.stateId, ownerUserId: actor.userId, createdAt: args.versionTime } }
 }

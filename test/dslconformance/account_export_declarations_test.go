@@ -25,6 +25,7 @@ var stayingKinds = map[string]string{
 	// Room approval and canonical appearance are private, cluster-bound agent authority.
 	"v1:calls:agentAdmissionState": "signin",
 	"v1:calls:processingRate":      "signin",
+	"v1:calls:messageReceipt":      "signin",
 	"v1:calls:processingReceipt":   "signin",
 	"v1:calls:processingState":     "signin",
 	"v1:calls:reportCase":          "signin",

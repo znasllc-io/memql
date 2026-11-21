@@ -1969,8 +1969,8 @@ func (s *Service) credential(ctx context.Context, server MediaServer) (MediaCred
 
 // admitted is an admission's reply: the server's public address, a pass for the seat's
 // identity in the call's media room, and the pass's lifetime.
-func admitted(server MediaServer, credential MediaCredential, mediaRoom string, seat seatRow, policy callrules.Policy) (callrules.JoinResult, error) {
-	pass, err := MintPass(credential.Key, credential.Secret, callrules.SeatKind(seat.Kind), mediaRoom, seat.Identity, seat.DisplayName, nil, policy.PassTTL)
+func admitted(server MediaServer, credential MediaCredential, mediaRoom string, seat seatRow, policy callrules.Policy, relay bool) (callrules.JoinResult, error) {
+	pass, err := mintPass(credential.Key, credential.Secret, callrules.SeatKind(seat.Kind), mediaRoom, seat.Identity, seat.DisplayName, nil, policy.PassTTL, !relay)
 	if err != nil {
 		return callrules.JoinResult{}, err
 	}

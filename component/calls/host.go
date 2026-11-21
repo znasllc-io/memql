@@ -74,6 +74,7 @@ const (
 // CountdownKind distinguishes a firm wrap_up from the legacy host_left grace.
 // Identity and LeaveToken are given only to an occupying seat.
 type SeatCall struct {
+	Messages          *MessageStatus
 	Spotlight         *Spotlight
 	Reports           ReportCapabilities
 	Processing        *ProcessingStatus

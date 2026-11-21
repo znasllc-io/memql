@@ -1063,6 +1063,47 @@
       }
     },
     {
+      "concept": "v1:calls:messageRate",
+      "file": "calls/concepts.memql",
+      "fields": [
+        "ownerUserId",
+        "rateData",
+        "scope",
+        "targetId"
+      ],
+      "required": [
+        "ownerUserId",
+        "rateData",
+        "scope",
+        "targetId"
+      ]
+    },
+    {
+      "concept": "v1:calls:messageReceipt",
+      "file": "calls/concepts.memql",
+      "fields": [
+        "accountId",
+        "expiresAt",
+        "identity",
+        "joinedAt",
+        "ownerUserId",
+        "receiptData",
+        "roomId",
+        "seatId",
+        "siteId"
+      ],
+      "required": [
+        "expiresAt",
+        "identity",
+        "joinedAt",
+        "ownerUserId",
+        "receiptData",
+        "roomId",
+        "seatId",
+        "siteId"
+      ]
+    },
+    {
       "concept": "v1:calls:policy",
       "file": "calls/concepts.memql",
       "fields": [
@@ -1284,6 +1325,7 @@
         "locked",
         "mediaRoom",
         "mediaServerId",
+        "messageProtocol",
         "openedAt",
         "ownerUserId",
         "scheduledCallId",
@@ -1375,6 +1417,7 @@
         "lastSeenAt",
         "leftAt",
         "letInAt",
+        "messageIdentity",
         "ownerUserId",
         "participation",
         "roomId",

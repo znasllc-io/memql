@@ -175,8 +175,10 @@ func agentPresentation(ctx context.Context) string {
 	}
 	raw, _ := json.Marshal(struct {
 		callrules.AgentParticipant
-		AdmissionID string `json:"admissionId,omitempty"`
-	}{d, admission})
+		AdmissionID    string `json:"admissionId,omitempty"`
+		GrantID        string `json:"grantId,omitempty"`
+		ApprovalDigest string `json:"approvalDigest,omitempty"`
+	}{d, admission, agentContextGrant(ctx), agentContextApproval(ctx)})
 	return string(raw)
 }
 
@@ -214,4 +216,13 @@ func (s *Service) agentSeatAllowed(ctx context.Context, room roomRow, seat seatR
 		return s.guestAgentAdmissionAllowed(fresh, site, room, &sessionRow{SeatID: current.ID}, false)
 	}
 	return nil
+}
+
+func agentContextGrant(ctx context.Context) string {
+	v, _ := ctx.Value(agentCallContext{}).(string)
+	return v
+}
+func agentContextApproval(ctx context.Context) string {
+	v, _ := ctx.Value(agentApprovalContext{}).(string)
+	return v
 }

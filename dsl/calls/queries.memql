@@ -984,3 +984,79 @@ query reportAccessAudit callsReportAudit {
  paginate 257
  shape callsReportAudit
 }
+
+/// Native private replay metadata. actor.userId scoping is not the fix.
+@serverOnly
+@actor
+@cache(0)
+query messageReceipt callsMessageReceiptById {
+ args { id string! }
+ filter row => row.id == args.id && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ paginate 1
+ shape callsMessageReceiptFull
+}
+/// Native private counters. actor.userId scoping is not the fix.
+@serverOnly
+@actor
+@cache(0)
+query messageRate callsMessageRateById {
+ args { id string! }
+ filter row => row.id == args.id && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ paginate 1
+ shape callsMessageRateFull
+}
+
+/// Bounded native recipient authority batch; actor.userId scoping is not the fix.
+@serverOnly
+@actor
+@cache(0)
+query credential callsMessageCredentials {
+ args { ids []string! }
+ filter row => row.id in args.ids && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ paginate 100
+ shape callsCredentialFull
+}
+
+/// Bounded native recipient authority batch; actor.userId scoping is not the fix.
+@serverOnly
+@actor
+@cache(0)
+query key callsMessageKeys {
+ args { ids []string! }
+ filter row => row.id in args.ids && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ paginate 100
+ shape callsKeyFull
+}
+
+/// Bounded native recipient authority batch; actor.userId scoping is not the fix.
+@serverOnly
+@actor
+@cache(0)
+query delegationState callsMessageDelegations {
+ args { ids []string! }
+ filter row => row.id in args.ids && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ paginate 100
+ shape callsDelegationFull
+}
+
+/// Bounded native admission receipt batch; actor.userId scoping is not the fix.
+@serverOnly
+@actor
+@cache(0)
+query messageReceipt callsMessageReceipts {
+ args { ids []string! }
+ filter row => row.id in args.ids && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ paginate 100
+ shape callsMessageReceiptFull
+}
+
+/// Bounded native family session authority batch; actor.userId scoping is not the fix.
+@serverOnly
+@actor
+@cache(0)
+query session callsMessageSessions {
+ args { ids []string! }
+ filter row => row.id in args.ids && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ paginate 100
+ shape callsSessionFull
+}

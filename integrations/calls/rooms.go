@@ -270,6 +270,7 @@ func (s *Store) keyByID(ctx context.Context, owner, keyID string) (*Key, error) 
 // ShareSeatID and ShareStartedAt are the newest screen share the media server reported
 // (events.go), the zero time before any.
 type roomRow struct {
+	MessageProtocol string
 	roomFunding
 	SpotlightData                                                                string
 	HistoryPending                                                               bool
@@ -287,6 +288,7 @@ func (r roomRow) open() bool { return r.Status != "ended" }
 func roomFromRow(r map[string]any) roomRow {
 	return roomRow{
 		SpotlightData:   rowString(r, "spotlightData"),
+		MessageProtocol: rowString(r, "messageProtocol"),
 		roomFunding:     fundingFromRow(r),
 		HistoryPending:  rowBool(r, "historyPending"),
 		ID:              memql.BareShortId(rowString(r, "id")),
@@ -371,6 +373,7 @@ type newRoom struct {
 
 func (s *Store) createRoom(ctx context.Context, owner string, n newRoom, versionTime time.Time) error {
 	args := map[string]any{
+		"messageProtocol":     callrules.MessageProtocol,
 		"historyPending":      true,
 		"roomId":              n.ID,
 		"siteId":              n.SiteID,
@@ -457,6 +460,7 @@ func (s *Store) updateRoom(ctx context.Context, owner string, prior roomRow, fie
 // webhook about it: events.go), AbsentSince when a pass first found it missing there
 // (reconcile.go, calls.SeatAbsent), and LetInAt a host's admission past the call's lock.
 type seatRow struct {
+	MessageIdentity                                                      string
 	AgentData                                                            string
 	DepartureReceipt                                                     string
 	DepartureKeepRunning                                                 bool
@@ -488,6 +492,7 @@ func (r seatRow) passesLock() bool { return r.Host || !r.LetInAt.IsZero() }
 
 func seatFromRow(r map[string]any) seatRow {
 	return seatRow{
+		MessageIdentity:      rowString(r, "messageIdentity"),
 		AgentData:            rowString(r, "agentData"),
 		DepartureReceipt:     rowString(r, "departureReceipt"),
 		DepartureKeepRunning: rowBool(r, "departureKeepRunning"),

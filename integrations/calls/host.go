@@ -405,6 +405,10 @@ func (s *Service) SessionCall(ctx context.Context, sess callrules.Session) (call
 			return callrules.SeatCall{}, e
 		}
 		out.Reports = reportCapabilities(reportPolicy)
+		out.Messages, err = s.messageStatus(fresh, *room, *seat, v.seats)
+		if err != nil {
+			return none, err
+		}
 		out.Processing, err = s.processingStatus(fresh, *room, *seat, v.seats)
 		if err != nil {
 			return none, err

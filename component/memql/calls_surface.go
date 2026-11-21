@@ -40,6 +40,8 @@ const (
 	CallsSurfacePathPrefix = "/calls/"
 
 	// Agent/provider routes extend the same exact site-stamped HTTP surface.
+	CallsMessagesPath                = CallsSurfacePathPrefix + "messages"
+	CallsMessageBodyBytes      int64 = 12 << 10
 	CallsFamilyPath                  = CallsSurfacePathPrefix + "family"
 	CallsWorkflowsPath               = CallsSurfacePathPrefix + "workflows"
 	CallsWorkflowBodyBytes     int64 = 128 << 10

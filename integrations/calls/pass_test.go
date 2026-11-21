@@ -212,3 +212,23 @@ func TestMintPassRefusesWhatItMustNotMint(t *testing.T) {
 		}
 	})
 }
+
+func TestRelayPassDisablesPeerDataWithoutChangingLegacyConsumers(t *testing.T) {
+	for _, kind := range []callrules.SeatKind{callrules.KindPerson, callrules.KindAgent, callrules.KindAvatar, callrules.KindSampler} {
+		restricted, err := mintPass(passKey, passSecret, kind, "room", "seat", "Name", nil, time.Minute, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rawVideoGrant(t, restricted)["canPublishData"] != false {
+			t.Fatalf("relay %s can publish peer data", kind)
+		}
+		legacy, err := MintPass(passKey, passSecret, kind, "room", "seat", "Name", nil, time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		spec, _ := callrules.GrantFor(kind)
+		if rawVideoGrant(t, legacy)["canPublishData"] != spec.CanPublishData {
+			t.Fatalf("legacy %s grant changed", kind)
+		}
+	}
+}

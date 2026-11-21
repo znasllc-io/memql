@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	callrules "github.com/znasllc-io/memql/component/calls"
 	"net/url"
 	"slices"
 	"strings"
@@ -176,6 +177,19 @@ func (b *liveKitBackend) PublishProcessing(ctx context.Context, room string, dat
 		return errors.New("calls: server data unavailable")
 	}
 	topic := processingTopic
+	_, e := sender.SendData(ctx, &livekit.SendDataRequest{Room: room, Data: data, Kind: livekit.DataPacket_RELIABLE, DestinationIdentities: recipients, Topic: &topic})
+	return e
+}
+
+// PublishApplicationMessage is a fixed trusted server channel, distinct from processing.
+func (b *liveKitBackend) PublishApplicationMessage(ctx context.Context, room string, data []byte, recipients []string) error {
+	sender, ok := b.rooms.(interface {
+		SendData(context.Context, *livekit.SendDataRequest) (*livekit.SendDataResponse, error)
+	})
+	if !ok || len(recipients) == 0 {
+		return errors.New("calls: application relay unavailable")
+	}
+	topic := callrules.MessageProtocol
 	_, e := sender.SendData(ctx, &livekit.SendDataRequest{Room: room, Data: data, Kind: livekit.DataPacket_RELIABLE, DestinationIdentities: recipients, Topic: &topic})
 	return e
 }

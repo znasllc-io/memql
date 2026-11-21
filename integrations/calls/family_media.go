@@ -49,6 +49,7 @@ func (s *Service) familyGuardianSeat(ctx context.Context, r roomRow) (*seatRow, 
 	return nil, nil
 }
 func (s *Service) familyGuardianLive(ctx context.Context, r roomRow) (bool, error) {
+	ctx = memql.ContextWithFreshRead(ctx)
 	seat, e := s.familyGuardianSeat(ctx, r)
 	if e != nil || seat == nil {
 		return false, e
@@ -62,12 +63,29 @@ func (s *Service) familyGuardianLive(ctx context.Context, r roomRow) (bool, erro
 	if e != nil {
 		return false, e
 	}
+	observed := false
 	for _, p := range present {
-		if p.Identity == seat.Identity {
-			return true, nil
-		}
+		observed = observed || p.Identity == seat.Identity
 	}
-	return false, nil
+	if !observed {
+		return false, nil
+	}
+	// Provider inventory is not an authority lease. Guardian credential loss
+	// can commit under its account gate while a child's room-gated call waits.
+	fresh := memql.ContextWithFreshRead(ctx)
+	latest, e := s.store.roomByID(fresh, r.OwnerUserID, r.ID)
+	if e != nil || latest == nil || !latest.open() || latest.SiteID != r.SiteID || latest.KeyID != r.KeyID {
+		return false, e
+	}
+	state, e := s.familyRoomState(fresh, *latest)
+	if e != nil || !state.Data.ClosingAt.IsZero() {
+		return false, e
+	}
+	current, e := s.familyGuardianSeat(fresh, *latest)
+	if e != nil || current == nil {
+		return false, e
+	}
+	return current.ID == seat.ID && current.Identity == seat.Identity && current.CredentialID == seat.CredentialID && current.JoinedAt.Equal(seat.JoinedAt), nil
 }
 
 // Family rooms are created only by initial placement, before any media token is
@@ -219,6 +237,15 @@ func (s *Service) familySeatAllowed(ctx context.Context, r roomRow, seat seatRow
 		return e
 	}
 	defer release()
+	return s.familySeatAllowedLocked(ctx, r, seat)
+}
+
+// Caller already owns the room gate; no nested lock. A child check may read
+// bounded provider inventory, whose guardian authority is refreshed afterward.
+func (s *Service) familySeatAllowedLocked(ctx context.Context, r roomRow, seat seatRow) error {
+	if !familyRoom(r) {
+		return nil
+	}
 	ctx = memql.ContextWithFreshRead(ctx)
 	if !s.familyAvailable() {
 		return accountRefusal("family_unavailable")

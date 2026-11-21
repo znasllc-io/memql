@@ -423,6 +423,11 @@ func (s *Service) fundingEndState(ctx context.Context, hint roomRow) (bool, room
 // does not disconnect existing LiveKit participants; reconciliation separately
 // deletes the room, but an old token cannot reopen it beyond this deadline.
 func (s *Service) admittedWithFunding(ctx context.Context, owner string, server MediaServer, credential MediaCredential, roomID string, seat seatRow, policy callrules.Policy) (callrules.JoinResult, error) {
+	release, e := s.gates(ctx, roomGate(roomID))
+	if e != nil {
+		return callrules.JoinResult{}, e
+	}
+	defer release()
 	room, err := s.store.roomByID(memql.ContextWithFreshRead(ctx), owner, roomID)
 	if err != nil {
 		return callrules.JoinResult{}, err
@@ -442,7 +447,7 @@ func (s *Service) admittedWithFunding(ctx context.Context, owner string, server 
 	if err := s.agentSeatAllowed(ctx, *room, seat); err != nil {
 		return refuseJoin(callrules.ReasonOf(err)), err
 	}
-	if err := s.familySeatAllowed(ctx, *room, seat); err != nil {
+	if err := s.familySeatAllowedLocked(ctx, *room, seat); err != nil {
 		return refuseJoin(callrules.ReasonOf(err)), err
 	}
 	if err := fundingRoomAllowed(*room, s.now()); err != nil {
@@ -464,7 +469,10 @@ func (s *Service) admittedWithFunding(ctx context.Context, owner string, server 
 			return refuseJoin(endReasonAllowance), callrules.Refuse(callrules.ErrEnded, endReasonAllowance, "the room's allowance has ended")
 		}
 	}
-	return admitted(server, credential, room.MediaRoom, seat, policy)
+	if err := s.ensureMessageReceipt(ctx, *room, *current); err != nil {
+		return callrules.JoinResult{}, err
+	}
+	return admitted(server, credential, room.MediaRoom, seat, policy, room.MessageProtocol == callrules.MessageProtocol)
 }
 
 func fundedSeatKind(room roomRow, kind callrules.SeatKind) callrules.SeatKind {
