@@ -63,6 +63,24 @@ func (s *Service) workflowRequirements(ctx context.Context, site callrules.SiteR
 	if !ok {
 		return nil, callrules.ErrInvalid
 	}
+	var participants []MediaParticipant
+	available := true
+	if n.Requirements.Video || n.Requirements.ScreenShare || n.Requirements.SupervisorRoleID != "" {
+		var err error
+		participants, err = s.workflowMuteInventory(ctx, room)
+		available = err == nil
+	}
+	return s.workflowRequirementsObserved(ctx, site, room, r, nodeID, participants, available)
+}
+
+// Evaluate fresh native membership against one already captured provider snapshot.
+// This performs no provider I/O, so a final effect commit can use its room gate
+// without admitting a departed/re-entered next speaker or supervisor from stale rows.
+func (s *Service) workflowRequirementsObserved(ctx context.Context, site callrules.SiteRef, room roomRow, r callrules.WorkflowRun, nodeID string, participants []MediaParticipant, available bool) ([]string, error) {
+	n, ok := callrules.WorkflowNodeByID(r.Definition, nodeID)
+	if !ok {
+		return nil, callrules.ErrInvalid
+	}
 	blockers := []string{}
 	seats, err := s.store.seatsForRoom(ctx, site.OwnerUserID, room.ID)
 	if err != nil {
@@ -87,14 +105,7 @@ func (s *Service) workflowRequirements(ctx context.Context, site callrules.SiteR
 		}
 	}
 	if n.Requirements.Video || n.Requirements.ScreenShare || supervisor != "" {
-		backend, err := s.backendFor(ctx, room)
-		if err != nil || backend == nil {
-			return append(blockers, "media_readiness_unavailable"), nil
-		}
-		mediaCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-		participants, err := backend.Participants(mediaCtx, room.MediaRoom)
-		if err != nil {
+		if !available {
 			return append(blockers, "media_readiness_unavailable"), nil
 		}
 		video, share := false, false
@@ -236,6 +247,10 @@ func workflowProjection(run callrules.WorkflowRun, seat seatRow, agent bool, now
 		}
 		if r.Status != "blocked" && workflowAckReady(&r) {
 			r.AllowedActions = append(r.AllowedActions, "next", "end_turn")
+			node, _ := callrules.WorkflowNodeByID(r.Definition, r.NodeID)
+			if node.Type == "turn" && node.RoleID != "" && r.Bindings[node.RoleID] != "" && r.Status == "running" && (r.Effect == nil || r.Effect.Status == "completed" || r.Effect.Status == "cancelled") {
+				r.AllowedActions = append(r.AllowedActions, "end_turn_mute")
+			}
 			if len(r.History) > 0 {
 				r.AllowedActions = append(r.AllowedActions, "previous", "seek")
 			}
@@ -279,6 +294,9 @@ func (s *Service) ReconcileWorkflows(ctx context.Context) error {
 	})
 }
 func (s *Service) workflowReconcileOne(ctx context.Context, owner string, v *workflowState) error {
+	if err := s.workflowReconcileMute(ctx, owner, v.ID); err != nil {
+		return err
+	}
 	release, err := s.gates(ctx, roomGate(v.Run.RoomID))
 	if err != nil {
 		return err

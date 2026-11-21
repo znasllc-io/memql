@@ -105,7 +105,16 @@ type WorkflowVisit struct {
 	VisitID        string `json:"visitId"`
 	ElapsedSeconds int64  `json:"elapsedSeconds"`
 }
+
+// WorkflowEffect is a receipt, not a claim that cancellation undid media changes.
+type WorkflowEffect struct {
+	OperationID string `json:"operationId"`
+	Action      string `json:"action"`
+	Status      string `json:"status"`
+	Reason      string `json:"reason,omitempty"`
+}
 type WorkflowRun struct {
+	Effect              *WorkflowEffect    `json:"effect,omitempty"`
 	ID                  string             `json:"id"`
 	RoomID              string             `json:"roomId"`
 	DefinitionID        string             `json:"definitionId"`
@@ -132,6 +141,7 @@ type WorkflowRun struct {
 	ServerNow           time.Time          `json:"serverNow"`
 }
 type WorkflowResult struct {
+	Effect      *WorkflowEffect      `json:"effect,omitempty"`
 	Binding     *WorkflowBinding     `json:"binding,omitempty"`
 	Catalog     []WorkflowDefinition `json:"catalog,omitempty"`
 	Definitions []WorkflowDefinition `json:"definitions,omitempty"`

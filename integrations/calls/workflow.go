@@ -30,6 +30,11 @@ func (s *Service) Workflow(ctx context.Context, site callrules.SiteRef, token st
 	if slices.Contains([]string{"catalog", "list", "validate", "simulate", "save", "publish"}, req.Action) {
 		return s.workflowLibrary(ctx, site, token, req)
 	}
+	if req.Action == "snapshot" {
+		if err := s.workflowMuteReconcileSession(ctx, site, token); err != nil {
+			return out, err
+		}
+	}
 	return s.workflowRunCommand(ctx, site, token, req)
 }
 
@@ -39,7 +44,7 @@ func WorkflowScope(action string) string {
 		return "skills_read"
 	case "save", "publish":
 		return "skills_write"
-	case "start", "pause", "resume", "next", "previous", "seek", "extend", "end_turn", "change", "cancel", "ack", "handoff", "bind_booking":
+	case "start", "pause", "resume", "next", "previous", "seek", "extend", "end_turn", "end_turn_mute", "change", "cancel", "ack", "handoff", "bind_booking":
 		return "skills_control"
 	}
 	return ""
@@ -90,7 +95,7 @@ func (s *Service) workflowAgentAllowed(ctx context.Context, site callrules.SiteR
 	if d == nil || d.SiteID != site.SiteID || d.KeyID != key || !d.State.RevokedAt.IsZero() || !s.now().Before(d.State.Request.ExpiresAt) {
 		return accountRefusal("delegation_inactive")
 	}
-	if !slices.Contains(d.State.Request.Scopes, WorkflowScope(action)) {
+	if !slices.Contains(d.State.Request.Scopes, WorkflowScope(action)) || action == "end_turn_mute" && !slices.Contains(d.State.Request.Scopes, "control") {
 		return accountRefusal("delegation_scope")
 	}
 	return s.commerceAdultAllowed(ctx, site, key)
@@ -364,7 +369,7 @@ func (s *Service) workflowRunCommand(ctx context.Context, site callrules.SiteRef
 	if err != nil {
 		return out, err
 	}
-	defer release()
+	defer func() { release() }()
 	ctx = memql.ContextWithFreshRead(ctx)
 	held, _, err = s.session(ctx, site, token, s.now())
 	if err != nil {
@@ -419,6 +424,9 @@ func (s *Service) workflowRunCommand(ctx context.Context, site callrules.SiteRef
 			}
 		}
 		projected := workflowProjection(*v.Run, *seat, agent, s.now())
+		if agent && s.workflowAgentAllowed(ctx, site, held.KeyID, "end_turn_mute") != nil {
+			projected.AllowedActions = slices.DeleteFunc(projected.AllowedActions, func(action string) bool { return action == "end_turn_mute" })
+		}
 		out.Run = &projected
 	}
 	if req.Action == "snapshot" {
@@ -438,6 +446,18 @@ func (s *Service) workflowRunCommand(ctx context.Context, site callrules.SiteRef
 		return out, err
 	}
 	if seen {
+		if req.Action == "end_turn_mute" {
+			op := workflowMuteOperation(v, req, held.ID)
+			if op == nil || op.Admission != workflowMuteAdmission(*seat) {
+				return out, accountRefusal("workflow_actor_changed")
+			}
+			release()
+			release = func() {}
+			if err = s.workflowReconcileMute(ctx, site.OwnerUserID, sid); err != nil {
+				return out, err
+			}
+			return s.workflowMuteResponse(ctx, site, token, req, held.ID)
+		}
 		return out, nil
 	}
 	if v.Run == nil {
@@ -460,6 +480,24 @@ func (s *Service) workflowRunCommand(ctx context.Context, site callrules.SiteRef
 	}
 	if err = s.workflowAgentVersionAllowed(ctx, site, held.KeyID, *room, req, v.Run); err != nil {
 		return out, err
+	}
+	if req.Action == "end_turn_mute" {
+		if err = s.workflowPrepareMute(ctx, site, token, *held, *seat, *room, v, req); err != nil {
+			return out, err
+		}
+		release()
+		release = func() {}
+		reserved, reserveErr := s.workflowReserveMute(ctx, site, v)
+		if reserveErr != nil {
+			return out, reserveErr
+		}
+		if reserved {
+			s.workflowDispatchMute(ctx, site.OwnerUserID, sid, workflowDigest(req))
+		}
+		if err = s.workflowReconcileMute(ctx, site.OwnerUserID, sid); err != nil {
+			return out, err
+		}
+		return s.workflowMuteResponse(ctx, site, token, req, held.ID)
 	}
 	now := s.now()
 	if req.Action == "start" || req.Action == "change" {
@@ -654,6 +692,9 @@ func (s *Service) workflowRunCommand(ctx context.Context, site callrules.SiteRef
 		return out, err
 	}
 	projected := workflowProjection(*v.Run, *seat, agent, now)
+	if agent && s.workflowAgentAllowed(ctx, site, held.KeyID, "end_turn_mute") != nil {
+		projected.AllowedActions = slices.DeleteFunc(projected.AllowedActions, func(action string) bool { return action == "end_turn_mute" })
+	}
 	out.Run = &projected
 	out.ServerNow = now
 	return out, nil

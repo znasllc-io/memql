@@ -1885,9 +1885,23 @@ control epoch survive refresh/replica changes. Participant snapshots filter
 private content before transport. Human pause/change/cancel creates a hold that
 an agent cannot bypass by rereading the latest revision.
 
-Overtime stays advisory. Ending a turn and muting are separate operations;
-neither activates the next participant's microphone. Cancel stops guidance and
-keeps the call open. Pausing does not stop usage charges or hard deadlines.
+Overtime stays advisory. Separate End turn and Mute controls remain available.
+The host-only `end_turn_mute` action combines them in one durable operation;
+agents need both `skills_control` and `control`, the approved skill version and
+room authority. It checks the legal next step, acknowledgments, readiness and
+Insights before pinning the current speaker's exact admission and microphone
+publications. It advances only after those microphones are confirmed muted and
+current authority and readiness still hold. It never unmutes the next speaker.
+
+Retry an unknown response with the identical `runId`, `expectedRevision`,
+`expectedEpoch`, `nodeId` (if supplied) and `idempotencyKey`. The `effect` receipt
+in the result and run identifies the operation and reports `pending`, `uncertain`,
+`completed` or `cancelled`. Retries and reconciliation only check the original
+microphones; they never repeat a mute. Unconfirmed intents expire after one minute.
+Human overrides, revocation, a changed connection or changed microphones prevent
+advancement. Cancellation is not rollback: a mute already dispatched may have
+happened. Cancel keeps the call open; pause does not stop usage charges or hard
+deadlines.
 Required interview video checks the assigned interviewee's actual track, not the
 host's camera. A camera track is not identity or age evidence. Supervision
 requirements need an occupied, non-agent human host with adult evidence; this

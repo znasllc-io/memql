@@ -79,7 +79,7 @@ func workflowUTCPTools(endpoint string) []any {
 		schema  map[string]any
 		actions []string
 	}{
-		{"workflow", dtoSchema(reflect.TypeOf(WorkflowRequest{})), []string{"catalog", "list", "validate", "simulate", "save", "publish", "snapshot", "start", "pause", "resume", "next", "previous", "seek", "extend", "end_turn", "change", "cancel", "ack", "handoff", "bind_booking", "snapshot_binding"}},
+		{"workflow", dtoSchema(reflect.TypeOf(WorkflowRequest{})), []string{"catalog", "list", "validate", "simulate", "save", "publish", "snapshot", "start", "pause", "resume", "next", "previous", "seek", "extend", "end_turn", "end_turn_mute", "change", "cancel", "ack", "handoff", "bind_booking", "snapshot_binding"}},
 		{"resource", dtoSchema(reflect.TypeOf(ResourceRequest{})), []string{"list", "register", "update", "unregister", "start", "stop", "switch", "status"}},
 	} {
 		for _, action := range family.actions {
@@ -92,9 +92,24 @@ func workflowUTCPTools(endpoint string) []any {
 				props[k] = v
 			}
 			props["action"] = map[string]any{"type": "string", "const": action}
+			if action == "end_turn_mute" {
+				props = map[string]any{
+					"action":           map[string]any{"type": "string", "const": action},
+					"runId":            map[string]any{"type": "string", "minLength": 1, "maxLength": 80},
+					"expectedRevision": map[string]any{"type": "integer", "minimum": 1},
+					"expectedEpoch":    map[string]any{"type": "integer", "minimum": 1},
+					"idempotencyKey":   map[string]any{"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$"},
+					"nodeId":           map[string]any{"type": "string", "maxLength": 80, "description": "Explicit legal next node when the current turn has multiple outgoing branches."},
+				}
+				nested["required"] = []string{"action", "runId", "expectedRevision", "expectedEpoch", "idempotencyKey"}
+			}
 			nested["properties"] = props
 			request := map[string]any{"type": "object", "properties": map[string]any{"action": map[string]any{"type": "string", "const": family.name}, family.name: nested}, "required": []string{"action", family.name}, "additionalProperties": false}
-			result = append(result, map[string]any{"name": "callkey_" + family.name + "_" + action, "description": "Callkey " + family.name + " " + action + ". Uses the same native operation as the human interface. Requires separately approved scopes and exact skill versions/resource IDs. Live skill execution requires the room's paid Insights entitlement. Host holds and revision/epoch guards remain authoritative.", "inputs": map[string]any{"type": "object", "properties": map[string]any{"request": request}, "required": []string{"request"}, "additionalProperties": false}, "outputs": map[string]any{"type": "object"}, "tool_call_template": map[string]any{"call_template_type": "http", "url": endpoint, "http_method": "POST", "content_type": "application/json", "body_field": "request", "auth": map[string]any{"auth_type": "api_key", "api_key": "Bearer ${CALLKEY_AGENT_TOKEN}", "var_name": "Authorization", "location": "header"}}})
+			description := "Callkey " + family.name + " " + action + ". Uses the same native operation as the human interface. Requires separately approved scopes and exact skill versions/resource IDs. Live skill execution requires the room's paid Insights entitlement. Host holds and revision/epoch guards remain authoritative."
+			if action == "end_turn_mute" {
+				description += " Host only; requires BOTH skills_control and control. One durable intent pins the current turn speaker and microphone publications. Retry the identical request and idempotency key: pending or uncertain retries only reconcile, never mute again. A completed effect confirms advancement; cancelled means no advancement, but already dispatched microphones may have been muted. Never unmute automatically."
+			}
+			result = append(result, map[string]any{"name": "callkey_" + family.name + "_" + action, "description": description, "inputs": map[string]any{"type": "object", "properties": map[string]any{"request": request}, "required": []string{"request"}, "additionalProperties": false}, "outputs": map[string]any{"type": "object"}, "tool_call_template": map[string]any{"call_template_type": "http", "url": endpoint, "http_method": "POST", "content_type": "application/json", "body_field": "request", "auth": map[string]any{"auth_type": "api_key", "api_key": "Bearer ${CALLKEY_AGENT_TOKEN}", "var_name": "Authorization", "location": "header"}}})
 		}
 	}
 	return result

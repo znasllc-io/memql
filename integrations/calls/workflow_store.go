@@ -15,11 +15,14 @@ import (
 const workflowConcept = "v1:calls:workflowState"
 
 type workflowOperation struct {
+	Effect             *callrules.WorkflowEffect `json:"effect,omitempty"`
+	Admission          string                    `json:"admission,omitempty"`
 	TargetID           string
 	Key, Digest, Actor string
 	Revision           int64
 }
 type workflowState struct {
+	Mute              *workflowMuteIntent            `json:"mute,omitempty"`
 	Binding           *callrules.WorkflowBinding     `json:"binding,omitempty"`
 	BookingDigest     string                         `json:"bookingDigest,omitempty"`
 	ID, SiteID, KeyID string                         `json:"-"`
@@ -74,12 +77,16 @@ func (s *Store) workflowState(ctx context.Context, owner, id string) (*workflowS
 			return nil, accountRefusal("workflow_state_unavailable")
 		}
 	}
+	if !workflowValidMute(&v) {
+		return nil, accountRefusal("workflow_state_unavailable")
+	}
 	if v.Kind == "booking" && (v.Binding == nil || !callrules.ValidWorkflowID(v.Binding.BookingID) || !callrules.ValidWorkflowID(v.Binding.SkillID) || v.Binding.Revision < 1 || v.Binding.Version < 1 || len(v.Binding.Bindings) > 16 || len(v.BookingDigest) != 64) {
 		return nil, accountRefusal("workflow_state_unavailable")
 	}
 	return &v, nil
 }
 func (s *Store) saveWorkflow(ctx context.Context, owner string, v *workflowState, now time.Time) error {
+	workflowInvalidateMute(v)
 	data, err := json.Marshal(v)
 	if err != nil || len(data) > 1<<20 {
 		return accountRefusal("workflow_limit")

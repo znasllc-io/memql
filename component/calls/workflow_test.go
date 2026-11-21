@@ -56,3 +56,21 @@ func TestWorkflowConditionRequiresExplicitBranchWithoutCycles(t *testing.T) {
 	require.Empty(t, ValidateWorkflow(d))
 	require.Equal(t, []string{"done", "alternative"}, WorkflowNext(d, "turn"))
 }
+
+func TestWorkflowCombinedMuteDiscoveryHasOneExactBoundedOperation(t *testing.T) {
+	var found map[string]any
+	for _, value := range workflowUTCPTools("https://calls.example.test/agent") {
+		tool := value.(map[string]any)
+		if tool["name"] == "callkey_workflow_end_turn_mute" {
+			found = tool
+		}
+	}
+	require.NotNil(t, found)
+	require.Contains(t, found["description"], "BOTH skills_control and control")
+	require.Contains(t, found["description"], "never mute again")
+	request := found["inputs"].(map[string]any)["properties"].(map[string]any)["request"].(map[string]any)
+	workflow := request["properties"].(map[string]any)["workflow"].(map[string]any)
+	require.Equal(t, false, workflow["additionalProperties"])
+	require.ElementsMatch(t, []string{"action", "runId", "expectedRevision", "expectedEpoch", "idempotencyKey"}, workflow["required"])
+	require.Len(t, workflow["properties"], 6)
+}

@@ -107,7 +107,7 @@ func UTCPManual(endpoint string) map[string]any {
 	tools = append(tools, reportUTCPTools(endpoint)...)
 	tools = append(tools, workflowUTCPTools(endpoint)...)
 	tools = append(tools, proposalUTCPTools(endpoint)...)
-	return map[string]any{"utcp_version": "1.1.0", "manual_version": "2.5.0", "agent_policy": CurrentAgentPolicy(), "application_messages": map[string]any{"protocol": MessageProtocol, "reactionCatalog": map[string]any{"url": "/reaction-identifiers.json", "sha256": ReactionCatalogDigest}}, "tools": tools}
+	return map[string]any{"utcp_version": "1.1.0", "manual_version": "2.6.0", "agent_policy": CurrentAgentPolicy(), "application_messages": map[string]any{"protocol": MessageProtocol, "reactionCatalog": map[string]any{"url": "/reaction-identifiers.json", "sha256": ReactionCatalogDigest}}, "tools": tools}
 }
 func agentAcceptanceSchema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{"approvalRevision": map[string]any{"type": "integer", "minimum": 1}, "approvalDigest": map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"}, "conductVersion": map[string]any{"type": "string", "const": AgentConductVersion}, "terms": map[string]any{"type": "string", "const": AgentTermsVersion}}, "required": []string{"approvalRevision", "approvalDigest", "conductVersion", "terms"}, "additionalProperties": false}
