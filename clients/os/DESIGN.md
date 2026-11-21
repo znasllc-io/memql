@@ -257,7 +257,9 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
 - Sign-in and sign-out use one quiet `EntryPending` handoff in that frame,
   without the theme toggle (`EntryLayout preferences={false}`): the handoff
   shows for a moment on every reload, and a toggle there only flashes in the
-  corner. Its mark is 43px.
+  corner. Its mark is 86px and its text 24px (2x, Nov 20 2026), capped by
+  `min(…, 23vmin / 6.4vw)` so it fits a 375x667 phone; the first-load curtain
+  (`BootCurtain`) uses the same sizes so the two never jump.
   Keep same-origin authorization in the current document, preserve PKCE/state
   validation, and reveal the cluster destination after its initial facts arrive.
   Do not flash form skeletons, generic account pages, or the desktop on the way
