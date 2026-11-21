@@ -497,7 +497,10 @@ Page to one card when two would crowd the details or action targets.
 Sharing's search is a multi-select picker: the first five eligible options,
 then a Load more row that reveals five more. Search the full directory before
 paging. Checked selections survive filters, searches and reopening; show one
-`N selected` indicator and enable the plus action only with a selection. Commit
+`N selected` indicator and enable the plus action only with a selection. Files'
+share view shows the selection as removable chips inside the search box instead,
+like an email's "To:" line, and keeps the count for screen readers only (José
+and Jesús, Nov 20 2026); Fleet keeps the visible count for now. Commit
 the selected batch in one write, retain it on failure, and exclude entries that
 already have access. Options toggle checkmarks and never save on click.
 Use `kit/AnchoredPicker` to join the popup to the text field, escape scroll and

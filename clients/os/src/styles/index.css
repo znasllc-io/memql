@@ -14962,6 +14962,27 @@ button.os-cluster-mesh-peer:focus-visible {
 .os-card-search-input .os-input { width: 100%; min-width: 0; box-sizing: border-box; padding-inline: 30px 36px; }
 .os-card-search-input .os-icon-button { position: absolute; inset-inline-end: 0; top: 50%; transform: translateY(-50%); }
 .os-card-search > .os-add-button { flex: none; }
+/* PICKS INSIDE THE BOX (kit CardCollectionSearch `picks`; Files' share view,
+ * Jesús and José on the Nov 20 call: picked people stand in the field like an
+ * email's "To:" line). With picks the wrapper becomes the field, so the chips
+ * and the typing share one box that grows a line when they do not fit; the
+ * search icon and the clear button stay on the first line, and the list joins
+ * the whole box (kit AnchoredPicker reads `data-picker-field`). */
+.os-card-search-input[data-picker-field] {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
+  min-height: var(--os-control-h); box-sizing: border-box; padding: 3px 36px 3px 30px;
+  background: var(--os-raised); border: 1px solid var(--os-line); border-radius: var(--os-radius-xs);
+}
+.os-card-search-input[data-picker-field]:focus-within { outline: 2px solid var(--os-accent); outline-offset: 1px; }
+.os-card-search-input[data-picker-field] > .os-input { flex: 1 1 8ch; min-width: 8ch; width: auto; height: calc(var(--os-control-h) - 8px); padding: 0; border: 0; background: transparent; }
+.os-card-search-input[data-picker-field] > .os-input:focus-visible { outline: none; }
+.os-card-search-input[data-picker-field] > svg,
+.os-card-search-input[data-picker-field] > .os-icon-button { top: calc(var(--os-control-h) / 2 - 1px); }
+.os-card-search-input[data-picker-field] > .os-chip { max-width: 100%; font-family: inherit; }
+.os-card-search-input[data-picker-field] > .os-chip > svg { flex: none; }
+.os-card-search-input[data-picker-field][data-picker-side] { border-color: var(--os-accent); outline: none; }
+.os-card-search-input[data-picker-field][data-picker-side="below"] { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.os-card-search-input[data-picker-field][data-picker-side="above"] { border-top-left-radius: 0; border-top-right-radius: 0; }
 .fleet-label-hint { margin: 0 0 4px; }
 .os-editable-card { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-rows: auto minmax(36px, auto); align-items: center; column-gap: 8px; height: 100%; min-height: 70px; box-sizing: border-box; padding: 6px 10px 4px 12px; border: 1px solid var(--os-line); border-radius: var(--os-selection-radius); background: var(--os-plate); }
 .os-editable-card:has(> .os-editable-card-meta) { grid-template-columns: minmax(74px, 1fr) minmax(0, auto) minmax(74px, 1fr); }

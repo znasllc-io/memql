@@ -41,6 +41,15 @@ import { shareFileCall, timeLeftLabel, useFileShares, useShareDirectory, type Fi
 //                    classes and helpers rather than the component itself,
 //                    because that one saves a machine's whole audience at once
 //                    and this saves one share per person or group.
+//                    ONE CHANGE from Fleet's (Jesús on the Nov 20 call with
+//                    José: "as it works on Outlook ... the person that you
+//                    selected already stays here as a little bubble, as a
+//                    pill"; José: "that '1 selected', I fucking hate that, get
+//                    rid of it"): the people and groups ticked so far stand as
+//                    chips inside the search box, each with an x, and
+//                    Backspace in an empty box takes off the last. The
+//                    "N selected" line is gone from sight; screen readers
+//                    still hear it. Fleet keeps its line for now.
 //
 // Adding someone shares the file with them until the end chosen above. Who
 // already has it is not offered again: each card's "⋯" menu (Jesús's pick,
@@ -129,6 +138,10 @@ export function ShareView({ file, backLabel, onBack }: { file: ArtifactRow; back
   const selection = chosenKeys.filter((key) => eligible.has(key));
   const activeIndex = active >= 0 && active < results.length ? active : -1;
   const locked = pending !== "";
+  const picks = selection.flatMap((key) => {
+    const pick = candidates.find((c) => subjectKey(c.kind, c.id) === key);
+    return pick ? [{ key, label: pick.name, icon: pick.kind === "group" ? <Users size={11} aria-hidden /> : <User size={11} aria-hidden />, onRemove: () => toggleCandidate(pick) }] : [];
+  });
 
   function toggleCandidate(candidate: Candidate) {
     if (locked) return;
@@ -242,6 +255,8 @@ export function ShareView({ file, backLabel, onBack }: { file: ArtifactRow; back
       else if (results.length) setActive(event.key === "ArrowDown" ? Math.min(activeIndex + 1, results.length - 1) : Math.max(activeIndex - 1, 0));
     } else if (event.key === "Enter" && searching && results[activeIndex]) {
       event.preventDefault(); toggleCandidate(results[activeIndex]);
+    } else if (event.key === "Backspace" && query === "" && picks.length) {
+      event.preventDefault(); picks[picks.length - 1]!.onRemove();
     } else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeSearch(); }
     else if (event.key === "Tab") closeSearch();
   }
@@ -315,7 +330,7 @@ export function ShareView({ file, backLabel, onBack }: { file: ArtifactRow; back
             <div ref={searchArea} className="fleet-share-search-area">
               <CardCollectionSearch label="Find or add users and groups" query={query} inputRef={search} disabled={locked || !ready}
                 mode={{ label: "Search users and groups by", value: searchBy, options: [["all", "All"], ["person", "Users"], ["group", "Groups"]], onChange: (value) => { setSearchBy(value); setActive(-1); setVisibleCount(5); setRevealKey(undefined); } }}
-                onQueryChange={(value) => { setQuery(value); setSearching(true); setActive(0); setVisibleCount(5); setRevealKey(undefined); }} clearLabel="Clear sharing search"
+                onQueryChange={(value) => { setQuery(value); setSearching(true); setActive(0); setVisibleCount(5); setRevealKey(undefined); }} clearLabel="Clear sharing search" picks={picks}
                 add={{ label: "Add selected users and groups", enabled: selection.length > 0 && end !== null, onClick: () => { void addSelection(); } }}
                 inputProps={{ id: `${searchId}-search`, "aria-label": "Search users and groups", role: "combobox", "aria-autocomplete": "list", "aria-expanded": searching && !locked,
                   "aria-controls": searching && !locked ? listId : undefined, "aria-activedescendant": searching && !locked && activeIndex >= 0 ? `${listId}-${activeIndex}` : undefined,
@@ -339,7 +354,7 @@ export function ShareView({ file, backLabel, onBack }: { file: ArtifactRow; back
                 }} />
               </AnchoredPicker> : null}
             </div>
-            <p className="os-caption fleet-share-selection-count" id={`${searchId}-selection`} role="status" aria-live="polite" aria-atomic="true">{selection.length} selected</p>
+            <p className="os-sr-only" id={`${searchId}-selection`} role="status" aria-live="polite" aria-atomic="true">{selection.length} selected</p>
             {!ready ? <CardCollectionSkeleton label="Loading users and groups" /> : matches.length ? <CardCarousel key={`${searchBy}:${query}`} items={matches} itemKey={shareKey} revealKey={revealKey} minCardWidth={240}
               label="Sharing access cards" listLabel="Shared users and groups" noun="entry" plural="entries" renderItem={(share) => {
                 const who = nameOf(share);

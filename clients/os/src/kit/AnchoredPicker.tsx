@@ -22,10 +22,16 @@ export function AnchoredPicker({ anchor, owner, popupRef, onClose, children }: {
     for (let node = input.parentElement; node; node = node.parentElement) {
       if (/(auto|scroll|hidden|clip)/.test(getComputedStyle(node).overflowY)) clipping.push(node);
     }
-    let frame = 0, lastRect = "";
+    // The list joins the box the person sees: the input itself, or the box a
+    // caller draws round it (`data-picker-field`: kit CardCollectionSearch with
+    // picks inside). Looked up every frame, because the box appears with the
+    // first pick, often while the list is open.
+    let frame = 0, lastRect = "", field: HTMLElement = input;
     const position = () => {
       if (input.closest('[hidden], [inert], [aria-hidden="true"]')) { close.current(); return; }
-      const rect = input.getBoundingClientRect();
+      const box = input.closest<HTMLElement>("[data-picker-field]") ?? input;
+      if (box !== field) { delete field.dataset.pickerSide; field = box; lastRect = ""; }
+      const rect = field.getBoundingClientRect();
       const viewport = window.visualViewport;
       const leftEdge = viewport?.offsetLeft ?? 0, topEdge = viewport?.offsetTop ?? 0;
       const width = viewport?.width ?? window.innerWidth, height = viewport?.height ?? window.innerHeight;
@@ -47,7 +53,7 @@ export function AnchoredPicker({ anchor, owner, popupRef, onClose, children }: {
         popup.style.top = `${(up ? rect.top + 1 : rect.bottom - 1) / s}px`;
         popup.style.transform = up ? "translateY(-100%)" : "none";
         popup.dataset.side = up ? "above" : "below";
-        input.dataset.pickerSide = popup.dataset.side;
+        field.dataset.pickerSide = popup.dataset.side;
       }
       // Windows can move by transforms without a scroll/resize event.
       frame = requestAnimationFrame(position);
@@ -63,7 +69,7 @@ export function AnchoredPicker({ anchor, owner, popupRef, onClose, children }: {
     document.addEventListener("visibilitychange", visibility);
     return () => {
       cancelAnimationFrame(frame);
-      delete input.dataset.pickerSide;
+      delete field.dataset.pickerSide;
       window.removeEventListener("pointerdown", outside, true);
       window.removeEventListener("focusin", outside);
       document.removeEventListener("visibilitychange", visibility);
