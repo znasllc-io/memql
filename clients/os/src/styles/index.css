@@ -511,10 +511,12 @@ button:not(:disabled):active {
   color: var(--os-ink);
 }
 /* An icon whose act is running dims and takes no press (kit/oneAtATime). It
- * keeps its focus, so it is not `disabled`. */
+ * keeps its focus, so it is not `disabled`. The dim is the whole signal: no
+ * `cursor: progress`, which the Mac draws as a spinning wheel by the pointer
+ * (Jesús, Nov 20 2026: "It doesn't really need to have a roller. If it grays
+ * out, I think that's enough"). */
 .os-icon-button[data-busy] {
   opacity: 0.4;
-  cursor: progress;
 }
 /* An icon's name at once, above it (kit IconButton tip="above"). Fixed and
  * drawn on the body, so no window or scroller clips it; the page's ink
@@ -2735,9 +2737,6 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   color: var(--os-accent);
   border-color: var(--os-accent);
   background: color-mix(in srgb, var(--os-accent) 12%, var(--os-raised));
-}
-.os-button[aria-busy="true"] {
-  cursor: progress;
 }
 
 .os-check {
