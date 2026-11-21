@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { ShareFoot, type FileShare, type SharePerson } from "../../src/apps/files/sharing";
+import { MIN_HOLD_MS } from "../../src/kit/oneAtATime";
 
 // The share panel at the foot of the Files rail (Jesús, Nov 18 2026): names
 // only until a person is chosen; then, above the names, the days and Share
@@ -31,6 +32,9 @@ function renderFoot(shares: FileShare[] = [], acts: { onShare?: ShareAct; onRene
 
 const click = async (el: Element) => { await act(async () => { fireEvent.click(el); }); };
 
+
+/** Waits out the half second a press holds its button (kit/oneAtATime). */
+const holdOver = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, MIN_HOLD_MS)); });
 describe("the share panel at the foot of the rail", () => {
   it("shows only Share with and the names until a person is chosen", () => {
     renderFoot([danaShare]);
@@ -92,6 +96,7 @@ describe("the share panel at the foot of the rail", () => {
     expect(onShare).toHaveBeenCalledOnce();
     expect(share.textContent).toBe("Sharing…");
     await act(async () => { answer(); });
+    await holdOver();
     expect(share.textContent).toBe("Shared");
     expect(share.getAttribute("data-state")).toBe("done");
   });
@@ -100,8 +105,9 @@ describe("the share panel at the foot of the rail", () => {
     renderFoot([], { onShare: vi.fn<ShareAct>(async () => { throw new Error("No."); }) });
     await click(screen.getByRole("button", { name: /Lee Park/ }));
     await click(screen.getByRole("button", { name: "Share" }));
-    expect(screen.getByRole("button", { name: "Share" }).textContent).toBe("Share");
     expect(screen.getByRole("alert").textContent).toBe("No.");
+    await holdOver();
+    expect(screen.getByRole("button", { name: "Share" }).textContent).toBe("Share");
   });
 
   it("keeps listing someone who still has the file after leaving the organization", () => {
