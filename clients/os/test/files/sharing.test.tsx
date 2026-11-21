@@ -197,6 +197,41 @@ describe("Shared with me", () => {
     expect(connection.callsNamed("librarySaveSharedCopy")).toHaveLength(2);
   });
 
+  // Jesús, Nov 20: Download behaves like Save -- a burst is one download, the
+  // icon dims while it is prepared, and a line says it landed.
+  it("Download counts a burst of clicks as one, dims meanwhile, then says it landed", async () => {
+    let answer = () => {};
+    h.download.mockImplementationOnce(() => new Promise<void>((resolve) => { answer = resolve; }));
+    connect({});
+    await renderFiles();
+    await click(within(rail()).getByRole("button", { name: "Shared with me" }));
+    await click(await screen.findByRole("button", { name: /Budget 2027\.xlsx/ }));
+    const download = within(screen.getByRole("group", { name: "Selected: Budget 2027.xlsx" })).getByRole("button", { name: "Download" });
+    await act(async () => { for (let i = 0; i < 20; i++) fireEvent.click(download); });
+    expect(h.download).toHaveBeenCalledTimes(1);
+    expect(download.getAttribute("aria-busy")).toBe("true");
+
+    await act(async () => { answer(); });
+    expect(screen.getByText('Downloaded "Budget 2027.xlsx".')).toBeTruthy();
+    expect(download.hasAttribute("data-busy")).toBe(false);
+    await click(download);
+    expect(h.download).toHaveBeenCalledTimes(2);
+  });
+
+  it("Download on your own file's Head counts a burst as one too", async () => {
+    let answer = () => {};
+    h.download.mockImplementationOnce(() => new Promise<void>((resolve) => { answer = resolve; }));
+    connect({});
+    await renderFiles();
+    await click(screen.getByRole("button", { name: /brief\.pdf/ }));
+    const download = within(screen.getByRole("group", { name: "Selected: brief.pdf" })).getByRole("button", { name: "Download" });
+    await act(async () => { for (let i = 0; i < 20; i++) fireEvent.click(download); });
+    expect(h.download).toHaveBeenCalledTimes(1);
+    expect(download.getAttribute("aria-busy")).toBe("true");
+    await act(async () => { answer(); });
+    expect(screen.getByText('Downloaded "brief.pdf".')).toBeTruthy();
+  });
+
   it("says in place when the engine refuses the copy", async () => {
     connect({ refuse: { librarySaveSharedCopy: "This share has ended." } });
     await renderFiles();

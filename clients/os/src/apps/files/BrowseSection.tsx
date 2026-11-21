@@ -235,6 +235,9 @@ export function BrowseSection({
           : null,
         bearer: () => authSource.bearer(),
       });
+      // The same one-line answer, for the same five seconds, as Save's.
+      setRailNote(`Downloaded "${artifactName(row)}".`);
+      setTimeout(() => setRailNote(""), 5000);
     } catch (err: unknown) {
       refuse("The download did not land.", "Nothing was saved.", err);
     }
@@ -565,6 +568,9 @@ export function BrowseSection({
         readFile: async () => ({ sizeBytes: notice.size, name: notice.title }),
         bearer: () => authSource.bearer(),
       });
+      // The same one-line answer, for the same five seconds, as Save's.
+      setRailNote(`Downloaded "${notice.title}".`);
+      setTimeout(() => setRailNote(""), 5000);
     } catch (err: unknown) {
       refuse("The download did not land.", "Nothing was saved.", err);
     }

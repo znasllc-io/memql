@@ -402,7 +402,7 @@ export function Inspector({
           readAt={versions.readAt}
           presence={presence}
           onRefresh={versions.refresh}
-          onDownload={(entry) => void downloadVersion(entry)}
+          onDownload={(entry) => downloadVersion(entry)}
           downloadingVersion={downloadingVersion}
         />
       ) : null}

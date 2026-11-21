@@ -112,6 +112,10 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    did not happen, so the button never says it did. Hand the promise back
    (`onClick={() => save(file)}`, not `void save(file)`); the engine refuses
    the same save while one runs, for agents with no button.
+   Download is one of these acts (Head icon, right-click, Shared with me, a
+   version's icon): a burst downloads once, the icon dims while the file is
+   prepared, and the rail says `Downloaded "name".` for five seconds, as it
+   says `Saved ...` after Save.
 
 7. **Say it once.** A scope is named in one place. The rail highlights it,
    the Head names it, the list does not re-caption it, placeholders stay

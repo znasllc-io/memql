@@ -33,7 +33,8 @@ export function VersionHistory({
   readAt: Date | null;
   presence: (workerId: string) => MachinePresence | null;
   onRefresh: () => void;
-  onDownload: (entry: VersionEntry) => void;
+  /** Returns the download's promise, so a version's Download takes no second press until it settles. */
+  onDownload: (entry: VersionEntry) => unknown;
   /** The version currently downloading, or 0. */
   downloadingVersion: number;
 }) {
