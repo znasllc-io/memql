@@ -34,10 +34,9 @@ const GLYPHS: Record<string, ComponentType<{ size?: number | string; "aria-hidde
 // A desktop file icon. Open (double-click / Enter) is the VS Code handoff;
 // the desktop layer owns the handoff ports and its no-answer timeout, so
 // this component only renders what it is told (spec D3). No dot: a file that
-// cannot open yet is drawn dim, with one line under its name saying why or
-// what happens next (items/deskFileState.ts holds the rules).
+// cannot open yet is drawn dim, with one line under its name saying why
+// (items/deskFileState.ts holds the rules).
 const LINES: Record<Exclude<DeskLine, "failed" | null>, string> = {
-  opening: "Opening when done",
   offline: "Computer offline",
   ready: "Ready",
 };

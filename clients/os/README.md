@@ -121,12 +121,13 @@ or client-visible session authority.
   rules are in DESIGN.md, "Windows on a desk".
 - **Desktop items**: files are Library artifact shortcuts, with no dot. A
   file that cannot open yet (still uploading, or made on a computer that is
-  offline) is drawn dim and still selects, moves and files. Opening an
-  uploading file waits and it opens once the upload lands; opening an
-  offline computer's file does nothing and is not remembered, so it never
-  pops open later. One line under the name says the rest: "Opening
-  when done", "Upload failed -- retry", "Computer offline", or "Ready" for
-  about three seconds after an upload nobody opened (`items/deskFileState.ts`).
+  offline) is drawn dim and still selects, moves and files (dropped on a
+  folder while uploading, it goes in once the upload lands). Opening it does
+  nothing and is not remembered, so nothing ever pops open later: an open
+  that ran after the click would be refused by Safari's pop-up blocker.
+  One line under the name says the rest: "Upload failed -- retry",
+  "Computer offline", or "Ready" for about three seconds after an upload
+  lands, when it can be opened (`items/deskFileState.ts`).
   Every icon behaves like
   a desktop icon (epic memql#4842): single click SELECTS, double-click or
   Enter OPENS -- a file hands off to VS Code, a folder opens the Files app

@@ -13,10 +13,12 @@ import {
 } from "../../src/items/deskFileState";
 
 // No dot on a desk file (José, Nov 19 call; Jesús picked the states Nov 20
-// 2026): uploading or offline is dim and does not open; opening an uploading
-// file waits and it opens by itself once it lands; opening an offline
-// computer's file is refused and never remembered (Jesús, Nov 20); a failed upload drops the wait; a finished
-// upload nobody waited on says "Ready" for about three seconds.
+// 2026): uploading or offline is dim and does not open. Opening it does
+// nothing and is never remembered, so nothing opens by itself later (Jesús,
+// Nov 20 evening: a later open is outside the click and Safari blocks it). A
+// file dropped into a folder while uploading still goes in once it lands; a
+// failed upload drops that move; an upload that lands on the desk says
+// "Ready" for about three seconds.
 
 const holds = (entries: Record<string, Hold>) => new Map(Object.entries(entries));
 
@@ -54,18 +56,22 @@ describe("holdOf -- what stops a desk file opening", () => {
 });
 
 describe("the desk's file states", () => {
-  it("opens a file opened while uploading once the upload lands, with no Ready", () => {
+  it("does nothing when a file is opened while uploading, and nothing opens when it lands", () => {
     const d = desk({ a: "uploading" });
     d.ask("a", "open");
+    d.ask("a", "open");
     expect(d.release).not.toHaveBeenCalled();
-    expect(d.line("a")).toBe("opening");
+    expect(d.line("a")).toBeNull();
 
     d.holds({ a: null });
+    expect(d.release).not.toHaveBeenCalled();
+    // Ready says it can be opened now, and opening it now opens it.
+    expect(d.line("a")).toBe("ready");
+    d.ask("a", "open");
     expect(d.release).toHaveBeenCalledExactlyOnceWith("a", "open");
-    expect(d.line("a")).toBeNull();
   });
 
-  it("drops the waiting open when the upload fails, and a retry that lands just says Ready", () => {
+  it("offers the retry line when the upload fails, and a retry that lands says Ready", () => {
     const d = desk({ a: "uploading" });
     d.ask("a", "open");
     d.holds({ a: "failed" });
@@ -78,7 +84,7 @@ describe("the desk's file states", () => {
     expect(d.line("a")).toBe("ready");
   });
 
-  it("says Ready for three seconds when nobody tried to open it, then nothing", () => {
+  it("says Ready for three seconds after an upload lands, then nothing", () => {
     const d = desk({ a: "uploading", b: null });
     d.holds({ a: null, b: null });
     expect(d.line("a")).toBe("ready");
@@ -108,14 +114,6 @@ describe("the desk's file states", () => {
     expect(d.release).toHaveBeenCalledExactlyOnceWith("a", "open");
   });
 
-  it("drops a waiting open if the file's computer goes offline before it can open", () => {
-    const d = desk({ a: "uploading" });
-    d.ask("a", "open");
-    d.holds({ a: "offline" });
-    d.holds({ a: null });
-    expect(d.release).not.toHaveBeenCalled();
-  });
-
   it("opens at once when nothing holds it, and never for a failed upload", () => {
     const d = desk({ a: null, f: "failed" });
     d.ask("a", "open");
@@ -136,11 +134,13 @@ describe("the desk's file states", () => {
     expect(d.line("a")).toBeNull();
   });
 
-  it("forgets a file that left the desk while it waited", () => {
-    const d = desk({ a: "uploading" });
-    d.ask("a", "open");
-    d.holds({});
-    d.holds({ a: null });
+  it("drops a folder move when the upload fails or the file leaves the desk", () => {
+    const d = desk({ a: "uploading", b: "uploading" });
+    d.ask("a", { folderId: "f-1" });
+    d.ask("b", { folderId: "f-1" });
+    // a fails; b leaves the desk.
+    d.holds({ a: "failed" });
+    d.holds({ a: null, b: null });
     expect(d.release).not.toHaveBeenCalled();
   });
 });
@@ -151,5 +151,6 @@ describe("settle and ask, without React", () => {
     expect(settle(NO_OPENS, h, h).opens).toBe(NO_OPENS);
     expect(ask(NO_OPENS, "a", "failed", "open").opens).toBe(NO_OPENS);
     expect(ask(NO_OPENS, "a", "offline", "open")).toEqual({ opens: NO_OPENS, now: false });
+    expect(ask(NO_OPENS, "a", "uploading", "open")).toEqual({ opens: NO_OPENS, now: false });
   });
 });

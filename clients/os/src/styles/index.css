@@ -322,9 +322,9 @@ button:not(:disabled):active {
   cursor: pointer;
 }
 
-/* The one line where the retry line goes: "Opening when done" in the ink,
- * "Ready" in the accent green, "Computer offline" quiet. One line, centred on
- * the icon even when a little wider than it. */
+/* The one line where the retry line goes: "Ready" in the accent green,
+ * "Computer offline" quiet. One line, centred on the icon even when a little
+ * wider than it. */
 .os-file-line {
   display: flex;
   justify-content: center;
