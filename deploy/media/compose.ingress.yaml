@@ -1,0 +1,20 @@
+# Overlay with the engine's deploy/media/compose.yaml, never a separate project.
+# Sharing LiveKit's network namespace makes its loopback ICE candidates reachable
+# by the trusted ingress publisher on Docker Desktop as well as by the browser.
+services:
+  livekit:
+    ports:
+      - "127.0.0.1:18080:8080"
+      - "127.0.0.1:7885:7885/udp"
+      - "127.0.0.1:18081:8081"
+  ingress:
+    image: livekit/ingress:v1.6.0
+    network_mode: service:livekit
+    depends_on: [livekit, redis]
+    restart: unless-stopped
+    cpus: 4
+    mem_limit: 4g
+    environment:
+      INGRESS_CONFIG_FILE: /etc/livekit/ingress.yaml
+    volumes:
+      - "${MEDIA_CONFIG_DIR:?set by the media operator}/ingress.yaml:/etc/livekit/ingress.yaml:ro"

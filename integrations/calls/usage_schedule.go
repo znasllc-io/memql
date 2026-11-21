@@ -32,6 +32,9 @@ func (s *Service) configuredSchedule(ctx context.Context, h keyHolder, req callr
 	}
 	defer release()
 	fresh := memql.ContextWithFreshRead(ctx)
+	if err := s.delegatedEffectAllowed(fresh, h.site, h.row.KeyID); err != nil {
+		return none, err
+	}
 	now := s.now()
 	owner := h.site.OwnerUserID
 	if err = s.heldKeyForCancellation(fresh, h, now); err != nil {
@@ -46,6 +49,11 @@ func (s *Service) configuredSchedule(ctx context.Context, h keyHolder, req callr
 	}
 	if current == nil && !isNew {
 		return none, callrules.ErrNotFound
+	}
+	if current != nil {
+		if err := delegatedBookingAllowed(ctx, current); err != nil {
+			return none, err
+		}
 	}
 	prior := map[string]string{}
 	if current != nil && current.UsageRequests != "" {
@@ -73,6 +81,21 @@ func (s *Service) configuredSchedule(ctx context.Context, h keyHolder, req callr
 	}
 	c, err := s.readCallQuote(h, req.QuoteID, false)
 	if err != nil {
+		return none, err
+	}
+	if err = s.familyConfigurationAllowed(fresh, h.site, h.row.KeyID, c); err != nil {
+		return none, err
+	}
+	if current != nil && current.UsageConfig != "" {
+		old, e := decodeUsageConfig(current.UsageConfig)
+		if e != nil {
+			return none, e
+		}
+		if (old.ParticipationMode == familyMode) != (c.ParticipationMode == familyMode) {
+			return none, accountRefusal("family_policy_immutable")
+		}
+	}
+	if err = s.delegatedConfigurationAllowed(fresh, h.site, h.row.KeyID, c, req.Start); err != nil {
 		return none, err
 	}
 	if req.Minutes != c.DurationMinutes {
@@ -125,9 +148,10 @@ func (s *Service) configuredSchedule(ctx context.Context, h keyHolder, req callr
 	links := configuredLinks(h.pepper, operation)
 	prior[operation] = digest
 	requests, _ := json.Marshal(prior)
-	fields := map[string]any{"usageConfig": encodeUsageConfig(c), "usageOperation": operation, "usageDigest": digest, "usageRequests": string(requests), "start": span.Start, "end": span.End, "title": title, "guestDigest": callrules.Digest(h.pepper, []byte(links.GuestToken)), "hostDigest": callrules.Digest(h.pepper, []byte(links.HostToken))}
+	grantID, _ := ctx.Value(agentCallContext{}).(string)
+	fields := map[string]any{"delegationId": grantID, "usageConfig": encodeUsageConfig(c), "usageOperation": operation, "usageDigest": digest, "usageRequests": string(requests), "start": span.Start, "end": span.End, "title": title, "guestDigest": callrules.Digest(h.pepper, []byte(links.GuestToken)), "hostDigest": callrules.Digest(h.pepper, []byte(links.HostToken))}
 	if current == nil {
-		n := newBooking{ID: callID, SiteID: h.site.SiteID, KeyID: h.row.KeyID, Title: title, Start: span.Start, End: span.End, CalendarUID: callID + "@" + host, GuestDigest: fields["guestDigest"].(string), HostDigest: fields["hostDigest"].(string), UsageConfig: encodeUsageConfig(c), UsageOperation: operation, UsageDigest: digest, UsageRequests: string(requests)}
+		n := newBooking{DelegationID: grantID, ID: callID, SiteID: h.site.SiteID, KeyID: h.row.KeyID, Title: title, Start: span.Start, End: span.End, CalendarUID: callID + "@" + host, GuestDigest: fields["guestDigest"].(string), HostDigest: fields["hostDigest"].(string), UsageConfig: encodeUsageConfig(c), UsageOperation: operation, UsageDigest: digest, UsageRequests: string(requests)}
 		if err = s.store.createBooking(fresh, owner, n, now); err != nil {
 			return none, err
 		}

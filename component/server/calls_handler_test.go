@@ -1932,7 +1932,7 @@ func TestCallsSurfaceDeclarations(t *testing.T) {
 	t.Run("the exact routes carry the base", func(t *testing.T) {
 		t.Setenv("MEMQL_SERVER_PUBLIC_PATH", "/tenant")
 		var want []string
-		for _, name := range []string{"history", "account", "unlock", "session", "start", "schedule", "reschedule", "cancel", "join", "queue", "host", "leave"} {
+		for _, name := range []string{"family", "workflows", "delegation", "agent", "utcp.json", "stripe-webhook", "didit-webhook", "history", "account", "unlock", "session", "start", "schedule", "reschedule", "cancel", "join", "queue", "host", "leave"} {
 			want = append(want, "/calls/"+name, "/tenant/calls/"+name)
 		}
 		if got := CallsSelfAuthenticatedPaths(); !reflect.DeepEqual(got, want) {

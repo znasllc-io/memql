@@ -161,6 +161,10 @@ func (s *Service) meterPresence(ctx context.Context, room roomRow, seats []seatR
 // unioned, so reordered reconnects never count one seat twice. Concurrent-count
 // pricing is recalculated at each boundary, never over historical elapsed time.
 func usageCost(room roomRow, end time.Time) (int64, error) {
+	configuration, configErr := decodeUsageConfig(room.UsageConfig)
+	if configErr != nil {
+		return 0, configErr
+	}
 	if room.UsageReservedCents < 0 || room.UsageReservedCents > simulatedMaximumBalanceCents || room.FundingMaxPeople < 1 || room.FundingMaxPeople > 100 {
 		return 0, allowanceUnavailable()
 	}
@@ -190,7 +194,7 @@ func usageCost(room roomRow, end time.Time) (int64, error) {
 	var units, last int64
 	for _, e := range events {
 		if last != 0 {
-			units += (e.at - last) * callrules.PreviewRate(min(people, room.FundingMaxPeople))
+			units += (e.at - last) * callrules.ConfigurationRate(configuration, min(people, room.FundingMaxPeople))
 		}
 		last = e.at
 		before := counts[e.identity]
@@ -361,6 +365,9 @@ func (s *Service) reconcileMeterCapacity(ctx context.Context, hint roomRow, back
 	}
 	if len(rows) < usageIntervalLimit {
 		return false, nil
+	}
+	if familyRoom(hint) {
+		return true, s.closeFamily(ctx, hint, "family_meter_capacity")
 	}
 	s.checkpointUsage(ctx, hint)
 	if err = bounded(ctx, func(ctx context.Context) error { return backend.DeleteRoom(ctx, hint.MediaRoom) }); err != nil {

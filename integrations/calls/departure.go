@@ -72,12 +72,18 @@ func (s *Service) LeaveWithOptions(ctx context.Context, sess callrules.Session, 
 	if seat == nil || seat.RoomID != room.ID {
 		return departureConflict()
 	}
+	if familyRoom(*room) && !room.open() && seat.KeyID == room.KeyID && seat.Host {
+		return nil
+	}
 	// Refuse stale/unauthorized requests before provider work, and keep receipt
 	// replay cheap. This is only a preflight: the gate repeats every check before
 	// writing because role, admission and session can change during the checkpoint.
 	_, replay, err := s.departureFields(fresh, *room, *seat, *departure, s.now())
 	if err != nil {
 		return err
+	}
+	if familyRoom(*room) && seat.KeyID == room.KeyID && seat.Host {
+		return s.closeFamily(ctx, *room, "family_guardian_left")
 	}
 	if !replay {
 		s.checkpointUsage(ctx, *room)
@@ -118,7 +124,7 @@ func (s *Service) departureFields(ctx context.Context, room roomRow, seat seatRo
 	if !room.open() || session.SeatID != seat.ID || session.RoomID != room.ID || seat.RoomID != room.ID || !seat.occupying() || !seat.JoinedAt.Equal(d.token.JoinedAt) || !seat.LeftAt.Equal(d.token.LeftAt) || seat.DepartureReceipt != d.token.Receipt {
 		return nil, false, departureConflict()
 	}
-	if d.request.Mode == "" && seat.Host {
+	if d.request.Mode == "" && seat.Host && !familyRoom(room) {
 		return nil, false, callrules.Refuse(callrules.ErrConflict, "leave_choice_required", "a current host must choose how the call continues")
 	}
 	if d.request.Mode != "" && !seat.Host {

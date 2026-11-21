@@ -3,7 +3,7 @@ package memql
 // calls_surface.go -- THE WIRE NAMES OF THE CALLS SURFACE, shared by the edge, which
 // answers a deployable's own origin at CallsInboundPath, and the bff, which serves the
 // routes under CallsSurfacePathPrefix (component/server calls_handler.go). The owner
-// approved this HTTP route family on 2026-11-17.
+// approved this HTTP route family on 2026-11-17 and its UTCP/provider extension on 2026-11-20.
 //
 // THEY LIVE HERE for the reason the access surface's do (site_access_code.go): this is the
 // one package component/edge and component/server can both import, and a literal repeated
@@ -31,7 +31,7 @@ const (
 	CallsStampOwnerHeader = "X-Memql-Calls-Owner"
 )
 
-// The routes of the calls surface on the bff: the base its handler mounts under and the ten
+// The routes of the calls surface on the bff: the base its handler mounts under and the exact
 // paths the edge forwards to. Each is reached on a deployable's own origin at the same name
 // under CallsInboundPath, and the edge maps one to the other.
 const (
@@ -39,6 +39,18 @@ const (
 	// visitor's path: on a deployable's origin the surface is CallsInboundPath.
 	CallsSurfacePathPrefix = "/calls/"
 
+	// Agent/provider routes extend the same exact site-stamped HTTP surface.
+	CallsFamilyPath                  = CallsSurfacePathPrefix + "family"
+	CallsWorkflowsPath               = CallsSurfacePathPrefix + "workflows"
+	CallsWorkflowBodyBytes     int64 = 128 << 10
+	CallsDelegationPath              = CallsSurfacePathPrefix + "delegation"
+	CallsDelegationBodyBytes   int64 = 64 << 10 // bounded recipient allowlist and version/resource pins
+	CallsAgentPath                   = CallsSurfacePathPrefix + "agent"
+	CallsUTCPPath                    = CallsSurfacePathPrefix + "utcp.json"
+	CallsStripeWebhookPath           = CallsSurfacePathPrefix + "stripe-webhook"
+	CallsDiditWebhookPath            = CallsSurfacePathPrefix + "didit-webhook"
+	CallsProviderBodyBytes     int64 = 1 << 20
+	CallsAgentCredentialHeader       = "X-Memql-Calls-Agent-Credential"
 	// CallsAccountPath performs deployable-local passkey ceremonies and account management.
 	CallsAccountPath            = CallsSurfacePathPrefix + "account"
 	CallsAccountBodyBytes int64 = 64 << 10

@@ -256,6 +256,12 @@ func TestSimulatedAllowanceMonthlyTotalSurvivesDailyResetsAndNewSessions(t *test
 	if cw == nil {
 		return
 	}
+	// Each call exercises one UTC daily bucket. Starting near midnight would
+	// correctly bridge into the next day's allowance instead of ending at 3h.
+	// Move forward before activating the pass so the seven-day fixture is
+	// independent of both the wall clock and the current calendar month.
+	now := cw.clock.Now()
+	cw.advanceTo(time.Date(now.Year(), now.Month()+1, 1, 12, 0, 0, 0, time.UTC))
 	ctx := context.Background()
 	k, host, pass := allowanceAccount(t, cw, "month")
 	first := cw.clock.Now()

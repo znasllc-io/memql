@@ -24,8 +24,8 @@ func validQuoteRequest(r callrules.AccountRequest) bool {
 	return r.AccountID != "" && len(r.AccountID) <= 128 && r.Key == "" && r.ChallengeID == "" && len(r.Credential) == 0 && r.CredentialID == "" && r.Label == "" && r.AmountCents == 0 && r.Plan == "" && r.IdempotencyKey == "" && r.ParticipantLimit >= 1 && r.ParticipantLimit <= 100 && (r.DurationMinutes == 10 || r.DurationMinutes >= 15 && r.DurationMinutes <= 1440 && r.DurationMinutes%15 == 0)
 }
 func (s *Service) quoteCall(ctx context.Context, site callrules.SiteRef, token string, req callrules.AccountRequest) (callrules.AccountResult, error) {
-	if req.Insights {
-		return callrules.AccountResult{}, callrules.Refuse(callrules.ErrInvalid, "insights_unavailable", "Insights is not connected to this simulation")
+	if (req.Insights || req.Resources) && s.commerceConfig().admission(s.now()) != nil {
+		return callrules.AccountResult{}, callrules.Refuse(callrules.ErrInvalid, "insights_unavailable", "Insights guidance requires a fresh funded service envelope")
 	}
 	h, err := s.fundingHolder(ctx, site, token, req.AccountID)
 	if err != nil {
@@ -35,7 +35,13 @@ func (s *Service) quoteCall(ctx context.Context, site callrules.SiteRef, token s
 	if err != nil {
 		return callrules.AccountResult{}, err
 	}
-	c := callrules.CallConfiguration{ParticipantLimit: req.ParticipantLimit, DurationMinutes: req.DurationMinutes, RateVersion: callrules.PreviewRateVersion}
+	c := callrules.CallConfiguration{ParticipationMode: req.ParticipationMode, ParticipantLimit: req.ParticipantLimit, DurationMinutes: req.DurationMinutes, RateVersion: callrules.PreviewRateVersion}
+	if req.Insights || req.Resources {
+		c.Insights, c.Resources, c.RateVersion = req.Insights, req.Resources, callrules.GuidanceRateVersion
+	}
+	if err := s.familyConfigurationAllowed(ctx, site, h.row.KeyID, c); err != nil {
+		return callrules.AccountResult{}, err
+	}
 	if err := configuredPolicyAllows(policy, c); err != nil {
 		return callrules.AccountResult{}, err
 	}
@@ -45,7 +51,7 @@ func (s *Service) quoteCall(ctx context.Context, site callrules.SiteRef, token s
 	}
 	expires := s.now().Add(usageQuoteLifetime).UTC()
 	data, _ := json.Marshal(usageQuotePayload{site.SiteID, h.row.KeyID, c, expires})
-	out.Quote = &callrules.CallQuote{CallConfiguration: c, QuoteID: callrules.SealHistoryToken(h.pepper, "call-quote", data), RateMicroDollarsPerMinute: callrules.PreviewRate(c.ParticipantLimit), MaxCostCents: callrules.PreviewReservation(c), ExpiresAt: expires, ExpiresInMs: usageQuoteLifetime.Milliseconds()}
+	out.Quote = &callrules.CallQuote{CallConfiguration: c, QuoteID: callrules.SealHistoryToken(h.pepper, "call-quote", data), RateMicroDollarsPerMinute: callrules.ConfigurationRate(c, c.ParticipantLimit), MaxCostCents: callrules.PreviewReservation(c), ExpiresAt: expires, ExpiresInMs: usageQuoteLifetime.Milliseconds()}
 	return out, nil
 }
 func configuredPolicyAllows(p callrules.Policy, c callrules.CallConfiguration) error {
@@ -102,6 +108,9 @@ func configuredLinks(pepper []byte, operation string) callrules.CallLinks {
 }
 
 func (s *Service) configuredFunding(ctx context.Context, site callrules.SiteRef, keyID string, c callrules.CallConfiguration, now time.Time) (roomFunding, callrules.KeyAllowance, error) {
+	if err := s.familyConfigurationAllowed(ctx, site, keyID, c); err != nil {
+		return roomFunding{}, callrules.KeyAllowance{}, err
+	}
 	p, err := s.store.PolicyFor(ctx, site.OwnerUserID, site.SiteID)
 	if err != nil {
 		return roomFunding{}, callrules.KeyAllowance{}, err
@@ -134,4 +143,20 @@ func (s *Service) configuredFunding(ctx context.Context, site callrules.SiteRef,
 	}
 	deadline := now.Add(time.Duration(c.DurationMinutes) * time.Minute)
 	return roomFunding{FundingMode: usageMeteredMode, FundingDeadline: deadline, FundingMaxPeople: c.ParticipantLimit, UsageConfig: encodeUsageConfig(c), UsageReservedCents: reserve, UsageMeter: "[]"}, callrules.KeyAllowance{AvailableUntil: deadline}, nil
+}
+
+// Resource capacity is explicitly quoted before any publisher may consume it.
+// Existing rooms and stale operator envelopes cannot acquire this new authority.
+func (s *Service) resourceBudgetAllowed(room roomRow) error {
+	if err := s.commerceConfig().admission(s.now()); err != nil {
+		return err
+	}
+	c, err := decodeUsageConfig(room.UsageConfig)
+	if err != nil {
+		return err
+	}
+	if !c.Resources {
+		return accountRefusal("resource_tariff_required")
+	}
+	return nil
 }

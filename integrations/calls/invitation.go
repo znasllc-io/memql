@@ -3,6 +3,7 @@ package calls
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -43,7 +44,7 @@ func (s *Service) Invite(ctx context.Context, sess callrules.Session, req callru
 	if !valid || !callrules.TokenWellFormed(req.Token) {
 		return callrules.InviteResult{}, fmt.Errorf("%w: one email address and a guest token are required", callrules.ErrInvalid)
 	}
-	h, err := s.hostOf(memql.ContextWithFreshRead(ctx), sess)
+	site, target, _, startsAt, err := s.invitationAuthority(memql.ContextWithFreshRead(ctx), sess, req)
 	if err != nil {
 		return callrules.InviteResult{}, err
 	}
@@ -51,8 +52,8 @@ func (s *Service) Invite(ctx context.Context, sess callrules.Session, req callru
 	if err != nil {
 		return callrules.InviteResult{}, err
 	}
-	key := callrules.Digest(pepper, []byte("invitation:"+h.site.SiteID+":"+h.room.ID+":"+recipient))
-	release, err := s.gates(ctx, invitationSiteGate(h.site.SiteID), roomGate(h.room.ID), invitationGate(key))
+	key := callrules.Digest(pepper, []byte("invitation:"+site.SiteID+":"+target+":"+recipient))
+	release, err := s.gates(ctx, invitationSiteGate(site.SiteID), invitationTargetGate(target, req.BookingID != ""), invitationGate(key))
 	if err != nil {
 		return callrules.InviteResult{}, err
 	}
@@ -63,24 +64,20 @@ func (s *Service) Invite(ctx context.Context, sess callrules.Session, req callru
 		}
 	}()
 	fresh := memql.ContextWithFreshRead(ctx)
-	room, err := s.stillHost(fresh, h)
+	_, currentTarget, _, _, err := s.invitationAuthority(fresh, sess, req)
 	if err != nil {
 		return callrules.InviteResult{}, err
 	}
-	linked, err := s.store.roomByLink(fresh, h.site.OwnerUserID, h.site.SiteID, callrules.Digest(pepper, []byte(req.Token)), false)
-	if err != nil {
-		return callrules.InviteResult{}, err
+	if currentTarget != target {
+		return callrules.InviteResult{}, callrules.ErrConflict
 	}
-	if linked == nil || linked.ID != room.ID {
-		return callrules.InviteResult{}, fmt.Errorf("%w: the guest token is not this call's", callrules.ErrInvalid)
-	}
-	prior, err := s.store.invitationByID(fresh, h.site.OwnerUserID, key)
+	prior, err := s.store.invitationByID(fresh, site.OwnerUserID, key)
 	if err != nil {
 		return callrules.InviteResult{}, err
 	}
 	now := s.now()
 	if prior != nil && prior.Status != "retryable" {
-		return s.invitationReplay(fresh, h.site.OwnerUserID, *prior, now)
+		return s.invitationReplay(fresh, site.OwnerUserID, *prior, now)
 	}
 	if prior != nil && now.Before(prior.RetryAt) {
 		return callrules.InviteResult{}, invitationLimited(prior.RetryAt.Sub(now))
@@ -93,7 +90,7 @@ func (s *Service) Invite(ctx context.Context, sess callrules.Session, req callru
 		return callrules.InviteResult{}, callrules.ErrInvitationUnavailable
 	}
 	if prior == nil {
-		roomReceipts, err := s.store.invitationsForRoom(fresh, h.site.OwnerUserID, room.ID)
+		roomReceipts, err := s.store.invitationsForRoom(fresh, site.OwnerUserID, target)
 		if err != nil {
 			return callrules.InviteResult{}, err
 		}
@@ -101,12 +98,12 @@ func (s *Service) Invite(ctx context.Context, sess callrules.Session, req callru
 			return callrules.InviteResult{}, callrules.Refuse(callrules.ErrConflict, "invitation_full", "this call has used its email invitations")
 		}
 	}
-	budget, err := s.store.invitationBudget(fresh, h.site.OwnerUserID, h.site.SiteID)
+	budget, err := s.store.invitationBudget(fresh, site.OwnerUserID, site.SiteID)
 	if err != nil {
 		return callrules.InviteResult{}, err
 	}
 	if budget == nil {
-		budget = &invitationBudget{SiteID: h.site.SiteID}
+		budget = &invitationBudget{SiteID: site.SiteID}
 	}
 	if budget.MinuteStart.IsZero() || !now.Before(budget.MinuteStart.Add(time.Minute)) {
 		budget.MinuteStart, budget.MinuteCount = now, 0
@@ -124,9 +121,14 @@ func (s *Service) Invite(ctx context.Context, sess callrules.Session, req callru
 		}
 		return callrules.InviteResult{}, invitationLimited(delay)
 	}
-	message, err := s.store.invitationMessage(fresh, h.site, recipient, req.Token)
+	message, err := s.store.invitationMessage(fresh, site, recipient, req.Token)
 	if err != nil {
 		return callrules.InviteResult{}, callrules.ErrInvitationUnavailable
+	}
+	if !startsAt.IsZero() {
+		when := startsAt.UTC().Format(time.RFC1123)
+		message.TextBody += "\n\nScheduled for " + when + "."
+		message.HTMLBody = strings.Replace(message.HTMLBody, "</body>", "<p>Scheduled for "+when+".</p></body>", 1)
 	}
 	if err := message.Validate(); err != nil {
 		return callrules.InviteResult{}, callrules.ErrInvitationUnavailable
@@ -155,16 +157,28 @@ func (s *Service) Invite(ctx context.Context, sess callrules.Session, req callru
 		releaseProvider = giveBack
 		work = reserved
 	}
-	receipt := invitationReceipt{ID: key, SiteID: h.site.SiteID, RoomID: room.ID, Status: "attempting", AttemptedAt: now, Fingerprint: digest}
+	receipt := invitationReceipt{ID: key, SiteID: site.SiteID, RoomID: target, Status: "attempting", AttemptedAt: now, Fingerprint: digest}
 	if prior != nil {
 		receipt.Version = prior.Version
 	}
 	budget.MinuteCount++
 	budget.DayCount++
-	if err = s.store.writeInvitationBudget(fresh, h.site.OwnerUserID, *budget, now); err != nil {
+	if err = s.store.writeInvitationBudget(fresh, site.OwnerUserID, *budget, now); err != nil {
 		return callrules.InviteResult{}, err
 	}
-	if err = s.store.writeInvitation(fresh, h.site.OwnerUserID, receipt, prior == nil, now); err != nil {
+	if err = s.store.writeInvitation(fresh, site.OwnerUserID, receipt, prior == nil, now); err != nil {
+		return callrules.InviteResult{}, err
+	}
+	if _, _, _, _, err = s.invitationAuthority(memql.ContextWithFreshRead(ctx), sess, req); err != nil {
+		// No provider send happened. Persist that fact so a later authorized retry
+		// cannot be trapped behind an ambiguous-delivery receipt.
+		receipt.Status = "retryable"
+		receipt.RetryAt = s.now()
+		current, e := s.store.invitationByID(memql.ContextWithFreshRead(ctx), site.OwnerUserID, key)
+		if e == nil && current != nil {
+			receipt.Version = current.Version
+			_ = s.store.writeInvitation(fresh, site.OwnerUserID, receipt, false, s.now())
+		}
 		return callrules.InviteResult{}, err
 	}
 	release()
@@ -194,7 +208,7 @@ func (s *Service) Invite(ctx context.Context, sess callrules.Session, req callru
 		return callrules.InviteResult{Status: "unknown"}, nil
 	}
 	defer unlock()
-	current, err := s.store.invitationByID(memql.ContextWithFreshRead(finish), h.site.OwnerUserID, key)
+	current, err := s.store.invitationByID(memql.ContextWithFreshRead(finish), site.OwnerUserID, key)
 	if err != nil || current == nil {
 		return callrules.InviteResult{Status: "unknown"}, nil
 	}
@@ -203,7 +217,7 @@ func (s *Service) Invite(ctx context.Context, sess callrules.Session, req callru
 	if delay, throttled := email.IsThrottled(sendErr); throttled && delay > invitationRetryDelay {
 		current.RetryAt = s.now().Add(delay)
 	}
-	if err = s.store.writeInvitation(finish, h.site.OwnerUserID, *current, false, s.now()); err != nil {
+	if err = s.store.writeInvitation(finish, site.OwnerUserID, *current, false, s.now()); err != nil {
 		return callrules.InviteResult{Status: "unknown"}, nil
 	}
 	if status == "retryable" {
@@ -262,4 +276,86 @@ func invitationBrand(value string) string {
 		return "Call"
 	}
 	return value
+}
+
+func invitationTargetGate(target string, scheduled bool) string {
+	if scheduled {
+		return bookingGate(target)
+	}
+	return roomGate(target)
+}
+func (s *Service) invitationAuthority(ctx context.Context, sess callrules.Session, req callrules.InviteRequest) (callrules.SiteRef, string, string, time.Time, error) {
+	var site callrules.SiteRef
+	var target, key string
+	var start time.Time
+	if req.BookingID == "" {
+		h, err := s.hostOf(ctx, sess)
+		if err != nil {
+			return site, target, key, start, err
+		}
+		pepper, err := s.pepperOr(ctx, callrules.ErrNoSession)
+		if err != nil {
+			return site, target, key, start, err
+		}
+		linked, err := s.store.roomByLink(ctx, h.site.OwnerUserID, h.site.SiteID, callrules.Digest(pepper, []byte(req.Token)), false)
+		if err != nil {
+			return site, target, key, start, err
+		}
+		if linked == nil || linked.ID != h.room.ID {
+			return site, target, key, start, callrules.ErrInvalid
+		}
+		if err = s.invitationDelegationAllowed(ctx, h.site, h.room.KeyID, h.room.ID, h.room.ScheduledCallID, req.Email); err != nil {
+			return site, target, key, start, err
+		}
+		return h.site, h.room.ID, h.room.KeyID, start, nil
+	}
+	h, err := s.authenticatedKey(ctx, sess)
+	if err != nil {
+		return site, target, key, start, err
+	}
+	b, err := s.store.bookingByLink(ctx, h.site.OwnerUserID, h.site.SiteID, callrules.Digest(h.pepper, []byte(req.Token)), false)
+	if err != nil {
+		return site, target, key, start, err
+	}
+	if b == nil || b.ID != req.BookingID || b.KeyID != h.row.KeyID || b.status() != callrules.BookingScheduled || !s.now().Before(b.End) {
+		return site, target, key, start, callrules.ErrNotFound
+	}
+	if err = delegatedBookingAllowed(ctx, b); err != nil {
+		return site, target, key, start, err
+	}
+	if err = s.delegatedEffectAllowed(ctx, h.site, h.row.KeyID); err != nil {
+		return site, target, key, start, err
+	}
+	if err = s.invitationDelegationAllowed(ctx, h.site, h.row.KeyID, b.RoomID, b.ID, req.Email); err != nil {
+		return site, target, key, start, err
+	}
+	return h.site, b.ID, h.row.KeyID, b.Start, nil
+}
+
+func (s *Service) invitationDelegationAllowed(ctx context.Context, site callrules.SiteRef, key, room, booking, recipient string) error {
+	grant, agent := ctx.Value(agentCallContext{}).(string)
+	if !agent {
+		return nil
+	}
+	if err := s.delegatedEffectAllowed(ctx, site, key); err != nil {
+		return err
+	}
+	d, err := s.store.delegation(memql.ContextWithFreshRead(ctx), site.OwnerUserID, grant)
+	if err != nil {
+		return err
+	}
+	if d == nil || !slices.Contains(d.State.Request.Scopes, "invite") {
+		return accountRefusal("delegation_scope")
+	}
+	if !callrules.DelegationRecipientAllowed(d.State.Request, recipient) {
+		return accountRefusal("delegation_recipient_scope")
+	}
+	if len(d.State.Request.RoomIDs) > 0 {
+		if !slices.Contains(d.State.Request.RoomIDs, room) && !slices.Contains(d.State.Request.RoomIDs, booking) {
+			return accountRefusal("delegation_room_scope")
+		}
+	} else if !delegationOwnsSource(d, "room", room) && !delegationOwnsSource(d, "booking", booking) {
+		return accountRefusal("delegation_call_scope")
+	}
+	return nil
 }

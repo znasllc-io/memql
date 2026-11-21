@@ -86,6 +86,7 @@ cap_spec_param "tls-cert"     "the front door's TLS certificate, which Caddy ser
 cap_spec_param "tls-key"      "the front door's TLS private key (default: the pair make secrets loads)"
 cap_spec_param "docker"       "the docker CLI (default: docker on PATH)"
 cap_spec_param "wait-seconds" "how long to wait for LiveKit to answer through TLS; 0 does not wait (default: 60)"
+cap_spec_param "ingress"      "enable bounded local resource publishing (flag); retained once configured"
 cap_spec_param "dry-run"      "check that the configuration renders and report what would start, writing and starting nothing (flag)"
 
 #=============================================================================
@@ -122,6 +123,7 @@ TLS_CERT=""
 TLS_KEY=""
 DOCKER=""
 WAIT_SECONDS=""
+INGRESS_ENABLED=""
 DRY_RUN=""
 
 API_KEY=""
@@ -357,6 +359,13 @@ function render_configuration() {
     render_template "${TEMPLATE_DIR}/Caddyfile.tmpl" "${dir}/${RENDERED_CADDY}" \
         MEDIA_HOST "$MEDIA_HOST" HTTPS_PORT "$HTTPS_PORT"
     write_private "${dir}/${RENDERED_CA}" "$FRONT_DOOR_CA"
+    if [[ -n "$INGRESS_ENABLED" ]]; then
+        render_template "${TEMPLATE_DIR}/ingress.yaml.tmpl" "${dir}/ingress.yaml" API_KEY "$API_KEY" API_SECRET "$API_SECRET"
+        local livekit_text
+        livekit_text="$(cat "${dir}/${RENDERED_LIVEKIT}")"
+        livekit_text+=$'\ningress:\n  whip_base_url: "http://127.0.0.1:18080/whip"'
+        write_private "${dir}/${RENDERED_LIVEKIT}" "$livekit_text"
+    fi
 }
 
 #=============================================================================
@@ -373,7 +382,7 @@ function render_configuration() {
 # captured instead of printed.
 function config_digest() {
     cat "${STATE_DIR}/${RENDERED_LIVEKIT}" "${STATE_DIR}/${RENDERED_CADDY}" "${STATE_DIR}/${RENDERED_CA}" \
-        "$TLS_CERT" "$TLS_KEY" "$COMPOSE_FILE" | openssl dgst -sha256 | awk '{print $NF}'
+        "$TLS_CERT" "$TLS_KEY" "$COMPOSE_FILE" ${INGRESS_ENABLED:+"${STATE_DIR}/ingress.yaml"} ${INGRESS_ENABLED:+"${TEMPLATE_DIR}/compose.ingress.yaml"} | openssl dgst -sha256 | awk '{print $NF}'
 }
 
 # already_running <digest> -- succeeds when every service of the project is running and the
@@ -396,6 +405,10 @@ function already_running() {
 
 function start_media_server() {
     local digest unchanged=""
+    local -a compose_files=(--file "$COMPOSE_FILE")
+    if [[ -n "$INGRESS_ENABLED" ]]; then
+        compose_files+=(--file "${TEMPLATE_DIR}/compose.ingress.yaml")
+    fi
     command -v openssl >/dev/null 2>&1 \
         || cap_fail 4 "openssl is required to digest the media server's configuration. Install it first."
     digest="$(config_digest)" || cap_fail 5 "could not digest the rendered configuration"
@@ -408,7 +421,7 @@ function start_media_server() {
     # file, never through argv or the environment.
     if ! MEDIA_CONFIG_DIR="$STATE_DIR" MEDIA_TLS_CERT="$TLS_CERT" MEDIA_TLS_KEY="$TLS_KEY" \
         MEDIA_API_HOST="$API_HOST" MEDIA_HTTPS_PORT="$HTTPS_PORT" MEDIA_CONFIG_DIGEST="$digest" \
-        "$DOCKER" compose --project-name "$PROJECT" --file "$COMPOSE_FILE" up --detach --wait --remove-orphans >&2; then
+        "$DOCKER" compose --project-name "$PROJECT" "${compose_files[@]}" up --detach --wait --remove-orphans >&2; then
         cap_fail 5 "docker compose could not start ${PROJECT}; its output is above, and the containers' logs are at: ${DOCKER} compose --project-name ${PROJECT} logs"
     fi
     STARTED=true
@@ -481,6 +494,7 @@ function main() {
     # Compose resolves a relative bind source against the compose file's directory, not
     # this shell's, so every path it is handed is made absolute here.
     STATE_DIR="$(absolute_path "$STATE_DIR")"
+    if cap_bool ingress || [[ -f "${STATE_DIR}/ingress.yaml" ]]; then INGRESS_ENABLED=1; fi
     TLS_CERT="$(absolute_path "$TLS_CERT")"
     TLS_KEY="$(absolute_path "$TLS_KEY")"
 

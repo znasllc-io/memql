@@ -9,7 +9,11 @@ import (
 
 // InviteRequest carries only a recipient and the guest capability the host already
 // holds. The service verifies that capability against the host's active room.
-type InviteRequest struct{ Email, Token string }
+type InviteRequest struct {
+	Email     string `json:"email"`
+	Token     string `json:"token"`
+	BookingID string `json:"bookingId,omitempty"`
+}
 
 // InvitationLinkRequest binds recovery to the media seat the requesting page is
 // showing. A cookie may have moved to another call in a second tab since that page

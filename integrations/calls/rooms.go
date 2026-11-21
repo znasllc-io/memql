@@ -461,6 +461,8 @@ type seatRow struct {
 	HistoryPending                                                       bool
 	ID, RoomID, Identity, Kind, DisplayName, Status, TermsVersion, KeyID string
 	CredentialID                                                         string
+	Participation                                                        string
+	AuthorityAccepted                                                    bool
 	Host, ConfirmAdult, ConfirmNoMinors                                  bool
 	JoinedAt, LeftAt, LastSeenAt, AbsentSince, LetInAt                   time.Time
 	// WaitingSince is when the seat last began waiting to come in (the concept's
@@ -499,6 +501,8 @@ func seatFromRow(r map[string]any) seatRow {
 		Host:                 rowBool(r, "host"),
 		ConfirmAdult:         rowBool(r, "confirmAdult"),
 		ConfirmNoMinors:      rowBool(r, "confirmNoMinors"),
+		Participation:        rowString(r, "participation"),
+		AuthorityAccepted:    rowBool(r, "authorityAccepted"),
 		JoinedAt:             rowTime(r, "joinedAt"),
 		LeftAt:               rowTime(r, "leftAt"),
 		LastSeenAt:           rowTime(r, "lastSeenAt"),
@@ -547,19 +551,21 @@ type newSeat struct {
 
 func (s *Store) createSeat(ctx context.Context, owner string, n newSeat, versionTime time.Time) error {
 	args := map[string]any{
-		"historyPending":  n.KeyID != "" && !n.JoinedAt.IsZero(),
-		"seatId":          n.ID,
-		"siteId":          n.SiteID,
-		"roomId":          n.RoomID,
-		"identity":        n.Identity,
-		"kind":            n.Kind,
-		"displayName":     n.DisplayName,
-		"host":            n.Host,
-		"status":          n.Status,
-		"confirmAdult":    n.Confirm.Adult,
-		"confirmNoMinors": n.Confirm.NoMinors,
-		"termsVersion":    n.Confirm.Terms,
-		"versionTime":     versionStamp(versionTime),
+		"historyPending":    n.KeyID != "" && !n.JoinedAt.IsZero(),
+		"seatId":            n.ID,
+		"siteId":            n.SiteID,
+		"roomId":            n.RoomID,
+		"identity":          n.Identity,
+		"kind":              n.Kind,
+		"displayName":       n.DisplayName,
+		"host":              n.Host,
+		"status":            n.Status,
+		"confirmAdult":      n.Confirm.Adult,
+		"confirmNoMinors":   n.Confirm.NoMinors,
+		"participation":     n.Confirm.Participation,
+		"authorityAccepted": n.Confirm.AuthorityAccepted,
+		"termsVersion":      n.Confirm.Terms,
+		"versionTime":       versionStamp(versionTime),
 	}
 	// A seat that waits has not been taken yet, and begins waiting as it is written: every
 	// path that seats somebody waiting (a join, or the opening of a call) writes it here.

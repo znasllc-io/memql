@@ -150,6 +150,7 @@ const (
 // Service is the calls service. New builds it beside the integration's operator acts,
 // over the same store, gate pool, pepper, clock and randomness.
 type Service struct {
+	commerce         func() CommerceConfig
 	store            *Store
 	gateDB           func() *sql.DB
 	pepper           func(context.Context) ([]byte, error)
@@ -330,7 +331,7 @@ func (s *Service) Start(ctx context.Context, sess callrules.Session, body callru
 // the host's admission without a pass (the caller mints it once the gates are released)
 // and the host's seat.
 func (s *Service) startGated(ctx context.Context, h keyHolder, policy callrules.Policy, server MediaServer, ask joinAsk, o roomOpening) (callrules.JoinResult, seatRow, error) {
-	release, err := s.gates(ctx, accountGate(h.row.KeyID), keyGate(h.row.KeyID), roomGate(o.roomID), serverGate(server.ID))
+	release, err := s.gates(ctx, accountGate(h.row.KeyID), keyGate(h.row.KeyID), commerceGlobalGate, roomGate(o.roomID), serverGate(server.ID))
 	if err != nil {
 		return callrules.JoinResult{}, seatRow{}, err
 	}
@@ -357,6 +358,9 @@ func (s *Service) startGated(ctx context.Context, h keyHolder, policy callrules.
 		}
 	}
 	if o.configuration != nil {
+		if err := s.delegatedConfigurationAllowed(fresh, h.site, current.KeyID, *o.configuration, time.Time{}); err != nil {
+			return callrules.JoinResult{}, seatRow{}, err
+		}
 		if err := s.retireUnopenedSeats(fresh, h.site.OwnerUserID, o.roomID); err != nil {
 			return callrules.JoinResult{}, seatRow{}, err
 		}
@@ -416,6 +420,17 @@ func (s *Service) keyHolderOf(ctx context.Context, sess callrules.Session) (keyH
 // call runs. Simulated funding checks every opening under the payer key gate instead
 // (fundingForOpening), including a guest opening a scheduled room.
 func (s *Service) openRefusal(ctx context.Context, site callrules.SiteRef, keyID string, held *sessionRow, oneCallPerKey bool) (callrules.JoinResult, error) {
+	if err := s.delegatedEffectAllowed(ctx, site, keyID); err != nil {
+		return callrules.JoinResult{}, err
+	}
+	if err := s.commerceAdultAllowed(ctx, site, keyID); err != nil {
+		return callrules.JoinResult{}, err
+	}
+	if c := s.commerceConfig(); c.enabled() {
+		if err := c.admission(s.now()); err != nil {
+			return callrules.JoinResult{}, err
+		}
+	}
 	opens, err := s.keyOpensCalls(ctx, site, keyID)
 	if err != nil {
 		return callrules.JoinResult{}, err
@@ -543,7 +558,7 @@ type roomOpening struct {
 	configuration               *callrules.CallConfiguration
 	usageOperation, usageDigest string
 	quoteID                     string
-	roomID, identity            string               // the room, which names its media room; the opener's media identity
+	roomID, identity, mediaRoom string               // the room, which names its media room; the opener's media identity
 	keyID                       string               // the key the call runs on
 	host, locked                bool                 // the opener takes a host seat; the room opens locked
 	class                       callrules.QueueClass // the opener's place in the server's queue when it is full
@@ -571,6 +586,9 @@ type roomOpening struct {
 // It answers the opener's admission without a pass (minted once the gates are released), a
 // wait or a place in the queue, the session the opener now holds, and their seat.
 func (s *Service) openRoom(ctx context.Context, site callrules.SiteRef, server MediaServer, policy callrules.Policy, held *sessionRow, ask joinAsk, o roomOpening, out callrules.Session, beforeRoom func(context.Context, time.Time) error, now time.Time) (callrules.JoinResult, callrules.Session, seatRow, error) {
+	if err := s.commerceOpeningAllowed(ctx, site, o.keyID, o.configuration); err != nil {
+		return refuseJoin(callrules.ReasonOf(err)), out, seatRow{}, err
+	}
 	owner := site.OwnerUserID
 	var funding roomFunding
 	var allowance callrules.KeyAllowance
@@ -616,7 +634,7 @@ func (s *Service) openRoom(ctx context.Context, site callrules.SiteRef, server M
 	}
 
 	seat := seatRow{
-		ID: id.NewShortId(), RoomID: o.roomID, Identity: o.identity, Kind: string(callrules.KindPerson),
+		ID: id.NewShortId(), RoomID: o.roomID, Identity: o.identity, Kind: delegatedSeatKind(ctx),
 		DisplayName: ask.name, Status: seatWaiting, Host: o.host, KeyID: held.keyHeld(), CredentialID: held.credentialHeld(),
 	}
 	joinedAt := time.Time{}
@@ -651,6 +669,10 @@ func (s *Service) openRoom(ctx context.Context, site callrules.SiteRef, server M
 			return callrules.JoinResult{}, out, seatRow{}, err
 		}
 	}
+	mediaRoom := o.mediaRoom
+	if mediaRoom == "" {
+		mediaRoom = o.roomID
+	}
 	hostSeat := ""
 	if seat.Host {
 		hostSeat = seat.ID
@@ -658,7 +680,7 @@ func (s *Service) openRoom(ctx context.Context, site callrules.SiteRef, server M
 	if err := s.store.createRoom(ctx, owner, newRoom{
 		roomFunding: funding,
 		ID:          o.roomID, SiteID: site.SiteID, Deployable: site.Deployable, KeyID: o.keyID,
-		MediaServerID: server.ID, MediaRoom: o.roomID, HostSeatID: hostSeat,
+		MediaServerID: server.ID, MediaRoom: mediaRoom, HostSeatID: hostSeat,
 		GuestDigest: o.guestDigest, HostDigest: o.hostDigest, ScheduledCallID: o.scheduledCallID, Locked: o.locked,
 		OpenedAt: now, Window: window, Title: callTitle(o.title, now),
 	}, now); err != nil {
@@ -718,6 +740,9 @@ func (s *Service) Join(ctx context.Context, site callrules.SiteRef, sess *callru
 		}
 	}()
 	none := callrules.Session{}
+	if body.Family || body.FamilyToken != "" {
+		return s.joinFamily(ctx, site, sess, body)
+	}
 	name, confirm, err := checkJoiner(body.Name, body.Confirm)
 	if err != nil {
 		return callrules.JoinResult{}, none, err
@@ -769,6 +794,13 @@ func (s *Service) Join(ctx context.Context, site callrules.SiteRef, sess *callru
 				return callrules.JoinResult{}, none, err
 			}
 			if found.usable(now) {
+				child, e := s.store.familyForSession(ctx, owner, site.SiteID, found.ID)
+				if e != nil {
+					return callrules.JoinResult{}, none, e
+				}
+				if child != nil {
+					return callrules.JoinResult{}, none, accountRefusal("family_invitation_required")
+				}
 				held = found
 			}
 		}
@@ -885,6 +917,9 @@ func (s *Service) ensureMediaRoom(ctx context.Context, server MediaServer, crede
 	if err != nil {
 		return fmt.Errorf("calls: reach media server %s: %w", server.ID, err)
 	}
+	if familyRoom(room) {
+		return s.ensureFamilyMedia(ctx, room)
+	}
 	if err := backend.CreateRoom(ctx, room.MediaRoom, mediaRoomLimit(policy)); err != nil {
 		return fmt.Errorf("calls: open the call's media room: %w", err)
 	}
@@ -1000,6 +1035,9 @@ func (s *Service) joinGated(ctx context.Context, site callrules.SiteRef, room ro
 		return refuseJoin(callrules.ReasonOf(err)), held.stateOf(ask.token, site), seatRow{}, err
 	}
 	if err := fundingRoomAllowed(*current, now); err != nil {
+		return refuseJoin(callrules.ReasonOf(err)), held.stateOf(ask.token, site), seatRow{}, err
+	}
+	if err := s.familyJoinAllowed(fresh, *current, held, ask.asHost); err != nil {
 		return refuseJoin(callrules.ReasonOf(err)), held.stateOf(ask.token, site), seatRow{}, err
 	}
 	policy = fundedPolicy(policy, current.roomFunding)
@@ -1130,7 +1168,7 @@ func (s *Service) joinGated(ctx context.Context, site callrules.SiteRef, room ro
 	}
 
 	taken := seatRow{
-		ID: id.NewShortId(), RoomID: current.ID, Kind: string(callrules.KindPerson),
+		ID: id.NewShortId(), RoomID: current.ID, Kind: delegatedSeatKind(ctx),
 		DisplayName: ask.name, Status: seatWaiting, Host: host, KeyID: held.keyHeld(), CredentialID: held.credentialHeld(),
 	}
 	if reentry {
@@ -1270,9 +1308,11 @@ func (s *Service) recordJoin(ctx context.Context, owner string, seat seatRow, as
 	if seat.DisplayName != ask.name {
 		fields["displayName"], seat.DisplayName = ask.name, ask.name
 	}
-	if !seat.ConfirmAdult || !seat.ConfirmNoMinors || seat.TermsVersion != ask.confirm.Terms {
-		fields["confirmAdult"], fields["confirmNoMinors"], fields["termsVersion"] = true, true, ask.confirm.Terms
-		seat.ConfirmAdult, seat.ConfirmNoMinors, seat.TermsVersion = true, true, ask.confirm.Terms
+	if seat.ConfirmAdult != ask.confirm.Adult || seat.ConfirmNoMinors != ask.confirm.NoMinors || seat.Participation != ask.confirm.Participation || seat.AuthorityAccepted != ask.confirm.AuthorityAccepted || seat.TermsVersion != ask.confirm.Terms {
+		fields["confirmAdult"], fields["confirmNoMinors"], fields["termsVersion"] = ask.confirm.Adult, ask.confirm.NoMinors, ask.confirm.Terms
+		fields["participation"], fields["authorityAccepted"] = ask.confirm.Participation, ask.confirm.AuthorityAccepted
+		seat.ConfirmAdult, seat.ConfirmNoMinors, seat.TermsVersion = ask.confirm.Adult, ask.confirm.NoMinors, ask.confirm.Terms
+		seat.Participation, seat.AuthorityAccepted = ask.confirm.Participation, ask.confirm.AuthorityAccepted
 	}
 	if ask.asHost && !seat.Host {
 		fields["host"], seat.Host = true, true
@@ -1605,6 +1645,9 @@ func (s *Service) Leave(ctx context.Context, sess callrules.Session) error {
 	seat, room, err := s.seatAndRoom(ctx, site.OwnerUserID, row)
 	if err != nil || seat == nil || room == nil {
 		return err
+	}
+	if familyRoom(*room) && seat.KeyID == room.KeyID && seat.Host {
+		return s.closeFamily(ctx, *room, "family_guardian_left")
 	}
 	s.checkpointUsage(ctx, *room)
 	left, ended, err := s.leaveGated(ctx, site.OwnerUserID, *room, seat.ID)
@@ -1972,15 +2015,37 @@ func checkSite(site callrules.SiteRef) (callrules.SiteRef, error) {
 // and all three confirmations every seat records -- 18 or older, no one under 18 on
 // their camera or screen, and the terms version they accept. Anything missing is
 // ErrInvalid, before anything is read or written.
-func checkJoiner(name string, c callrules.Confirmation) (string, callrules.Confirmation, error) {
+// checkDisplayName validates display text without inventing age or consent evidence.
+func checkDisplayName(name string) (string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" || utf8.RuneCountInString(name) > maxDisplayNameRunes || strings.IndexFunc(name, unicode.IsControl) >= 0 {
-		return "", c, fmt.Errorf("%w: a name of 1 to %d characters is needed", callrules.ErrInvalid, maxDisplayNameRunes)
+		return "", fmt.Errorf("%w: a name of 1 to %d characters is needed", callrules.ErrInvalid, maxDisplayNameRunes)
+	}
+	return name, nil
+}
+
+func checkJoiner(name string, c callrules.Confirmation) (string, callrules.Confirmation, error) {
+	if c.Participation == "children_present" {
+		return "", c, callrules.Refuse(callrules.ErrInvalid, "family_consent_required", "use an approved supervised family invitation")
+	}
+	var err error
+	name, err = checkDisplayName(name)
+	if err != nil {
+		return "", c, err
 	}
 	if !c.Adult {
 		return "", c, fmt.Errorf("%w: the person has not confirmed they are 18 or older", callrules.ErrInvalid)
 	}
-	if !c.NoMinors {
+	if c.Participation != "" && c.Participation != "adults_only" && c.Participation != "children_present" {
+		return "", c, callrules.ErrInvalid
+	}
+	if c.Participation == "children_present" && !c.AuthorityAccepted {
+		return "", c, callrules.Refuse(callrules.ErrInvalid, "child_authority_required", "an adult supervisor must acknowledge participation authority")
+	}
+	if c.Participation == "adults_only" && !c.NoMinors {
+		return "", c, callrules.ErrInvalid
+	}
+	if c.Participation != "children_present" && !c.NoMinors {
 		return "", c, fmt.Errorf("%w: the person has not confirmed that no one under 18 will appear on their camera or screen", callrules.ErrInvalid)
 	}
 	c.Terms = strings.TrimSpace(c.Terms)

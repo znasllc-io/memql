@@ -70,20 +70,25 @@ const (
 // CountdownKind distinguishes a firm wrap_up from the legacy host_left grace.
 // Identity and LeaveToken are given only to an occupying seat.
 type SeatCall struct {
-	Identity         string
-	LeaveToken       string
-	CountdownKind    string
-	ParticipantLimit int
-	DurationMinutes  int
-	ReservedCents    *int64
-	CostCents        *int64
-	Title            string
-	Host             bool
-	OpenedAt         time.Time
-	CountdownEndsAt  time.Time
-	AllowanceEndsAt  time.Time
-	FundingMode      string
-	Roster           *Roster
+	ParticipationMode string
+	Family            *FamilySession
+	RoomID            string
+	Identity          string
+	LeaveToken        string
+	CountdownKind     string
+	ParticipantLimit  int
+	Insights          bool
+	Resources         bool
+	DurationMinutes   int
+	ReservedCents     *int64
+	CostCents         *int64
+	Title             string
+	Host              bool
+	OpenedAt          time.Time
+	CountdownEndsAt   time.Time
+	AllowanceEndsAt   time.Time
+	FundingMode       string
+	Roster            *Roster
 }
 
 // The host controls (design section 7.7, "Host controls"). Each is stable: a client

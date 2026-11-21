@@ -360,6 +360,9 @@ func (s *Service) reconcileFunding(ctx context.Context, hint roomRow, backend Me
 	if err != nil || !due {
 		return false, err
 	}
+	if familyRoom(room) {
+		return true, s.closeFamily(ctx, room, "family_deadline")
+	}
 	s.checkpointUsage(ctx, room)
 	if err := bounded(ctx, func(ctx context.Context) error { return backend.DeleteRoom(ctx, room.MediaRoom) }); err != nil {
 		return true, err
@@ -426,6 +429,9 @@ func (s *Service) admittedWithFunding(ctx context.Context, owner string, server 
 	}
 	if room == nil || !room.open() {
 		return refuseJoin(callrules.ReasonCallEnded), fmt.Errorf("%w: the call has ended", callrules.ErrEnded)
+	}
+	if err := s.familySeatAllowed(ctx, *room, seat); err != nil {
+		return refuseJoin(callrules.ReasonOf(err)), err
 	}
 	if err := fundingRoomAllowed(*room, s.now()); err != nil {
 		return refuseJoin(callrules.ReasonOf(err)), err

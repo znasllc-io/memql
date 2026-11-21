@@ -1,0 +1,1541 @@
+[
+  {
+    "id": "working-session",
+    "version": 1,
+    "revision": 1,
+    "status": "published",
+    "title": "Working session",
+    "description": "Collaborate on a concrete outcome.",
+    "instructions": "Guide the conversation respectfully. Never infer age, identity, consent or comprehension from media. Do not activate another participant's camera or microphone.",
+    "requiresInsights": true,
+    "roles": [
+      {
+        "id": "facilitator",
+        "label": "Facilitator",
+        "required": true
+      }
+    ],
+    "nodes": [
+      {
+        "id": "step-1",
+        "type": "discussion",
+        "label": "Set the outcome",
+        "instructions": "Set the outcome. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 120,
+        "requirements": {},
+        "position": {
+          "x": 0,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-2",
+        "type": "discussion",
+        "label": "Focused work",
+        "instructions": "Focused work. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 1200,
+        "requirements": {},
+        "position": {
+          "x": 240,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-3",
+        "type": "discussion",
+        "label": "Share results",
+        "instructions": "Share results. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 300,
+        "requirements": {},
+        "position": {
+          "x": 480,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-4",
+        "type": "discussion",
+        "label": "Next actions",
+        "instructions": "Next actions. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 180,
+        "requirements": {},
+        "position": {
+          "x": 720,
+          "y": 100
+        }
+      },
+      {
+        "id": "finish",
+        "type": "finish",
+        "label": "Complete",
+        "instructions": "Confirm next actions. Guidance ends; the call remains open.",
+        "visibility": "all",
+        "position": {
+          "x": 960,
+          "y": 100
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-1",
+        "source": "step-1",
+        "target": "step-2"
+      },
+      {
+        "id": "edge-2",
+        "source": "step-2",
+        "target": "step-3"
+      },
+      {
+        "id": "edge-3",
+        "source": "step-3",
+        "target": "step-4"
+      },
+      {
+        "id": "edge-4",
+        "source": "step-4",
+        "target": "finish"
+      }
+    ],
+    "entryNodeId": "step-1"
+  },
+  {
+    "id": "one-on-one",
+    "version": 1,
+    "revision": 1,
+    "status": "published",
+    "title": "One-on-one",
+    "description": "A balanced, private conversation.",
+    "instructions": "Guide the conversation respectfully. Never infer age, identity, consent or comprehension from media. Do not activate another participant's camera or microphone.",
+    "requiresInsights": true,
+    "roles": [
+      {
+        "id": "facilitator",
+        "label": "Facilitator",
+        "required": true
+      }
+    ],
+    "nodes": [
+      {
+        "id": "step-1",
+        "type": "discussion",
+        "label": "Check in",
+        "instructions": "Check in. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 180,
+        "requirements": {},
+        "position": {
+          "x": 0,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-2",
+        "type": "discussion",
+        "label": "First perspective",
+        "instructions": "First perspective. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 420,
+        "requirements": {},
+        "position": {
+          "x": 240,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-3",
+        "type": "discussion",
+        "label": "Second perspective",
+        "instructions": "Second perspective. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 420,
+        "requirements": {},
+        "position": {
+          "x": 480,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-4",
+        "type": "discussion",
+        "label": "Agree next steps",
+        "instructions": "Agree next steps. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 180,
+        "requirements": {},
+        "position": {
+          "x": 720,
+          "y": 100
+        }
+      },
+      {
+        "id": "finish",
+        "type": "finish",
+        "label": "Complete",
+        "instructions": "Confirm next actions. Guidance ends; the call remains open.",
+        "visibility": "all",
+        "position": {
+          "x": 960,
+          "y": 100
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-1",
+        "source": "step-1",
+        "target": "step-2"
+      },
+      {
+        "id": "edge-2",
+        "source": "step-2",
+        "target": "step-3"
+      },
+      {
+        "id": "edge-3",
+        "source": "step-3",
+        "target": "step-4"
+      },
+      {
+        "id": "edge-4",
+        "source": "step-4",
+        "target": "finish"
+      }
+    ],
+    "entryNodeId": "step-1"
+  },
+  {
+    "id": "interview",
+    "version": 1,
+    "revision": 1,
+    "status": "published",
+    "title": "Structured interview",
+    "description": "Use consistent questions and respect the interviewee; their live camera is required. Video does not verify identity or age.",
+    "instructions": "Guide the conversation respectfully. Never infer age, identity, consent or comprehension from media. Do not activate another participant's camera or microphone.",
+    "requiresInsights": true,
+    "roles": [
+      {
+        "id": "facilitator",
+        "label": "Facilitator",
+        "required": true
+      },
+      {
+        "id": "interviewee",
+        "label": "Interviewee",
+        "required": true
+      }
+    ],
+    "nodes": [
+      {
+        "id": "step-1",
+        "type": "discussion",
+        "label": "Introduction and consent",
+        "instructions": "Introduction and consent. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "interviewee",
+        "durationSeconds": 120,
+        "requirements": {
+          "video": true
+        },
+        "position": {
+          "x": 0,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-2",
+        "type": "discussion",
+        "label": "Experience",
+        "instructions": "Experience. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "interviewee",
+        "durationSeconds": 600,
+        "requirements": {
+          "video": true
+        },
+        "position": {
+          "x": 240,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-3",
+        "type": "discussion",
+        "label": "Scenario discussion",
+        "instructions": "Scenario discussion. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "interviewee",
+        "durationSeconds": 600,
+        "requirements": {
+          "video": true
+        },
+        "position": {
+          "x": 480,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-4",
+        "type": "discussion",
+        "label": "Candidate questions",
+        "instructions": "Candidate questions. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "interviewee",
+        "durationSeconds": 300,
+        "requirements": {
+          "video": true
+        },
+        "position": {
+          "x": 720,
+          "y": 100
+        }
+      },
+      {
+        "id": "finish",
+        "type": "finish",
+        "label": "Complete",
+        "instructions": "Confirm next actions. Guidance ends; the call remains open.",
+        "visibility": "all",
+        "position": {
+          "x": 960,
+          "y": 100
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-1",
+        "source": "step-1",
+        "target": "step-2"
+      },
+      {
+        "id": "edge-2",
+        "source": "step-2",
+        "target": "step-3"
+      },
+      {
+        "id": "edge-3",
+        "source": "step-3",
+        "target": "step-4"
+      },
+      {
+        "id": "edge-4",
+        "source": "step-4",
+        "target": "finish"
+      }
+    ],
+    "entryNodeId": "step-1"
+  },
+  {
+    "id": "presentation",
+    "version": 1,
+    "revision": 1,
+    "status": "published",
+    "title": "Presentation and Q&A",
+    "description": "Guide a presentation; participants control their own microphones.",
+    "instructions": "Guide the conversation respectfully. Never infer age, identity, consent or comprehension from media. Do not activate another participant's camera or microphone.",
+    "requiresInsights": true,
+    "roles": [
+      {
+        "id": "facilitator",
+        "label": "Facilitator",
+        "required": true
+      }
+    ],
+    "nodes": [
+      {
+        "id": "step-1",
+        "type": "discussion",
+        "label": "Welcome",
+        "instructions": "Welcome. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 120,
+        "requirements": {},
+        "position": {
+          "x": 0,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-2",
+        "type": "discussion",
+        "label": "Presentation",
+        "instructions": "Presentation. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 1200,
+        "requirements": {},
+        "position": {
+          "x": 240,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-3",
+        "type": "discussion",
+        "label": "Questions",
+        "instructions": "Questions. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 600,
+        "requirements": {},
+        "position": {
+          "x": 480,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-4",
+        "type": "discussion",
+        "label": "Close",
+        "instructions": "Close. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 120,
+        "requirements": {},
+        "position": {
+          "x": 720,
+          "y": 100
+        }
+      },
+      {
+        "id": "finish",
+        "type": "finish",
+        "label": "Complete",
+        "instructions": "Confirm next actions. Guidance ends; the call remains open.",
+        "visibility": "all",
+        "position": {
+          "x": 960,
+          "y": 100
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-1",
+        "source": "step-1",
+        "target": "step-2"
+      },
+      {
+        "id": "edge-2",
+        "source": "step-2",
+        "target": "step-3"
+      },
+      {
+        "id": "edge-3",
+        "source": "step-3",
+        "target": "step-4"
+      },
+      {
+        "id": "edge-4",
+        "source": "step-4",
+        "target": "finish"
+      }
+    ],
+    "entryNodeId": "step-1"
+  },
+  {
+    "id": "panel",
+    "version": 1,
+    "revision": 1,
+    "status": "published",
+    "title": "Panel discussion",
+    "description": "Give panelists clear turns and invite audience questions.",
+    "instructions": "Guide the conversation respectfully. Never infer age, identity, consent or comprehension from media. Do not activate another participant's camera or microphone.",
+    "requiresInsights": true,
+    "roles": [
+      {
+        "id": "facilitator",
+        "label": "Facilitator",
+        "required": true
+      }
+    ],
+    "nodes": [
+      {
+        "id": "step-1",
+        "type": "discussion",
+        "label": "Introductions",
+        "instructions": "Introductions. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 180,
+        "requirements": {},
+        "position": {
+          "x": 0,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-2",
+        "type": "discussion",
+        "label": "Opening perspectives",
+        "instructions": "Opening perspectives. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 600,
+        "requirements": {},
+        "position": {
+          "x": 240,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-3",
+        "type": "discussion",
+        "label": "Discussion",
+        "instructions": "Discussion. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 900,
+        "requirements": {},
+        "position": {
+          "x": 480,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-4",
+        "type": "discussion",
+        "label": "Audience questions",
+        "instructions": "Audience questions. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 600,
+        "requirements": {},
+        "position": {
+          "x": 720,
+          "y": 100
+        }
+      },
+      {
+        "id": "finish",
+        "type": "finish",
+        "label": "Complete",
+        "instructions": "Confirm next actions. Guidance ends; the call remains open.",
+        "visibility": "all",
+        "position": {
+          "x": 960,
+          "y": 100
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-1",
+        "source": "step-1",
+        "target": "step-2"
+      },
+      {
+        "id": "edge-2",
+        "source": "step-2",
+        "target": "step-3"
+      },
+      {
+        "id": "edge-3",
+        "source": "step-3",
+        "target": "step-4"
+      },
+      {
+        "id": "edge-4",
+        "source": "step-4",
+        "target": "finish"
+      }
+    ],
+    "entryNodeId": "step-1"
+  },
+  {
+    "id": "standup",
+    "version": 1,
+    "revision": 1,
+    "status": "published",
+    "title": "Team stand-up",
+    "description": "Brief progress updates and explicit follow-ups.",
+    "instructions": "Guide the conversation respectfully. Never infer age, identity, consent or comprehension from media. Do not activate another participant's camera or microphone.",
+    "requiresInsights": true,
+    "roles": [
+      {
+        "id": "facilitator",
+        "label": "Facilitator",
+        "required": true
+      }
+    ],
+    "nodes": [
+      {
+        "id": "step-1",
+        "type": "discussion",
+        "label": "Goal",
+        "instructions": "Goal. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 60,
+        "requirements": {},
+        "position": {
+          "x": 0,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-2",
+        "type": "discussion",
+        "label": "Progress updates",
+        "instructions": "Progress updates. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 600,
+        "requirements": {},
+        "position": {
+          "x": 240,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-3",
+        "type": "discussion",
+        "label": "Blockers",
+        "instructions": "Blockers. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 240,
+        "requirements": {},
+        "position": {
+          "x": 480,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-4",
+        "type": "discussion",
+        "label": "Follow-ups",
+        "instructions": "Follow-ups. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 120,
+        "requirements": {},
+        "position": {
+          "x": 720,
+          "y": 100
+        }
+      },
+      {
+        "id": "finish",
+        "type": "finish",
+        "label": "Complete",
+        "instructions": "Confirm next actions. Guidance ends; the call remains open.",
+        "visibility": "all",
+        "position": {
+          "x": 960,
+          "y": 100
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-1",
+        "source": "step-1",
+        "target": "step-2"
+      },
+      {
+        "id": "edge-2",
+        "source": "step-2",
+        "target": "step-3"
+      },
+      {
+        "id": "edge-3",
+        "source": "step-3",
+        "target": "step-4"
+      },
+      {
+        "id": "edge-4",
+        "source": "step-4",
+        "target": "finish"
+      }
+    ],
+    "entryNodeId": "step-1"
+  },
+  {
+    "id": "retrospective",
+    "version": 1,
+    "revision": 1,
+    "status": "published",
+    "title": "Retrospective",
+    "description": "Reflect respectfully and choose concrete improvements.",
+    "instructions": "Guide the conversation respectfully. Never infer age, identity, consent or comprehension from media. Do not activate another participant's camera or microphone.",
+    "requiresInsights": true,
+    "roles": [
+      {
+        "id": "facilitator",
+        "label": "Facilitator",
+        "required": true
+      }
+    ],
+    "nodes": [
+      {
+        "id": "step-1",
+        "type": "discussion",
+        "label": "Working agreement",
+        "instructions": "Working agreement. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 120,
+        "requirements": {},
+        "position": {
+          "x": 0,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-2",
+        "type": "discussion",
+        "label": "What happened",
+        "instructions": "What happened. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 600,
+        "requirements": {},
+        "position": {
+          "x": 240,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-3",
+        "type": "discussion",
+        "label": "What to improve",
+        "instructions": "What to improve. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 600,
+        "requirements": {},
+        "position": {
+          "x": 480,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-4",
+        "type": "discussion",
+        "label": "Choose actions",
+        "instructions": "Choose actions. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 300,
+        "requirements": {},
+        "position": {
+          "x": 720,
+          "y": 100
+        }
+      },
+      {
+        "id": "finish",
+        "type": "finish",
+        "label": "Complete",
+        "instructions": "Confirm next actions. Guidance ends; the call remains open.",
+        "visibility": "all",
+        "position": {
+          "x": 960,
+          "y": 100
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-1",
+        "source": "step-1",
+        "target": "step-2"
+      },
+      {
+        "id": "edge-2",
+        "source": "step-2",
+        "target": "step-3"
+      },
+      {
+        "id": "edge-3",
+        "source": "step-3",
+        "target": "step-4"
+      },
+      {
+        "id": "edge-4",
+        "source": "step-4",
+        "target": "finish"
+      }
+    ],
+    "entryNodeId": "step-1"
+  },
+  {
+    "id": "planning",
+    "version": 1,
+    "revision": 1,
+    "status": "published",
+    "title": "Planning workshop",
+    "description": "Agree scope, dependencies and owners.",
+    "instructions": "Guide the conversation respectfully. Never infer age, identity, consent or comprehension from media. Do not activate another participant's camera or microphone.",
+    "requiresInsights": true,
+    "roles": [
+      {
+        "id": "facilitator",
+        "label": "Facilitator",
+        "required": true
+      }
+    ],
+    "nodes": [
+      {
+        "id": "step-1",
+        "type": "discussion",
+        "label": "Scope",
+        "instructions": "Scope. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 300,
+        "requirements": {},
+        "position": {
+          "x": 0,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-2",
+        "type": "discussion",
+        "label": "Options",
+        "instructions": "Options. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 900,
+        "requirements": {},
+        "position": {
+          "x": 240,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-3",
+        "type": "discussion",
+        "label": "Dependencies",
+        "instructions": "Dependencies. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 600,
+        "requirements": {},
+        "position": {
+          "x": 480,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-4",
+        "type": "discussion",
+        "label": "Owners and next steps",
+        "instructions": "Owners and next steps. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 300,
+        "requirements": {},
+        "position": {
+          "x": 720,
+          "y": 100
+        }
+      },
+      {
+        "id": "finish",
+        "type": "finish",
+        "label": "Complete",
+        "instructions": "Confirm next actions. Guidance ends; the call remains open.",
+        "visibility": "all",
+        "position": {
+          "x": 960,
+          "y": 100
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-1",
+        "source": "step-1",
+        "target": "step-2"
+      },
+      {
+        "id": "edge-2",
+        "source": "step-2",
+        "target": "step-3"
+      },
+      {
+        "id": "edge-3",
+        "source": "step-3",
+        "target": "step-4"
+      },
+      {
+        "id": "edge-4",
+        "source": "step-4",
+        "target": "finish"
+      }
+    ],
+    "entryNodeId": "step-1"
+  },
+  {
+    "id": "pair-programming",
+    "version": 1,
+    "revision": 1,
+    "status": "published",
+    "title": "Pair programming",
+    "description": "Alternate driver and reviewer; share only authorized resources.",
+    "instructions": "Guide the conversation respectfully. Never infer age, identity, consent or comprehension from media. Do not activate another participant's camera or microphone.",
+    "requiresInsights": true,
+    "roles": [
+      {
+        "id": "facilitator",
+        "label": "Facilitator",
+        "required": true
+      }
+    ],
+    "nodes": [
+      {
+        "id": "step-1",
+        "type": "discussion",
+        "label": "Define task",
+        "instructions": "Define task. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 180,
+        "requirements": {},
+        "position": {
+          "x": 0,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-2",
+        "type": "discussion",
+        "label": "First work interval",
+        "instructions": "First work interval. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 1200,
+        "requirements": {},
+        "position": {
+          "x": 240,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-3",
+        "type": "discussion",
+        "label": "Review",
+        "instructions": "Review. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 300,
+        "requirements": {},
+        "position": {
+          "x": 480,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-4",
+        "type": "discussion",
+        "label": "Handoff",
+        "instructions": "Handoff. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 120,
+        "requirements": {},
+        "position": {
+          "x": 720,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-5",
+        "type": "discussion",
+        "label": "Second work interval",
+        "instructions": "Second work interval. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 1200,
+        "requirements": {},
+        "position": {
+          "x": 960,
+          "y": 100
+        }
+      },
+      {
+        "id": "finish",
+        "type": "finish",
+        "label": "Complete",
+        "instructions": "Confirm next actions. Guidance ends; the call remains open.",
+        "visibility": "all",
+        "position": {
+          "x": 1200,
+          "y": 100
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-1",
+        "source": "step-1",
+        "target": "step-2"
+      },
+      {
+        "id": "edge-2",
+        "source": "step-2",
+        "target": "step-3"
+      },
+      {
+        "id": "edge-3",
+        "source": "step-3",
+        "target": "step-4"
+      },
+      {
+        "id": "edge-4",
+        "source": "step-4",
+        "target": "step-5"
+      },
+      {
+        "id": "edge-5",
+        "source": "step-5",
+        "target": "finish"
+      }
+    ],
+    "entryNodeId": "step-1"
+  },
+  {
+    "id": "study-group",
+    "version": 1,
+    "revision": 1,
+    "status": "published",
+    "title": "Study group",
+    "description": "Explain, practice and reflect without requiring an agent.",
+    "instructions": "Guide the conversation respectfully. Never infer age, identity, consent or comprehension from media. Do not activate another participant's camera or microphone.",
+    "requiresInsights": true,
+    "roles": [
+      {
+        "id": "facilitator",
+        "label": "Facilitator",
+        "required": true
+      }
+    ],
+    "nodes": [
+      {
+        "id": "step-1",
+        "type": "discussion",
+        "label": "Learning goal",
+        "instructions": "Learning goal. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 180,
+        "requirements": {},
+        "position": {
+          "x": 0,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-2",
+        "type": "discussion",
+        "label": "Explanation",
+        "instructions": "Explanation. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 600,
+        "requirements": {},
+        "position": {
+          "x": 240,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-3",
+        "type": "discussion",
+        "label": "Practice",
+        "instructions": "Practice. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 900,
+        "requirements": {},
+        "position": {
+          "x": 480,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-4",
+        "type": "discussion",
+        "label": "Reflection",
+        "instructions": "Reflection. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 300,
+        "requirements": {},
+        "position": {
+          "x": 720,
+          "y": 100
+        }
+      },
+      {
+        "id": "finish",
+        "type": "finish",
+        "label": "Complete",
+        "instructions": "Confirm next actions. Guidance ends; the call remains open.",
+        "visibility": "all",
+        "position": {
+          "x": 960,
+          "y": 100
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-1",
+        "source": "step-1",
+        "target": "step-2"
+      },
+      {
+        "id": "edge-2",
+        "source": "step-2",
+        "target": "step-3"
+      },
+      {
+        "id": "edge-3",
+        "source": "step-3",
+        "target": "step-4"
+      },
+      {
+        "id": "edge-4",
+        "source": "step-4",
+        "target": "finish"
+      }
+    ],
+    "entryNodeId": "step-1"
+  },
+  {
+    "id": "tutoring",
+    "version": 1,
+    "revision": 1,
+    "status": "published",
+    "title": "Tutoring",
+    "description": "A learner-paced teaching conversation.",
+    "instructions": "Guide the conversation respectfully. Never infer age, identity, consent or comprehension from media. Do not activate another participant's camera or microphone.",
+    "requiresInsights": true,
+    "roles": [
+      {
+        "id": "facilitator",
+        "label": "Facilitator",
+        "required": true
+      }
+    ],
+    "nodes": [
+      {
+        "id": "step-1",
+        "type": "discussion",
+        "label": "Check understanding",
+        "instructions": "Check understanding. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 180,
+        "requirements": {},
+        "position": {
+          "x": 0,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-2",
+        "type": "discussion",
+        "label": "Worked example",
+        "instructions": "Worked example. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 600,
+        "requirements": {},
+        "position": {
+          "x": 240,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-3",
+        "type": "discussion",
+        "label": "Guided practice",
+        "instructions": "Guided practice. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 900,
+        "requirements": {},
+        "position": {
+          "x": 480,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-4",
+        "type": "discussion",
+        "label": "Recap",
+        "instructions": "Recap. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 300,
+        "requirements": {},
+        "position": {
+          "x": 720,
+          "y": 100
+        }
+      },
+      {
+        "id": "finish",
+        "type": "finish",
+        "label": "Complete",
+        "instructions": "Confirm next actions. Guidance ends; the call remains open.",
+        "visibility": "all",
+        "position": {
+          "x": 960,
+          "y": 100
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-1",
+        "source": "step-1",
+        "target": "step-2"
+      },
+      {
+        "id": "edge-2",
+        "source": "step-2",
+        "target": "step-3"
+      },
+      {
+        "id": "edge-3",
+        "source": "step-3",
+        "target": "step-4"
+      },
+      {
+        "id": "edge-4",
+        "source": "step-4",
+        "target": "finish"
+      }
+    ],
+    "entryNodeId": "step-1"
+  },
+  {
+    "id": "supervised-learning",
+    "version": 1,
+    "revision": 1,
+    "status": "published",
+    "title": "Supervised learning",
+    "description": "An authorized human supervisor must remain present; this is not an age or consent waiver.",
+    "instructions": "Guide the conversation respectfully. Never infer age, identity, consent or comprehension from media. Do not activate another participant's camera or microphone.",
+    "requiresInsights": true,
+    "roles": [
+      {
+        "id": "facilitator",
+        "label": "Facilitator",
+        "required": true
+      },
+      {
+        "id": "supervisor",
+        "label": "Human supervisor",
+        "required": true
+      }
+    ],
+    "nodes": [
+      {
+        "id": "step-1",
+        "type": "discussion",
+        "label": "Supervisor readiness",
+        "instructions": "Supervisor readiness. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 120,
+        "requirements": {
+          "supervisorRoleId": "supervisor"
+        },
+        "position": {
+          "x": 0,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-2",
+        "type": "discussion",
+        "label": "Learning activity",
+        "instructions": "Learning activity. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 900,
+        "requirements": {
+          "supervisorRoleId": "supervisor"
+        },
+        "position": {
+          "x": 240,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-3",
+        "type": "discussion",
+        "label": "Questions",
+        "instructions": "Questions. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 300,
+        "requirements": {
+          "supervisorRoleId": "supervisor"
+        },
+        "position": {
+          "x": 480,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-4",
+        "type": "discussion",
+        "label": "Wrap-up",
+        "instructions": "Wrap-up. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 180,
+        "requirements": {
+          "supervisorRoleId": "supervisor"
+        },
+        "position": {
+          "x": 720,
+          "y": 100
+        }
+      },
+      {
+        "id": "finish",
+        "type": "finish",
+        "label": "Complete",
+        "instructions": "Confirm next actions. Guidance ends; the call remains open.",
+        "visibility": "all",
+        "position": {
+          "x": 960,
+          "y": 100
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-1",
+        "source": "step-1",
+        "target": "step-2"
+      },
+      {
+        "id": "edge-2",
+        "source": "step-2",
+        "target": "step-3"
+      },
+      {
+        "id": "edge-3",
+        "source": "step-3",
+        "target": "step-4"
+      },
+      {
+        "id": "edge-4",
+        "source": "step-4",
+        "target": "finish"
+      }
+    ],
+    "entryNodeId": "step-1"
+  },
+  {
+    "id": "office-hours",
+    "version": 1,
+    "revision": 1,
+    "status": "published",
+    "title": "Office hours",
+    "description": "Provide orderly guidance and follow-up.",
+    "instructions": "Guide the conversation respectfully. Never infer age, identity, consent or comprehension from media. Do not activate another participant's camera or microphone.",
+    "requiresInsights": true,
+    "roles": [
+      {
+        "id": "facilitator",
+        "label": "Facilitator",
+        "required": true
+      }
+    ],
+    "nodes": [
+      {
+        "id": "step-1",
+        "type": "discussion",
+        "label": "Question",
+        "instructions": "Question. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 180,
+        "requirements": {},
+        "position": {
+          "x": 0,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-2",
+        "type": "discussion",
+        "label": "Explore together",
+        "instructions": "Explore together. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 900,
+        "requirements": {},
+        "position": {
+          "x": 240,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-3",
+        "type": "discussion",
+        "label": "Next steps",
+        "instructions": "Next steps. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 180,
+        "requirements": {},
+        "position": {
+          "x": 480,
+          "y": 100
+        }
+      },
+      {
+        "id": "finish",
+        "type": "finish",
+        "label": "Complete",
+        "instructions": "Confirm next actions. Guidance ends; the call remains open.",
+        "visibility": "all",
+        "position": {
+          "x": 720,
+          "y": 100
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-1",
+        "source": "step-1",
+        "target": "step-2"
+      },
+      {
+        "id": "edge-2",
+        "source": "step-2",
+        "target": "step-3"
+      },
+      {
+        "id": "edge-3",
+        "source": "step-3",
+        "target": "finish"
+      }
+    ],
+    "entryNodeId": "step-1"
+  },
+  {
+    "id": "demonstration",
+    "version": 1,
+    "revision": 1,
+    "status": "published",
+    "title": "Resource demonstration",
+    "description": "Show an authorized presentation source and explain it.",
+    "instructions": "Guide the conversation respectfully. Never infer age, identity, consent or comprehension from media. Do not activate another participant's camera or microphone.",
+    "requiresInsights": true,
+    "roles": [
+      {
+        "id": "facilitator",
+        "label": "Facilitator",
+        "required": true
+      }
+    ],
+    "nodes": [
+      {
+        "id": "step-1",
+        "type": "discussion",
+        "label": "Presentation readiness",
+        "instructions": "Presentation readiness. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 120,
+        "requirements": {
+          "screenShare": true
+        },
+        "position": {
+          "x": 0,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-2",
+        "type": "discussion",
+        "label": "Demonstration",
+        "instructions": "Demonstration. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 900,
+        "requirements": {
+          "screenShare": true
+        },
+        "position": {
+          "x": 240,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-3",
+        "type": "discussion",
+        "label": "Questions",
+        "instructions": "Questions. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 300,
+        "requirements": {
+          "screenShare": true
+        },
+        "position": {
+          "x": 480,
+          "y": 100
+        }
+      },
+      {
+        "id": "finish",
+        "type": "finish",
+        "label": "Complete",
+        "instructions": "Confirm next actions. Guidance ends; the call remains open.",
+        "visibility": "all",
+        "position": {
+          "x": 720,
+          "y": 100
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-1",
+        "source": "step-1",
+        "target": "step-2"
+      },
+      {
+        "id": "edge-2",
+        "source": "step-2",
+        "target": "step-3"
+      },
+      {
+        "id": "edge-3",
+        "source": "step-3",
+        "target": "finish"
+      }
+    ],
+    "entryNodeId": "step-1"
+  }
+]

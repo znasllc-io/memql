@@ -55,6 +55,11 @@ func (s *Service) accountClaimBegin(ctx context.Context, site callrules.SiteRef,
 	if err != nil {
 		return out, err
 	}
+	if k.UserHandle == "" {
+		if err := s.commerceRegistrationAllowed(ctx); err != nil {
+			return out, err
+		}
+	}
 	handle, err := callrules.NewToken(s.random, 32)
 	if err != nil {
 		return out, err
@@ -96,7 +101,7 @@ func (s *Service) accountClaimFinish(ctx context.Context, site callrules.SiteRef
 	if err != nil || !cred.Flags.UserVerified {
 		return out, accountRefusal("invalid_passkey")
 	}
-	release, err := s.gates(ctx, accountGate(k.ID), credentialGate(cred.ID))
+	release, err := s.gates(ctx, accountGate(k.ID), credentialGate(cred.ID), commerceGlobalGate)
 	if err != nil {
 		return out, err
 	}
@@ -108,6 +113,11 @@ func (s *Service) accountClaimFinish(ctx context.Context, site callrules.SiteRef
 	}
 	if entry.UserId != k.ID+"|"+h.row.ID {
 		return out, accountRefusal("invalid_passkey")
+	}
+	if k.UserHandle == "" {
+		if err := s.commerceRegistrationAllowed(fresh); err != nil {
+			return out, err
+		}
 	}
 	prior, err := s.store.credentialByDigest(fresh, cred.ID)
 	if err != nil {

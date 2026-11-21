@@ -1273,12 +1273,12 @@ func TestASeatIsToldWhetherItHostsAndWhenTheCountdownEnds(t *testing.T) {
 		opened := rowTime(cw.row(roomConcept, started.Call.ID), "openedAt")
 		guestCall := cw.sessionCall(guest)
 		require.NotEmpty(t, guestCall.LeaveToken)
-		require.Equal(t, callrules.SeatCall{Identity: in.Identity, LeaveToken: guestCall.LeaveToken, Title: callTitle("", opened), OpenedAt: opened}, guestCall, "a guest was given host controls or a countdown while the host is in the call")
+		require.Equal(t, callrules.SeatCall{RoomID: started.Call.ID, Identity: in.Identity, LeaveToken: guestCall.LeaveToken, Title: callTitle("", opened), OpenedAt: opened}, guestCall, "a guest was given host controls or a countdown while the host is in the call")
 
 		cw.clock.Advance(time.Minute)
 		left := cw.clock.Now()
 		require.NoError(t, cw.svc.Leave(ctx, hostSess))
-		require.Equal(t, callrules.SeatCall{Identity: in.Identity, LeaveToken: guestCall.LeaveToken, CountdownKind: "host_left", Title: callTitle("", opened), OpenedAt: opened, CountdownEndsAt: left.Add(grace)}, cw.sessionCall(guest),
+		require.Equal(t, callrules.SeatCall{RoomID: started.Call.ID, Identity: in.Identity, LeaveToken: guestCall.LeaveToken, CountdownKind: "host_left", Title: callTitle("", opened), OpenedAt: opened, CountdownEndsAt: left.Add(grace)}, cw.sessionCall(guest),
 			"a guest is not told when the call ends now that the host left")
 		require.Equal(t, callrules.SeatCall{}, cw.sessionCall(hostSess), "a host who left is told about a call it is not in")
 
@@ -1331,9 +1331,9 @@ func TestASeatIsToldWhetherItHostsAndWhenTheCountdownEnds(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, callrules.OutcomeWait, waits.Outcome)
 		cw.advanceTo(sc.Start.Add(grace + time.Minute))
-		require.Equal(t, callrules.SeatCall{Title: "Unhosted"}, cw.sessionCall(candidate), "a countdown runs inside a booked call's window")
+		require.Equal(t, callrules.SeatCall{RoomID: candidate.RoomID, Title: "Unhosted"}, cw.sessionCall(candidate), "a countdown runs inside a booked call's window")
 		cw.advanceTo(sc.End)
-		require.Equal(t, callrules.SeatCall{Title: "Unhosted", CountdownKind: "host_left", CountdownEndsAt: sc.End.Add(grace)}, cw.sessionCall(candidate),
+		require.Equal(t, callrules.SeatCall{RoomID: candidate.RoomID, Title: "Unhosted", CountdownKind: "host_left", CountdownEndsAt: sc.End.Add(grace)}, cw.sessionCall(candidate),
 			"a seat waiting past the booked end is not told when the call ends")
 	})
 

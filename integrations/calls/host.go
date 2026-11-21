@@ -172,6 +172,7 @@ import (
 
 // Host makes one host control with a session (the file note).
 func (s *Service) Host(ctx context.Context, sess callrules.Session, req callrules.HostActionRequest) error {
+	ctx = context.WithValue(ctx, agentScopeContext{}, "control")
 	action := strings.TrimSpace(req.Action)
 	if !callrules.IsHostAction(action) {
 		return fmt.Errorf("%w: no host control has that name", callrules.ErrInvalid)
@@ -188,7 +189,12 @@ func (s *Service) Host(ctx context.Context, sess callrules.Session, req callrule
 		s.checkpointUsage(ctx, h.room)
 	}
 	switch action {
-	case callrules.HostMute, callrules.HostCameraOff, callrules.HostStopShare:
+	case callrules.HostStopShare:
+		if managed, err := s.stopHostedResource(ctx, sess, h, target); managed || err != nil {
+			return err
+		}
+		return s.muteTracks(ctx, h, target, action)
+	case callrules.HostMute, callrules.HostCameraOff:
 		return s.muteTracks(ctx, h, target, action)
 	case callrules.HostRemove:
 		return s.remove(ctx, h, target)
@@ -233,12 +239,18 @@ func (s *Service) hostOf(ctx context.Context, sess callrules.Session) (acting, e
 	if !seat.Host || !seat.occupying() {
 		return acting{}, notHost()
 	}
+	if err := s.delegatedEffectAllowed(ctx, site, seat.KeyID); err != nil {
+		return acting{}, err
+	}
 	return acting{site: site, seat: *seat, room: *room}, nil
 }
 
 // stillHost asks again, fresh and under the gates, what hostOf asked: the call is open and
 // the actor's seat is still a host seat in it. It answers the room as read.
 func (s *Service) stillHost(ctx context.Context, h acting) (roomRow, error) {
+	if err := s.delegatedEffectAllowed(ctx, h.site, h.seat.KeyID); err != nil {
+		return roomRow{}, err
+	}
 	owner := h.site.OwnerUserID
 	room, err := s.store.roomByID(ctx, owner, h.room.ID)
 	if err != nil {
@@ -250,6 +262,9 @@ func (s *Service) stillHost(ctx context.Context, h acting) (roomRow, error) {
 	seat, err := s.store.seatByID(ctx, owner, h.seat.ID)
 	if err != nil {
 		return roomRow{}, err
+	}
+	if familyRoom(*room) && (seat == nil || seat.KeyID != room.KeyID || seat.Kind != string(callrules.KindPerson)) {
+		return roomRow{}, notHost()
 	}
 	if seat == nil || seat.RoomID != room.ID || !seat.Host || !seat.occupying() {
 		return roomRow{}, notHost()
@@ -318,6 +333,7 @@ func (s *Service) SessionCall(ctx context.Context, sess callrules.Session) (call
 		return none, err
 	}
 	var out callrules.SeatCall
+	out.RoomID = room.ID
 	out.Title = callTitle(room.Title, room.OpenedAt)
 	out.AllowanceEndsAt = room.FundingDeadline
 	out.FundingMode = room.FundingMode
@@ -327,6 +343,8 @@ func (s *Service) SessionCall(ctx context.Context, sess callrules.Session) (call
 			return none, e
 		}
 		out.ParticipantLimit, out.DurationMinutes = c.ParticipantLimit, c.DurationMinutes
+		out.Insights, out.Resources = c.Insights, c.Resources
+		out.ParticipationMode = c.ParticipationMode
 		if seat.Host {
 			reserved := room.UsageReservedCents
 			out.ReservedCents = &reserved
@@ -457,6 +475,11 @@ func (s *Service) muteTracks(ctx context.Context, h acting, target, action strin
 			if track.Muted || !slices.Contains(sources, track.Source) {
 				continue
 			}
+			// Media inventory is external I/O. Recheck after it returns so a stale
+			// request cannot retain host/delegated authority while waiting on media.
+			if _, err := s.stillHost(memql.ContextWithFreshRead(ctx), h); err != nil {
+				return err
+			}
 			if err := backend.MuteTrack(ctx, h.room.MediaRoom, participant.Identity, track.SID); err != nil {
 				return err
 			}
@@ -468,6 +491,9 @@ func (s *Service) muteTracks(ctx context.Context, h acting, target, action strin
 // remove takes a seat out of its call for good (the file note), and disconnects its
 // identity once the gates are released.
 func (s *Service) remove(ctx context.Context, h acting, target string) error {
+	if familyRoom(h.room) {
+		return accountRefusal("family_revoke_required")
+	}
 	if target == h.seat.ID {
 		return fmt.Errorf("%w: a host leaves the call rather than removing their own seat", callrules.ErrInvalid)
 	}
@@ -544,6 +570,9 @@ func (s *Service) giveUpPlace(ctx context.Context, owner, roomID, seatID string,
 
 // setLock locks or unlocks a call; a call already so is not written.
 func (s *Service) setLock(ctx context.Context, h acting, locked bool) error {
+	if familyRoom(h.room) && !locked {
+		return accountRefusal("family_private_call")
+	}
 	release, err := s.gates(ctx, roomGate(h.room.ID), serverGate(h.room.MediaServerID))
 	if err != nil {
 		return err
@@ -598,6 +627,12 @@ func (s *Service) admit(ctx context.Context, h acting, target string) error {
 // rows under them (the file note). A call some other request ended meanwhile is no
 // failure: the state asked for holds.
 func (s *Service) end(ctx context.Context, h acting) error {
+	if familyRoom(h.room) {
+		if _, err := s.stillHost(memql.ContextWithFreshRead(ctx), h); err != nil {
+			return err
+		}
+		return s.closeFamily(ctx, h.room, "family_host_ended")
+	}
 	if err := s.deleteMediaRoom(ctx, h.room); err != nil {
 		return err
 	}
@@ -1032,6 +1067,12 @@ func (s *Service) backendFor(ctx context.Context, room roomRow) (MediaBackend, e
 // deleteMediaRoom ends a call's media room and disconnects everyone in it. A room the
 // server no longer has is not an error (MediaBackend.DeleteRoom).
 func (s *Service) deleteMediaRoom(ctx context.Context, room roomRow) error {
+	if familyRoom(room) {
+		return s.closeFamily(ctx, room, "family_ended")
+	}
+	if err := s.StopRoomResources(ctx, room); err != nil {
+		return err
+	}
 	backend, err := s.backendFor(ctx, room)
 	if err != nil || backend == nil {
 		return err

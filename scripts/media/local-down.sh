@@ -40,7 +40,7 @@ cap_spec_param "docker"    "the docker CLI (default: docker on PATH)"
 
 PROJECT="memql-media"
 # The files local-up.sh renders, and nothing else.
-RENDERED_FILES=("livekit.yaml" "Caddyfile" "front-door-ca.pem")
+RENDERED_FILES=("livekit.yaml" "Caddyfile" "front-door-ca.pem" "ingress.yaml")
 
 STATE_DIR=""
 DOCKER=""

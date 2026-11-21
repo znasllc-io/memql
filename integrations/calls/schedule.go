@@ -167,6 +167,9 @@ func (s *Service) Schedule(ctx context.Context, sess callrules.Session, req call
 		return none, err
 	}
 	owner := h.site.OwnerUserID
+	if err := s.commerceAdultAllowed(ctx, h.site, h.row.KeyID); err != nil {
+		return none, err
+	}
 	policy, err := s.store.PolicyFor(ctx, owner, h.site.SiteID)
 	if err != nil {
 		return none, err
@@ -352,6 +355,7 @@ func (s *Service) moveGated(ctx context.Context, h keyHolder, callID string, pol
 // answered that the call was cancelled. Cancelling a cancelled booking changes nothing
 // and is not an error; a started call is a conflict, and an ended one has ended.
 func (s *Service) Cancel(ctx context.Context, sess callrules.Session, callID string) error {
+	ctx = context.WithValue(ctx, agentScopeContext{}, "schedule")
 	h, err := s.keyHolderOf(ctx, sess)
 	if err != nil {
 		return err
@@ -371,8 +375,14 @@ func (s *Service) Cancel(ctx context.Context, sess callrules.Session, callID str
 	if err := s.heldKeyForCancellation(fresh, h, now); err != nil {
 		return err
 	}
+	if err := s.delegatedEffectAllowed(fresh, h.site, h.row.KeyID); err != nil {
+		return err
+	}
 	current, err := s.bookingOf(fresh, h, b.ID)
 	if err != nil {
+		return err
+	}
+	if err := delegatedBookingAllowed(ctx, current); err != nil {
 		return err
 	}
 	room, err := s.bookedRoom(fresh, owner, *current)
@@ -671,6 +681,11 @@ func (s *Service) joinBooking(ctx context.Context, site callrules.SiteRef, sess 
 		if e != nil {
 			return callrules.JoinResult{}, held.state(sess, site), e
 		}
+		if c.ParticipationMode == familyMode {
+			if held == nil || held.KeyID != b.KeyID || held.CredentialID == "" || delegatedSeatKind(ctx) != string(callrules.KindPerson) {
+				return callrules.JoinResult{}, held.state(sess, site), accountRefusal("family_guardian_required")
+			}
+		}
 		policy.MaxPeople, policy.MaxAgents = c.ParticipantLimit, 0
 	}
 	placed, refused, err := s.placeRoom(ctx, policy)
@@ -740,7 +755,7 @@ type opening struct {
 // host link, carrying the booking's id and digests, and the booking marked started just
 // before the room is written.
 func (s *Service) openGated(ctx context.Context, site callrules.SiteRef, b bookingRow, server MediaServer, policy callrules.Policy, held *sessionRow, ask joinAsk, roomID, identity string) (opening, error) {
-	gateKeys := []string{keyGate(b.KeyID), bookingGate(b.ID), roomGate(roomID), serverGate(server.ID)}
+	gateKeys := []string{keyGate(b.KeyID), commerceGlobalGate, bookingGate(b.ID), roomGate(roomID), serverGate(server.ID)}
 	if held != nil && held.KeyID != "" {
 		gateKeys = append([]string{accountGate(held.KeyID)}, gateKeys...)
 	}
@@ -761,6 +776,21 @@ func (s *Service) openGated(ctx context.Context, site callrules.SiteRef, b booki
 	}
 	if current == nil || current.ID != b.ID {
 		return opening{out: held.stateOf(ask.token, site)}, errLinkOpensNoRoom
+	}
+	if current.DelegationID != "" {
+		delegated := context.WithValue(fresh, agentCallContext{}, current.DelegationID)
+		if err := s.delegatedEffectAllowed(delegated, site, current.KeyID); err != nil {
+			return opening{}, err
+		}
+		if current.UsageConfig != "" {
+			config, err := decodeUsageConfig(current.UsageConfig)
+			if err != nil {
+				return opening{}, err
+			}
+			if err = s.delegatedConfigurationAllowed(delegated, site, current.KeyID, config, current.Start); err != nil {
+				return opening{}, err
+			}
+		}
 	}
 	if room, err := s.bookedRoom(fresh, owner, *current); err != nil || room != nil {
 		return opening{out: held.stateOf(ask.token, site), joinIn: room}, err
@@ -838,6 +868,7 @@ func bookingsAs(ctx context.Context, owner string) (context.Context, bool) {
 // bookingRow is one v1:calls:scheduledCall. Its ids are BARE; its digests are filtered
 // on and read back only by bookingDigests.
 type bookingRow struct {
+	DelegationID                                            string
 	UsageConfig, UsageOperation, UsageDigest, UsageRequests string
 	HistoryPending                                          bool
 	ID, SiteID, KeyID, Title, Status, RoomID, CalendarUID   string
@@ -855,7 +886,8 @@ func (r bookingRow) status() string {
 
 func bookingFromRow(r map[string]any) bookingRow {
 	return bookingRow{
-		UsageConfig: rowString(r, "usageConfig"), UsageOperation: rowString(r, "usageOperation"), UsageDigest: rowString(r, "usageDigest"), UsageRequests: rowString(r, "usageRequests"),
+		DelegationID: rowString(r, "delegationId"),
+		UsageConfig:  rowString(r, "usageConfig"), UsageOperation: rowString(r, "usageOperation"), UsageDigest: rowString(r, "usageDigest"), UsageRequests: rowString(r, "usageRequests"),
 		HistoryPending: rowBool(r, "historyPending"),
 		ID:             memql.BareShortId(rowString(r, "id")),
 		SiteID:         memql.BareShortId(rowString(r, "siteId")),
@@ -940,6 +972,7 @@ func (s *Store) bookingDigests(ctx context.Context, owner, callID string) (guest
 
 // newBooking is what a booking's create writes: digests of its links, never the links.
 type newBooking struct {
+	DelegationID                                                   string
 	UsageConfig, UsageOperation, UsageDigest, UsageRequests        string
 	ID, SiteID, KeyID, Title, GuestDigest, HostDigest, CalendarUID string
 	Start, End                                                     time.Time
@@ -949,6 +982,7 @@ func (s *Store) createBooking(ctx context.Context, owner string, n newBooking, v
 	args := map[string]any{
 		"historyPending":  true,
 		"scheduledCallId": n.ID,
+		"delegationId":    n.DelegationID,
 		"siteId":          n.SiteID,
 		"keyId":           n.KeyID,
 		"start":           versionStamp(n.Start),

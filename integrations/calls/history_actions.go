@@ -43,7 +43,7 @@ func (s *Service) recheckHistoryAuthority(ctx context.Context, sess callrules.Se
 	if current.row.KeyID != h.row.KeyID {
 		return callrules.ErrNoSession
 	}
-	return nil
+	return s.delegatedEffectAllowed(ctx, h.site, h.row.KeyID)
 }
 
 func (s *Service) ownedHistory(ctx context.Context, h keyHolder, id string) (*historyRow, error) {

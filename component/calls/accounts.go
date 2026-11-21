@@ -8,28 +8,38 @@ import (
 // AccountRequest is one bounded account ceremony or credential-management act.
 // Credential is the browser's WebAuthn response, verified by the service.
 type AccountRequest struct {
-	ParticipantLimit int             `json:"participantLimit,omitempty"`
-	DurationMinutes  int             `json:"durationMinutes,omitempty"`
-	Insights         bool            `json:"insights,omitempty"`
-	Action           string          `json:"action"`
-	Key              string          `json:"key,omitempty"`
-	ChallengeID      string          `json:"challengeId,omitempty"`
-	Credential       json.RawMessage `json:"credential,omitempty"`
-	CredentialID     string          `json:"credentialId,omitempty"`
-	Label            string          `json:"label,omitempty"`
-	AccountID        string          `json:"accountId,omitempty"`
-	AmountCents      int64           `json:"amountCents,omitempty"`
-	Plan             string          `json:"plan,omitempty"`
-	IdempotencyKey   string          `json:"idempotencyKey,omitempty"`
+	ParticipationMode string          `json:"participationMode,omitempty"`
+	OperationID       string          `json:"operationId,omitempty"`
+	Outcome           string          `json:"outcome,omitempty"`
+	AdultDeclared     bool            `json:"adultDeclared,omitempty"`
+	TermsAccepted     bool            `json:"termsAccepted,omitempty"`
+	SaveMethod        bool            `json:"saveMethod,omitempty"`
+	ParticipantLimit  int             `json:"participantLimit,omitempty"`
+	DurationMinutes   int             `json:"durationMinutes,omitempty"`
+	Insights          bool            `json:"insights,omitempty"`
+	Resources         bool            `json:"resources,omitempty"`
+	Action            string          `json:"action"`
+	Key               string          `json:"key,omitempty"`
+	ChallengeID       string          `json:"challengeId,omitempty"`
+	Credential        json.RawMessage `json:"credential,omitempty"`
+	CredentialID      string          `json:"credentialId,omitempty"`
+	Label             string          `json:"label,omitempty"`
+	AccountID         string          `json:"accountId,omitempty"`
+	AmountCents       int64           `json:"amountCents,omitempty"`
+	Plan              string          `json:"plan,omitempty"`
+	IdempotencyKey    string          `json:"idempotencyKey,omitempty"`
 }
 
 type AccountCapabilities struct {
-	CallConfiguration bool `json:"callConfiguration"`
-	Passkeys          bool `json:"passkeys"`
-	RequirePasskeys   bool `json:"requirePasskeys"`
-	Payments          bool `json:"payments"`
-	SimulatedFunding  bool `json:"simulatedFunding"`
-	UsagePreview      bool `json:"usagePreview"`
+	FamilyMode        string `json:"familyMode,omitempty"`
+	Resources         bool   `json:"resources"`
+	Insights          bool   `json:"insights"`
+	CallConfiguration bool   `json:"callConfiguration"`
+	Passkeys          bool   `json:"passkeys"`
+	RequirePasskeys   bool   `json:"requirePasskeys"`
+	Payments          bool   `json:"payments"`
+	SimulatedFunding  bool   `json:"simulatedFunding"`
+	UsagePreview      bool   `json:"usagePreview"`
 }
 
 // AccountID is the durable calls key id, not a MemQL operator identity or the
@@ -87,6 +97,7 @@ type AccountCredential struct {
 }
 
 type AccountResult struct {
+	Lifecycle       *AccountLifecycle   `json:"lifecycle,omitempty"`
 	Quote           *CallQuote          `json:"quote,omitempty"`
 	Authenticated   bool                `json:"authenticated"`
 	Capabilities    AccountCapabilities `json:"capabilities"`

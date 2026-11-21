@@ -96,10 +96,15 @@ const (
 // callsStampHeaders is every header this surface controls. Both reverse proxies delete them
 // from everything they forward, not only from the fixed pairs, so a client cannot supply its
 // own on any path.
-var callsStampHeaders = []string{CallsStampSiteHeader, CallsStampOwnerHeader}
+var callsStampHeaders = []string{CallsStampSiteHeader, CallsStampOwnerHeader, memql.CallsAgentCredentialHeader}
 
 // The operations. A fixed set, because the budget a request draws on is chosen by it.
 const (
+	callsOpWorkflows   = "workflows"
+	callsOpAgent       = "agent"
+	callsOpWebhook     = "provider-webhook"
+	callsOpUTCP        = "utcp"
+	callsOpFamily      = "family"
 	callsOpAccount     = "account"
 	callsOpAccountRead = "account-read"
 	callsOpLogout      = "logout"
@@ -137,6 +142,14 @@ func callsInbound(upstream string) string {
 }
 
 var callsRoutes = [...]callsRoute{
+	{http.MethodPost, callsInbound(memql.CallsFamilyPath), memql.CallsFamilyPath, callsOpFamily, memql.CallsSmallBodyBytes},
+	{http.MethodPost, callsInbound(memql.CallsWorkflowsPath), memql.CallsWorkflowsPath, callsOpWorkflows, memql.CallsWorkflowBodyBytes},
+	{http.MethodGet, callsInbound(memql.CallsDelegationPath), memql.CallsDelegationPath, callsOpAccountRead, memql.CallsSmallBodyBytes},
+	{http.MethodPost, callsInbound(memql.CallsDelegationPath), memql.CallsDelegationPath, callsOpAccount, memql.CallsDelegationBodyBytes},
+	{http.MethodPost, callsInbound(memql.CallsAgentPath), memql.CallsAgentPath, callsOpAgent, memql.CallsWorkflowBodyBytes},
+	{http.MethodGet, callsInbound(memql.CallsUTCPPath), memql.CallsUTCPPath, callsOpUTCP, memql.CallsSmallBodyBytes},
+	{http.MethodPost, callsInbound(memql.CallsStripeWebhookPath), memql.CallsStripeWebhookPath, callsOpWebhook, memql.CallsProviderBodyBytes},
+	{http.MethodPost, callsInbound(memql.CallsDiditWebhookPath), memql.CallsDiditWebhookPath, callsOpWebhook, memql.CallsProviderBodyBytes},
 	{http.MethodGet, callsInbound(memql.CallsHistoryPath), memql.CallsHistoryPath, callsOpHistory, memql.CallsSmallBodyBytes},
 	{http.MethodPost, callsInbound(memql.CallsHistoryPath), memql.CallsHistoryPath, callsOpHistory, memql.CallsScheduleBodyBytes},
 	{http.MethodGet, callsInbound(memql.CallsAccountPath), memql.CallsAccountPath, callsOpAccountRead, memql.CallsSmallBodyBytes},
@@ -410,6 +423,12 @@ func (h *Handler) serveCallsSurface(w http.ResponseWriter, r *http.Request, site
 	// unambiguous logout uses the exit/control budget, so reading the account or
 	// exhausting login attempts cannot prevent sign-out. Every other account
 	// payload stays authentication-limited; the BFF still validates and authorizes it.
+	if route.op == callsOpFamily {
+		if !boundCallsBody(w, r, route.maxBody) {
+			return
+		}
+		budget = callsFamilyBudget(r)
+	}
 	if route.op == callsOpAccount {
 		if !boundCallsBody(w, r, route.maxBody) {
 			return
@@ -424,7 +443,7 @@ func (h *Handler) serveCallsSurface(w http.ResponseWriter, r *http.Request, site
 		return
 	}
 
-	if route.op != callsOpAccount && !boundCallsBody(w, r, route.maxBody) {
+	if route.op != callsOpAccount && route.op != callsOpFamily && !boundCallsBody(w, r, route.maxBody) {
 		return
 	}
 
@@ -481,6 +500,71 @@ func callsAccountIsLogout(r *http.Request) bool {
 	return err == io.EOF
 }
 
+// Family polling must not consume the household's mutation/exit allowance.
+// Only an exact, unambiguous read or revoke body earns a different bucket; the
+// service still validates all account, room, invitation and consent authority.
+func callsFamilyBudget(r *http.Request) string {
+	if r.Body == nil || r.ContentLength < 0 || r.ContentLength > memql.CallsSmallBodyBytes {
+		return callsOpJoin
+	}
+	body, e := io.ReadAll(r.Body)
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	if e != nil {
+		return callsOpJoin
+	}
+	d := json.NewDecoder(bytes.NewReader(body))
+	token, e := d.Token()
+	if e != nil || token != json.Delim('{') {
+		return callsOpJoin
+	}
+	fields := map[string]string{}
+	for d.More() {
+		k, e := d.Token()
+		if e != nil {
+			return callsOpJoin
+		}
+		key, ok := k.(string)
+		if !ok {
+			return callsOpJoin
+		}
+		if _, seen := fields[key]; seen {
+			return callsOpJoin
+		}
+		switch key {
+		case "action", "roomId", "identity", "invitationId", "invitationToken", "idempotencyKey":
+		default:
+			return callsOpJoin
+		}
+		var value string
+		if d.Decode(&value) != nil {
+			return callsOpJoin
+		}
+		fields[key] = value
+	}
+	token, e = d.Token()
+	if e != nil || token != json.Delim('}') {
+		return callsOpJoin
+	}
+	if _, e = d.Token(); e != io.EOF {
+		return callsOpJoin
+	}
+	switch fields["action"] {
+	case "status":
+		if fields["roomId"] == "" && fields["identity"] == "" && fields["idempotencyKey"] == "" {
+			return callsOpAccountRead
+		}
+	case "list":
+		if fields["invitationId"] == "" && fields["invitationToken"] == "" && fields["idempotencyKey"] == "" {
+			return callsOpAccountRead
+		}
+	case "revoke":
+		if fields["invitationToken"] == "" {
+			return callsOpLeave
+		}
+	}
+	return callsOpJoin
+}
+
 // callsStamp is the rewrite that makes the forwarded request the bff's.
 //
 // IT SETS AND DOES NOT STRIP. newBFFProxy has already deleted both headers from everything it
@@ -508,9 +592,18 @@ func callsStamp(route callsRoute, siteID, owner string) func(*httputil.ProxyRequ
 		pr.Out.Header.Set(CallsStampSiteHeader, siteID)
 		pr.Out.Header.Set(CallsStampOwnerHeader, owner)
 		pr.Out.Header.Del("Authorization")
+		pr.Out.Header.Del(memql.CallsAgentCredentialHeader)
+		if route.op == callsOpAgent {
+			// Only this exact route transports machine authority. It is deliberately
+			// not a MemQL bearer, so identity middleware never interprets it as one.
+			header := pr.In.Header.Get("Authorization")
+			if strings.HasPrefix(header, "Bearer ") && len(header) < 512 {
+				pr.Out.Header.Set(memql.CallsAgentCredentialHeader, strings.TrimPrefix(header, "Bearer "))
+			}
+		}
 		pr.Out.Header.Del("Sec-WebSocket-Protocol")
 		accessSetCookies(pr.Out.Header, accessCookiePairs(pr.In.Header.Values("Cookie"), func(name string) bool {
-			return name == memql.CallsCookieName
+			return name == memql.CallsCookieName && route.op != callsOpAgent && route.op != callsOpWebhook && route.op != callsOpUTCP
 		}))
 		pr.Out.URL.Path = route.upstream
 		pr.Out.URL.RawPath = ""

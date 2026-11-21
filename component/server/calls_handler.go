@@ -158,18 +158,25 @@ type CallsService interface {
 // The route names, which a log line carries. A fixed set, so a line never holds anything a
 // request sent.
 const (
-	callsOpAccount    = "account"
-	callsOpHistory    = "history"
-	callsOpUnlock     = "unlock"
-	callsOpSession    = "session"
-	callsOpStart      = "start"
-	callsOpSchedule   = "schedule"
-	callsOpReschedule = "reschedule"
-	callsOpCancel     = "cancel"
-	callsOpJoin       = "join"
-	callsOpQueue      = "queue"
-	callsOpHost       = "host"
-	callsOpLeave      = "leave"
+	callsOpDelegation    = "delegation"
+	callsOpWorkflows     = "workflows"
+	callsOpAgent         = "agent"
+	callsOpUTCP          = "utcp"
+	callsOpStripeWebhook = "stripe-webhook"
+	callsOpDiditWebhook  = "didit-webhook"
+	callsOpFamily        = "family"
+	callsOpAccount       = "account"
+	callsOpHistory       = "history"
+	callsOpUnlock        = "unlock"
+	callsOpSession       = "session"
+	callsOpStart         = "start"
+	callsOpSchedule      = "schedule"
+	callsOpReschedule    = "reschedule"
+	callsOpCancel        = "cancel"
+	callsOpJoin          = "join"
+	callsOpQueue         = "queue"
+	callsOpHost          = "host"
+	callsOpLeave         = "leave"
 )
 
 // callsRoute is one of the fixed method and path pairs. One table, because the routes this
@@ -185,6 +192,14 @@ type callsRoute struct {
 // THE CAPS ARE ENFORCED WHILE READING, before anything is decoded: the edge's cap is the
 // edge's.
 var callsRoutes = []callsRoute{
+	{http.MethodPost, memql.CallsFamilyPath, callsOpFamily, memql.CallsSmallBodyBytes},
+	{http.MethodPost, memql.CallsWorkflowsPath, callsOpWorkflows, memql.CallsWorkflowBodyBytes},
+	{http.MethodGet, memql.CallsDelegationPath, callsOpDelegation, memql.CallsSmallBodyBytes},
+	{http.MethodPost, memql.CallsDelegationPath, callsOpDelegation, memql.CallsDelegationBodyBytes},
+	{http.MethodPost, memql.CallsAgentPath, callsOpAgent, memql.CallsWorkflowBodyBytes},
+	{http.MethodGet, memql.CallsUTCPPath, callsOpUTCP, memql.CallsSmallBodyBytes},
+	{http.MethodPost, memql.CallsStripeWebhookPath, callsOpStripeWebhook, memql.CallsProviderBodyBytes},
+	{http.MethodPost, memql.CallsDiditWebhookPath, callsOpDiditWebhook, memql.CallsProviderBodyBytes},
 	{http.MethodGet, memql.CallsHistoryPath, callsOpHistory, memql.CallsSmallBodyBytes},
 	{http.MethodPost, memql.CallsHistoryPath, callsOpHistory, memql.CallsScheduleBodyBytes},
 	{http.MethodGet, memql.CallsAccountPath, callsOpAccount, memql.CallsSmallBodyBytes},
@@ -279,6 +294,14 @@ func (h *callsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch route.op {
+	case callsOpFamily:
+		h.serveFamily(w, r, c)
+	case callsOpWorkflows:
+		h.serveWorkflow(w, r, c)
+	case callsOpDelegation, callsOpAgent, callsOpUTCP:
+		h.serveDelegated(w, r, c)
+	case callsOpStripeWebhook, callsOpDiditWebhook:
+		h.serveCommerceWebhook(w, r, c)
 	case callsOpHistory:
 		h.serveHistory(w, r, c)
 	case callsOpAccount:
@@ -521,18 +544,28 @@ func (h *callsHandler) serveSession(w http.ResponseWriter, r *http.Request, c ca
 			return
 		}
 	}
-	h.write(w, http.StatusOK, h.sessionReply(sess, call))
+	reply := h.sessionReply(sess, call)
+	if svc, ok := h.svc.(CallsFamilyService); ok {
+		reply.Family, err = svc.FamilySession(r.Context(), c.site, c.cookie.token)
+		if err != nil {
+			h.refuse(w, c, err, calls.JoinResult{})
+			return
+		}
+	}
+	h.write(w, http.StatusOK, reply)
 }
 
 // callsConfirmBody is the three confirmations every seat records.
 type callsConfirmBody struct {
-	Adult    bool   `json:"adult"`
-	NoMinors bool   `json:"noMinors"`
-	Terms    string `json:"terms"`
+	Participation     string `json:"participation,omitempty"`
+	AuthorityAccepted bool   `json:"authorityAccepted,omitempty"`
+	Adult             bool   `json:"adult"`
+	NoMinors          bool   `json:"noMinors"`
+	Terms             string `json:"terms"`
 }
 
 func (b callsConfirmBody) confirmation() calls.Confirmation {
-	return calls.Confirmation{Adult: b.Adult, NoMinors: b.NoMinors, Terms: b.Terms}
+	return calls.Confirmation{Adult: b.Adult, NoMinors: b.NoMinors, Terms: b.Terms, Participation: b.Participation, AuthorityAccepted: b.AuthorityAccepted}
 }
 
 func (h *callsHandler) serveStart(w http.ResponseWriter, r *http.Request, c callsCall) {
@@ -639,11 +672,14 @@ func (h *callsHandler) serveCancel(w http.ResponseWriter, r *http.Request, c cal
 // join that presents both.
 func (h *callsHandler) serveJoin(w http.ResponseWriter, r *http.Request, c callsCall) {
 	var body struct {
-		Token     string           `json:"token"`
-		HostToken string           `json:"hostToken"`
-		HistoryID string           `json:"historyId"`
-		Name      string           `json:"name"`
-		Confirm   callsConfirmBody `json:"confirm"`
+		FamilyInvitationID string           `json:"familyInvitationId"`
+		Family             bool             `json:"family"`
+		FamilyToken        string           `json:"familyToken"`
+		Token              string           `json:"token"`
+		HostToken          string           `json:"hostToken"`
+		HistoryID          string           `json:"historyId"`
+		Name               string           `json:"name"`
+		Confirm            callsConfirmBody `json:"confirm"`
 	}
 	if !h.decode(w, r, c, &body) {
 		return
@@ -674,7 +710,7 @@ func (h *callsHandler) serveJoin(w http.ResponseWriter, r *http.Request, c calls
 		held = &sess
 	}
 	result, out, err := h.svc.Join(r.Context(), c.site, held, calls.JoinBody{
-		Token: body.Token, HostToken: body.HostToken, HistoryID: body.HistoryID, Name: body.Name, Confirm: body.Confirm.confirmation(),
+		FamilyInvitationID: body.FamilyInvitationID, Family: body.Family, FamilyToken: body.FamilyToken, Token: body.Token, HostToken: body.HostToken, HistoryID: body.HistoryID, Name: body.Name, Confirm: body.Confirm.confirmation(),
 	})
 	// THE SESSION THE JOINER NOW HOLDS is handed over whenever it is not the one they
 	// brought, whatever else the answer says: the service has written it, and the person's
@@ -924,7 +960,7 @@ func (h *callsHandler) refuse(w http.ResponseWriter, c callsCall, err error, res
 		h.logger.Warn("calls surface: a request failed",
 			"component", "server", "op", c.route.op, logger.Subject(callsSiteConcept, c.siteID()), "err", err)
 	}
-	if answer.status == http.StatusUnauthorized && answer.body.Error == "no_session" && c.cookie.presented {
+	if answer.status == http.StatusUnauthorized && answer.body.Error == "no_session" && c.cookie.presented && c.route.op != callsOpAgent && c.route.op != callsOpStripeWebhook && c.route.op != callsOpDiditWebhook {
 		clearCallsCookie(w)
 	}
 	if answer.body.RetryAfterMs > 0 {
@@ -970,19 +1006,23 @@ func setCallsRetryAfter(w http.ResponseWriter, d time.Duration) {
 // page the server's now (expiresAt less expiresInMs), which is what `countdownEndsAt` is
 // counted down from and an occupying seat's elapsed call time is measured from.
 type callsSessionReply struct {
-	Identity         string `json:"identity,omitempty"`
-	LeaveToken       string `json:"leaveToken,omitempty"`
-	CountdownKind    string `json:"countdownKind,omitempty"`
-	ParticipantLimit int    `json:"participantLimit,omitempty"`
-	DurationMinutes  int    `json:"durationMinutes,omitempty"`
-	ReservedCents    *int64 `json:"reservedCents,omitempty"`
-	CostCents        *int64 `json:"costCents,omitempty"`
-	Kind             string `json:"kind"`
-	KeyID            string `json:"keyId,omitempty"`
-	SeatID           string `json:"seatId,omitempty"`
-	RoomID           string `json:"roomId,omitempty"`
-	ExpiresAt        string `json:"expiresAt"`
-	ExpiresInMs      int64  `json:"expiresInMs"`
+	ParticipationMode string               `json:"participationMode,omitempty"`
+	Family            *calls.FamilySession `json:"family,omitempty"`
+	Identity          string               `json:"identity,omitempty"`
+	LeaveToken        string               `json:"leaveToken,omitempty"`
+	CountdownKind     string               `json:"countdownKind,omitempty"`
+	ParticipantLimit  int                  `json:"participantLimit,omitempty"`
+	Insights          bool                 `json:"insights,omitempty"`
+	Resources         bool                 `json:"resources,omitempty"`
+	DurationMinutes   int                  `json:"durationMinutes,omitempty"`
+	ReservedCents     *int64               `json:"reservedCents,omitempty"`
+	CostCents         *int64               `json:"costCents,omitempty"`
+	Kind              string               `json:"kind"`
+	KeyID             string               `json:"keyId,omitempty"`
+	SeatID            string               `json:"seatId,omitempty"`
+	RoomID            string               `json:"roomId,omitempty"`
+	ExpiresAt         string               `json:"expiresAt"`
+	ExpiresInMs       int64                `json:"expiresInMs"`
 	// Host is true while the session's seat hosts its open call (a host seat admitted or in
 	// the call), and absent otherwise.
 	Host bool `json:"host,omitempty"`
@@ -1032,6 +1072,7 @@ type callsRosterWaiterReply struct {
 
 func (h *callsHandler) sessionReply(sess calls.Session, call calls.SeatCall) callsSessionReply {
 	reply := callsSessionReply{
+		ParticipationMode: call.ParticipationMode, Family: call.Family,
 		Identity:      call.Identity,
 		LeaveToken:    call.LeaveToken,
 		CountdownKind: call.CountdownKind,
@@ -1051,6 +1092,7 @@ func (h *callsHandler) sessionReply(sess calls.Session, call calls.SeatCall) cal
 		reply.AllowanceEndsAt = call.AllowanceEndsAt.UTC().Format(time.RFC3339Nano)
 		reply.FundingMode = call.FundingMode
 		reply.ParticipantLimit, reply.DurationMinutes = call.ParticipantLimit, call.DurationMinutes
+		reply.Insights, reply.Resources = call.Insights, call.Resources
 		if call.Host {
 			reply.ReservedCents, reply.CostCents = call.ReservedCents, call.CostCents
 		}

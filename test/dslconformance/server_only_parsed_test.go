@@ -173,6 +173,38 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 			"attribute name changed, which would silently exempt nothing and gate nothing.")
 	}
 	want := map[serverOnlyKey]bool{
+		// A borrowed owner is not an occupied room host or delegated source owner.
+		// Native checks bind runs, private instructions and media lease secrets to
+		// the current site/session/grant; caller row ownership alone cannot do so.
+		{Path: "calls/mutations.memql", Name: "saveCallsWorkflowState"}:  true,
+		{Path: "calls/mutations.memql", Name: "saveCallsResourceState"}:  true,
+		{Path: "calls/queries.memql", Name: "callsWorkflowStateById"}:    true,
+		{Path: "calls/queries.memql", Name: "callsResourceStateById"}:    true,
+		{Path: "calls/queries.memql", Name: "callsWorkflowStates"}:       true,
+		{Path: "calls/queries.memql", Name: "callsResourceStates"}:       true,
+		{Path: "calls/queries.memql", Name: "callsResourceLegacyStates"}: true,
+		// A borrowed site-owner actor is not a verified payer or provider. Only
+		// native signed-provider/account gates may journal paid credit and age proof.
+		{Path: "calls/mutations.memql", Name: "createCallsCommerceState"}: true,
+		{Path: "calls/mutations.memql", Name: "updateCallsCommerceState"}: true,
+		{Path: "calls/queries.memql", Name: "callsCommerceStateById"}:     true,
+		// Financial admission needs a complete cross-site inventory; client actor
+		// scoping would undercount liabilities and cannot authorize these reads.
+		{Path: "calls/queries.memql", Name: "callsCommerceStates"}:   true,
+		{Path: "calls/queries.memql", Name: "callsCommerceRooms"}:    true,
+		{Path: "calls/queries.memql", Name: "callsCommerceAccounts"}: true,
+		// Passkey-approved grants and atomic spending receipts are native authority,
+		// never editable through the site-owner actor or generic generated SDK.
+		{Path: "calls/mutations.memql", Name: "saveCallsDelegation"}: true,
+		// Family consent and browser bindings require the native guardian/child protocol.
+		// actor.userId scoping alone cannot establish parental consent or supervision.
+		{Path: "calls/queries.memql", Name: "callsFamilyById"}:        true,
+		{Path: "calls/queries.memql", Name: "callsFamilyByToken"}:     true,
+		{Path: "calls/queries.memql", Name: "callsFamilyForSession"}:  true,
+		{Path: "calls/queries.memql", Name: "callsFamilyForRoom"}:     true,
+		{Path: "calls/mutations.memql", Name: "saveCallsFamily"}:      true,
+		{Path: "calls/queries.memql", Name: "callsDelegationById"}:    true,
+		{Path: "calls/queries.memql", Name: "callsDelegationsForKey"}: true,
 		// First claim is authorized by the unclaimed calls session plus a verified WebAuthn ceremony, never the borrowed site owner alone.
 		{Path: "calls/mutations.memql", Name: "claimCallsKey"}: true,
 		// Credential revocation cleanup requires a verified calls account, not the borrowed site-owner actor alone.

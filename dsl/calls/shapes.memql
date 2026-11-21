@@ -121,6 +121,8 @@ shape seat callsSeatFull {
   status
   confirmAdult
   confirmNoMinors
+  participation
+  authorityAccepted
   termsVersion
   joinedAt
   leftAt
@@ -152,6 +154,7 @@ shape queueEntry callsQueueEntryFull {
 /// The scheduledCall row as the calls integration reads it. No digest is projected.
 @row
 shape scheduledCall callsScheduledCallFull {
+ delegationId
   usageRequests
   usageConfig
   usageOperation
@@ -312,4 +315,65 @@ shape historySync callsHistorySyncFull {
   afterCursor
   complete
   accountId
+}
+
+/// Private protocol and accounting state; only the native service projects it.
+@row
+shape commerceState callsCommerceStateFull {
+ row.id
+ row.createdAt
+ siteId
+ ownerUserId
+ keyId
+ stateData
+}
+
+/// Native-only journal; never returned directly to a visitor or agent.
+@row
+shape delegationState callsDelegationFull {
+  row.id
+  row.createdAt
+  siteId
+  keyId
+  tokenDigest
+  stateData
+}
+
+/// Native-only journal projection.
+@row
+shape workflowState callsWorkflowStateFull {
+ kind
+ active
+ ownerUserId
+ row.id
+ row.createdAt
+ siteId
+ keyId
+ stateData
+}
+
+/// Native-only journal projection.
+@row
+shape resourceState callsResourceStateFull {
+ active
+ ownerUserId
+ row.id
+ row.createdAt
+ siteId
+ keyId
+ stateData
+}
+
+/// Native-only family authorization journal, never directly exposed.
+@row
+shape familyState callsFamilyFull {
+ row.id
+ row.createdAt
+ siteId
+ keyId
+ roomId
+ kind
+ tokenDigest
+ sessionId
+ stateData
 }

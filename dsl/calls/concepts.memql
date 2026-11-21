@@ -189,6 +189,8 @@ concept seat {
   host  bool  @description("True for the room's host seat.")
   status  enum("waiting", "admitted", "in_call", "left", "removed")  @description("Where the seat is on its walk.")
   confirmAdult  bool  @description("The participant confirmed, at the seat's latest join, that they are 18 or older.")
+  participation string @description("Declared adults_only or children_present; does not prove legal consent or parenthood.")
+  authorityAccepted bool @description("Adult supervisor acknowledgement, distinct from independently required child consent.")
   confirmNoMinors  bool  @description("The participant confirmed, at the seat's latest join, that no one under 18 will appear on their camera or screen.")
   termsVersion  string  @description("The version of the terms the participant accepted at the seat's latest join.")
   joinedAt  datetime  @description("When the seat was taken.")
@@ -247,6 +249,7 @@ concept queueEntry {
 @displayCard(primary="title", secondary="start", status="status")
 @belongsTo(account, via="siteId")
 concept scheduledCall {
+ delegationId string @description("Standing agent grant that authorized this booking, checked again before guests can open it.")
   usageRequests string
   usageConfig string
   usageOperation string
@@ -461,4 +464,93 @@ concept historySync {
   @relationship(type="references", as="forSite", field="siteId", target=site, direction="outgoing")
   @relationship(type="references", as="siteOwner", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", as="forKey", field="keyId", target=key, direction="outgoing")
+}
+
+/// A private account commerce journal. One fenced state retains age evidence,
+/// provider operation identities and verification costs across key replacement.
+/// No card number, ID image, selfie, birth date or legal name is stored here.
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@displayCard(primary="keyId", secondary="siteId")
+@belongsTo(account, via="siteId", stays="signin")
+concept commerceState {
+ siteId string!
+ ownerUserId string!
+ keyId string!
+ stateData string! @maxLength(524288)
+ accountId string
+ @relationship(type="references", as="forSite", field="siteId", target=site, direction="outgoing")
+ @relationship(type="references", as="forKey", field="keyId", target=key, direction="outgoing")
+ @relationship(type="references", as="siteOwner", field="ownerUserId", target=user, direction="outgoing")
+}
+
+/// A standing delegated authority and its bounded reservation journal. No bearer
+/// secret or provider identity data is retained; native gates validate the payload.
+// @no-displayCard: opaque credential digests and policy journal are not a human-facing identity.
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@belongsTo(account, via="siteId", stays="signin")
+concept delegationState {
+  siteId string!
+  ownerUserId string!
+  keyId string!
+  tokenDigest string! @maxLength(64) @pattern("^[0-9a-f]{64}$")
+  stateData string! @maxLength(1048576)
+  accountId string
+  @relationship(type="references", as="delegationKey", field="keyId", target=key, direction="outgoing")
+  @relationship(type="references", as="delegationSite", field="siteId", target=site, direction="outgoing")
+}
+
+/// Bounded private skill library or authoritative session-run journal.
+// @no-displayCard: private native authorization, run instructions and publisher lease state are projected only through the authenticated Calls surface.
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@belongsTo(account, via="siteId", stays="signin")
+concept workflowState {
+ kind enum("library", "run", "booking") @description("Native journal kind; optional for additive compatibility.")
+ active bool @description("Native projection: only running, paused or blocked runs need reconciliation.")
+ siteId string!
+ ownerUserId string!
+ keyId string!
+ stateData string! @maxLength(1048576)
+ accountId string
+ @relationship(type="references", as="forSite", field="siteId", target=site, direction="outgoing")
+ @relationship(type="references", as="forKey", field="keyId", target=key, direction="outgoing")
+}
+
+/// Bounded private resource bindings and publication leases; never device credentials.
+// @no-displayCard: private native authorization, run instructions and publisher lease state are projected only through the authenticated Calls surface.
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@belongsTo(account, via="siteId", stays="signin")
+concept resourceState {
+ active bool @description("Native projection: an account has an active or uncertain publication lease; absent on pre-release rows.")
+ siteId string!
+ ownerUserId string!
+ keyId string!
+ stateData string! @maxLength(1048576)
+ accountId string
+ @relationship(type="references", as="forSite", field="siteId", target=site, direction="outgoing")
+ @relationship(type="references", as="forKey", field="keyId", target=key, direction="outgoing")
+}
+
+/// Local family supervision/consent journal; never a real parental-consent claim.
+// @no-displayCard: private child session bindings and consent receipts are not public identities.
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@belongsTo(account, via="siteId", stays="signin")
+@retention(ttl="30d", keepLatest=false, archive="none")
+concept familyState {
+ siteId string!
+ ownerUserId string!
+ keyId string!
+ roomId string!
+ kind enum("room", "invitation")!
+ tokenDigest string
+ sessionId string
+ stateData string! @maxLength(65536)
+ accountId string
+ @relationship(type="references", as="familySite", field="siteId", target=site, direction="outgoing")
+ @relationship(type="references", as="familyKey", field="keyId", target=key, direction="outgoing")
+ @relationship(type="references", as="familyRoom", field="roomId", target=room, direction="outgoing")
 }

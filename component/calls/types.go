@@ -151,13 +151,18 @@ type CallLinks struct {
 // or older, that no one under 18 will appear on their camera or screen, and
 // the version of the terms they accept. Each seat records all three.
 type Confirmation struct {
-	Adult, NoMinors bool
-	Terms           string
+	Adult, NoMinors   bool
+	Participation     string
+	AuthorityAccepted bool
+	Terms             string
 }
 
 // JoinBody names a call by one invitation, an account-owned history entry, or
 // the session's current seat. HistoryID is a lookup, never a bearer capability.
 type JoinBody struct {
+	FamilyInvitationID                string
+	Family                            bool
+	FamilyToken                       string
 	Token, HostToken, HistoryID, Name string
 	Confirm                           Confirmation
 }

@@ -126,6 +126,33 @@ secrets:
     optional: true
     description: "The secret, at least 32 characters, of the key pair the calls media server signs its webhooks with. Sealed into the calls.media.webhook global secret at boot. One of the eight MEMQL_CALLS_MEDIA_* values, set all or none."
 
+  # --- purchase-first calls commerce (optional; live payments refused) ---
+
+  - name: MEMQL_CALLS_STRIPE_SECRET_KEY
+    component: calls
+    scope: node
+    kind: integration
+    optional: true
+    description: "Stripe sandbox API credential; only sk_test_ keys are accepted. Unused in mock mode; never sent to a browser."
+  - name: MEMQL_CALLS_STRIPE_WEBHOOK_SECRET
+    component: calls
+    scope: node
+    kind: integration
+    optional: true
+    description: "Stripe sandbox webhook signing secret. Server-only, required with sandbox payments; never sent to a browser."
+  - name: MEMQL_CALLS_DIDIT_API_KEY
+    component: calls
+    scope: node
+    kind: integration
+    optional: true
+    description: "Didit sandbox API credential for the pinned adult-verification workflow. Unused in mock mode; never sent to a browser."
+  - name: MEMQL_CALLS_DIDIT_WEBHOOK_SECRET
+    component: calls
+    scope: node
+    kind: integration
+    optional: true
+    description: "Didit sandbox webhook signing secret. Server-only, required with sandbox verification; never sent to a browser."
+
   # --- operator evaluation tooling ---
 
   - name: MEMQL_EVALUATION_TOKEN
@@ -1733,6 +1760,100 @@ variables:
     scope: node
     optional: true
     description: "The DNS name every calls media server's host is at or under (media.example.com for m1.media.example.com), which the edge admits to connect-src, over wss and https on any port, on a deployable whose calls switch is on, so its page can reach the media servers. A host name of two or more labels, with no scheme, port, path or wildcard. One value per installation. Unset or not a host name, the page policy names no media server: the calls routes still answer, a browser refuses to connect to the call, and the edge warns once at boot."
+
+  # --- purchase-first calls commerce (optional; live payments refused) ---
+
+  - name: MEMQL_CALLS_FAMILY_MODE
+    component: calls
+    scope: node
+    optional: true
+    description: "Disabled by default. Only mock permits local supervised-family consent simulation with a fresh mock commerce envelope. No production parental-consent provider is enabled."
+
+  - name: MEMQL_CALLS_COMMERCE_MODE
+    component: calls
+    scope: node
+    optional: true
+    description: "Optional purchase-first lifecycle: disabled by default, mock for server-owned simulation, or sandbox for explicit provider test adapters. Live mode is refused."
+  - name: MEMQL_CALLS_COMMERCE_VALID_UNTIL
+    component: calls
+    scope: node
+    optional: true
+    description: "RFC3339 expiry of the operator financial and capacity observation. Missing or stale closes new effects; reconciliation remains available."
+  - name: MEMQL_CALLS_COMMERCE_CASH_CENTS
+    component: calls
+    scope: node
+    optional: true
+    description: "Available funded cash in cents, excluding pending processor payouts. Mock values are simulation only, not cash or a profit forecast."
+  - name: MEMQL_CALLS_COMMERCE_PROTECTED_CENTS
+    component: calls
+    scope: node
+    optional: true
+    description: "Protected cushion, tax, refund and dispute obligations in cents; unavailable to new commitments."
+  - name: MEMQL_CALLS_COMMERCE_FIXED_CENTS
+    component: calls
+    scope: node
+    optional: true
+    description: "Already committed infrastructure expenses in cents; unavailable to new commitments."
+  - name: MEMQL_CALLS_COMMERCE_FULFILLMENT_RESERVE_BPS
+    component: calls
+    scope: node
+    optional: true
+    description: "Conservative service-cost reserve against prepaid principal, 1 to 10000 basis points. Include processing costs here or protect them separately."
+  - name: MEMQL_CALLS_COMMERCE_VERIFICATION_UNIT_CENTS
+    component: calls
+    scope: node
+    optional: true
+    description: "Maximum cost in cents for one entire verification workflow including every permitted hosted SDK retry, optional feature, branding fee and tax; not a base check price."
+  - name: MEMQL_CALLS_COMMERCE_VERIFICATION_BUDGET_CENTS
+    component: calls
+    scope: node
+    optional: true
+    description: "Cumulative verification expenditure plus unfinished reservations ceiling in cents."
+  - name: MEMQL_CALLS_COMMERCE_PROVIDER_CREDIT_CENTS
+    component: calls
+    scope: node
+    optional: true
+    description: "Provider credit envelope in cents covering the same cumulative verification expenditure and reservations."
+  - name: MEMQL_CALLS_COMMERCE_CALL_BUDGET_CENTS
+    component: calls
+    scope: node
+    optional: true
+    description: "Cumulative conservative call-cost ceiling in cents; historical configured quotes continue to consume it."
+  - name: MEMQL_CALLS_COMMERCE_MAX_ACCOUNTS
+    component: calls
+    scope: node
+    optional: true
+    description: "Global durable passkey-bound account ceiling, 1 to 999; adding a credential does not consume another account."
+  - name: MEMQL_CALLS_COMMERCE_MAX_PENDING_VERIFICATIONS
+    component: calls
+    scope: node
+    optional: true
+    description: "Maximum pending checks plus unexpired checkout verification-capacity holds."
+  - name: MEMQL_CALLS_COMMERCE_MAX_VERIFICATION_ATTEMPTS
+    component: calls
+    scope: node
+    optional: true
+    description: "Per-account maximum verification attempts, 1 to 20. Credentials and displayed keys do not reset this counter."
+  - name: MEMQL_CALLS_COMMERCE_MAX_OPEN_CALLS
+    component: calls
+    scope: node
+    optional: true
+    description: "Maximum simultaneously open rooms across deployables; hardware media placement is checked separately."
+  - name: MEMQL_CALLS_COMMERCE_MAX_PARTICIPANTS
+    component: calls
+    scope: node
+    optional: true
+    description: "Maximum configured participant capacity committed to open rooms across deployables, not a benchmark of hardware capacity."
+  - name: MEMQL_CALLS_DIDIT_WORKFLOW_ID
+    component: calls
+    scope: node
+    optional: true
+    description: "Sandbox workflow identifier whose explicit document age, liveness and face-match results may prove adulthood. Generic approval does not prove 18+."
+  - name: MEMQL_CALLS_DIDIT_WORKFLOW_VERSION
+    component: calls
+    scope: node
+    optional: true
+    description: "Positive sandbox workflow version pinned to the adult-verification contract; provider responses must match it."
 
   # --- streaming transcription (epic memql#4988) ---
   #

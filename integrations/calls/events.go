@@ -250,6 +250,11 @@ func (s *Service) applyMediaEvent(ctx context.Context, ev mediaEvent) (string, e
 // disconnects, after the gates, a connection that holds no seat in the call.
 func (s *Service) participant(ctx context.Context, hint roomRow, ev mediaEvent) (string, error) {
 	outcome, err := s.participantGated(ctx, hint, ev)
+	if err == nil {
+		if e := s.familyParticipant(ctx, hint, ev); e != nil {
+			return outcome, e
+		}
+	}
 	if err != nil || outcome != outcomeRemoved {
 		return outcome, err
 	}
@@ -411,6 +416,9 @@ func (s *Service) removeConnection(ctx context.Context, room roomRow, ev mediaEv
 // roomFinished applies room_finished: the call ends, empty, only when the empty-room rule
 // would end it (host.go endsEmpty), under a call's end gates.
 func (s *Service) roomFinished(ctx context.Context, hint roomRow) (string, error) {
+	if familyRoom(hint) {
+		return outcomeEnded, s.closeFamily(ctx, hint, "family_media_ended")
+	}
 	release, err := s.gates(ctx, endGates(hint)...)
 	if err != nil {
 		return "", err

@@ -39,6 +39,27 @@ func (s *Service) Account(ctx context.Context, site callrules.SiteRef, token str
 		return s.accountSnapshot(ctx, site, token)
 	}
 	req := *request
+	if req.Action != "logout" && callrules.TokenWellFormed(token) {
+		row, _, e := s.session(ctx, site, token, s.now())
+		if e != nil && !errors.Is(e, callrules.ErrNoSession) {
+			return callrules.AccountResult{}, e
+		}
+		if row != nil {
+			child, e := s.store.familyForSession(ctx, site.OwnerUserID, site.SiteID, row.ID)
+			if e != nil {
+				return callrules.AccountResult{}, e
+			}
+			if child != nil {
+				return callrules.AccountResult{}, accountRefusal("family_child_account_unavailable")
+			}
+		}
+	}
+	if commerceAction(req.Action) {
+		if !validCommerceRequest(req) {
+			return callrules.AccountResult{}, callrules.ErrInvalid
+		}
+		return s.accountCommerce(ctx, site, token, req)
+	}
 	if !validAccountRequest(req) {
 		return callrules.AccountResult{}, callrules.ErrInvalid
 	}
@@ -46,6 +67,9 @@ func (s *Service) Account(ctx context.Context, site callrules.SiteRef, token str
 		return s.quoteCall(ctx, site, token, req)
 	}
 	if req.Action == "simulate_topup" || req.Action == "activate_pass" {
+		if s.commerceConfig().enabled() {
+			return callrules.AccountResult{}, accountRefusal("checkout_required")
+		}
 		return s.accountFunding(ctx, site, token, req)
 	}
 	if req.Action == "logout" {
@@ -53,6 +77,11 @@ func (s *Service) Account(ctx context.Context, site callrules.SiteRef, token str
 	}
 	if req.Action == "revoke" {
 		return s.accountRevoke(ctx, site, token, req.CredentialID)
+	}
+	if req.Action == "register_begin" {
+		if gateErr := s.commerceRegistrationAllowed(ctx); gateErr != nil {
+			return callrules.AccountResult{}, gateErr
+		}
 	}
 	ceremony, err := s.accountCeremony(ctx, site)
 	if err != nil {
@@ -77,10 +106,13 @@ func (s *Service) Account(ctx context.Context, site callrules.SiteRef, token str
 }
 
 func validAccountRequest(r callrules.AccountRequest) bool {
+	if r.OperationID != "" || r.Outcome != "" || r.AdultDeclared || r.TermsAccepted || r.SaveMethod {
+		return false
+	}
 	if r.Action == "quote_call" {
 		return validQuoteRequest(r)
 	}
-	if r.ParticipantLimit != 0 || r.DurationMinutes != 0 || r.Insights {
+	if r.ParticipantLimit != 0 || r.DurationMinutes != 0 || r.Insights || r.ParticipationMode != "" {
 		return false
 	}
 	if r.Action == "simulate_topup" || r.Action == "activate_pass" {
@@ -114,7 +146,8 @@ func validAccountRequest(r callrules.AccountRequest) bool {
 
 func (s *Service) accountBase(ctx context.Context, site callrules.SiteRef) (callrules.AccountResult, error) {
 	policy, err := s.store.PolicyFor(ctx, site.OwnerUserID, site.SiteID)
-	return callrules.AccountResult{Capabilities: callrules.AccountCapabilities{Passkeys: true, RequirePasskeys: policy.RequirePasskeys, Payments: false, SimulatedFunding: policy.SimulatedFunding, CallConfiguration: policy.SimulatedFunding && policy.CallConfiguration, UsagePreview: policy.SimulatedFunding && policy.UsagePreview}, Credentials: []callrules.AccountCredential{}}, err
+	return callrules.AccountResult{Capabilities: callrules.AccountCapabilities{FamilyMode: s.familyCapability(), Insights: policy.SimulatedFunding && policy.CallConfiguration && s.commerceConfig().admission(s.now()) == nil,
+		Resources: policy.SimulatedFunding && policy.CallConfiguration && s.commerceConfig().admission(s.now()) == nil, Passkeys: true, RequirePasskeys: policy.RequirePasskeys, Payments: false, SimulatedFunding: policy.SimulatedFunding, CallConfiguration: policy.SimulatedFunding && policy.CallConfiguration, UsagePreview: policy.SimulatedFunding && policy.UsagePreview}, Credentials: []callrules.AccountCredential{}}, err
 }
 func (s *Service) accountSnapshot(ctx context.Context, site callrules.SiteRef, token string) (callrules.AccountResult, error) {
 	out, err := s.accountBase(ctx, site)
@@ -179,6 +212,9 @@ func (s *Service) accountSnapshot(ctx context.Context, site callrules.SiteRef, t
 		out.Account.BalanceCents = &zero
 	}
 	if err := s.fundingSnapshot(ctx, site, &out, key); err != nil {
+		return out, err
+	}
+	if err := s.commerceAccountSnapshot(ctx, site, &out, key); err != nil {
 		return out, err
 	}
 	return out, nil
@@ -349,7 +385,11 @@ func (s *Service) accountRegisterFinish(ctx context.Context, site callrules.Site
 		}
 		keyID = k.ID
 	}
-	release, err := s.gates(ctx, accountGate(keyID), credentialGate(cred.ID))
+	gateKeys := []string{accountGate(keyID), credentialGate(cred.ID)}
+	if tag == "register" {
+		gateKeys = append(gateKeys, commerceGlobalGate)
+	}
+	release, err := s.gates(ctx, gateKeys...)
 	if err != nil {
 		return out, err
 	}
@@ -361,6 +401,11 @@ func (s *Service) accountRegisterFinish(ctx context.Context, site callrules.Site
 	}
 	if prior != nil {
 		return out, accountRefusal("credential_exists")
+	}
+	if tag == "register" {
+		if err := s.commerceRegistrationAllowed(fresh); err != nil {
+			return out, err
+		}
 	}
 	var keyText string
 	if tag == "add" {

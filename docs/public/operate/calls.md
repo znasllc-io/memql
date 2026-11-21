@@ -89,9 +89,12 @@ host link, and a seat a host admitted -- and is decided against the room's size 
 server's seats as anybody else is. One key holds one call at a time: a start is refused
 while a call of the key is open (`key_in_call`).
 
-**Every join confirms three things**, and the seat records them: the person is 18 or
-older, nobody under 18 will appear on their camera or screen, and which version of the
-terms they accept. A join without all three is refused.
+**Every join records an adult's declaration and accepted terms version.** The
+participant selects adults only, or children present with an explicit supervision
+and authority acknowledgment. Legacy confirmations without a participation scope
+still require the adults-only declaration. The acknowledgment is not evidence of
+parental/school authority or legally sufficient child consent. An unattended child
+account and a complete child-safety processing system are not implemented here.
 
 **Every pass is handed out once its call's media room is open.** The media server opens no
 room a connection names (`room.auto_create` is off), and it can lose a room a call still
@@ -1404,9 +1407,11 @@ transcription, sentiment processing or commercial billing is enabled.
 The account capability `callConfiguration` and `hostingMode:
 "usage_metered_preview"` distinguish this mode. A claimed key can request an
 account `quote_call` with its expected `accountId`, `participantLimit` (1–100),
-`durationMinutes` (10, or a multiple of 15 through 1440), and `insights: false`.
-The host and human or AI guests share that participant ceiling. Insights true is
-refused as `insights_unavailable`; an estimate is never evidence of processing.
+`durationMinutes` (10, or a multiple of 15 through 1440), `insights`, and
+`resources`. The host, human/AI guests and an optional managed source share that
+participant ceiling. The current, unexpired commerce envelope must enable the
+requested capability. Insights enables deterministic session guidance, not
+unconfigured transcription, sentiment analysis or model inference.
 
 A quote is an authenticated, site/key-bound five-minute configuration snapshot,
 not a reservation. Its result includes `quoteId`, the configuration,
@@ -1487,3 +1492,314 @@ operations; existing rooms retain their stored deadline and settlement mode.
 Regression coverage includes `usage_metered_db_test.go`, the pure configuration
 and usage-meter tests, the existing pass/preview tests and
 `history_current_db_test.go`.
+
+## Purchase-first adult verification and provider test modes
+
+The optional commerce lifecycle reuses the existing private account behind its
+passkeys. The displayed call key, a newly added passkey, a payment and a call are
+not new identities. `commerceState` stores only an 18+ result, method, timestamp,
+provider reference and bounded payment/verification receipts. It stores no ID
+image, selfie, birth date, legal name or card number. A passkey authenticates an
+account; it does not prove which finger was used or that its current holder is
+the originally verified adult. If every credential is lost, a new ID check alone
+does not recover the old account, its credit or its delegations.
+
+The default commerce mode is disabled. `MEMQL_CALLS_COMMERCE_MODE=mock` enables
+server-owned local simulation; `sandbox` enables the explicit Stripe test-key
+and Didit sandbox adapters. Live mode is rejected. Both modes use test credit,
+never a production balance, and the existing site policy must enable simulated
+funding and configured calls. The visitor protocol uses the existing account
+endpoint for `checkout_begin`, `checkout_refresh`, `verification_begin` and
+`verification_refresh`. Local-only outcome operations are rejected in sandbox.
+A browser redirect only resumes the interface: provider reads determine results.
+
+Before an initial checkout, the visitor declares adulthood and accepts the
+verification disclosure. A server check reserves verification capacity for up to
+15 minutes before opening checkout; pending purchases also reserve their maximum
+credit and fulfillment liability. Payment must be confirmed before creating a
+verification. The minimum purchase is USD 10; the full amount becomes hosting
+credit. Verification costs consume the business envelope, not a hidden debit
+from the advertised credit. Only the funded portion remaining after the service
+fulfillment reserve can cover that account's bounded verification attempts;
+service-reserved funds cannot subsidize another check. Delayed payment can outlive its capacity hold, so a
+paid account may wait for capacity before verification. Refund and dispute events
+put the account on financial hold without discarding its adult result or creating
+a new verification charge. An exact refund policy remains a product decision.
+
+The native journal binds each provider operation to one account and idempotency
+nonce. A paid fact is committed before its independently idempotent wallet
+receipt. A crash between them is repaired by refresh or provider reconciliation.
+An external create is durably claimed before dispatch. A timeout never creates a
+second verification or payment; a signed provider event can recover the original
+provider reference after the create response is lost. Reconciliation fetches the
+provider object and checks its account, operation, amount and mode. Unsigned
+callbacks, unrelated objects and generic identity `Approved` statuses cannot
+credit an account or prove adulthood.
+
+Didit must supply an explicit 18+ result from the pinned document, liveness and
+face-match workflow. Manual overrides do not establish that result. One pending
+verification is resumed, including manual review; a retry is a new, separately
+reserved attempt. All completed attempts conservatively consume their maximum
+reserved cost until a finer provider billing reconciliation exists. The configured
+attempt cap is per private account, not per passkey. Reuse of an accepted account
+result makes no provider call and has no arbitrary annual expiry. Revocation,
+provider-reported proof expiry or rejected evidence requires a new funded check. An
+observed expired/revoked proof cannot be revived by a stale response for that same
+provider reference. Age verification does not establish parenthood, school
+permissions or child consent.
+
+### Admission configuration
+
+Every new paid effect requires the operator's current financial/capacity
+observation. Set the following `MEMQL_CALLS_COMMERCE_` variables on the server,
+or supply `Service.SetCommerceConfig` from an installed operator controller:
+
+| Suffix | Meaning |
+| --- | --- |
+| `VALID_UNTIL` | RFC3339 expiry of the observation; stale or missing closes new effects. |
+| `CASH_CENTS` | Available funded cash; excludes pending payouts. |
+| `PROTECTED_CENTS` | Protected cushion, tax, refund and dispute obligations. |
+| `FIXED_CENTS` | Already committed infrastructure expenses. |
+| `FULFILLMENT_RESERVE_BPS` | Conservative service-cost portion reserved against prepaid principal; 1–10000. Include variable processing fees here or protect them separately. |
+| `VERIFICATION_UNIT_CENTS` | Maximum billable workflow cost, including every permitted hosted SDK retry, optional feature, branding fee and tax. |
+| `VERIFICATION_BUDGET_CENTS` | Cumulative verification expenditure plus open reservations ceiling. |
+| `PROVIDER_CREDIT_CENTS` | Provider credits available for that same expenditure envelope. |
+| `CALL_BUDGET_CENTS` | Cumulative conservative call cost ceiling. |
+| `MAX_ACCOUNTS` | Passkey-bound durable account count ceiling, below the query's 1000-row guard. |
+| `MAX_PENDING_VERIFICATIONS` | Pending checks and unexpired checkout verification holds. |
+| `MAX_VERIFICATION_ATTEMPTS` | Per-account maximum, 1–20. |
+| `MAX_OPEN_CALLS` | Simultaneously open room ceiling. |
+| `MAX_PARTICIPANTS` | Total configured participant capacity committed to open rooms. |
+
+The server requires all values in mock and sandbox modes. Values are not a
+profit forecast or proof of hardware capacity. The global PostgreSQL gate spans
+accounts, provider reservations and room admission across replicas. Room creation
+rechecks adulthood, current policy, remaining budget and physical media capacity.
+The room's final durable insert holds its full configured credit; existing funded
+rooms retain their reservations when new admission closes. Calls conservatively
+consume their full configured quote against the business envelope. The global
+account/room journal query ceiling and the 128-operation per-account journal
+ceiling fail closed instead of silently undercounting.
+
+Sandbox credentials stay server-side: `MEMQL_CALLS_STRIPE_SECRET_KEY`,
+`MEMQL_CALLS_STRIPE_WEBHOOK_SECRET`, `MEMQL_CALLS_DIDIT_API_KEY`,
+`MEMQL_CALLS_DIDIT_WEBHOOK_SECRET`, `MEMQL_CALLS_DIDIT_WORKFLOW_ID` and
+`MEMQL_CALLS_DIDIT_WORKFLOW_VERSION`. Provider webhook signatures are verified
+before resolving any account. Stripe event duplicates cannot duplicate credit;
+Didit event duplicates cannot repeat a check. Pending/SCA-required automatic
+top-ups retain their funding reservation and require attention rather than
+starting another charge. A second automatic top-up is refused while one is
+pending, even if the old visible balance still meets the trigger.
+
+`commerce_db_test.go` exercises purchase-first gates, prepaid settlement replay,
+replica-safe verification capacity, retries, underage refusal, proof reuse across
+passkeys, unknown-create recovery, strict age evidence and interrupted credit
+reconciliation against the real database. Provider contract tests fake the HTTP
+server and test signatures and environment isolation. These do not replace an
+end-to-end provider sandbox qualification. Production activation additionally
+requires a real settled-cash reconciliation, qualified metering and moderation
+capacity observations, confirmed provider retry/cost limits, recovery policy and
+legal review. A budget gate cannot guarantee profit or eliminate chargebacks.
+
+### Enable the local mock lifecycle on an existing cluster
+
+The existing `memql-secrets` configuration path carries commerce settings; no
+Deployment override or new ConfigMap is required. Register variables in
+`scripts/secrets/manifest.yaml` and regenerate its embedded snapshot with
+`make env-registry-sync`. Provider API keys and webhook secrets are classified
+as secrets. All commerce settings are optional at boot, without automatic
+funding defaults; enabling the lifecycle still requires a complete envelope.
+
+From the engine checkout, preview the bounded local fixture, then apply it:
+
+```bash
+bash scripts/k3d/calls-mock.sh --cluster=memql --namespace=memql
+bash scripts/k3d/calls-mock.sh --cluster=memql --namespace=memql --apply
+make dev CLUSTER=memql NAMESPACE=memql
+```
+
+The helper requires the matching `k3d-memql` context and an already running
+local cluster, pins subsequent requests to that context, and refuses to replace
+a sandbox or live mode. Preview is read-only. Apply changes only the 15
+`MEMQL_CALLS_COMMERCE_` keys in the existing Secret, with its resource-version
+precondition and ArgoCD preservation annotations. It preserves every unrelated
+key, refuses a concurrent change, and leaves site policy and pods untouched.
+For code updates, the normal `make dev` rebuilds/imports all engine images and
+rolls their pods so embedded DSL and the registry agree across the mesh. For a
+configuration-only refresh, restart the bff replicas after applying; environment
+changes do not reach already running pods.
+
+The fixture sets **simulated**, not real, cents: cash 100000; protected cushion
+10000; fixed commitments 10000; verification budget and provider credit 10000
+each; maximum workflow attempt cost 100; cumulative call budget 50000; service
+reserve 5000 basis points. It caps durable accounts at 200, pending verification
+holds/checks at 10, attempts per account at 3, open calls at 5 and committed
+participant capacity at 40. The participant ceiling leaves headroom below the
+default local media server's 50 seats. These are test limits, not measured
+hardware capacity or Didit prices. Existing account, room and provider receipts
+remain part of admission; running the helper does not reset them.
+
+The mock observation expires after 30 days (or `--valid-days=1` through `30`).
+There is no automatic renewal: after expiry, new effects close until an operator
+refreshes the fixture. A real financial observation must not use this artificial
+validity window. The site's `simulatedFunding` and `callConfiguration` policies
+must already be enabled. The helper does not enlarge or reduce existing site
+limits; a configuration above the global or physical capacity is refused.
+
+On an HTTPS calls site, local checkout and verification controls use the same
+origin account endpoint. They need neither external hosted URLs nor provider
+credentials. The interface exposes these controls only when the authenticated
+server snapshot says `mode: "mock"`; sandbox uses the actual hosted test flow.
+The regression `TestCallsMockLocalGuardAndAtomicPreservation` covers preview,
+local-context/mode restrictions, finite expiry and concurrent Secret changes.
+
+## Agent authority and UTCP
+
+The same service methods implement human and agent quoting, hosting, scheduling,
+joining scheduled calls, call controls, invitations, balance and history. Agents
+discover named operations at `GET /_memql/calls/utcp.json` and call the single
+`POST /_memql/calls/agent` endpoint. This follows the
+[UTCP HTTP call-template contract](https://www.utcp.io/protocols/http): UTCP
+describes the narrow HTTPS surface; it does not replace its transport or security.
+No MCP server, arbitrary URL proxy, generic graph query or shell tool is exposed.
+`start` and `join` return a short-lived media pass. An agent runtime connects to
+the existing LiveKit/WebRTC media service with it; UTCP controls the call but does
+not transport its audio/video or supply an AI voice/video participant.
+
+An adult-verified account creates a grant at `POST /_memql/calls/delegation`
+after a user-verified passkey assertion within five minutes. `GET` lists its
+grants. Creation returns a bearer credential once; only its keyed digest is
+stored. Use it as `Authorization: Bearer <credential>` on the agent endpoint,
+or bind the manual's `CALLKEY_AGENT_TOKEN` variable in the UTCP client. The
+official Python SDK namespaces variables: registering this manual as `callkey`
+requires `callkey_CALLKEY_AGENT_TOKEN` and names a tool
+`callkey.callkey_balance`. It never becomes a human
+session cookie. Changing passkeys, identity evidence, payment methods or grants
+requires human account authentication; an agent cannot approve its own authority.
+
+Each grant fixes its terms version, adults-only or supervised-child participation
+declaration, scopes, participant/duration ceilings, per-call ceiling, UTC calendar
+month ceiling, lifetime ceiling and expiry (at most 90 days). Prices and limits
+use integer USD cents. Unknown outcomes retain the full reserved maximum, even
+across a month boundary. Retry effectful operations with the same
+`idempotencyKey`; changing the request under that key is refused. Settled usage
+releases only the unused reservation proven by the existing immutable meter.
+There are bounded journals of 100 grants per account and 1000 operations per
+grant; reaching a guard refuses further work rather than dropping receipts.
+
+`read` can inspect account balance/history and quote calls. `host` starts a call
+or joins a booking assigned to that grant. `schedule` creates, reschedules and
+cancels its own bookings. `control` manages its current host seat and edits the
+history of calls created by that grant. History archiving keeps the human
+`archive_preview` then `archive` with `confirmationToken` and `acknowledged`
+contract; `restore` reverses it during the existing retention window. Guest links
+are available; reusable host bearer links are never returned to agents. Identity
+ceremonies remain human-only. The separate `invite` scope can send a bounded,
+deduplicated invitation to an owned live call or scheduled booking. It requires
+an explicit `invitationRecipients` allowlist or separately approved
+`allowAnyRecipient: true`. An older invite grant without either remains readable
+and revocable but has no delivery authority. Receipt identity normalizes mailbox
+case and whitespace; it does not infer aliases. Local delivery is captured.
+
+`maxCalls: 1` limits a grant to one new usage operation. An optional
+`scheduleStart` pins that booking's start (at the scheduler's one-second
+precision), forbids immediate hosting and moving it to another time, and requires
+the approved maximum duration to end before grant expiry. Without it, scheduling
+remains a standing permission within the other caps. Proposal review displays
+these actual limits. Participant labels and role names express expected attendees;
+they do not authenticate the person who receives or follows a guest link.
+
+Automatic top-ups are a separately approved `topup` mandate against an explicitly
+saved payment method. The owner fixes its trigger, charge amount, per-charge,
+monthly and lifetime ceilings. An agent cannot select another card or amount,
+and buying credit never replenishes its usage allowance. A checkout must save a
+method before a grant can enable top-ups. Pending charges prevent another charge;
+replacing that saved method requires a new human-approved grant before charging it.
+SCA, decline or an uncertain result pauses funding for reconciliation/attention.
+
+Reservations and native effects recheck durable authority across replicas. Revoking
+a grant prevents new funded effects and attempts to end its active call and cancel
+its bookings. A guest link cannot open a revoked grant's scheduled room. Media
+cleanup is best effort if the media provider is unavailable, so revocation is not
+a promise of instantaneous media disconnection. Scheduled bookings hold grant
+allowance but do not pre-reserve the account wallet or future server capacity;
+opening rechecks both and can refuse when either is unavailable.
+
+### Skills, workflow controls and resource publication
+
+UTCP exposes the same definition and runtime operations as the human dashboard.
+The only added human operation surface is `POST /_memql/calls/workflows`, with
+exactly one typed workflow, resource or invitation request. Agent operations stay
+on `/agent`; there is no endpoint per skill. Both bounded operation bodies have a
+128 KiB cap, reject unknown fields, and recheck authority in the service. Human
+delegation approval has a 64 KiB cap for bounded recipient/version/resource lists.
+Cookies never authenticate the machine route, and its bearer is stripped from
+other routes. Neither the JSON schema nor a UTCP declaration grants authority.
+
+`skills_read`, `skills_write` and `skills_control` separate discovery/reading,
+authoring and running. Runs require the actual call's Insights entitlement and
+the approved immutable skill version. The catalog contains fourteen curated
+templates. The implemented finite graph vocabulary is readiness, instruction,
+turn, discussion, presentation, acknowledgment, condition, handoff and finish.
+Unsupported repeat/parallel nodes, cycles and arbitrary effects are rejected.
+The connected-node editor and UTCP use the same definition. Preview has no real
+side effects. Published versions, run visits, server clock anchors, revision and
+control epoch survive refresh/replica changes. Participant snapshots filter
+private content before transport. Human pause/change/cancel creates a hold that
+an agent cannot bypass by rereading the latest revision.
+
+Overtime stays advisory. Ending a turn and muting are separate operations;
+neither activates the next participant's microphone. Cancel stops guidance and
+keeps the call open. Pausing does not stop usage charges or hard deadlines.
+Required interview video checks the assigned interviewee's actual track, not the
+host's camera. A camera track is not identity or age evidence. Supervision
+requirements need an occupied, non-agent human host with adult evidence; this
+does not substitute for parental authority or child-use launch review.
+
+Managed resource grants separately require `resources_read`,
+`resources_publish`/`resources_control`, exact resource IDs and room authority.
+The owner runs the encoder; Callkey receives a WHIP push. **Callkey does not
+accept SSH destinations, device passwords, commands, pull URLs or arbitrary
+network tunnels.** A rendered terminal is video, not a remote terminal. Screen,
+camera and local command selection stay on the owner's device. Neither viewers
+nor session instructions can execute device commands through this surface.
+
+`start` returns a private revocable ingress key; it never returns operator media
+credentials or an ingress-worker JWT. `stop` deletes the ingress definition and
+stream-key mapping. Human stop (including a co-host's Stop sharing) creates a
+durable hold; only an explicit human restart releases it. Unknown cleanup retains
+capacity and refuses replacement. Live media observation, not registration or
+lease allocation, establishes `publishing`. One source per room and two active
+sources per local installation are allowed; expiry is at most fifteen minutes
+and no later than the room allowance. Reconciliation repairs expired/revoked
+leases across replicas. Provider outages can delay cleanup.
+
+The current ingress enforces one bounded VP8 video output and mono Opus audio;
+both tracks must be authorized because this gateway cannot enforce one-track
+isolation. Partial-track permission requests fail closed. Output limits are
+1280×720, 15 fps, 1 Mbps video and 64 kbps audio. Resource sharing has an explicit
+quote/reservation. Local guidance/resource quotes use
+`preview-2026-11-20-guidance-v2`; older calls retain their original rate. These
+illustrative local prices are not evidence of production profitability.
+
+Remote ingress URLs require HTTPS. Plain HTTP is accepted only for literal
+loopback/localhost development endpoints. The optional local ingress helper
+uses port 18080 and is not a public SSH/HTTP proxy. Owner-side clients validate
+TLS, refuse credential-forwarding redirects and restrict WHIP cleanup locations
+to the expected origin/path. Ordinary native participant/agent JWTs retain the
+existing revocation limits; managed ingress-key revocation does not upgrade
+those older tokens. Production admission, abuse and media hardening remain
+separate from local acceptance.
+
+Regression coverage includes `TestWorkflowTransportRequiresOneTypedOperationAndHumanSession`,
+`TestAgentCredentialIsKeptToExactAgentRoute`, `TestDelegationTaskScopeDatabasePinsScheduleAndRecipientBeforeEffects`,
+`TestDelegationTaskScopeDatabaseNarrowedHostAuthorityStopsRetainedSession`, and
+the resource database/actual-media revocation tests. The reference owner-side
+runner joins approved bookings and publishes voice through the native media SDK;
+an external agent still supplies conversational reasoning. No server-side model
+or remote device command runner is installed by these features.
+
+
+### Local supervised family prototype
+
+The optional [supervised family simulation](calls-family-local.md) binds child-specific mock consent to a verified guardian account and the child browser, requires actual guardian media presence, and terminally closes the call on guardian loss or consent revocation. It is disabled by default and available only with an explicit mock-family flag plus a fresh mock-commerce envelope. No real parental-consent provider is connected; this is not enabled for real children or production. Family renewals never recreate a media-room name, and queued provider cleanup preserves its first settlement cutoff.

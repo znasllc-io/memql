@@ -199,6 +199,8 @@ mutation seat createCallsSeat {
     host  bool
     status  string
     confirmAdult  bool
+    participation string
+    authorityAccepted bool
     confirmNoMinors  bool
     termsVersion  string
     joinedAt  datetime
@@ -206,7 +208,7 @@ mutation seat createCallsSeat {
     waitingSince  datetime
   }
   insert {
-    accept { historyPending, siteId, roomId, credentialId, identity, kind, displayName, host, status, confirmAdult, confirmNoMinors, termsVersion, joinedAt, keyId, waitingSince }
+    accept { historyPending, siteId, roomId, credentialId, identity, kind, displayName, host, status, confirmAdult, confirmNoMinors, participation, authorityAccepted, termsVersion, joinedAt, keyId, waitingSince }
     stamp {
       id: args.seatId
       ownerUserId: actor.userId
@@ -227,6 +229,8 @@ mutation seat updateCallsSeat {
     host  bool
     status  string
     confirmAdult  bool
+    participation string
+    authorityAccepted bool
     confirmNoMinors  bool
     termsVersion  string
     joinedAt  datetime
@@ -240,7 +244,7 @@ mutation seat updateCallsSeat {
     waitingSince  datetime
   }
   update {
-    accept { departureReceipt, departureKeepRunning, departureWrapUpAt, historyPending, credentialId, displayName, host, status, confirmAdult, confirmNoMinors, termsVersion, joinedAt, leftAt, lastSeenAt, absentSince, letInAt, waitingSince }
+    accept { departureReceipt, departureKeepRunning, departureWrapUpAt, historyPending, credentialId, displayName, host, status, confirmAdult, confirmNoMinors, participation, authorityAccepted, termsVersion, joinedAt, leftAt, lastSeenAt, absentSince, letInAt, waitingSince }
     stamp {
       id: args.seatId
       createdAt: args.versionTime ?? now
@@ -299,6 +303,7 @@ mutation queueEntry updateCallsQueueEntry {
 @serverOnly
 mutation scheduledCall createCallsScheduledCall {
   args {
+    delegationId string
     usageRequests string
     usageConfig string
     usageOperation string
@@ -317,7 +322,7 @@ mutation scheduledCall createCallsScheduledCall {
     calendarUid  string @maxLength(320)
   }
   insert {
-    accept { usageRequests, usageConfig, usageOperation, usageDigest, historyPending, siteId, keyId, start, end, title, guestDigest, hostDigest, calendarUid }
+    accept { delegationId, usageRequests, usageConfig, usageOperation, usageDigest, historyPending, siteId, keyId, start, end, title, guestDigest, hostDigest, calendarUid }
     stamp {
       id: args.scheduledCallId
       ownerUserId: actor.userId
@@ -331,6 +336,7 @@ mutation scheduledCall createCallsScheduledCall {
 @serverOnly
 mutation scheduledCall updateCallsScheduledCall {
   args {
+    delegationId string
     usageRequests string
     usageConfig string
     usageOperation string
@@ -347,7 +353,7 @@ mutation scheduledCall updateCallsScheduledCall {
     hostDigest  string @maxLength(64) @pattern("^[0-9a-f]{64}$")
   }
   update {
-    accept { usageRequests, usageConfig, usageOperation, usageDigest, historyPending, start, end, title, status, roomId, guestDigest, hostDigest }
+    accept { delegationId, usageRequests, usageConfig, usageOperation, usageDigest, historyPending, start, end, title, status, roomId, guestDigest, hostDigest }
     stamp {
       id: args.scheduledCallId
       createdAt: args.versionTime ?? now
@@ -791,4 +797,111 @@ mutation simulatedWalletEntry createCallsSimulatedWalletEntry {
     accept { siteId, keyId, kind, requestDigest, balanceCents, creditedCents, debitedCents, plan, passId, passPlan, passActivatedAt, passExpiresAt, passTotalSeconds, passDailySeconds, passMaxPeople }
     stamp { id: args.entryId, ownerUserId: actor.userId, createdAt: args.versionTime }
   }
+}
+
+/// Native gates bind the account and preserve uncertain provider effects. actor.userId scoping is not the fix: only internal-origin calls reach this construct.
+@actor
+@serverOnly
+mutation commerceState createCallsCommerceState {
+ args {
+ stateId string!
+ siteId string!
+ keyId string!
+ stateData string!
+ versionTime datetime!
+ }
+ insert {
+  accept { siteId, keyId, stateData }
+  stamp { id: args.stateId, ownerUserId: actor.userId, createdAt: args.versionTime }
+ }
+}
+
+/// Update the same account journal under a fresh-read version fence. actor.userId scoping is not the fix: only internal-origin calls reach this construct.
+@serverOnly
+mutation commerceState updateCallsCommerceState {
+ args {
+ stateId string!
+ stateData string!
+ versionTime datetime!
+ }
+ update {
+  accept { stateData }
+  stamp { id: args.stateId, createdAt: args.versionTime }
+ }
+}
+
+/// One fenced authority/reservation version; actor.userId scoping is not the fix.
+@actor
+@serverOnly
+mutation delegationState saveCallsDelegation {
+  args {
+    grantId string!
+    versionTime datetime!
+    siteId string!
+    keyId string!
+    tokenDigest string!
+    stateData string!
+  }
+  insert {
+    accept { siteId, keyId, tokenDigest, stateData }
+    stamp { id: args.grantId, ownerUserId: actor.userId, createdAt: args.versionTime }
+  }
+}
+
+/// Fenced native journal write; actor.userId scoping is not the fix.
+@actor
+@serverOnly
+mutation workflowState saveCallsWorkflowState {
+ args {
+  stateId string!
+  versionTime datetime!
+  siteId string!
+  keyId string!
+  stateData string!
+  kind string!
+  active bool!
+ }
+ insert {
+  accept { siteId, keyId, stateData, kind, active }
+  stamp { id: args.stateId, ownerUserId: actor.userId, createdAt: args.versionTime }
+ }
+}
+
+/// Fenced native journal write; actor.userId scoping is not the fix.
+@actor
+@serverOnly
+mutation resourceState saveCallsResourceState {
+ args {
+  stateId string!
+  versionTime datetime!
+  siteId string!
+  keyId string!
+  stateData string!
+  active bool!
+ }
+ insert {
+  accept { siteId, keyId, stateData, active }
+  stamp { id: args.stateId, ownerUserId: actor.userId, createdAt: args.versionTime }
+ }
+}
+
+/// Native fenced journal; actor.userId scoping is not the fix.
+@serverOnly
+@actor
+mutation familyState saveCallsFamily {
+ args {
+ stateId string!
+ versionTime datetime!
+ siteId string!
+ keyId string!
+ roomId string!
+ kind string!
+ tokenDigest string
+ sessionId string
+ stateData string!
+ }
+ insert {
+ accept { siteId, keyId, roomId, kind, tokenDigest, sessionId, stateData }
+ stamp { id: args.stateId, ownerUserId: actor.userId, createdAt: args.versionTime }
+ }
 }

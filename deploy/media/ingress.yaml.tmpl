@@ -1,0 +1,17 @@
+# Render operator values into a mode-0600 file; never check credentials in.
+api_key: "{{API_KEY}}"
+api_secret: "{{API_SECRET}}"
+ws_url: ws://127.0.0.1:7880
+redis:
+  address: redis:6379
+whip_port: 8080
+health_port: 8081
+rtc_config:
+  udp_port: 7885
+  node_ip: 127.0.0.1
+  use_external_ip: false
+cpu_cost:
+  whip_cpu_cost: 2.0
+  rtmp_cpu_cost: 2.0
+log_level: warn
+# Do not enable URL pull or psrpc compression in the existing media stack.

@@ -716,6 +716,23 @@
       }
     },
     {
+      "concept": "v1:calls:commerceState",
+      "file": "calls/concepts.memql",
+      "fields": [
+        "accountId",
+        "keyId",
+        "ownerUserId",
+        "siteId",
+        "stateData"
+      ],
+      "required": [
+        "keyId",
+        "ownerUserId",
+        "siteId",
+        "stateData"
+      ]
+    },
+    {
       "concept": "v1:calls:credential",
       "file": "calls/concepts.memql",
       "fields": [
@@ -739,6 +756,54 @@
         "ownerUserId",
         "siteId"
       ]
+    },
+    {
+      "concept": "v1:calls:delegationState",
+      "file": "calls/concepts.memql",
+      "fields": [
+        "accountId",
+        "keyId",
+        "ownerUserId",
+        "siteId",
+        "stateData",
+        "tokenDigest"
+      ],
+      "required": [
+        "keyId",
+        "ownerUserId",
+        "siteId",
+        "stateData",
+        "tokenDigest"
+      ]
+    },
+    {
+      "concept": "v1:calls:familyState",
+      "file": "calls/concepts.memql",
+      "fields": [
+        "accountId",
+        "keyId",
+        "kind",
+        "ownerUserId",
+        "roomId",
+        "sessionId",
+        "siteId",
+        "stateData",
+        "tokenDigest"
+      ],
+      "required": [
+        "keyId",
+        "kind",
+        "ownerUserId",
+        "roomId",
+        "siteId",
+        "stateData"
+      ],
+      "enums": {
+        "kind": [
+          "invitation",
+          "room"
+        ]
+      }
     },
     {
       "concept": "v1:calls:history",
@@ -1008,6 +1073,24 @@
       }
     },
     {
+      "concept": "v1:calls:resourceState",
+      "file": "calls/concepts.memql",
+      "fields": [
+        "accountId",
+        "active",
+        "keyId",
+        "ownerUserId",
+        "siteId",
+        "stateData"
+      ],
+      "required": [
+        "keyId",
+        "ownerUserId",
+        "siteId",
+        "stateData"
+      ]
+    },
+    {
       "concept": "v1:calls:room",
       "file": "calls/concepts.memql",
       "fields": [
@@ -1067,6 +1150,7 @@
       "fields": [
         "accountId",
         "calendarUid",
+        "delegationId",
         "end",
         "guestDigest",
         "historyPending",
@@ -1102,6 +1186,7 @@
       "fields": [
         "absentSince",
         "accountId",
+        "authorityAccepted",
         "confirmAdult",
         "confirmNoMinors",
         "credentialId",
@@ -1119,6 +1204,7 @@
         "leftAt",
         "letInAt",
         "ownerUserId",
+        "participation",
         "roomId",
         "siteId",
         "status",
@@ -1220,6 +1306,32 @@
         "plan": [
           "day",
           "month"
+        ]
+      }
+    },
+    {
+      "concept": "v1:calls:workflowState",
+      "file": "calls/concepts.memql",
+      "fields": [
+        "accountId",
+        "active",
+        "keyId",
+        "kind",
+        "ownerUserId",
+        "siteId",
+        "stateData"
+      ],
+      "required": [
+        "keyId",
+        "ownerUserId",
+        "siteId",
+        "stateData"
+      ],
+      "enums": {
+        "kind": [
+          "booking",
+          "library",
+          "run"
         ]
       }
     },

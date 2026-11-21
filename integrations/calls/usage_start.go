@@ -6,6 +6,7 @@ import (
 
 	callrules "github.com/znasllc-io/memql/component/calls"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 func (s *Service) startConfigured(ctx context.Context, sess callrules.Session, body callrules.StartBody, h keyHolder, p callrules.Policy, title, name string, confirm callrules.Confirmation) (callrules.StartResult, error) {
@@ -38,8 +39,33 @@ func (s *Service) startConfigured(ctx context.Context, sess callrules.Session, b
 		}
 		return callrules.StartResult{Join: refused}, err
 	}
+	var familyRelease func()
+	if c.ParticipationMode == familyMode {
+		familyRelease, err = s.gates(ctx, familyMediaGate(operation))
+		if err != nil {
+			return callrules.StartResult{}, err
+		}
+		defer func() {
+			if familyRelease != nil {
+				familyRelease()
+			}
+		}()
+		if existing, e := s.store.roomByID(memql.ContextWithFreshRead(ctx), h.site.OwnerUserID, operation); e != nil {
+			return callrules.StartResult{}, e
+		} else if existing != nil {
+			familyRelease()
+			familyRelease = nil
+			return s.configuredStartAnswer(ctx, sess, h, *existing, digest, links)
+		}
+	}
 	p.MaxPeople, p.MaxAgents = c.ParticipantLimit, 0
-	placed, refused, err := s.placeNamedRoom(ctx, p, operation)
+	// Each family placement attempt gets a never-reused physical name. A timed-out
+	// provider create may finish late; no token was ever issued for that attempt.
+	mediaName := operation
+	if c.ParticipationMode == familyMode {
+		mediaName = id.NewShortId()
+	}
+	placed, refused, err := s.placeNamedRoom(ctx, p, mediaName)
 	if err != nil {
 		return callrules.StartResult{Join: refused}, err
 	}
@@ -48,13 +74,17 @@ func (s *Service) startConfigured(ctx context.Context, sess callrules.Session, b
 		return callrules.StartResult{}, err
 	}
 	ask := joinAsk{name: name, confirm: confirm, asHost: true, pepper: h.pepper, token: sess.Token}
-	_, _, err = s.startGated(ctx, h, p, placed.server, ask, roomOpening{roomID: operation, identity: identity, keyID: h.row.KeyID, host: true, class: callrules.ClassNewCall, title: title, guestDigest: callrules.Digest(h.pepper, []byte(links.GuestToken)), hostDigest: callrules.Digest(h.pepper, []byte(links.HostToken)), configuration: &c, quoteID: body.QuoteID, usageOperation: operation, usageDigest: digest})
+	_, _, err = s.startGated(ctx, h, p, placed.server, ask, roomOpening{roomID: operation, mediaRoom: placed.roomID, identity: identity, keyID: h.row.KeyID, host: true, class: callrules.ClassNewCall, title: title, guestDigest: callrules.Digest(h.pepper, []byte(links.GuestToken)), hostDigest: callrules.Digest(h.pepper, []byte(links.HostToken)), configuration: &c, quoteID: body.QuoteID, usageOperation: operation, usageDigest: digest})
 	if err != nil {
 		return callrules.StartResult{}, err
 	}
 	existing, err = s.store.roomByID(memql.ContextWithFreshRead(ctx), h.site.OwnerUserID, operation)
 	if err != nil || existing == nil {
 		return callrules.StartResult{}, err
+	}
+	if familyRelease != nil {
+		familyRelease()
+		familyRelease = nil
 	}
 	return s.configuredStartAnswer(ctx, sess, h, *existing, digest, links)
 }

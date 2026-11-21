@@ -5,7 +5,7 @@
 // conjunct, as siteAccessSessionByToken does; actor.userId scoping alone is not the fix for a digest lookup,
 // because a client-callable lookup by digest is an oracle for guessed secrets.
 
-use common.traits.{ isOpen }
+use common.traits.{ isOpen, isActiveRecord }
 
 /// The newest complete simulated state, not an aggregate. actor.userId scoping is not the fix: only internal-origin calls reach this construct.
 @serverOnly
@@ -616,4 +616,173 @@ query seat callsHistoryPendingSeats {
   filter row => row.siteId == args.siteId && row.keyId == args.keyId && row.historyPending == true && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   paginate 1
   shape callsSeatFull
+}
+
+/// Internal account lookup. actor.userId scoping is not the fix: only internal-origin calls reach this construct.
+@serverOnly
+@actor
+@cache(0)
+query commerceState callsCommerceStateById {
+ args { id string! }
+ filter row => row.id == args.id && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ paginate 1
+ shape callsCommerceStateFull
+}
+
+/// Global accounting must fail closed at the native page ceiling rather than undercount. actor.userId scoping is not the fix: only internal-origin calls reach this construct.
+@serverOnly
+@actor
+@cache(0)
+query commerceState callsCommerceStates {
+ filter row => actor.isClusterOwner == true
+ paginate 1000
+ shape callsCommerceStateFull
+}
+
+/// Global resource commitments across deployables. actor.userId scoping is not the fix: only internal-origin calls reach this construct.
+@serverOnly
+@actor
+@cache(0)
+query room callsCommerceRooms {
+ filter row => actor.isClusterOwner == true
+ paginate 1000
+ shape callsRoomFull
+}
+
+/// Account admission uses durable account rows, not the number of credentials. actor.userId scoping is not the fix: only internal-origin calls reach this construct.
+@serverOnly
+@actor
+@cache(0)
+query key callsCommerceAccounts {
+ filter row => actor.isClusterOwner == true && row.userHandle != nil && row.userHandle != ""
+ paginate 1000
+ shape callsKeyFull
+}
+
+/// actor.userId scoping is not the fix: internal origin and native credential gates are mandatory.
+@serverOnly
+@actor
+@cache(0)
+query delegationState callsDelegationById {
+  args { id string! }
+  filter row => row.id == args.id && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  paginate 1
+  shape callsDelegationFull
+}
+
+/// Bounded account inventory; reaching the limit refuses further grants.
+/// actor.userId scoping is not the fix: this is a server-only projection.
+@serverOnly
+@actor
+@cache(0)
+query delegationState callsDelegationsForKey {
+  args { siteId string! keyId string! }
+  filter row => row.siteId == args.siteId && row.keyId == args.keyId && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  sort "row.id", "asc"
+  paginate 101
+  shape callsDelegationFull
+}
+
+/// actor.userId scoping is not the fix: native authorization and internal origin are mandatory.
+@serverOnly
+@actor
+@cache(0)
+query workflowState callsWorkflowStateById {
+ args { id string! }
+ filter row => row.id == args.id && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ paginate 1
+ shape callsWorkflowStateFull
+}
+
+/// actor.userId scoping is not the fix: native authorization and internal origin are mandatory.
+@serverOnly
+@actor
+@cache(0)
+query resourceState callsResourceStateById {
+ args { id string! }
+ filter row => row.id == args.id && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ paginate 1
+ shape callsResourceStateFull
+}
+
+/// Native bounded reconciliation only; actor.userId scoping is not the fix.
+@serverOnly
+@actor
+@cache(0)
+query workflowState callsWorkflowStates {
+ filter row => actor.isClusterOwner == true && row.kind == "run" && isActiveRecord(row)
+ paginate 1000
+ shape callsWorkflowStateFull
+}
+
+/// Native bounded reconciliation only; actor.userId scoping is not the fix.
+@serverOnly
+@actor
+@cache(0)
+query resourceState callsResourceStates {
+ filter row => actor.isClusterOwner == true && isActiveRecord(row)
+ sort "row.id", "asc"
+ paginate 1000
+ shape callsResourceStateFull
+}
+
+/// Bounded additive migration; each normalized row leaves this queue. Native gates remain mandatory; actor.userId scoping is not the fix.
+@serverOnly
+@actor
+@cache(0)
+query resourceState callsResourceLegacyStates {
+ filter row => actor.isClusterOwner == true && row.active == nil
+ sort "row.id", "asc"
+ paginate 100
+ shape callsResourceStateFull
+}
+
+/// actor.userId scoping is not the fix: native authority and internal origin are required.
+@serverOnly
+@actor
+@cache(0)
+query familyState callsFamilyById {
+ args { id string! }
+ filter row => row.id == args.id && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ paginate 1
+ shape callsFamilyFull
+}
+/// actor.userId scoping is not the fix: native authority and internal origin are required.
+@serverOnly
+@actor
+@cache(0)
+query familyState callsFamilyByToken {
+ args {
+ siteId string!
+ tokenDigest string!
+ }
+ filter row => row.siteId == args.siteId && row.tokenDigest == args.tokenDigest && row.kind == "invitation" && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ paginate 1
+ shape callsFamilyFull
+}
+/// actor.userId scoping is not the fix: native authority and internal origin are required.
+@serverOnly
+@actor
+@cache(0)
+query familyState callsFamilyForSession {
+ args {
+ siteId string!
+ sessionId string!
+ }
+ filter row => row.siteId == args.siteId && row.sessionId == args.sessionId && row.kind == "invitation" && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ paginate 2
+ shape callsFamilyFull
+}
+/// actor.userId scoping is not the fix: native authority and internal origin are required.
+@serverOnly
+@actor
+@cache(0)
+query familyState callsFamilyForRoom {
+ args {
+ siteId string!
+ roomId string!
+ }
+ filter row => row.siteId == args.siteId && row.roomId == args.roomId && row.kind == "invitation" && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ paginate 101
+ shape callsFamilyFull
 }

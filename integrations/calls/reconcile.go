@@ -151,6 +151,12 @@ func (s *Service) Reconcile(ctx context.Context) error {
 	tally := &reconcileTally{}
 	failed := 0
 	var first error
+	for _, reconcile := range []func(context.Context) error{s.ReconcileResources, s.ReconcileWorkflows} {
+		if err := reconcile(ctx); err != nil && first == nil {
+			first = err
+			failed++
+		}
+	}
 	for _, server := range servers {
 		n, err := s.reconcileServer(ctx, server, tally)
 		failed += n
@@ -214,6 +220,9 @@ type reconcilePlan struct {
 // reconcileRoom reconciles one call: its participant list read outside the gates, its
 // rows repaired under them, and the media calls their decisions need made after them.
 func (s *Service) reconcileRoom(ctx context.Context, server MediaServer, backend MediaBackend, hint roomRow, tally *reconcileTally) error {
+	if handled, err := s.reconcileFamily(ctx, hint); handled || err != nil {
+		return err
+	}
 	if handled, err := s.reconcileMeterCapacity(ctx, hint, backend, tally); handled || err != nil {
 		return err
 	}
@@ -232,6 +241,9 @@ func (s *Service) reconcileRoom(ctx context.Context, server MediaServer, backend
 	plan, err := s.reconcileGatedObserved(ctx, server, hint, present, tally, observedAt)
 	if err != nil {
 		return err
+	}
+	if familyRoom(hint) && plan.end != "" {
+		return s.closeFamily(ctx, hint, "family_supervision_ended")
 	}
 	switch plan.end {
 	case callrules.EndReasonHostLeft:

@@ -76,3 +76,42 @@ func TestPreviewPricingUsesMarginalBandsAndCeilingReservation(t *testing.T) {
 		}
 	}
 }
+
+// New capabilities need explicit paid configuration; old signed configurations
+// cannot silently gain them. Every reservation covers its maximum settlement.
+func TestGuidanceAndResourcesUseExplicitVersionAndCoveredRates(t *testing.T) {
+	for _, insights := range []bool{false, true} {
+		for _, resources := range []bool{false, true} {
+			if !insights && !resources {
+				continue
+			}
+			for people := 1; people <= 100; people++ {
+				for _, minutes := range []int{10, 15, 60, 1440} {
+					c := CallConfiguration{ParticipantLimit: people, DurationMinutes: minutes, Insights: insights, Resources: resources, RateVersion: GuidanceRateVersion}
+					if !ValidCallConfiguration(c) {
+						t.Fatalf("valid capability refused: %+v", c)
+					}
+					want := PreviewRate(people)
+					if insights {
+						want = want * 175 / 100
+					}
+					if resources {
+						want += 2500
+					}
+					if got := ConfigurationRate(c, people); got != want {
+						t.Fatalf("rate %d want %d", got, want)
+					}
+					reserved := PreviewReservation(c)
+					raw := want * int64(minutes)
+					if reserved*10000 < raw || (reserved-1)*10000 >= raw {
+						t.Fatalf("underfunded capability: %+v", c)
+					}
+					c.RateVersion = PreviewRateVersion
+					if ValidCallConfiguration(c) || ConfigurationRate(c, people) != 0 {
+						t.Fatal("legacy configuration gained new powers")
+					}
+				}
+			}
+		}
+	}
+}
