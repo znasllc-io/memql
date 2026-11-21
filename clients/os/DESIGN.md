@@ -807,6 +807,10 @@ placement is computed, never dragged freehand or resized (`system/placement.ts`,
   app borderless. With nothing else open there is no picker: it goes borderless.
 - **Drag to the top** (within 24px) lights the whole area and makes a lone
   window borderless on its desk. A pair is already borderless and stays as it is.
+- **Desk icons reach the same line.** The icon grid's rows run down to where
+  windows stop (`DEFAULT_PLACEMENT.dockReserve` above the bottom), so an icon
+  drags as low as a window reaches and never sits under the dock
+  (`gridForViewport` in `chrome/state.tsx`; Jesús, Nov 20 2026).
 - Snap highlights and the picker are static fills: no animation, so reduced
   motion adds none. The phone layout has no desks or windows.
 

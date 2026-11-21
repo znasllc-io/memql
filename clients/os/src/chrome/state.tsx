@@ -54,6 +54,7 @@ import {
   type GridSize,
 } from "../system/desktop";
 import { movePin as movePinFn, pin as pinFn, unpin as unpinFn, type DockState } from "../system/dock";
+import { DEFAULT_PLACEMENT } from "../system/placement";
 import { accessAdmits, canOpen, sectionsFor, widgetById, type OsRegistry } from "../system/registry";
 import {
   documentFromState,
@@ -271,14 +272,22 @@ export function useOsIfPresent(): OsContextValue | null {
 
 /**
  * Grid size from the viewport (cell tokens are 96x104). The surface pads
- * 20px on each side and the dock reserves the bottom -- both come OUT of
- * the cell budget, or the last column paints past the viewport edge and
- * bleeds onto the neighboring desk plate.
+ * 20px on each side -- that comes OUT of the cell budget, or the last column
+ * paints past the viewport edge and bleeds onto the neighboring desk plate.
+ *
+ * The rows run from the 20px pad at the top down to the line windows stop
+ * at, `DEFAULT_PLACEMENT.dockReserve` above the bottom (system/placement.ts),
+ * so an icon never sits under the dock and the grid never stops short of it.
+ * It used to reserve a flat 200px, which Jesús met as "an invisible barrier"
+ * (Nov 20 2026): on his 881px-tall Safari window the grid ended at 644px with
+ * the dock's top at 805px, a whole row of room nobody could drag into. The
+ * viewport and the reserve are both the desk's own CSS pixels, so the line
+ * holds at any desktop scale.
  */
 export function gridForViewport(width: number, height: number): GridSize {
   return {
     cols: Math.max(3, Math.floor((width - 40) / 96)),
-    rows: Math.max(2, Math.floor((height - 200) / 104)),
+    rows: Math.max(2, Math.floor((height - 20 - DEFAULT_PLACEMENT.dockReserve) / 104)),
   };
 }
 
