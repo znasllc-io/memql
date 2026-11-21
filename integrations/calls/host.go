@@ -172,6 +172,12 @@ import (
 
 // Host makes one host control with a session (the file note).
 func (s *Service) Host(ctx context.Context, sess callrules.Session, req callrules.HostActionRequest) error {
+	if req.Action == "processing_consent" {
+		return s.processingConsent(ctx, sess, req)
+	}
+	if req.Processing != nil {
+		return callrules.ErrInvalid
+	}
 	ctx = context.WithValue(ctx, agentScopeContext{}, "control")
 	action := strings.TrimSpace(req.Action)
 	if action == "agent_approve" || action == "agent_reject" {
@@ -367,6 +373,12 @@ func (s *Service) SessionCall(ctx context.Context, sess callrules.Session) (call
 				agent.Seat, agent.Identity, agent.Name = member.ID, member.Identity, member.DisplayName
 				out.Agents = append(out.Agents, agent)
 			}
+		}
+	}
+	if seat.occupying() {
+		out.Processing, err = s.processingStatus(fresh, *room, *seat, v.seats)
+		if err != nil {
+			return none, err
 		}
 	}
 	if seat.Host && seat.occupying() {

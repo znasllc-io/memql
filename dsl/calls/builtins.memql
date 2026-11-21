@@ -76,6 +76,7 @@ builtin callsSiteEnable {
 @description("Set any of a deployable's calls limits, which are per site; a limit not named keeps its value and one never set is the shipped default. Counts are whole numbers and durations are whole seconds, each held to the cluster's bounds so no site claims more than the cluster allows. Judged in the deployable's organization; refused for a deployable the caller cannot read, one with no owner, a caller who is not a person and any call inside a run. Returns the effective limits: {policyId, siteId, maxPeople, maxAgents, roomJoinsPerMinute, maxUpcomingScheduled, maxScheduledMinutes, hostLeftGrace, passTtl, scheduleHorizon, queueEntryTtl, queuePoll}.")
 builtin callsPolicySet {
   requirePasskeys int @description("Require a currently credential-backed session at join: 0 optional guest access, 1 required.")
+  processingEnabled int @description("Operator opt-in for trusted processing in consented, configured Insights calls; no family processing.")
   callConfiguration int @description("Operator opt-in for configured local simulated prepaid rooms. Requires simulatedFunding; never real payment authority.")
   usagePreview int @description("Operator-only opt-in for bounded local usage preview. Requires simulatedFunding. Never charges usage or enables real payments.")
   simulatedFunding int @description("Operator-only local funding simulation: 0 disabled by default, 1 enables simulated wallet credit and bounded hosting passes. Never enables real payments.")
@@ -143,4 +144,43 @@ builtin callsReconcile { }
 @description("Apply one of the media server's webhooks, staged as a v1:platform:inboundRequest, to the call it names: a seat in the call, a disconnect recorded, a new screen share taking over, an empty call ended, a connection without a seat disconnected. Refused to every caller but the engine's own applyMediaEvent automation; it works only a delivery the calls media credential verified. Returns {requestId, event, outcome}.")
 builtin callsApplyMediaEvent {
   requestId  string!  @description("The staged delivery's row id, as the automation's trigger hands it.")
+}
+
+/// Trusted operator only, refused inside runs. Returns an ephemeral 30-second
+/// room-wide subscribe-only sampler token and an exact consented track allowlist.
+/// Worker must filter publication SID AND participant identity. Renew with leaseId;
+/// reset with the owned live leaseId after reconnect to advance every track epoch.
+@sdk
+@executor("integration.calls.processingLease")
+@requiresCapability("execute", "app:deployables/calls")
+@description("Acquire or renew a trusted processing lease for a configured Insights call. Cluster owner only, outside runs; consent required, family calls excluded. Token grants room-wide subscription, exact track filtering remains the trusted worker's obligation. No media or tokens are journalled.")
+builtin callsProcessingLease {
+ siteId string!
+ roomId string!
+ leaseId string
+ reset bool
+ maxTracks int!
+}
+
+/// Trusted operator only, refused inside runs. Exact lease/epoch/consent/source
+/// authority is rechecked before ephemeral server-origin data publication.
+@sdk
+@executor("integration.calls.processingPublish")
+@requiresCapability("execute", "app:deployables/calls")
+@description("Publish one bounded attributed ephemeral processing result under a current trusted lease. Reject stale consent, track or admission generations. No transcript or model observation storage; observations are not age or legal findings.")
+builtin callsProcessingPublish {
+ siteId string!
+ roomId string!
+ leaseId string!
+ revision int!
+ event object! @secret
+}
+
+/// Operator-only bounded discovery for explicitly configured worker sites.
+@sdk
+@executor("integration.calls.processingRooms")
+@requiresCapability("execute", "app:deployables/calls")
+@description("List at most 100 eligible open rooms with current participant processing consent for one configured site. Trusted operator only, outside runs. No media credentials or participant data.")
+builtin callsProcessingRooms {
+ siteId string!
 }

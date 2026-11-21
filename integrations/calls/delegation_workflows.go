@@ -8,6 +8,15 @@ import (
 )
 
 func agentRequestScope(r callrules.AgentRequest) string {
+	if r.Action == "processing_consent" {
+		if r.Processing == nil {
+			return ""
+		}
+		return "processing"
+	}
+	if r.Processing != nil {
+		return ""
+	}
 	if r.Action == "invite" && r.Invitation != nil && r.Workflow == nil && r.Resource == nil && r.Proposal == nil {
 		return "invite"
 	}

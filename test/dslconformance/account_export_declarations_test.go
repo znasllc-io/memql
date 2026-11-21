@@ -24,6 +24,7 @@ import (
 var stayingKinds = map[string]string{
 	// Room approval and canonical appearance are private, cluster-bound agent authority.
 	"v1:calls:agentAdmissionState": "signin",
+	"v1:calls:processingState":     "signin",
 	"v1:calls:agentPortrait":       "signin",
 	// A credential is bound to this deployable origin and stays with sign-in authority.
 	"v1:calls:credential": "signin",

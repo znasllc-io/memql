@@ -207,7 +207,8 @@ type AccountExportsArgs struct {
 	// The nextCursor of the previous page.
 	After string
 	// Exports per page: 20 when absent, at most 100.
-	Limit int
+	Limit    int
+	LimitSet bool // set true to send an explicit zero; nonzero values are always sent
 }
 
 // AccountExports calls the engine builtin accountExports.
@@ -228,7 +229,7 @@ func AccountExportsBuild(args AccountExportsArgs) string {
 		b.WriteString("after: ")
 		b.WriteString(quoteMemQL(args.After))
 	}
-	if args.Limit != 0 {
+	if args.LimitSet || args.Limit != 0 {
 		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
@@ -267,7 +268,8 @@ type AccountMovesArgs struct {
 	// The nextCursor of the previous page.
 	After string
 	// Moves per page: 50 when absent, at most 200.
-	Limit int
+	Limit    int
+	LimitSet bool // set true to send an explicit zero; nonzero values are always sent
 }
 
 // AccountMoves calls the engine builtin accountMoves.
@@ -290,7 +292,7 @@ func AccountMovesBuild(args AccountMovesArgs) string {
 		b.WriteString("after: ")
 		b.WriteString(quoteMemQL(args.After))
 	}
-	if args.Limit != 0 {
+	if args.LimitSet || args.Limit != 0 {
 		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
@@ -310,7 +312,8 @@ type AccountRowsArgs struct {
 	// The nextCursor of the previous page.
 	After string
 	// Rows per page: 50 when absent, at most 200.
-	Limit int
+	Limit    int
+	LimitSet bool // set true to send an explicit zero; nonzero values are always sent
 	// A canonical row id or bare UUID reads exactly that row in this account; other text filters the page's display values, ignoring case.
 	Search string
 }
@@ -340,7 +343,7 @@ func AccountRowsBuild(args AccountRowsArgs) string {
 		b.WriteString("after: ")
 		b.WriteString(quoteMemQL(args.After))
 	}
-	if args.Limit != 0 {
+	if args.LimitSet || args.Limit != 0 {
 		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
@@ -805,37 +808,55 @@ func CallsMediaServersBuild(args CallsMediaServersArgs) string {
 // PER SITE: the limits are the site's, on a row its owner owns, because a package deployable's name is unique only together with its package. ONLY WHAT IS NAMED CHANGES: a limit left out keeps the value it had, and one nobody ever set is the shipped default (calls.DefaultPolicy). Counts are whole numbers and DURATIONS ARE WHOLE SECONDS. Every value is held to the CLUSTER'S bounds (a room of 1 to 1000 people, a pass of 10 to 900 seconds, a waiter that polls at least once a minute and whose place outlives a poll), so no site claims more than the cluster allows; what a deployable allows inside those bounds is its operator's to choose. Judged in the site's organization, and refused for a deployable the caller cannot read, one with no owner, a caller who is not a person and any call inside a run. Returns the effective limits: {policyId, siteId} and one field per limit.
 type CallsPolicySetArgs struct {
 	// Require a currently credential-backed session at join: 0 optional guest access, 1 required.
-	RequirePasskeys int
+	RequirePasskeys    int
+	RequirePasskeysSet bool // set true to send an explicit zero; nonzero values are always sent
+	// Operator opt-in for trusted processing in consented, configured Insights calls; no family processing.
+	ProcessingEnabled    int
+	ProcessingEnabledSet bool // set true to send an explicit zero; nonzero values are always sent
 	// Operator opt-in for configured local simulated prepaid rooms. Requires simulatedFunding; never real payment authority.
-	CallConfiguration int
+	CallConfiguration    int
+	CallConfigurationSet bool // set true to send an explicit zero; nonzero values are always sent
 	// Operator-only opt-in for bounded local usage preview. Requires simulatedFunding. Never charges usage or enables real payments.
-	UsagePreview int
+	UsagePreview    int
+	UsagePreviewSet bool // set true to send an explicit zero; nonzero values are always sent
 	// Operator-only local funding simulation: 0 disabled by default, 1 enables simulated wallet credit and bounded hosting passes. Never enables real payments.
-	SimulatedFunding int
+	SimulatedFunding    int
+	SimulatedFundingSet bool // set true to send an explicit zero; nonzero values are always sent
 	// The deployable the limits are for.
 	SiteId string
 	// People allowed in one room, 1 to 1000.
-	MaxPeople int
+	MaxPeople    int
+	MaxPeopleSet bool // set true to send an explicit zero; nonzero values are always sent
 	// Agents allowed in one room, 0 to 100.
-	MaxAgents int
+	MaxAgents    int
+	MaxAgentsSet bool // set true to send an explicit zero; nonzero values are always sent
 	// Join attempts allowed per room per minute, 1 to 10000.
-	RoomJoinsPerMinute int
+	RoomJoinsPerMinute    int
+	RoomJoinsPerMinuteSet bool // set true to send an explicit zero; nonzero values are always sent
 	// Unfunded unclaimed guest retirement after 30 to 365 days without use; default 30. Funded and Passkey-secured accounts are excluded.
-	GuestInactiveDays int
+	GuestInactiveDays    int
+	GuestInactiveDaysSet bool // set true to send an explicit zero; nonzero values are always sent
 	// Upcoming scheduled calls allowed per key, 0 to 1000.
-	MaxUpcomingScheduled int
+	MaxUpcomingScheduled    int
+	MaxUpcomingScheduledSet bool // set true to send an explicit zero; nonzero values are always sent
 	// The longest a scheduled call may be, in minutes, 1 to 1440.
-	MaxScheduledMinutes int
+	MaxScheduledMinutes    int
+	MaxScheduledMinutesSet bool // set true to send an explicit zero; nonzero values are always sent
 	// How long a room outlives its host, in seconds, 0 to 86400.
-	HostLeftGrace int
+	HostLeftGrace    int
+	HostLeftGraceSet bool // set true to send an explicit zero; nonzero values are always sent
 	// How long a pass lives, in seconds, 10 to 900.
-	PassTtl int
+	PassTtl    int
+	PassTtlSet bool // set true to send an explicit zero; nonzero values are always sent
 	// How far ahead a call may be booked, in seconds, 0 to 31622400.
-	ScheduleHorizon int
+	ScheduleHorizon    int
+	ScheduleHorizonSet bool // set true to send an explicit zero; nonzero values are always sent
 	// How long a queue entry may go unpolled, in seconds, 10 to 86400, and longer than queuePoll.
-	QueueEntryTtl int
+	QueueEntryTtl    int
+	QueueEntryTtlSet bool // set true to send an explicit zero; nonzero values are always sent
 	// How often a waiter polls, in seconds, 1 to 60.
-	QueuePoll int
+	QueuePoll    int
+	QueuePollSet bool // set true to send an explicit zero; nonzero values are always sent
 }
 
 // CallsPolicySet calls the engine builtin callsPolicySet.
@@ -847,25 +868,32 @@ func (qc *QueryClient) CallsPolicySet(ctx context.Context, args CallsPolicySetAr
 func CallsPolicySetBuild(args CallsPolicySetArgs) string {
 	var b strings.Builder
 	b.WriteString("builtin callsPolicySet(")
-	if args.RequirePasskeys != 0 {
+	if args.RequirePasskeysSet || args.RequirePasskeys != 0 {
 		b.WriteString("requirePasskeys: ")
 		b.WriteString(fmt.Sprintf("%v", args.RequirePasskeys))
 	}
-	if args.CallConfiguration != 0 {
+	if args.ProcessingEnabledSet || args.ProcessingEnabled != 0 {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("processingEnabled: ")
+		b.WriteString(fmt.Sprintf("%v", args.ProcessingEnabled))
+	}
+	if args.CallConfigurationSet || args.CallConfiguration != 0 {
 		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("callConfiguration: ")
 		b.WriteString(fmt.Sprintf("%v", args.CallConfiguration))
 	}
-	if args.UsagePreview != 0 {
+	if args.UsagePreviewSet || args.UsagePreview != 0 {
 		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("usagePreview: ")
 		b.WriteString(fmt.Sprintf("%v", args.UsagePreview))
 	}
-	if args.SimulatedFunding != 0 {
+	if args.SimulatedFundingSet || args.SimulatedFunding != 0 {
 		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
@@ -877,83 +905,196 @@ func CallsPolicySetBuild(args CallsPolicySetArgs) string {
 	}
 	b.WriteString("siteId: ")
 	b.WriteString(quoteMemQL(args.SiteId))
-	if args.MaxPeople != 0 {
+	if args.MaxPeopleSet || args.MaxPeople != 0 {
 		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("maxPeople: ")
 		b.WriteString(fmt.Sprintf("%v", args.MaxPeople))
 	}
-	if args.MaxAgents != 0 {
+	if args.MaxAgentsSet || args.MaxAgents != 0 {
 		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("maxAgents: ")
 		b.WriteString(fmt.Sprintf("%v", args.MaxAgents))
 	}
-	if args.RoomJoinsPerMinute != 0 {
+	if args.RoomJoinsPerMinuteSet || args.RoomJoinsPerMinute != 0 {
 		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("roomJoinsPerMinute: ")
 		b.WriteString(fmt.Sprintf("%v", args.RoomJoinsPerMinute))
 	}
-	if args.GuestInactiveDays != 0 {
+	if args.GuestInactiveDaysSet || args.GuestInactiveDays != 0 {
 		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("guestInactiveDays: ")
 		b.WriteString(fmt.Sprintf("%v", args.GuestInactiveDays))
 	}
-	if args.MaxUpcomingScheduled != 0 {
+	if args.MaxUpcomingScheduledSet || args.MaxUpcomingScheduled != 0 {
 		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("maxUpcomingScheduled: ")
 		b.WriteString(fmt.Sprintf("%v", args.MaxUpcomingScheduled))
 	}
-	if args.MaxScheduledMinutes != 0 {
+	if args.MaxScheduledMinutesSet || args.MaxScheduledMinutes != 0 {
 		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("maxScheduledMinutes: ")
 		b.WriteString(fmt.Sprintf("%v", args.MaxScheduledMinutes))
 	}
-	if args.HostLeftGrace != 0 {
+	if args.HostLeftGraceSet || args.HostLeftGrace != 0 {
 		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("hostLeftGrace: ")
 		b.WriteString(fmt.Sprintf("%v", args.HostLeftGrace))
 	}
-	if args.PassTtl != 0 {
+	if args.PassTtlSet || args.PassTtl != 0 {
 		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("passTtl: ")
 		b.WriteString(fmt.Sprintf("%v", args.PassTtl))
 	}
-	if args.ScheduleHorizon != 0 {
+	if args.ScheduleHorizonSet || args.ScheduleHorizon != 0 {
 		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("scheduleHorizon: ")
 		b.WriteString(fmt.Sprintf("%v", args.ScheduleHorizon))
 	}
-	if args.QueueEntryTtl != 0 {
+	if args.QueueEntryTtlSet || args.QueueEntryTtl != 0 {
 		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("queueEntryTtl: ")
 		b.WriteString(fmt.Sprintf("%v", args.QueueEntryTtl))
 	}
-	if args.QueuePoll != 0 {
+	if args.QueuePollSet || args.QueuePoll != 0 {
 		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("queuePoll: ")
 		b.WriteString(fmt.Sprintf("%v", args.QueuePoll))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CallsProcessingLease -- Trusted operator only, refused inside runs. Returns an ephemeral 30-second room-wide subscribe-only sampler token and an exact consented track allowlist. Worker must filter publication SID AND participant identity. Renew with leaseId; reset with the owned live leaseId after reconnect to advance every track epoch.
+type CallsProcessingLeaseArgs struct {
+	SiteId    string
+	RoomId    string
+	LeaseId   string
+	Reset     bool
+	ResetSet  bool // set true to send reset; required because zero-value bool is ambiguous
+	MaxTracks int
+}
+
+// CallsProcessingLease calls the engine builtin callsProcessingLease.
+func (qc *QueryClient) CallsProcessingLease(ctx context.Context, args CallsProcessingLeaseArgs) (*Result, error) {
+	call := CallsProcessingLeaseBuild(args)
+	return qc.executeNamed(ctx, "callsProcessingLease", call)
+}
+
+func CallsProcessingLeaseBuild(args CallsProcessingLeaseArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin callsProcessingLease(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("roomId: ")
+	b.WriteString(quoteMemQL(args.RoomId))
+	if args.LeaseId != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("leaseId: ")
+		b.WriteString(quoteMemQL(args.LeaseId))
+	}
+	if args.ResetSet {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("reset: ")
+		b.WriteString(fmt.Sprintf("%v", args.Reset))
+	}
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("maxTracks: ")
+	b.WriteString(fmt.Sprintf("%v", args.MaxTracks))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CallsProcessingPublish -- Trusted operator only, refused inside runs. Exact lease/epoch/consent/source authority is rechecked before ephemeral server-origin data publication.
+type CallsProcessingPublishArgs struct {
+	SiteId   string
+	RoomId   string
+	LeaseId  string
+	Revision int
+	Event    map[string]any
+}
+
+// CallsProcessingPublish calls the engine builtin callsProcessingPublish.
+func (qc *QueryClient) CallsProcessingPublish(ctx context.Context, args CallsProcessingPublishArgs) (*Result, error) {
+	call := CallsProcessingPublishBuild(args)
+	return qc.executeNamed(ctx, "callsProcessingPublish", call)
+}
+
+func CallsProcessingPublishBuild(args CallsProcessingPublishArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin callsProcessingPublish(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("roomId: ")
+	b.WriteString(quoteMemQL(args.RoomId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("leaseId: ")
+	b.WriteString(quoteMemQL(args.LeaseId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("revision: ")
+	b.WriteString(fmt.Sprintf("%v", args.Revision))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("event: ")
+	b.WriteString(renderMemQLValue(args.Event))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CallsProcessingRooms -- Operator-only bounded discovery for explicitly configured worker sites.
+type CallsProcessingRoomsArgs struct {
+	SiteId string
+}
+
+// CallsProcessingRooms calls the engine builtin callsProcessingRooms.
+func (qc *QueryClient) CallsProcessingRooms(ctx context.Context, args CallsProcessingRoomsArgs) (*Result, error) {
+	call := CallsProcessingRoomsBuild(args)
+	return qc.executeNamed(ctx, "callsProcessingRooms", call)
+}
+
+func CallsProcessingRoomsBuild(args CallsProcessingRoomsArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin callsProcessingRooms(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1313,6 +1454,7 @@ type CampaignConfigureSeriesArgs struct {
 	// Enum: save | pause | resume
 	Action           string
 	IntervalWeeks    int
+	IntervalWeeksSet bool // set true to send an explicit zero; nonzero values are always sent
 	FirstSendAt      string
 	TimeZone         string
 	ExpectedRevision string
@@ -1334,7 +1476,7 @@ func CampaignConfigureSeriesBuild(args CampaignConfigureSeriesArgs) string {
 	}
 	b.WriteString("action: ")
 	b.WriteString(quoteMemQL(args.Action))
-	if args.IntervalWeeks != 0 {
+	if args.IntervalWeeksSet || args.IntervalWeeks != 0 {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
@@ -2401,9 +2543,10 @@ func CommerceSoldBuild(args CommerceSoldArgs) string {
 // CommerceStock -- Inventory levels below a threshold at one location. Shopify models inventory as NAMED quantities (available, committed, on_hand), so the threshold is applied in Go and a level with no `available` count reads as unknown rather than as a stockout. For the store's owner or a cluster owner; anybody else is refused before the mirror is read.
 type CommerceStockArgs struct {
 	// The store. When omitted: the only configured store for a cluster owner; for anybody else the one store they own, and a storeId is asked for when they own several.
-	StoreId     string
-	LocationGid string
-	Threshold   int
+	StoreId      string
+	LocationGid  string
+	Threshold    int
+	ThresholdSet bool // set true to send an explicit zero; nonzero values are always sent
 }
 
 // CommerceStock calls the engine builtin commerceStock.
@@ -2426,7 +2569,7 @@ func CommerceStockBuild(args CommerceStockArgs) string {
 		b.WriteString("locationGid: ")
 		b.WriteString(quoteMemQL(args.LocationGid))
 	}
-	if args.Threshold != 0 {
+	if args.ThresholdSet || args.Threshold != 0 {
 		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
@@ -3210,12 +3353,13 @@ type EditDocumentArgs struct {
 	AttachmentId string
 	Note         string
 	// Enum: user | assistant | system
-	AuthorKind       string
-	AuthorId         string
-	ExpectedRevision string
-	ExpectedVersion  int
-	ProducedByPlanId string
-	PartitionId      string
+	AuthorKind         string
+	AuthorId           string
+	ExpectedRevision   string
+	ExpectedVersion    int
+	ExpectedVersionSet bool // set true to send an explicit zero; nonzero values are always sent
+	ProducedByPlanId   string
+	PartitionId        string
 }
 
 // EditDocument calls the engine builtin editDocument.
@@ -3271,7 +3415,7 @@ func EditDocumentBuild(args EditDocumentArgs) string {
 		b.WriteString("expectedRevision: ")
 		b.WriteString(quoteMemQL(args.ExpectedRevision))
 	}
-	if args.ExpectedVersion != 0 {
+	if args.ExpectedVersionSet || args.ExpectedVersion != 0 {
 		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
@@ -4971,8 +5115,9 @@ func LibraryBackupDownloadBlockBuild(args LibraryBackupDownloadBlockArgs) string
 
 // LibraryBackupList wraps the builtin named "libraryBackupList".
 type LibraryBackupListArgs struct {
-	Search string
-	Limit  int
+	Search   string
+	Limit    int
+	LimitSet bool // set true to send an explicit zero; nonzero values are always sent
 	// Enum: active | archives | all
 	Scope    string
 	WorkerId string
@@ -4992,7 +5137,7 @@ func LibraryBackupListBuild(args LibraryBackupListArgs) string {
 		b.WriteString("search: ")
 		b.WriteString(quoteMemQL(args.Search))
 	}
-	if args.Limit != 0 {
+	if args.LimitSet || args.Limit != 0 {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
@@ -5312,8 +5457,9 @@ func LibraryBrowseFacetsBuild(args LibraryBrowseFacetsArgs) string {
 
 // LibraryDocumentHistory -- Read owned document history metadata, with a version cursor and branch provenance.
 type LibraryDocumentHistoryArgs struct {
-	ArtifactId    string
-	BeforeVersion int
+	ArtifactId       string
+	BeforeVersion    int
+	BeforeVersionSet bool // set true to send an explicit zero; nonzero values are always sent
 }
 
 // LibraryDocumentHistory calls the engine builtin libraryDocumentHistory.
@@ -5327,7 +5473,7 @@ func LibraryDocumentHistoryBuild(args LibraryDocumentHistoryArgs) string {
 	b.WriteString("builtin libraryDocumentHistory(")
 	b.WriteString("artifactId: ")
 	b.WriteString(quoteMemQL(args.ArtifactId))
-	if args.BeforeVersion != 0 {
+	if args.BeforeVersionSet || args.BeforeVersion != 0 {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
@@ -5753,7 +5899,8 @@ type LibrarySimilarArtifactsArgs struct {
 	// Find artifacts similar to this one. Set this OR text.
 	ArtifactId string
 	// Maximum artifacts to return. Defaults to 5; capped at 50, because each returned artifact costs one further owner-gated read.
-	Limit int
+	Limit    int
+	LimitSet bool // set true to send an explicit zero; nonzero values are always sent
 }
 
 // LibrarySimilarArtifacts calls the engine builtin librarySimilarArtifacts.
@@ -5776,7 +5923,7 @@ func LibrarySimilarArtifactsBuild(args LibrarySimilarArtifactsArgs) string {
 		b.WriteString("artifactId: ")
 		b.WriteString(quoteMemQL(args.ArtifactId))
 	}
-	if args.Limit != 0 {
+	if args.LimitSet || args.Limit != 0 {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
@@ -5947,7 +6094,8 @@ type LogsSearchArgs struct {
 	// Case-insensitive substring of the message, subject, or structured attributes (including troubleshooting references).
 	Text string
 	// Rows per page: 1 to 500, default 200.
-	Limit int
+	Limit    int
+	LimitSet bool // set true to send an explicit zero; nonzero values are always sent
 	// Keyset cursor: the occurredAt of the oldest row already seen.
 	BeforeAt string
 	// Keyset cursor: the id of that row.
@@ -6047,7 +6195,7 @@ func LogsSearchBuild(args LogsSearchArgs) string {
 		b.WriteString("text: ")
 		b.WriteString(quoteMemQL(args.Text))
 	}
-	if args.Limit != 0 {
+	if args.LimitSet || args.Limit != 0 {
 		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
@@ -6153,7 +6301,8 @@ type LogsTailArgs struct {
 	// Case-insensitive substring of the message, subject, or structured attributes (including troubleshooting references).
 	Text string
 	// Rows per answer: 1 to 500, default 200.
-	Limit int
+	Limit    int
+	LimitSet bool // set true to send an explicit zero; nonzero values are always sent
 	// Keyset cursor: the occurredAt of the newest row already seen.
 	AfterAt string
 	// Keyset cursor: the id of that row.
@@ -6243,7 +6392,7 @@ func LogsTailBuild(args LogsTailArgs) string {
 		b.WriteString("text: ")
 		b.WriteString(quoteMemQL(args.Text))
 	}
-	if args.Limit != 0 {
+	if args.LimitSet || args.Limit != 0 {
 		if b.Len() > 17 {
 			b.WriteString(", ")
 		}
@@ -6333,7 +6482,8 @@ func MyBudgetBuild(args MyBudgetArgs) string {
 
 // MyBudgetSave -- Set your monthly AI budget in US dollars, or remove it by leaving monthlyLimitUSD out. Auto keeps your calls inside it.
 type MyBudgetSaveArgs struct {
-	MonthlyLimitUSD float64
+	MonthlyLimitUSD    float64
+	MonthlyLimitUSDSet bool // set true to send an explicit zero; nonzero values are always sent
 }
 
 // MyBudgetSave calls the engine builtin myBudgetSave.
@@ -6345,7 +6495,7 @@ func (qc *QueryClient) MyBudgetSave(ctx context.Context, args MyBudgetSaveArgs) 
 func MyBudgetSaveBuild(args MyBudgetSaveArgs) string {
 	var b strings.Builder
 	b.WriteString("builtin myBudgetSave(")
-	if args.MonthlyLimitUSD != 0 {
+	if args.MonthlyLimitUSDSet || args.MonthlyLimitUSD != 0 {
 		b.WriteString("monthlyLimitUSD: ")
 		b.WriteString(fmt.Sprintf("%v", args.MonthlyLimitUSD))
 	}
@@ -7424,6 +7574,7 @@ type RecallArgs struct {
 	Text     string
 	Concept  string
 	K        int
+	KSet     bool // set true to send an explicit zero; nonzero values are always sent
 	Provider string
 }
 
@@ -7445,7 +7596,7 @@ func RecallBuild(args RecallArgs) string {
 		b.WriteString("concept: ")
 		b.WriteString(quoteMemQL(args.Concept))
 	}
-	if args.K != 0 {
+	if args.KSet || args.K != 0 {
 		if b.Len() > 15 {
 			b.WriteString(", ")
 		}
@@ -7470,7 +7621,8 @@ type RecordFeedbackArgs struct {
 	// The top-level step judged; omit it to judge the whole run.
 	StepKey string
 	// The version of that step judged; the current one when omitted.
-	Version int
+	Version    int
+	VersionSet bool // set true to send an explicit zero; nonzero values are always sent
 	// The person's verdict.
 	// Enum: like | dislike | neutral
 	Verdict string
@@ -7505,7 +7657,7 @@ func RecordFeedbackBuild(args RecordFeedbackArgs) string {
 		b.WriteString("stepKey: ")
 		b.WriteString(quoteMemQL(args.StepKey))
 	}
-	if args.Version != 0 {
+	if args.VersionSet || args.Version != 0 {
 		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
@@ -7715,9 +7867,10 @@ func ReleaseAssembleProfileCandidateBuild(args ReleaseAssembleProfileCandidateAr
 
 // ReleaseBuilds -- Read this owner's saved release journeys, including interrupted attempts.
 type ReleaseBuildsArgs struct {
-	Limit  int
-	Cursor string
-	Search string
+	Limit    int
+	LimitSet bool // set true to send an explicit zero; nonzero values are always sent
+	Cursor   string
+	Search   string
 }
 
 // ReleaseBuilds calls the engine builtin releaseBuilds.
@@ -7729,7 +7882,7 @@ func (qc *QueryClient) ReleaseBuilds(ctx context.Context, args ReleaseBuildsArgs
 func ReleaseBuildsBuild(args ReleaseBuildsArgs) string {
 	var b strings.Builder
 	b.WriteString("builtin releaseBuilds(")
-	if args.Limit != 0 {
+	if args.LimitSet || args.Limit != 0 {
 		b.WriteString("limit: ")
 		b.WriteString(fmt.Sprintf("%v", args.Limit))
 	}
@@ -7895,9 +8048,10 @@ func ReleaseCandidateTargetsBuild(args ReleaseCandidateTargetsArgs) string {
 
 // ReleaseCandidates -- Page through caller-owned review history, including interrupted preparations.
 type ReleaseCandidatesArgs struct {
-	Cursor string
-	Limit  int
-	Search string
+	Cursor   string
+	Limit    int
+	LimitSet bool // set true to send an explicit zero; nonzero values are always sent
+	Search   string
 }
 
 // ReleaseCandidates calls the engine builtin releaseCandidates.
@@ -7913,7 +8067,7 @@ func ReleaseCandidatesBuild(args ReleaseCandidatesArgs) string {
 		b.WriteString("cursor: ")
 		b.WriteString(quoteMemQL(args.Cursor))
 	}
-	if args.Limit != 0 {
+	if args.LimitSet || args.Limit != 0 {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
@@ -8099,6 +8253,7 @@ type ReleaseDiscoverPublishedCandidatesArgs struct {
 	SourceId string
 	Cursor   string
 	Limit    int
+	LimitSet bool // set true to send an explicit zero; nonzero values are always sent
 	Search   string
 }
 
@@ -8120,7 +8275,7 @@ func ReleaseDiscoverPublishedCandidatesBuild(args ReleaseDiscoverPublishedCandid
 		b.WriteString("cursor: ")
 		b.WriteString(quoteMemQL(args.Cursor))
 	}
-	if args.Limit != 0 {
+	if args.LimitSet || args.Limit != 0 {
 		if b.Len() > 43 {
 			b.WriteString(", ")
 		}
@@ -8261,8 +8416,9 @@ func ReleaseLandInstallationProposalBuild(args ReleaseLandInstallationProposalAr
 
 // ReleaseListPublishedCandidates -- List verified published releases; identified developers, admins and owners may read.
 type ReleaseListPublishedCandidatesArgs struct {
-	Cursor string
-	Limit  int
+	Cursor   string
+	Limit    int
+	LimitSet bool // set true to send an explicit zero; nonzero values are always sent
 }
 
 // ReleaseListPublishedCandidates calls the engine builtin releaseListPublishedCandidates.
@@ -8278,7 +8434,7 @@ func ReleaseListPublishedCandidatesBuild(args ReleaseListPublishedCandidatesArgs
 		b.WriteString("cursor: ")
 		b.WriteString(quoteMemQL(args.Cursor))
 	}
-	if args.Limit != 0 {
+	if args.LimitSet || args.Limit != 0 {
 		if b.Len() > 39 {
 			b.WriteString(", ")
 		}
@@ -9228,7 +9384,8 @@ type RoleUpdateArgs struct {
 	// New description. Absent leaves it unchanged.
 	Description string
 	// New rank. Absent leaves it unchanged. Present, it must clear the same bounds a create does AND leave every current holder below the caller.
-	Rank int
+	Rank    int
+	RankSet bool // set true to send an explicit zero; nonzero values are always sent
 	// New account scope. Absent leaves it unchanged; the empty string clears it, making the role global.
 	AccountId string
 	// The role's grants AS A WHOLE, not a delta: pairs present are kept or added, pairs missing are retired. Absent leaves the grant set unchanged, which is what an edit that only renames should send.
@@ -9260,7 +9417,7 @@ func RoleUpdateBuild(args RoleUpdateArgs) string {
 		b.WriteString("description: ")
 		b.WriteString(quoteMemQL(args.Description))
 	}
-	if args.Rank != 0 {
+	if args.RankSet || args.Rank != 0 {
 		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
@@ -9333,12 +9490,13 @@ func RouteResetBuild(args RouteResetArgs) string {
 
 // RouteSave -- Save a route. Without an id, create one of your own (name required). With your own route's id, change it. With `local` or `apps`, change that route for the whole cluster: owner or developer, and the revision from routesForActor. Each job holds one to four sources -- fleet:, app: or federation: -- in the order they are tried. Search and memory is never a route's: every route uses the cluster's embedding model.
 type RouteSaveArgs struct {
-	Id        string
-	Name      string
-	Fast      []string
-	Strong    []string
-	Reasoning []string
-	Revision  int
+	Id          string
+	Name        string
+	Fast        []string
+	Strong      []string
+	Reasoning   []string
+	Revision    int
+	RevisionSet bool // set true to send an explicit zero; nonzero values are always sent
 }
 
 // RouteSave calls the engine builtin routeSave.
@@ -9376,7 +9534,7 @@ func RouteSaveBuild(args RouteSaveArgs) string {
 	}
 	b.WriteString("reasoning: ")
 	b.WriteString(renderMemQLValue(args.Reasoning))
-	if args.Revision != 0 {
+	if args.RevisionSet || args.Revision != 0 {
 		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
@@ -9637,14 +9795,15 @@ func RoutingRuleSaveBuild(args RoutingRuleSaveArgs) string {
 
 // RoutingRuleValidate -- Validate a custom rule definition against current policies and locked-rule constraints. This validates the definition; it does not claim a replay of historical decisions.
 type RoutingRuleValidateArgs struct {
-	ExpectedRevision int
-	Conditions       map[string]any
-	Name             string
-	Policy           string
-	Precedence       int
-	Level            string
-	OnUnavailable    string
-	Excludes         []string
+	ExpectedRevision    int
+	ExpectedRevisionSet bool // set true to send an explicit zero; nonzero values are always sent
+	Conditions          map[string]any
+	Name                string
+	Policy              string
+	Precedence          int
+	Level               string
+	OnUnavailable       string
+	Excludes            []string
 }
 
 // RoutingRuleValidate calls the engine builtin routingRuleValidate.
@@ -9656,7 +9815,7 @@ func (qc *QueryClient) RoutingRuleValidate(ctx context.Context, args RoutingRule
 func RoutingRuleValidateBuild(args RoutingRuleValidateArgs) string {
 	var b strings.Builder
 	b.WriteString("builtin routingRuleValidate(")
-	if args.ExpectedRevision != 0 {
+	if args.ExpectedRevisionSet || args.ExpectedRevision != 0 {
 		b.WriteString("expectedRevision: ")
 		b.WriteString(fmt.Sprintf("%v", args.ExpectedRevision))
 	}
@@ -9918,7 +10077,8 @@ type ShopifyProvisionWholesaleArgs struct {
 	// Defaults to '<company> wholesale'.
 	CatalogTitle string
 	// Whole-number percentage off published prices. Zero creates the price list with no adjustment, which is somewhere for the merchant to put real per-variant prices.
-	PercentOff int
+	PercentOff    int
+	PercentOffSet bool // set true to send an explicit zero; nonzero values are always sent
 	// The price list currency.
 	CurrencyCode string
 }
@@ -9963,7 +10123,7 @@ func ShopifyProvisionWholesaleBuild(args ShopifyProvisionWholesaleArgs) string {
 		b.WriteString("catalogTitle: ")
 		b.WriteString(quoteMemQL(args.CatalogTitle))
 	}
-	if args.PercentOff != 0 {
+	if args.PercentOffSet || args.PercentOff != 0 {
 		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
@@ -11143,7 +11303,8 @@ type SourceRepositoriesArgs struct {
 	// A github_app grant of the caller's to list under. Empty resolves the caller's active grant, which is what a person with one connection has.
 	CredentialId string
 	// 1-based page through the repositories of every installation, 100 per page. Empty or 0 means the first page; nextPage in the reply is 0 when there are no more.
-	Page int
+	Page    int
+	PageSet bool // set true to send an explicit zero; nonzero values are always sent
 }
 
 // SourceRepositories calls the engine builtin sourceRepositories.
@@ -11166,7 +11327,7 @@ func SourceRepositoriesBuild(args SourceRepositoriesArgs) string {
 		b.WriteString("credentialId: ")
 		b.WriteString(quoteMemQL(args.CredentialId))
 	}
-	if args.Page != 0 {
+	if args.PageSet || args.Page != 0 {
 		if b.Len() > 27 {
 			b.WriteString(", ")
 		}

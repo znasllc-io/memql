@@ -48,6 +48,35 @@ func TestBuiltinDiagnosticRedactionDoesNotImplySecretCapability(t *testing.T) {
 	}
 }
 
+func TestCallProcessingContentIsPrivateInBuiltinMetadata(t *testing.T) {
+	const origin = "../../dsl/calls/builtins.memql"
+	source, err := os.ReadFile(origin)
+	require.NoError(t, err)
+	for _, slice := range ExtractKeywordSlices(string(source), "builtin") {
+		if slice.Name != "callsProcessingPublish" {
+			continue
+		}
+		decl, err := languageParser.ParseBuiltinDecl(slice.Source)
+		require.NoError(t, err)
+		fn, err := builtinDeclToFunction(decl, origin)
+		require.NoError(t, err)
+		names := map[string]struct{}{}
+		for _, field := range fn.BuiltinArgs.Fields {
+			collectSecretArgNames(field, names)
+		}
+		args := map[string]any{"event": map[string]any{"text": secretValue, "observation": secretValue}}
+		encoded, err := json.Marshal(redactArgsForLog(args, names))
+		require.NoError(t, err)
+		require.NotContains(t, string(encoded), secretValue)
+		require.Equal(t, redactedArgValue, redactArgsForLog(args, names)["event"])
+		e := &MemQLEngine{functions: newFunctionRegistry()}
+		require.NoError(t, e.functions.add(fn))
+		require.False(t, e.workCapabilityAllowed(askTestActor(), fn))
+		return
+	}
+	t.Fatal("callsProcessingPublish declaration not found")
+}
+
 func TestShopifyOverlayCredentialInputsRemainPrivateCapabilities(t *testing.T) {
 	const origin = "../../dsl/shopify/overlay/builtins.memql"
 	source, err := os.ReadFile(origin)

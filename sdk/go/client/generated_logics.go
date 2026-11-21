@@ -554,9 +554,10 @@ func KnowledgeHasSeedArticlesBuild(args KnowledgeHasSeedArticlesArgs) string {
 
 // KnowledgeRefreshEligible -- Event-driven refresh uses the stale-signal threshold; the sweep uses cadence.
 type KnowledgeRefreshEligibleArgs struct {
-	StaleEvent       bool
-	StaleSignalCount float64
-	Due              bool
+	StaleEvent          bool
+	StaleSignalCount    float64
+	StaleSignalCountSet bool // set true to send an explicit zero; nonzero values are always sent
+	Due                 bool
 }
 
 // KnowledgeRefreshEligible calls the engine logic knowledgeRefreshEligible.
@@ -570,7 +571,7 @@ func KnowledgeRefreshEligibleBuild(args KnowledgeRefreshEligibleArgs) string {
 	b.WriteString("logic knowledgeRefreshEligible(")
 	b.WriteString("staleEvent: ")
 	b.WriteString(fmt.Sprintf("%v", args.StaleEvent))
-	if args.StaleSignalCount != 0 {
+	if args.StaleSignalCountSet || args.StaleSignalCount != 0 {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}

@@ -46,9 +46,10 @@ func AcknowledgeAttentionBuild(args AcknowledgeAttentionArgs) string {
 //
 // Bound concept: v1:memory:consolidationCursor (machine-readable: BoundConcepts["advanceMemoryConsolidationCursor"] in generated_concepts.go).
 type AdvanceMemoryConsolidationCursorArgs struct {
-	CursorId     string
-	Watermark    string
-	EpisodesSeen int
+	CursorId        string
+	Watermark       string
+	EpisodesSeen    int
+	EpisodesSeenSet bool // set true to send an explicit zero; nonzero values are always sent
 }
 
 // AdvanceMemoryConsolidationCursor calls the engine mutation advanceMemoryConsolidationCursor.
@@ -69,7 +70,7 @@ func AdvanceMemoryConsolidationCursorBuild(args AdvanceMemoryConsolidationCursor
 	}
 	b.WriteString("watermark: ")
 	b.WriteString(quoteMemQL(args.Watermark))
-	if args.EpisodesSeen != 0 {
+	if args.EpisodesSeenSet || args.EpisodesSeen != 0 {
 		if b.Len() > 42 {
 			b.WriteString(", ")
 		}
@@ -1191,6 +1192,7 @@ type CreateAccessRequestArgs struct {
 	Name              string
 	AdditionalContext string
 	RiskScore         int
+	RiskScoreSet      bool // set true to send an explicit zero; nonzero values are always sent
 	RiskSignals       string
 	SourceIP          string
 	UserAgent         string
@@ -1226,7 +1228,7 @@ func CreateAccessRequestBuild(args CreateAccessRequestArgs) string {
 		b.WriteString("additionalContext: ")
 		b.WriteString(quoteMemQL(args.AdditionalContext))
 	}
-	if args.RiskScore != 0 {
+	if args.RiskScoreSet || args.RiskScore != 0 {
 		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
@@ -1482,13 +1484,14 @@ func CreateAgentBuild(args CreateAgentArgs) string {
 //
 // Bound concept: v1:agents:agentAuthorization (machine-readable: BoundConcepts["createAgentAuthorization"] in generated_concepts.go).
 type CreateAgentAuthorizationArgs struct {
-	AuthId           string
-	AgentId          string
-	PlanKind         string
-	SpaceScope       string
-	TokenBudgetCap   int
-	ExpiresAt        string
-	ComputerUseScope string
+	AuthId            string
+	AgentId           string
+	PlanKind          string
+	SpaceScope        string
+	TokenBudgetCap    int
+	TokenBudgetCapSet bool // set true to send an explicit zero; nonzero values are always sent
+	ExpiresAt         string
+	ComputerUseScope  string
 }
 
 // CreateAgentAuthorization calls the engine mutation createAgentAuthorization.
@@ -1519,7 +1522,7 @@ func CreateAgentAuthorizationBuild(args CreateAgentAuthorizationArgs) string {
 	}
 	b.WriteString("spaceScope: ")
 	b.WriteString(quoteMemQL(args.SpaceScope))
-	if args.TokenBudgetCap != 0 {
+	if args.TokenBudgetCapSet || args.TokenBudgetCap != 0 {
 		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
@@ -1559,6 +1562,7 @@ type CreateAgentRoleArgs struct {
 	AvailableSkillIds []any
 	ForbiddenSkillIds []any
 	MaxSkills         int
+	MaxSkillsSet      bool // set true to send an explicit zero; nonzero values are always sent
 	SystemPromptHints string
 	Active            bool
 	ActiveSet         bool // set true to send active; required because zero-value bool is ambiguous
@@ -1638,7 +1642,7 @@ func CreateAgentRoleBuild(args CreateAgentRoleArgs) string {
 		b.WriteString("forbiddenSkillIds: ")
 		b.WriteString(renderMemQLValue(args.ForbiddenSkillIds))
 	}
-	if args.MaxSkills != 0 {
+	if args.MaxSkillsSet || args.MaxSkills != 0 {
 		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
@@ -2392,15 +2396,16 @@ func CreateBadgeIdentityBuild(args CreateBadgeIdentityArgs) string {
 //
 // Bound concept: v1:calendar:bookingHours (machine-readable: BoundConcepts["createBookingHours"] in generated_concepts.go).
 type CreateBookingHoursArgs struct {
-	HoursId      string
-	Weekday      string
-	StartLocal   string
-	EndLocal     string
-	Timezone     string
-	SlotMinutes  int
-	Published    bool
-	PublishedSet bool // set true to send published; required because zero-value bool is ambiguous
-	Label        string
+	HoursId        string
+	Weekday        string
+	StartLocal     string
+	EndLocal       string
+	Timezone       string
+	SlotMinutes    int
+	SlotMinutesSet bool // set true to send an explicit zero; nonzero values are always sent
+	Published      bool
+	PublishedSet   bool // set true to send published; required because zero-value bool is ambiguous
+	Label          string
 }
 
 // CreateBookingHours calls the engine mutation createBookingHours.
@@ -2434,7 +2439,7 @@ func CreateBookingHoursBuild(args CreateBookingHoursArgs) string {
 	}
 	b.WriteString("timezone: ")
 	b.WriteString(quoteMemQL(args.Timezone))
-	if args.SlotMinutes != 0 {
+	if args.SlotMinutesSet || args.SlotMinutes != 0 {
 		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
@@ -2794,9 +2799,13 @@ type CreateClusterSettingsArgs struct {
 	BootstrapBirthdate            string
 	BootstrappedAt                string
 	AccessTokenTTLSeconds         int
+	AccessTokenTTLSecondsSet      bool // set true to send an explicit zero; nonzero values are always sent
 	RefreshTokenTTLSeconds        int
+	RefreshTokenTTLSecondsSet     bool // set true to send an explicit zero; nonzero values are always sent
 	MagicLinkTTLSeconds           int
+	MagicLinkTTLSecondsSet        bool // set true to send an explicit zero; nonzero values are always sent
 	InvitationTTLDays             int
+	InvitationTTLDaysSet          bool // set true to send an explicit zero; nonzero values are always sent
 	RefreshCookieSameSite         string
 	AuthoredAutomationsEnabled    bool
 	AuthoredAutomationsEnabledSet bool // set true to send authoredAutomationsEnabled; required because zero-value bool is ambiguous
@@ -2942,28 +2951,28 @@ func CreateClusterSettingsBuild(args CreateClusterSettingsArgs) string {
 		b.WriteString("bootstrappedAt: ")
 		b.WriteString(quoteMemQL(args.BootstrappedAt))
 	}
-	if args.AccessTokenTTLSeconds != 0 {
+	if args.AccessTokenTTLSecondsSet || args.AccessTokenTTLSeconds != 0 {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("accessTokenTTLSeconds: ")
 		b.WriteString(fmt.Sprintf("%v", args.AccessTokenTTLSeconds))
 	}
-	if args.RefreshTokenTTLSeconds != 0 {
+	if args.RefreshTokenTTLSecondsSet || args.RefreshTokenTTLSeconds != 0 {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("refreshTokenTTLSeconds: ")
 		b.WriteString(fmt.Sprintf("%v", args.RefreshTokenTTLSeconds))
 	}
-	if args.MagicLinkTTLSeconds != 0 {
+	if args.MagicLinkTTLSecondsSet || args.MagicLinkTTLSeconds != 0 {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("magicLinkTTLSeconds: ")
 		b.WriteString(fmt.Sprintf("%v", args.MagicLinkTTLSeconds))
 	}
-	if args.InvitationTTLDays != 0 {
+	if args.InvitationTTLDaysSet || args.InvitationTTLDays != 0 {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
@@ -3153,6 +3162,7 @@ type CreateDatabaseArgs struct {
 	SslMode    string
 	// From the DSN. It used to be STAMPED as the literal 5432, so every cluster whose Postgres listened anywhere else recorded the wrong port while the DSN parse had the right one sitting in the payload (memql#4766).
 	Port              int
+	PortSet           bool // set true to send an explicit zero; nonzero values are always sent
 	EngineVersion     string
 	Extensions        []string
 	ExtensionVersions map[string]any
@@ -3187,7 +3197,7 @@ func CreateDatabaseBuild(args CreateDatabaseArgs) string {
 		b.WriteString("sslMode: ")
 		b.WriteString(quoteMemQL(args.SslMode))
 	}
-	if args.Port != 0 {
+	if args.PortSet || args.Port != 0 {
 		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
@@ -3421,6 +3431,7 @@ type CreateDeploymentNodeSpecArgs struct {
 	NodeType     string
 	Version      string
 	Replicas     int
+	ReplicasSet  bool // set true to send an explicit zero; nonzero values are always sent
 	ImageDigest  string
 }
 
@@ -3447,7 +3458,7 @@ func CreateDeploymentNodeSpecBuild(args CreateDeploymentNodeSpecArgs) string {
 		b.WriteString("version: ")
 		b.WriteString(quoteMemQL(args.Version))
 	}
-	if args.Replicas != 0 {
+	if args.ReplicasSet || args.Replicas != 0 {
 		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
@@ -3567,7 +3578,9 @@ type CreateDocumentChunkArgs struct {
 	Source        string
 	SourceRef     string
 	Seq           int
+	SeqSet        bool // set true to send an explicit zero; nonzero values are always sent
 	TokenCount    int
+	TokenCountSet bool // set true to send an explicit zero; nonzero values are always sent
 	SourceAgentId string
 	SourceTopic   string
 }
@@ -3605,14 +3618,14 @@ func CreateDocumentChunkBuild(args CreateDocumentChunkArgs) string {
 		b.WriteString("sourceRef: ")
 		b.WriteString(quoteMemQL(args.SourceRef))
 	}
-	if args.Seq != 0 {
+	if args.SeqSet || args.Seq != 0 {
 		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("seq: ")
 		b.WriteString(fmt.Sprintf("%v", args.Seq))
 	}
-	if args.TokenCount != 0 {
+	if args.TokenCountSet || args.TokenCount != 0 {
 		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
@@ -4062,12 +4075,13 @@ func CreateIdentityProviderBuild(args CreateIdentityProviderArgs) string {
 //
 // Bound concept: v1:library:fileChunk (machine-readable: BoundConcepts["createLibraryFileChunk"] in generated_concepts.go).
 type CreateLibraryFileChunkArgs struct {
-	ChunkId    string
-	FileId     string
-	ArtifactId string
-	Seq        int
-	Text       string
-	TokenCount int
+	ChunkId       string
+	FileId        string
+	ArtifactId    string
+	Seq           int
+	Text          string
+	TokenCount    int
+	TokenCountSet bool // set true to send an explicit zero; nonzero values are always sent
 }
 
 // CreateLibraryFileChunk calls the engine mutation createLibraryFileChunk.
@@ -4101,7 +4115,7 @@ func CreateLibraryFileChunkBuild(args CreateLibraryFileChunkArgs) string {
 	}
 	b.WriteString("text: ")
 	b.WriteString(quoteMemQL(args.Text))
-	if args.TokenCount != 0 {
+	if args.TokenCountSet || args.TokenCount != 0 {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
@@ -4154,15 +4168,16 @@ func CreateLibraryFolderBuild(args CreateLibraryFolderArgs) string {
 // Bound concept: v1:library:watchedFolder (machine-readable: BoundConcepts["createLibraryWatchedFolder"] in generated_concepts.go).
 type CreateLibraryWatchedFolderArgs struct {
 	// Enum: retain | sync
-	Mode             string
-	IntervalMinutes  int
-	WatchId          string
-	WorkerId         string
-	LocalPath        string
-	FolderId         string
-	ExcludeGlobs     []string
-	IncludeHidden    bool
-	IncludeHiddenSet bool // set true to send includeHidden; required because zero-value bool is ambiguous
+	Mode               string
+	IntervalMinutes    int
+	IntervalMinutesSet bool // set true to send an explicit zero; nonzero values are always sent
+	WatchId            string
+	WorkerId           string
+	LocalPath          string
+	FolderId           string
+	ExcludeGlobs       []string
+	IncludeHidden      bool
+	IncludeHiddenSet   bool // set true to send includeHidden; required because zero-value bool is ambiguous
 }
 
 // CreateLibraryWatchedFolder calls the engine mutation createLibraryWatchedFolder.
@@ -4178,7 +4193,7 @@ func CreateLibraryWatchedFolderBuild(args CreateLibraryWatchedFolderArgs) string
 		b.WriteString("mode: ")
 		b.WriteString(quoteMemQL(args.Mode))
 	}
-	if args.IntervalMinutes != 0 {
+	if args.IntervalMinutesSet || args.IntervalMinutes != 0 {
 		if b.Len() > 36 {
 			b.WriteString(", ")
 		}
@@ -5177,6 +5192,7 @@ type CreateRecordArgs struct {
 	NaturalKeyValue    string
 	SourceAttachmentId string
 	Confidence         float64
+	ConfidenceSet      bool // set true to send an explicit zero; nonzero values are always sent
 	CreatedAt          string
 }
 
@@ -5242,7 +5258,7 @@ func CreateRecordBuild(args CreateRecordArgs) string {
 		b.WriteString("sourceAttachmentId: ")
 		b.WriteString(quoteMemQL(args.SourceAttachmentId))
 	}
-	if args.Confidence != 0 {
+	if args.ConfidenceSet || args.Confidence != 0 {
 		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
@@ -5275,6 +5291,7 @@ type CreateRecordBatchArgs struct {
 	NaturalKeyField    string
 	NaturalKeyValue    string
 	Confidence         float64
+	ConfidenceSet      bool // set true to send an explicit zero; nonzero values are always sent
 }
 
 // CreateRecordBatch calls the engine mutation createRecordBatch.
@@ -5339,7 +5356,7 @@ func CreateRecordBatchBuild(args CreateRecordBatchArgs) string {
 		b.WriteString("naturalKeyValue: ")
 		b.WriteString(quoteMemQL(args.NaturalKeyValue))
 	}
-	if args.Confidence != 0 {
+	if args.ConfidenceSet || args.Confidence != 0 {
 		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
@@ -6271,13 +6288,17 @@ type CreateWorkerInvocationArgs struct {
 	StartedAt     string
 	CompletedAt   string
 	DurationMs    int
+	DurationMsSet bool // set true to send an explicit zero; nonzero values are always sent
 	Outcome       string
 	ExitCode      int
+	ExitCodeSet   bool // set true to send an explicit zero; nonzero values are always sent
 	Signal        string
 	ErrorCode     string
 	ErrorMessage  string
 	BytesIn       int
+	BytesInSet    bool // set true to send an explicit zero; nonzero values are always sent
 	BytesOut      int
+	BytesOutSet   bool // set true to send an explicit zero; nonzero values are always sent
 	OutputPreview string
 	Routing       map[string]any
 }
@@ -6353,7 +6374,7 @@ func CreateWorkerInvocationBuild(args CreateWorkerInvocationArgs) string {
 		b.WriteString("completedAt: ")
 		b.WriteString(quoteMemQL(args.CompletedAt))
 	}
-	if args.DurationMs != 0 {
+	if args.DurationMsSet || args.DurationMs != 0 {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
@@ -6365,7 +6386,7 @@ func CreateWorkerInvocationBuild(args CreateWorkerInvocationArgs) string {
 	}
 	b.WriteString("outcome: ")
 	b.WriteString(quoteMemQL(args.Outcome))
-	if args.ExitCode != 0 {
+	if args.ExitCodeSet || args.ExitCode != 0 {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
@@ -6393,14 +6414,14 @@ func CreateWorkerInvocationBuild(args CreateWorkerInvocationArgs) string {
 		b.WriteString("errorMessage: ")
 		b.WriteString(quoteMemQL(args.ErrorMessage))
 	}
-	if args.BytesIn != 0 {
+	if args.BytesInSet || args.BytesIn != 0 {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bytesIn: ")
 		b.WriteString(fmt.Sprintf("%v", args.BytesIn))
 	}
-	if args.BytesOut != 0 {
+	if args.BytesOutSet || args.BytesOut != 0 {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
@@ -7789,17 +7810,22 @@ type ModelProfileAddArgs struct {
 	// Enum: ollama | mlx | whispercpp | nemo | kokoro | mflux | comfyui | openai-compatible | cloud
 	Runtime string
 	// Enum: 16 | 24 | 32 | 64 | 128
-	MinMachineClass string
-	Family          string
-	Params          int
-	Quant           string
-	SizeBytes       int
-	MemoryNeedBytes int
-	ContextWindow   int
+	MinMachineClass    string
+	Family             string
+	Params             int
+	ParamsSet          bool // set true to send an explicit zero; nonzero values are always sent
+	Quant              string
+	SizeBytes          int
+	SizeBytesSet       bool // set true to send an explicit zero; nonzero values are always sent
+	MemoryNeedBytes    int
+	MemoryNeedBytesSet bool // set true to send an explicit zero; nonzero values are always sent
+	ContextWindow      int
+	ContextWindowSet   bool // set true to send an explicit zero; nonzero values are always sent
 	// The subset of {structured, tools, thinking, vision, audioIn, audioOut, imageGen, streaming} that is true.
 	Flags []string
 	// Vector width. Required in practice for an embeddings entry -- a binding cannot create its table without one -- and the seed gate says so; here it is an ordinary field, because an operator adding a text model has no dimensions to give.
 	Dimensions     int
+	DimensionsSet  bool // set true to send an explicit zero; nonzero values are always sent
 	License        string
 	Source         string
 	RecommendedFor []string
@@ -7845,7 +7871,7 @@ func ModelProfileAddBuild(args ModelProfileAddArgs) string {
 		b.WriteString("family: ")
 		b.WriteString(quoteMemQL(args.Family))
 	}
-	if args.Params != 0 {
+	if args.ParamsSet || args.Params != 0 {
 		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
@@ -7859,21 +7885,21 @@ func ModelProfileAddBuild(args ModelProfileAddArgs) string {
 		b.WriteString("quant: ")
 		b.WriteString(quoteMemQL(args.Quant))
 	}
-	if args.SizeBytes != 0 {
+	if args.SizeBytesSet || args.SizeBytes != 0 {
 		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sizeBytes: ")
 		b.WriteString(fmt.Sprintf("%v", args.SizeBytes))
 	}
-	if args.MemoryNeedBytes != 0 {
+	if args.MemoryNeedBytesSet || args.MemoryNeedBytes != 0 {
 		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("memoryNeedBytes: ")
 		b.WriteString(fmt.Sprintf("%v", args.MemoryNeedBytes))
 	}
-	if args.ContextWindow != 0 {
+	if args.ContextWindowSet || args.ContextWindow != 0 {
 		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
@@ -7887,7 +7913,7 @@ func ModelProfileAddBuild(args ModelProfileAddArgs) string {
 		b.WriteString("flags: ")
 		b.WriteString(renderMemQLValue(args.Flags))
 	}
-	if args.Dimensions != 0 {
+	if args.DimensionsSet || args.Dimensions != 0 {
 		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
@@ -8654,6 +8680,7 @@ type RecordPasskeyAssertionArgs struct {
 	CredentialId      string
 	PublicKey         string
 	SignCount         int
+	SignCountSet      bool // set true to send an explicit zero; nonzero values are always sent
 	Aaguid            string
 	Transports        []string
 	BackupEligible    bool
@@ -8685,7 +8712,7 @@ func RecordPasskeyAssertionBuild(args RecordPasskeyAssertionArgs) string {
 	}
 	b.WriteString("publicKey: ")
 	b.WriteString(quoteMemQL(args.PublicKey))
-	if args.SignCount != 0 {
+	if args.SignCountSet || args.SignCount != 0 {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
@@ -8746,9 +8773,13 @@ type RecordReputationWindowArgs struct {
 	WindowStart     string
 	NodeId          string
 	Accepted        int
+	AcceptedSet     bool // set true to send an explicit zero; nonzero values are always sent
 	HardBounce      int
+	HardBounceSet   bool // set true to send an explicit zero; nonzero values are always sent
 	SoftBounce      int
+	SoftBounceSet   bool // set true to send an explicit zero; nonzero values are always sent
 	Complaint       int
+	ComplaintSet    bool // set true to send an explicit zero; nonzero values are always sent
 }
 
 // RecordReputationWindow calls the engine mutation recordReputationWindow.
@@ -8777,28 +8808,28 @@ func RecordReputationWindowBuild(args RecordReputationWindowArgs) string {
 	}
 	b.WriteString("nodeId: ")
 	b.WriteString(quoteMemQL(args.NodeId))
-	if args.Accepted != 0 {
+	if args.AcceptedSet || args.Accepted != 0 {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("accepted: ")
 		b.WriteString(fmt.Sprintf("%v", args.Accepted))
 	}
-	if args.HardBounce != 0 {
+	if args.HardBounceSet || args.HardBounce != 0 {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("hardBounce: ")
 		b.WriteString(fmt.Sprintf("%v", args.HardBounce))
 	}
-	if args.SoftBounce != 0 {
+	if args.SoftBounceSet || args.SoftBounce != 0 {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("softBounce: ")
 		b.WriteString(fmt.Sprintf("%v", args.SoftBounce))
 	}
-	if args.Complaint != 0 {
+	if args.ComplaintSet || args.Complaint != 0 {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
@@ -8920,27 +8951,31 @@ type RecordRouterCallArgs struct {
 	ApiEquivalent       map[string]any
 	ElectricityEstimate map[string]any
 	// Independent billing evidence; zero subscription cost is not free work.
-	ActualBilling        map[string]any
-	InputTokens          int
-	OutputTokens         int
-	CachedInputTokens    int
-	TokensEstimated      bool
-	TokensEstimatedSet   bool // set true to send tokensEstimated; required because zero-value bool is ambiguous
-	InputCost            float64
-	OutputCost           float64
-	CachedInputCost      float64
-	TotalCost            float64
-	PricingConfigured    bool
-	PricingConfiguredSet bool // set true to send pricingConfigured; required because zero-value bool is ambiguous
-	TimeToFirstTokenMs   int
-	TotalDurationMs      int
-	TokensPerSec         float64
-	Streaming            bool
-	StreamingSet         bool // set true to send streaming; required because zero-value bool is ambiguous
-	Outcome              string
-	ErrorCategory        string
-	ErrorMessage         string
-	FallbackFromModel    string
+	ActualBilling         map[string]any
+	InputTokens           int
+	InputTokensSet        bool // set true to send an explicit zero; nonzero values are always sent
+	OutputTokens          int
+	OutputTokensSet       bool // set true to send an explicit zero; nonzero values are always sent
+	CachedInputTokens     int
+	CachedInputTokensSet  bool // set true to send an explicit zero; nonzero values are always sent
+	TokensEstimated       bool
+	TokensEstimatedSet    bool // set true to send tokensEstimated; required because zero-value bool is ambiguous
+	InputCost             float64
+	OutputCost            float64
+	CachedInputCost       float64
+	TotalCost             float64
+	PricingConfigured     bool
+	PricingConfiguredSet  bool // set true to send pricingConfigured; required because zero-value bool is ambiguous
+	TimeToFirstTokenMs    int
+	TimeToFirstTokenMsSet bool // set true to send an explicit zero; nonzero values are always sent
+	TotalDurationMs       int
+	TokensPerSec          float64
+	Streaming             bool
+	StreamingSet          bool // set true to send streaming; required because zero-value bool is ambiguous
+	Outcome               string
+	ErrorCategory         string
+	ErrorMessage          string
+	FallbackFromModel     string
 	// Who paid: metered | subscription | local | unknown. Absent reads as metered.
 	// Enum: metered | subscription | local | unknown
 	Billing string
@@ -8970,7 +9005,8 @@ type RecordRouterCallArgs struct {
 	// The call's footprint, so a decision can be filtered by what it was about.
 	Touches []string
 	// The context-window floor this resolution was made against. Never zero.
-	MinContextTokens int
+	MinContextTokens    int
+	MinContextTokensSet bool // set true to send an explicit zero; nonzero values are always sent
 	// Whose machine served a local call. Empty until shared machines land.
 	MachineOwnerUserId string
 	// The route a person chose for this call in Ask. Empty means Auto.
@@ -9071,21 +9107,21 @@ func RecordRouterCallBuild(args RecordRouterCallArgs) string {
 		b.WriteString("actualBilling: ")
 		b.WriteString(renderMemQLValue(args.ActualBilling))
 	}
-	if args.InputTokens != 0 {
+	if args.InputTokensSet || args.InputTokens != 0 {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("inputTokens: ")
 		b.WriteString(fmt.Sprintf("%v", args.InputTokens))
 	}
-	if args.OutputTokens != 0 {
+	if args.OutputTokensSet || args.OutputTokens != 0 {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("outputTokens: ")
 		b.WriteString(fmt.Sprintf("%v", args.OutputTokens))
 	}
-	if args.CachedInputTokens != 0 {
+	if args.CachedInputTokensSet || args.CachedInputTokens != 0 {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
@@ -9126,7 +9162,7 @@ func RecordRouterCallBuild(args RecordRouterCallArgs) string {
 		b.WriteString("pricingConfigured: ")
 		b.WriteString(fmt.Sprintf("%v", args.PricingConfigured))
 	}
-	if args.TimeToFirstTokenMs != 0 {
+	if args.TimeToFirstTokenMsSet || args.TimeToFirstTokenMs != 0 {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
@@ -9267,7 +9303,7 @@ func RecordRouterCallBuild(args RecordRouterCallArgs) string {
 		b.WriteString("touches: ")
 		b.WriteString(renderMemQLValue(args.Touches))
 	}
-	if args.MinContextTokens != 0 {
+	if args.MinContextTokensSet || args.MinContextTokens != 0 {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
@@ -9353,14 +9389,17 @@ func RecordSuppressionBuild(args RecordSuppressionArgs) string {
 //
 // Bound concept: v1:campaigns:warmupState (machine-readable: BoundConcepts["recordWarmupState"] in generated_concepts.go).
 type RecordWarmupStateArgs struct {
-	SendingIdentity string
-	Step            int
-	RatePerMinute   int
-	Decision        string
-	Reason          string
-	EvaluatedAt     string
-	StepEnteredAt   string
-	AcceptedInStep  int
+	SendingIdentity   string
+	Step              int
+	StepSet           bool // set true to send an explicit zero; nonzero values are always sent
+	RatePerMinute     int
+	RatePerMinuteSet  bool // set true to send an explicit zero; nonzero values are always sent
+	Decision          string
+	Reason            string
+	EvaluatedAt       string
+	StepEnteredAt     string
+	AcceptedInStep    int
+	AcceptedInStepSet bool // set true to send an explicit zero; nonzero values are always sent
 }
 
 // RecordWarmupState calls the engine mutation recordWarmupState.
@@ -9374,14 +9413,14 @@ func RecordWarmupStateBuild(args RecordWarmupStateArgs) string {
 	b.WriteString("mutation recordWarmupState(")
 	b.WriteString("sendingIdentity: ")
 	b.WriteString(quoteMemQL(args.SendingIdentity))
-	if args.Step != 0 {
+	if args.StepSet || args.Step != 0 {
 		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("step: ")
 		b.WriteString(fmt.Sprintf("%v", args.Step))
 	}
-	if args.RatePerMinute != 0 {
+	if args.RatePerMinuteSet || args.RatePerMinute != 0 {
 		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
@@ -9412,7 +9451,7 @@ func RecordWarmupStateBuild(args RecordWarmupStateArgs) string {
 	}
 	b.WriteString("stepEnteredAt: ")
 	b.WriteString(quoteMemQL(args.StepEnteredAt))
-	if args.AcceptedInStep != 0 {
+	if args.AcceptedInStepSet || args.AcceptedInStep != 0 {
 		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
@@ -9658,6 +9697,7 @@ type RegisterSurfaceArgs struct {
 	MachineId    string
 	Capabilities []string
 	Priority     int
+	PrioritySet  bool // set true to send an explicit zero; nonzero values are always sent
 }
 
 // RegisterSurface calls the engine mutation registerSurface.
@@ -9695,7 +9735,7 @@ func RegisterSurfaceBuild(args RegisterSurfaceArgs) string {
 	}
 	b.WriteString("capabilities: ")
 	b.WriteString(renderMemQLValue(args.Capabilities))
-	if args.Priority != 0 {
+	if args.PrioritySet || args.Priority != 0 {
 		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
@@ -9922,7 +9962,9 @@ type ReportLibraryWatchedFolderSweepArgs struct {
 	// Enum: ok | missing | unreadable | refused_by_policy
 	OriginState    string
 	FilesSeen      int
+	FilesSeenSet   bool // set true to send an explicit zero; nonzero values are always sent
 	BytesSeen      int
+	BytesSeenSet   bool // set true to send an explicit zero; nonzero values are always sent
 	LastSweepError string
 }
 
@@ -9942,14 +9984,14 @@ func ReportLibraryWatchedFolderSweepBuild(args ReportLibraryWatchedFolderSweepAr
 	}
 	b.WriteString("originState: ")
 	b.WriteString(quoteMemQL(args.OriginState))
-	if args.FilesSeen != 0 {
+	if args.FilesSeenSet || args.FilesSeen != 0 {
 		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("filesSeen: ")
 		b.WriteString(fmt.Sprintf("%v", args.FilesSeen))
 	}
-	if args.BytesSeen != 0 {
+	if args.BytesSeenSet || args.BytesSeen != 0 {
 		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
@@ -10733,8 +10775,9 @@ func ScheduleAccountDeletionBuild(args ScheduleAccountDeletionArgs) string {
 type SetAccountEntitlementArgs struct {
 	AccountId string
 	// Enum: free | pro | team | enterprise
-	Tier               string
-	MaxConcurrentTasks int
+	Tier                  string
+	MaxConcurrentTasks    int
+	MaxConcurrentTasksSet bool // set true to send an explicit zero; nonzero values are always sent
 	// Enum: user | org
 	AccountKind string
 	Note        string
@@ -10756,7 +10799,7 @@ func SetAccountEntitlementBuild(args SetAccountEntitlementArgs) string {
 	}
 	b.WriteString("tier: ")
 	b.WriteString(quoteMemQL(args.Tier))
-	if args.MaxConcurrentTasks != 0 {
+	if args.MaxConcurrentTasksSet || args.MaxConcurrentTasks != 0 {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
@@ -10870,15 +10913,16 @@ func SetAuthoredAutomationsEnabledBuild(args SetAuthoredAutomationsEnabledArgs) 
 //
 // Bound concept: v1:calendar:bookingHours (machine-readable: BoundConcepts["setBookingHours"] in generated_concepts.go).
 type SetBookingHoursArgs struct {
-	HoursId      string
-	Weekday      string
-	StartLocal   string
-	EndLocal     string
-	Timezone     string
-	SlotMinutes  int
-	Published    bool
-	PublishedSet bool // set true to send published; required because zero-value bool is ambiguous
-	Label        string
+	HoursId        string
+	Weekday        string
+	StartLocal     string
+	EndLocal       string
+	Timezone       string
+	SlotMinutes    int
+	SlotMinutesSet bool // set true to send an explicit zero; nonzero values are always sent
+	Published      bool
+	PublishedSet   bool // set true to send published; required because zero-value bool is ambiguous
+	Label          string
 }
 
 // SetBookingHours calls the engine mutation setBookingHours.
@@ -10920,7 +10964,7 @@ func SetBookingHoursBuild(args SetBookingHoursArgs) string {
 		b.WriteString("timezone: ")
 		b.WriteString(quoteMemQL(args.Timezone))
 	}
-	if args.SlotMinutes != 0 {
+	if args.SlotMinutesSet || args.SlotMinutes != 0 {
 		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
@@ -10949,15 +10993,16 @@ func SetBookingHoursBuild(args SetBookingHoursArgs) string {
 //
 // Bound concept: v1:router:budget (machine-readable: BoundConcepts["setBudget"] in generated_concepts.go).
 type SetBudgetArgs struct {
-	Id                string
-	Scope             string
-	ScopeId           string
-	PeriodType        string
-	LimitUSD          float64
-	AlertThresholdPct int
-	ResetAt           string
-	Active            bool
-	ActiveSet         bool // set true to send active; required because zero-value bool is ambiguous
+	Id                   string
+	Scope                string
+	ScopeId              string
+	PeriodType           string
+	LimitUSD             float64
+	AlertThresholdPct    int
+	AlertThresholdPctSet bool // set true to send an explicit zero; nonzero values are always sent
+	ResetAt              string
+	Active               bool
+	ActiveSet            bool // set true to send active; required because zero-value bool is ambiguous
 }
 
 // SetBudget calls the engine mutation setBudget.
@@ -10993,7 +11038,7 @@ func SetBudgetBuild(args SetBudgetArgs) string {
 	}
 	b.WriteString("limitUSD: ")
 	b.WriteString(renderMemQLValue(args.LimitUSD))
-	if args.AlertThresholdPct != 0 {
+	if args.AlertThresholdPctSet || args.AlertThresholdPct != 0 {
 		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
@@ -11178,15 +11223,17 @@ func SetCustomDomainFrontBuild(args SetCustomDomainFrontArgs) string {
 //
 // Bound concept: v1:worker:delegationPolicy (machine-readable: BoundConcepts["setDelegationPolicy"] in generated_concepts.go).
 type SetDelegationPolicyArgs struct {
-	PolicyId                  string
-	PreferSubscriptionApps    bool
-	PreferSubscriptionAppsSet bool // set true to send preferSubscriptionApps; required because zero-value bool is ambiguous
-	EligibleKinds             []any
-	AppOrder                  []any
-	MaxConcurrentSessions     int
-	WorkspaceRoot             string
-	CredentialLifetimeSeconds int
-	UpdatedAt                 string
+	PolicyId                     string
+	PreferSubscriptionApps       bool
+	PreferSubscriptionAppsSet    bool // set true to send preferSubscriptionApps; required because zero-value bool is ambiguous
+	EligibleKinds                []any
+	AppOrder                     []any
+	MaxConcurrentSessions        int
+	MaxConcurrentSessionsSet     bool // set true to send an explicit zero; nonzero values are always sent
+	WorkspaceRoot                string
+	CredentialLifetimeSeconds    int
+	CredentialLifetimeSecondsSet bool // set true to send an explicit zero; nonzero values are always sent
+	UpdatedAt                    string
 }
 
 // SetDelegationPolicy calls the engine mutation setDelegationPolicy.
@@ -11221,7 +11268,7 @@ func SetDelegationPolicyBuild(args SetDelegationPolicyArgs) string {
 		b.WriteString("appOrder: ")
 		b.WriteString(renderMemQLValue(args.AppOrder))
 	}
-	if args.MaxConcurrentSessions != 0 {
+	if args.MaxConcurrentSessionsSet || args.MaxConcurrentSessions != 0 {
 		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
@@ -11235,7 +11282,7 @@ func SetDelegationPolicyBuild(args SetDelegationPolicyArgs) string {
 		b.WriteString("workspaceRoot: ")
 		b.WriteString(quoteMemQL(args.WorkspaceRoot))
 	}
-	if args.CredentialLifetimeSeconds != 0 {
+	if args.CredentialLifetimeSecondsSet || args.CredentialLifetimeSeconds != 0 {
 		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
@@ -11776,14 +11823,16 @@ func SetPartitionVariableBuild(args SetPartitionVariableArgs) string {
 //
 // Bound concept: v1:data:policy (machine-readable: BoundConcepts["setPolicy"] in generated_concepts.go).
 type SetPolicyArgs struct {
-	PolicyId              string
-	TargetRecordType      string
-	PartitionId           string
-	RequiredChecks        float64
-	RequiredConfirmations float64
-	CheckedDataUsable     bool
-	CheckedDataUsableSet  bool // set true to send checkedDataUsable; required because zero-value bool is ambiguous
-	RevertMinRole         string
+	PolicyId                 string
+	TargetRecordType         string
+	PartitionId              string
+	RequiredChecks           float64
+	RequiredChecksSet        bool // set true to send an explicit zero; nonzero values are always sent
+	RequiredConfirmations    float64
+	RequiredConfirmationsSet bool // set true to send an explicit zero; nonzero values are always sent
+	CheckedDataUsable        bool
+	CheckedDataUsableSet     bool // set true to send checkedDataUsable; required because zero-value bool is ambiguous
+	RevertMinRole            string
 }
 
 // SetPolicy calls the engine mutation setPolicy.
@@ -11809,14 +11858,14 @@ func SetPolicyBuild(args SetPolicyArgs) string {
 		b.WriteString("partitionId: ")
 		b.WriteString(quoteMemQL(args.PartitionId))
 	}
-	if args.RequiredChecks != 0 {
+	if args.RequiredChecksSet || args.RequiredChecks != 0 {
 		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("requiredChecks: ")
 		b.WriteString(fmt.Sprintf("%v", args.RequiredChecks))
 	}
-	if args.RequiredConfirmations != 0 {
+	if args.RequiredConfirmationsSet || args.RequiredConfirmations != 0 {
 		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
@@ -12831,9 +12880,13 @@ type UpdateClusterSettingsArgs struct {
 	BootstrapBirthdate            string
 	BootstrappedAt                string
 	AccessTokenTTLSeconds         int
+	AccessTokenTTLSecondsSet      bool // set true to send an explicit zero; nonzero values are always sent
 	RefreshTokenTTLSeconds        int
+	RefreshTokenTTLSecondsSet     bool // set true to send an explicit zero; nonzero values are always sent
 	MagicLinkTTLSeconds           int
+	MagicLinkTTLSecondsSet        bool // set true to send an explicit zero; nonzero values are always sent
 	InvitationTTLDays             int
+	InvitationTTLDaysSet          bool // set true to send an explicit zero; nonzero values are always sent
 	RefreshCookieSameSite         string
 	AuthoredAutomationsEnabled    bool
 	AuthoredAutomationsEnabledSet bool // set true to send authoredAutomationsEnabled; required because zero-value bool is ambiguous
@@ -12979,28 +13032,28 @@ func UpdateClusterSettingsBuild(args UpdateClusterSettingsArgs) string {
 		b.WriteString("bootstrappedAt: ")
 		b.WriteString(quoteMemQL(args.BootstrappedAt))
 	}
-	if args.AccessTokenTTLSeconds != 0 {
+	if args.AccessTokenTTLSecondsSet || args.AccessTokenTTLSeconds != 0 {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("accessTokenTTLSeconds: ")
 		b.WriteString(fmt.Sprintf("%v", args.AccessTokenTTLSeconds))
 	}
-	if args.RefreshTokenTTLSeconds != 0 {
+	if args.RefreshTokenTTLSecondsSet || args.RefreshTokenTTLSeconds != 0 {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("refreshTokenTTLSeconds: ")
 		b.WriteString(fmt.Sprintf("%v", args.RefreshTokenTTLSeconds))
 	}
-	if args.MagicLinkTTLSeconds != 0 {
+	if args.MagicLinkTTLSecondsSet || args.MagicLinkTTLSeconds != 0 {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("magicLinkTTLSeconds: ")
 		b.WriteString(fmt.Sprintf("%v", args.MagicLinkTTLSeconds))
 	}
-	if args.InvitationTTLDays != 0 {
+	if args.InvitationTTLDaysSet || args.InvitationTTLDays != 0 {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
@@ -13197,6 +13250,7 @@ type UpdateDeploymentNodeSpecArgs struct {
 	NodeType     string
 	Version      string
 	Replicas     int
+	ReplicasSet  bool // set true to send an explicit zero; nonzero values are always sent
 	ImageDigest  string
 }
 
@@ -13223,7 +13277,7 @@ func UpdateDeploymentNodeSpecBuild(args UpdateDeploymentNodeSpecArgs) string {
 		b.WriteString("version: ")
 		b.WriteString(quoteMemQL(args.Version))
 	}
-	if args.Replicas != 0 {
+	if args.ReplicasSet || args.Replicas != 0 {
 		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
@@ -13412,12 +13466,13 @@ func UpdateIdentityBuild(args UpdateIdentityArgs) string {
 //
 // Bound concept: v1:library:watchedFolder (machine-readable: BoundConcepts["updateLibraryWatchedFolder"] in generated_concepts.go).
 type UpdateLibraryWatchedFolderArgs struct {
-	IntervalMinutes  int
-	WatchId          string
-	FolderId         string
-	ExcludeGlobs     []string
-	IncludeHidden    bool
-	IncludeHiddenSet bool // set true to send includeHidden; required because zero-value bool is ambiguous
+	IntervalMinutes    int
+	IntervalMinutesSet bool // set true to send an explicit zero; nonzero values are always sent
+	WatchId            string
+	FolderId           string
+	ExcludeGlobs       []string
+	IncludeHidden      bool
+	IncludeHiddenSet   bool // set true to send includeHidden; required because zero-value bool is ambiguous
 }
 
 // UpdateLibraryWatchedFolder calls the engine mutation updateLibraryWatchedFolder.
@@ -13429,7 +13484,7 @@ func (qc *QueryClient) UpdateLibraryWatchedFolder(ctx context.Context, args Upda
 func UpdateLibraryWatchedFolderBuild(args UpdateLibraryWatchedFolderArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation updateLibraryWatchedFolder(")
-	if args.IntervalMinutes != 0 {
+	if args.IntervalMinutesSet || args.IntervalMinutes != 0 {
 		b.WriteString("intervalMinutes: ")
 		b.WriteString(fmt.Sprintf("%v", args.IntervalMinutes))
 	}
@@ -13597,7 +13652,8 @@ type UpdateMyPreferencesArgs struct {
 	// IANA timezone name (e.g. America/Los_Angeles). Empty falls back to UTC.
 	Timezone string
 	// How long an archived space lives before the purge sweep hard-deletes it. 30 or 60.
-	ArchiveRetentionDays int
+	ArchiveRetentionDays    int
+	ArchiveRetentionDaysSet bool // set true to send an explicit zero; nonzero values are always sent
 	// Whether the daily-space automation provisions a per-day space for this user.
 	DailySpaceEnabled    bool
 	DailySpaceEnabledSet bool // set true to send dailySpaceEnabled; required because zero-value bool is ambiguous
@@ -13605,7 +13661,8 @@ type UpdateMyPreferencesArgs struct {
 	// Enum: archive | save
 	DailySpaceRolloverAction string
 	// Standard Mode cursor tween duration in milliseconds.
-	CursorTweenMs int
+	CursorTweenMs    int
+	CursorTweenMsSet bool // set true to send an explicit zero; nonzero values are always sent
 	// Standard Mode visual appearance during an agent UI-control takeover.
 	// Enum: clean | dim
 	TakeoverMode string
@@ -13648,7 +13705,7 @@ func UpdateMyPreferencesBuild(args UpdateMyPreferencesArgs) string {
 		b.WriteString("timezone: ")
 		b.WriteString(quoteMemQL(args.Timezone))
 	}
-	if args.ArchiveRetentionDays != 0 {
+	if args.ArchiveRetentionDaysSet || args.ArchiveRetentionDays != 0 {
 		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
@@ -13669,7 +13726,7 @@ func UpdateMyPreferencesBuild(args UpdateMyPreferencesArgs) string {
 		b.WriteString("dailySpaceRolloverAction: ")
 		b.WriteString(quoteMemQL(args.DailySpaceRolloverAction))
 	}
-	if args.CursorTweenMs != 0 {
+	if args.CursorTweenMsSet || args.CursorTweenMs != 0 {
 		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
@@ -13771,6 +13828,7 @@ type UpdateOutboundRequestStatusArgs struct {
 	RequestId     string
 	Status        string
 	Attempts      int
+	AttemptsSet   bool // set true to send an explicit zero; nonzero values are always sent
 	LastError     string
 	NextAttemptAt string
 	SentAt        string
@@ -13792,7 +13850,7 @@ func UpdateOutboundRequestStatusBuild(args UpdateOutboundRequestStatusArgs) stri
 	}
 	b.WriteString("status: ")
 	b.WriteString(quoteMemQL(args.Status))
-	if args.Attempts != 0 {
+	if args.AttemptsSet || args.Attempts != 0 {
 		if b.Len() > 37 {
 			b.WriteString(", ")
 		}
@@ -13932,6 +13990,7 @@ type UpdateRecordArgs struct {
 	NaturalKeyField string
 	NaturalKeyValue string
 	Confidence      float64
+	ConfidenceSet   bool // set true to send an explicit zero; nonzero values are always sent
 }
 
 // UpdateRecord calls the engine mutation updateRecord.
@@ -13973,7 +14032,7 @@ func UpdateRecordBuild(args UpdateRecordArgs) string {
 		b.WriteString("naturalKeyValue: ")
 		b.WriteString(quoteMemQL(args.NaturalKeyValue))
 	}
-	if args.Confidence != 0 {
+	if args.ConfidenceSet || args.Confidence != 0 {
 		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
@@ -14166,9 +14225,13 @@ type UpdateSendJobArgs struct {
 	SendJobId            string
 	Status               string
 	RecipientCount       int
+	RecipientCountSet    bool // set true to send an explicit zero; nonzero values are always sent
 	SentCount            int
+	SentCountSet         bool // set true to send an explicit zero; nonzero values are always sent
 	SkippedCount         int
+	SkippedCountSet      bool // set true to send an explicit zero; nonzero values are always sent
 	FailedCount          int
+	FailedCountSet       bool // set true to send an explicit zero; nonzero values are always sent
 	LastError            string
 	StartedAt            string
 	CompletedAt          string
@@ -14201,28 +14264,28 @@ func UpdateSendJobBuild(args UpdateSendJobArgs) string {
 		b.WriteString("status: ")
 		b.WriteString(quoteMemQL(args.Status))
 	}
-	if args.RecipientCount != 0 {
+	if args.RecipientCountSet || args.RecipientCount != 0 {
 		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("recipientCount: ")
 		b.WriteString(fmt.Sprintf("%v", args.RecipientCount))
 	}
-	if args.SentCount != 0 {
+	if args.SentCountSet || args.SentCount != 0 {
 		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sentCount: ")
 		b.WriteString(fmt.Sprintf("%v", args.SentCount))
 	}
-	if args.SkippedCount != 0 {
+	if args.SkippedCountSet || args.SkippedCount != 0 {
 		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("skippedCount: ")
 		b.WriteString(fmt.Sprintf("%v", args.SkippedCount))
 	}
-	if args.FailedCount != 0 {
+	if args.FailedCountSet || args.FailedCount != 0 {
 		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
@@ -14915,6 +14978,7 @@ type UpdateWorkerLastSeenArgs struct {
 	LastConnectedFromIP string
 	ConnectedNodeId     string
 	ActiveCount         int
+	ActiveCountSet      bool // set true to send an explicit zero; nonzero values are always sent
 	// A non-material inventory refresh riding the heartbeat's own write (epic memql#5146). Free disk moves on every report and decides nothing, so it is not worth a second write to this row; an inventory change that moves the `runtime:` labels does not come through here at all, it goes through updateWorkerHardware and does not wait.
 	// OMITTED, never sent empty. update{} is a read-merge and `??` is blank-coalescing, so an absent key keeps the stored inventory while an empty object would overwrite it with a machine that reports nothing -- turning a cockpit's silence into a statement.
 	Hardware map[string]any
@@ -14924,12 +14988,14 @@ type UpdateWorkerLastSeenArgs struct {
 	Setup map[string]any
 	// The latest Ping round trip in milliseconds (epic memql#5218, D11), riding the heartbeat's write for `hardware`'s reason: it is exactly as fresh as the flush it arrives with and decides nothing, so it is not worth a write of its own.
 	// OMITTED together with rttAt while nothing has been measured, and for the same `??` reason: an absent key keeps the stored figure, while a sent zero would write "0 ms" over a real one and read as a fast machine rather than as an unmeasured one.
-	RttMs int
+	RttMs    int
+	RttMsSet bool // set true to send an explicit zero; nonzero values are always sent
 	// When rttMs was measured, on the agent's clock. Present exactly when rttMs is; an absent rttAt on the row is the one reading for "not measured".
 	RttAt string
 	// The machine's clock minus the cluster's, in milliseconds, positive when the machine is ahead (epic memql#5327, design D6).
 	// OMITTED when the beat carried no timestamp, for rttMs's reason and with a sharper edge: zero here is a REAL ANSWER -- the clocks agree -- so a sent zero standing in for silence would read as a healthy machine rather than as one that has not spoken.
-	ClockSkewMs int
+	ClockSkewMs    int
+	ClockSkewMsSet bool // set true to send an explicit zero; nonzero values are always sent
 	// When this machine's credential stops being accepted (epic memql#5327, design D4), re-stamped after a rotation renews it.
 	// OMITTED when the stream does not know one -- a token minted before expiry existed -- because an empty string here would CLEAR a real expiry the register already wrote, and the row would then promise a credential that never expires about one that does.
 	CredentialExpiresAt string
@@ -14965,7 +15031,7 @@ func UpdateWorkerLastSeenBuild(args UpdateWorkerLastSeenArgs) string {
 		b.WriteString("connectedNodeId: ")
 		b.WriteString(quoteMemQL(args.ConnectedNodeId))
 	}
-	if args.ActiveCount != 0 {
+	if args.ActiveCountSet || args.ActiveCount != 0 {
 		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
@@ -14993,7 +15059,7 @@ func UpdateWorkerLastSeenBuild(args UpdateWorkerLastSeenArgs) string {
 		b.WriteString("setup: ")
 		b.WriteString(renderMemQLValue(args.Setup))
 	}
-	if args.RttMs != 0 {
+	if args.RttMsSet || args.RttMs != 0 {
 		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
@@ -15007,7 +15073,7 @@ func UpdateWorkerLastSeenBuild(args UpdateWorkerLastSeenArgs) string {
 		b.WriteString("rttAt: ")
 		b.WriteString(quoteMemQL(args.RttAt))
 	}
-	if args.ClockSkewMs != 0 {
+	if args.ClockSkewMsSet || args.ClockSkewMs != 0 {
 		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
@@ -15595,13 +15661,15 @@ func ValidateRequestBuild(args ValidateRequestArgs) string {
 //
 // Bound concept: v1:knowledge:documentChunk (machine-readable: BoundConcepts["writeKnowledgeChunk"] in generated_concepts.go).
 type WriteKnowledgeChunkArgs struct {
-	ChunkId     string
-	DomainId    string
-	Text        string
-	SourceRef   string
-	Seq         int
-	TokenCount  int
-	SourceTopic string
+	ChunkId       string
+	DomainId      string
+	Text          string
+	SourceRef     string
+	Seq           int
+	SeqSet        bool // set true to send an explicit zero; nonzero values are always sent
+	TokenCount    int
+	TokenCountSet bool // set true to send an explicit zero; nonzero values are always sent
+	SourceTopic   string
 }
 
 // WriteKnowledgeChunk calls the engine mutation writeKnowledgeChunk.
@@ -15630,14 +15698,14 @@ func WriteKnowledgeChunkBuild(args WriteKnowledgeChunkArgs) string {
 	}
 	b.WriteString("sourceRef: ")
 	b.WriteString(quoteMemQL(args.SourceRef))
-	if args.Seq != 0 {
+	if args.SeqSet || args.Seq != 0 {
 		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("seq: ")
 		b.WriteString(fmt.Sprintf("%v", args.Seq))
 	}
-	if args.TokenCount != 0 {
+	if args.TokenCountSet || args.TokenCount != 0 {
 		if b.Len() > 29 {
 			b.WriteString(", ")
 		}

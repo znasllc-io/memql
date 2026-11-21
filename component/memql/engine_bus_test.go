@@ -1,11 +1,32 @@
 package memql
 
 import (
+	"bytes"
+	"context"
+	"log/slog"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/bus"
 	busv1 "github.com/znasllc-io/memql/component/bus/gen"
+	"github.com/znasllc-io/memql/core/component"
 )
+
+func TestExecuteFailureDoesNotLogPrivateQueryPrefix(t *testing.T) {
+	var log bytes.Buffer
+	e := &MemQLEngine{Component: &component.Component{Logger: slog.New(slog.NewTextHandler(&log, nil))}}
+	msg := bus.NewMessage()
+	msg.Payload = &busv1.InternalMessage_EngineExecute{EngineExecute: &busv1.EngineExecuteRequest{Query: `builtin privateInput(event: {text: "private-spoken-content"})`}}
+	req := bus.NewRequest(msg)
+	e.handleExecuteRequest(context.Background(), req, "test-correlation")
+	require.NotContains(t, log.String(), "private-spoken-content")
+	require.NotContains(t, log.String(), "privateInput")
+	require.Contains(t, log.String(), "test-correlation")
+	require.Contains(t, log.String(), "query_bytes=")
+	require.Contains(t, log.String(), "error_type=")
+	reply := <-req.ReplyTo
+	require.False(t, reply.GetEngineExecuteResponse().Success)
+}
 
 func TestTruncate(t *testing.T) {
 	tests := []struct {

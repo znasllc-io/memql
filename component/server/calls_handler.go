@@ -759,14 +759,15 @@ func (h *callsHandler) serveQueue(w http.ResponseWriter, r *http.Request, c call
 // and that capability, and the service chooses the fixed template and transport.
 func (h *callsHandler) serveHost(w http.ResponseWriter, r *http.Request, c callsCall) {
 	var body struct {
-		Action       string  `json:"action"`
-		RequestID    *string `json:"requestId"`
-		ReviewDigest *string `json:"reviewDigest"`
-		Seat         *string `json:"seat"`
-		Email        *string `json:"email"`
-		Token        *string `json:"token"`
-		Identity     *string `json:"identity"`
-		Title        *string `json:"title"`
+		Processing   *calls.ProcessingConsentRequest `json:"processing"`
+		Action       string                          `json:"action"`
+		RequestID    *string                         `json:"requestId"`
+		ReviewDigest *string                         `json:"reviewDigest"`
+		Seat         *string                         `json:"seat"`
+		Email        *string                         `json:"email"`
+		Token        *string                         `json:"token"`
+		Identity     *string                         `json:"identity"`
+		Title        *string                         `json:"title"`
 	}
 	if !h.decode(w, r, c, &body) {
 		return
@@ -777,6 +778,8 @@ func (h *callsHandler) serveHost(w http.ResponseWriter, r *http.Request, c calls
 	reviewing := body.Action == "agent_approve" || body.Action == "agent_reject"
 	invalid := false
 	switch {
+	case body.Action == "processing_consent":
+		invalid = body.Processing == nil || body.RequestID != nil || body.ReviewDigest != nil || body.Title != nil || body.Seat != nil || body.Identity != nil || body.Email != nil || body.Token != nil
 	case reviewing:
 		invalid = body.RequestID == nil || body.ReviewDigest == nil || body.Title != nil || body.Seat != nil || body.Identity != nil || body.Email != nil || body.Token != nil
 	case inviting:
@@ -796,6 +799,9 @@ func (h *callsHandler) serveHost(w http.ResponseWriter, r *http.Request, c calls
 		}
 	default:
 		invalid = body.Title != nil || body.Email != nil || body.Token != nil || body.Identity != nil
+	}
+	if body.Action != "processing_consent" && body.Processing != nil {
+		invalid = true
 	}
 	if !reviewing && (body.RequestID != nil || body.ReviewDigest != nil) {
 		invalid = true
@@ -859,7 +865,7 @@ func (h *callsHandler) serveHost(w http.ResponseWriter, r *http.Request, c calls
 	if body.ReviewDigest != nil {
 		reviewDigest = *body.ReviewDigest
 	}
-	if err := h.svc.Host(r.Context(), c.session(), calls.HostActionRequest{Action: body.Action, Seat: seat, RequestID: requestID, ReviewDigest: reviewDigest}); err != nil {
+	if err := h.svc.Host(r.Context(), c.session(), calls.HostActionRequest{Action: body.Action, Seat: seat, RequestID: requestID, ReviewDigest: reviewDigest, Processing: body.Processing}); err != nil {
 		h.refuse(w, c, err, calls.JoinResult{})
 		return
 	}
@@ -1064,6 +1070,7 @@ type callsSessionReply struct {
 	FundingMode     string `json:"fundingMode,omitempty"`
 	// Roster is there for a host seat in an open call and absent for every other session.
 	Roster        *callsRosterReply        `json:"roster,omitempty"`
+	Processing    *calls.ProcessingStatus  `json:"processing,omitempty"`
 	PendingAgents []calls.PendingAgent     `json:"pendingAgents,omitempty"`
 	Agents        []calls.AgentParticipant `json:"agents,omitempty"`
 }
@@ -1112,6 +1119,7 @@ func (h *callsHandler) sessionReply(sess calls.Session, call calls.SeatCall) cal
 		Roster:        rosterReply(call.Roster),
 		Agents:        call.Agents,
 		PendingAgents: call.PendingAgents,
+		Processing:    call.Processing,
 	}
 	if !call.CountdownEndsAt.IsZero() {
 		reply.CountdownEndsAt = call.CountdownEndsAt.UTC().Format(time.RFC3339Nano)

@@ -684,6 +684,8 @@ PER SITE: the limits are the site's, on a row its owner owns, because a package 
 export interface CallsPolicySetArgs {
   /** Require a currently credential-backed session at join: 0 optional guest access, 1 required. */
   requirePasskeys?: number;
+  /** Operator opt-in for trusted processing in consented, configured Insights calls; no family processing. */
+  processingEnabled?: number;
   /** Operator opt-in for configured local simulated prepaid rooms. Requires simulatedFunding; never real payment authority. */
   callConfiguration?: number;
   /** Operator-only opt-in for bounded local usage preview. Requires simulatedFunding. Never charges usage or enables real payments. */
@@ -719,6 +721,7 @@ export interface CallsPolicySetArgs {
 export function buildCallsPolicySet(args: CallsPolicySetArgs): string {
   const parts: string[] = [];
   if (args.requirePasskeys !== undefined) parts.push("requirePasskeys: " + renderMemQLValue(args.requirePasskeys));
+  if (args.processingEnabled !== undefined) parts.push("processingEnabled: " + renderMemQLValue(args.processingEnabled));
   if (args.callConfiguration !== undefined) parts.push("callConfiguration: " + renderMemQLValue(args.callConfiguration));
   if (args.usagePreview !== undefined) parts.push("usagePreview: " + renderMemQLValue(args.usagePreview));
   if (args.simulatedFunding !== undefined) parts.push("simulatedFunding: " + renderMemQLValue(args.simulatedFunding));
@@ -745,6 +748,85 @@ declare module "./query.js" {
 
 QueryClient.prototype.callsPolicySet = function (this: QueryClient, args: CallsPolicySetArgs = {} as CallsPolicySetArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("callsPolicySet", buildCallsPolicySet(args), opts);
+};
+
+/** Trusted operator only, refused inside runs. Returns an ephemeral 30-second room-wide subscribe-only sampler token and an exact consented track allowlist. Worker must filter publication SID AND participant identity. Renew with leaseId; reset with the owned live leaseId after reconnect to advance every track epoch. */
+export interface CallsProcessingLeaseArgs {
+  siteId: string;
+  roomId: string;
+  leaseId?: string;
+  reset?: boolean;
+  maxTracks: number;
+}
+
+export function buildCallsProcessingLease(args: CallsProcessingLeaseArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  parts.push("roomId: " + renderMemQLValue(args.roomId));
+  if (args.leaseId !== undefined) parts.push("leaseId: " + renderMemQLValue(args.leaseId));
+  if (args.reset !== undefined) parts.push("reset: " + renderMemQLValue(args.reset));
+  parts.push("maxTracks: " + renderMemQLValue(args.maxTracks));
+  return "builtin callsProcessingLease(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    callsProcessingLease(args: CallsProcessingLeaseArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.callsProcessingLease = function (this: QueryClient, args: CallsProcessingLeaseArgs = {} as CallsProcessingLeaseArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("callsProcessingLease", buildCallsProcessingLease(args), opts);
+};
+
+/** Trusted operator only, refused inside runs. Exact lease/epoch/consent/source authority is rechecked before ephemeral server-origin data publication. */
+export interface CallsProcessingPublishArgs {
+  siteId: string;
+  roomId: string;
+  leaseId: string;
+  revision: number;
+  event: Record<string, unknown>;
+}
+
+export function buildCallsProcessingPublish(args: CallsProcessingPublishArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  parts.push("roomId: " + renderMemQLValue(args.roomId));
+  parts.push("leaseId: " + renderMemQLValue(args.leaseId));
+  parts.push("revision: " + renderMemQLValue(args.revision));
+  parts.push("event: " + renderMemQLValue(args.event));
+  return "builtin callsProcessingPublish(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    callsProcessingPublish(args: CallsProcessingPublishArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.callsProcessingPublish = function (this: QueryClient, args: CallsProcessingPublishArgs = {} as CallsProcessingPublishArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("callsProcessingPublish", buildCallsProcessingPublish(args), opts);
+};
+
+/** Operator-only bounded discovery for explicitly configured worker sites. */
+export interface CallsProcessingRoomsArgs {
+  siteId: string;
+}
+
+export function buildCallsProcessingRooms(args: CallsProcessingRoomsArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  return "builtin callsProcessingRooms(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    callsProcessingRooms(args: CallsProcessingRoomsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.callsProcessingRooms = function (this: QueryClient, args: CallsProcessingRoomsArgs = {} as CallsProcessingRoomsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("callsProcessingRooms", buildCallsProcessingRooms(args), opts);
 };
 
 /** Turn the calls capability on or off for a deployable.

@@ -6,7 +6,7 @@ import "reflect"
 // different URL, secret or engine operation. The server enforces every bound.
 func UTCPManual(endpoint string) map[string]any {
 	tools := []any{}
-	actions := []string{"authority", "balance", "quote", "start", "schedule", "reschedule", "cancel", "session", "history", "host", "leave", "topup", "join", "request_join", "join_status", "guest_join", "invitation_link", "rename", "archive_preview", "archive", "restore", "proposal_status", "portrait_upload", "portrait_get"}
+	actions := []string{"authority", "balance", "quote", "start", "schedule", "reschedule", "cancel", "session", "history", "host", "leave", "topup", "join", "request_join", "join_status", "guest_join", "invitation_link", "rename", "archive_preview", "archive", "restore", "proposal_status", "portrait_upload", "portrait_get", "processing_consent"}
 	for _, action := range actions {
 		props := map[string]any{"action": map[string]any{"type": "string", "const": action}}
 		all := map[string]any{}
@@ -28,9 +28,10 @@ func UTCPManual(endpoint string) map[string]any {
 		}
 		all["acceptance"] = agentAcceptanceSchema()
 		all["portraitId"] = map[string]any{"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9_-]+$"}
+		all["processing"] = dtoSchema(reflect.TypeOf(ProcessingConsentRequest{}))
 		all["portraitData"] = map[string]any{"type": "string", "minLength": 1, "maxLength": 54616, "contentEncoding": "base64", "description": "PNG/JPEG bytes only, no data URL. Maximum 40,960 decoded source bytes; each dimension 1–512px. Native service strips metadata and reencodes."}
 		fields := map[string][]string{
-			"portrait_upload": {"portraitData"}, "portrait_get": {"portraitId"},
+			"processing_consent": {"processing"}, "portrait_upload": {"portraitData"}, "portrait_get": {"portraitId"},
 			"quote":      {"participantLimit", "durationMinutes", "insights", "resources"},
 			"start":      {"idempotencyKey", "quoteId", "title", "name", "terms", "participation", "authorityAccepted", "acceptance"},
 			"schedule":   {"idempotencyKey", "quoteId", "title", "start", "acceptance"},
@@ -46,7 +47,7 @@ func UTCPManual(endpoint string) map[string]any {
 		}
 		required := []string{"action"}
 		required = append(required, map[string][]string{
-			"portrait_upload": {"portraitData"}, "portrait_get": {"portraitId"},
+			"processing_consent": {"processing"}, "portrait_upload": {"portraitData"}, "portrait_get": {"portraitId"},
 			"quote": {"participantLimit", "durationMinutes"}, "start": {"idempotencyKey", "quoteId", "name", "acceptance"},
 			"schedule": {"idempotencyKey", "quoteId", "start", "acceptance"}, "reschedule": {"idempotencyKey", "quoteId", "start", "callId", "acceptance"},
 			"cancel": {"callId"}, "host": {"control"}, "topup": {"idempotencyKey", "acceptance"}, "join": {"callId", "name", "idempotencyKey", "acceptance"},
@@ -56,6 +57,9 @@ func UTCPManual(endpoint string) map[string]any {
 		description := "Callkey " + action + " under the authenticated grant's separately approved scope and limits. Never infer host privileges from a facilitator role."
 		output := map[string]any{"type": "object"}
 		switch action {
+		case "processing_consent":
+			description = "Explicitly opt only this agent admission into optional trusted processing under separately human-approved processing scope. Read session first and send exact roomId, identity and consent revision. Never consent for another participant. Safety checks require native availability and explicit consent; speech transcription and text-tone also require the configured Insights feature. Family calls are excluded. Insights requires transcription. Captions and text-tone are ephemeral and visible to current room participants. Withdraw by setting all flags false; re-entry resets consent. This grants no room monitoring or host privilege."
+			output = dtoSchema(reflect.TypeOf(ProcessingStatus{}))
 		case "portrait_upload":
 			description = "Upload an optional static agent portrait under explicit portraits_write scope. Only bounded PNG/JPEG, no URL/SVG. Returns immutable canonical digest and identifier; upload alone grants no appearance or call authority. Include both portraitId and portraitDigest in a proposal for exact human review. Same canonical bytes deduplicate retries; limit 32 assets per Callkey and 8 new per hour. This sanitizes active content, not visual content."
 			output = dtoSchema(reflect.TypeOf(PortraitInfo{}))
@@ -98,7 +102,7 @@ func UTCPManual(endpoint string) map[string]any {
 	}
 	tools = append(tools, workflowUTCPTools(endpoint)...)
 	tools = append(tools, proposalUTCPTools(endpoint)...)
-	return map[string]any{"utcp_version": "1.1.0", "manual_version": "2.1.0", "agent_policy": CurrentAgentPolicy(), "tools": tools}
+	return map[string]any{"utcp_version": "1.1.0", "manual_version": "2.2.0", "agent_policy": CurrentAgentPolicy(), "tools": tools}
 }
 func agentAcceptanceSchema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{"approvalRevision": map[string]any{"type": "integer", "minimum": 1}, "approvalDigest": map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"}, "conductVersion": map[string]any{"type": "string", "const": AgentConductVersion}, "terms": map[string]any{"type": "string", "const": AgentTermsVersion}}, "required": []string{"approvalRevision", "approvalDigest", "conductVersion", "terms"}, "additionalProperties": false}

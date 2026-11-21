@@ -404,6 +404,13 @@ func (s *Service) reconcileGatedObserved(ctx context.Context, server MediaServer
 	}
 	for _, participant := range present {
 		if !inCall[participant.Identity] {
+			sampler, e := s.processingSampler(fresh, *room, participant.Identity)
+			if e != nil {
+				return reconcilePlan{}, e
+			}
+			if sampler {
+				continue
+			}
 			plan.disconnect = append(plan.disconnect, participant.Identity)
 		}
 	}

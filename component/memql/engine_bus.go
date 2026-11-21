@@ -3,6 +3,7 @@ package memql
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/znasllc-io/memql/component/bus"
@@ -81,10 +82,13 @@ func (e *MemQLEngine) handleExecuteRequest(ctx context.Context, req bus.Request,
 
 	resp := bus.NewCorrelatedMessage(req.Msg)
 	if err != nil {
+		// Queries can contain credentials or ephemeral captions, and parser
+		// errors can repeat those literals. Keep correlation and failure type
+		// for diagnosis without copying private request content into logs.
 		e.Logger.Error("bus execute failed",
 			"correlation_id", correlationId,
-			"query_prefix", truncate(execReq.Query, 80),
-			"error", err,
+			"query_bytes", len(execReq.Query),
+			"error_type", fmt.Sprintf("%T", err),
 		)
 		resp.Payload = &busv1.InternalMessage_EngineExecuteResponse{
 			EngineExecuteResponse: &busv1.EngineExecuteResponse{

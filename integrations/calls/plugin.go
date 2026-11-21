@@ -179,6 +179,9 @@ func (i *Integration) IntegrationName() string { return pluginName }
 // (events.go), declared in dsl/calls/builtins.memql.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
+		{Name: "processingRooms", Description: "Bounded trusted worker room discovery.", Handler: i.handleProcessingRooms, ArgsSchema: map[string]string{"siteId": "string required"}},
+		{Name: "processingLease", Description: "Trusted processing lease; operator only, outside runs.", Handler: i.handleProcessingLease, ArgsSchema: map[string]string{"siteId": "string required", "roomId": "string required", "leaseId": "string optional", "reset": "boolean optional", "maxTracks": "integer required"}},
+		{Name: "processingPublish", Description: "Ephemeral consent-bound processing result; operator only, outside runs.", Handler: i.handleProcessingPublish, ArgsSchema: map[string]string{"siteId": "string required", "roomId": "string required", "leaseId": "string required", "revision": "integer required", "event": "object required"}},
 		{
 			Name:        "testKeyCreate",
 			Description: "Mint a test calls key for a deployable. Returns {keyId, key}: the key once, here and nowhere else; only its digest is stored.",

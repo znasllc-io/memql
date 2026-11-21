@@ -891,3 +891,26 @@ query room callsGuestHeldRooms {
  paginate 1
  shape callsRoomFull
 }
+
+/// actor.userId scoping is not the fix: only native processing authority may read this journal.
+@serverOnly
+@actor
+@cache(0)
+query processingState callsProcessingById {
+ args { id string! }
+ filter row => row.id == args.id && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ paginate 1
+ shape callsProcessingFull
+}
+
+/// Bounded trusted worker inventory for one site. actor.userId scoping is not the fix.
+@serverOnly
+@actor
+@cache(0)
+query room callsProcessingRoomCandidates {
+ args { siteId string! }
+ filter row => row.siteId == args.siteId && isOpen(row) && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ sort "row.id", "asc"
+ paginate 100
+ shape callsRoomFull
+}

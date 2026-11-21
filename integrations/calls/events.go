@@ -278,6 +278,15 @@ func (s *Service) participantGated(ctx context.Context, hint roomRow, ev mediaEv
 		return "", meterErr
 	}
 	room = &metered
+	if seat == nil && room.open() {
+		sampler, e := s.processingSampler(fresh, *room, ev.Identity)
+		if e != nil {
+			return "", e
+		}
+		if sampler {
+			return outcomeIgnored, nil
+		}
+	}
 	if seat == nil || !seat.occupying() || !room.open() {
 		// NO SEAT IN THE CALL. A connection is disconnected again; a disconnect has
 		// nothing left to disconnect, and changes nothing.

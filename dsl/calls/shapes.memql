@@ -204,6 +204,7 @@ shape mediaServer callsMediaServerFull {
 /// The policy row as the calls integration reads it. No digest is projected.
 @row
 shape policy callsPolicyFull {
+  processingEnabled
   callConfiguration
   usagePreview
   simulatedFunding
@@ -404,4 +405,14 @@ shape agentPortrait callsPortraitFull {
  height
  blobRef
  issuedAt
+}
+
+/// Private consent and processing lease metadata only.
+@row
+shape processingState callsProcessingFull {
+ row.id
+ row.createdAt
+ siteId
+ roomId
+ stateData
 }

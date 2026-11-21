@@ -25,6 +25,7 @@ const (
 // Policy carries every limit the rules consult. It is a value, not a global,
 // so a deployment can override it and a test can pin it.
 type Policy struct {
+	ProcessingEnabled    bool
 	RequirePasskeys      bool
 	SimulatedFunding     bool
 	UsagePreview         bool

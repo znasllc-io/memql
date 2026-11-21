@@ -1076,6 +1076,7 @@
         "maxUpcomingScheduled",
         "ownerUserId",
         "passTtl",
+        "processingEnabled",
         "queueEntryTtl",
         "queuePoll",
         "requirePasskeys",
@@ -1088,6 +1089,23 @@
       "required": [
         "ownerUserId",
         "siteId"
+      ]
+    },
+    {
+      "concept": "v1:calls:processingState",
+      "file": "calls/concepts.memql",
+      "fields": [
+        "accountId",
+        "ownerUserId",
+        "roomId",
+        "siteId",
+        "stateData"
+      ],
+      "required": [
+        "ownerUserId",
+        "roomId",
+        "siteId",
+        "stateData"
       ]
     },
     {

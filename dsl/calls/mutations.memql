@@ -419,7 +419,8 @@ mutation policy createCallsPolicy {
     policyId  string!
     versionTime  datetime
     siteId  string!
-    callConfiguration int
+    processingEnabled int
+  callConfiguration int
     usagePreview int
     simulatedFunding int
     requirePasskeys int
@@ -436,7 +437,7 @@ mutation policy createCallsPolicy {
     queuePoll  int
   }
   insert {
-    accept { siteId, callConfiguration, usagePreview, simulatedFunding, requirePasskeys, maxPeople, maxAgents, roomJoinsPerMinute, maxUpcomingScheduled, guestInactiveDays, maxScheduledMinutes, hostLeftGrace, passTtl, scheduleHorizon, queueEntryTtl, queuePoll }
+    accept { siteId, processingEnabled, callConfiguration, usagePreview, simulatedFunding, requirePasskeys, maxPeople, maxAgents, roomJoinsPerMinute, maxUpcomingScheduled, guestInactiveDays, maxScheduledMinutes, hostLeftGrace, passTtl, scheduleHorizon, queueEntryTtl, queuePoll }
     stamp {
       id: args.policyId
       ownerUserId: actor.userId
@@ -451,7 +452,8 @@ mutation policy updateCallsPolicy {
   args {
     policyId  string!
     versionTime  datetime
-    callConfiguration int
+    processingEnabled int
+  callConfiguration int
     usagePreview int
     simulatedFunding int
     requirePasskeys int
@@ -468,7 +470,7 @@ mutation policy updateCallsPolicy {
     queuePoll  int
   }
   update {
-    accept { callConfiguration, usagePreview, simulatedFunding, requirePasskeys, maxPeople, maxAgents, roomJoinsPerMinute, maxUpcomingScheduled, guestInactiveDays, maxScheduledMinutes, hostLeftGrace, passTtl, scheduleHorizon, queueEntryTtl, queuePoll }
+    accept { processingEnabled, callConfiguration, usagePreview, simulatedFunding, requirePasskeys, maxPeople, maxAgents, roomJoinsPerMinute, maxUpcomingScheduled, guestInactiveDays, maxScheduledMinutes, hostLeftGrace, passTtl, scheduleHorizon, queueEntryTtl, queuePoll }
     stamp {
       id: args.policyId
       createdAt: args.versionTime ?? now
@@ -948,5 +950,22 @@ mutation agentPortrait saveCallsPortrait {
  insert {
  accept { siteId, keyId, digest, mimeType, width, height, blobRef, issuedAt }
  stamp { id: args.portraitId, ownerUserId: actor.userId, createdAt: args.versionTime }
+ }
+}
+
+/// Fenced native processing authority. actor.userId scoping is not the fix.
+@serverOnly
+@actor
+mutation processingState saveCallsProcessing {
+ args {
+ stateId string!
+ versionTime datetime!
+ siteId string!
+ roomId string!
+ stateData string!
+ }
+ insert {
+ accept { siteId, roomId, stateData }
+ stamp { id: args.stateId, ownerUserId: actor.userId, createdAt: args.versionTime }
  }
 }

@@ -122,6 +122,8 @@ func writeArgField(buf *bytes.Buffer, a ArgField) {
 		switch a.Type {
 		case "bool", "boolean":
 			fmt.Fprintf(buf, "\t%sSet bool // set true to send %s; required because zero-value bool is ambiguous\n", pascalCase(a.Name), a.Name)
+		case "number", "int", "integer":
+			fmt.Fprintf(buf, "\t%sSet bool // set true to send an explicit zero; nonzero values are always sent\n", pascalCase(a.Name))
 		}
 	}
 }
@@ -146,7 +148,9 @@ func emitArgComposer(buf *bytes.Buffer, a ArgField, first bool, prefixLen int) {
 			action()
 			fmt.Fprintf(buf, "\t}\n")
 		case a.Type == "number" || a.Type == "int" || a.Type == "integer":
-			fmt.Fprintf(buf, "\tif args.%s != 0 {\n", field)
+			// Preserve existing nonzero callers while allowing a deliberate zero:
+			// policy disablement and zero worker capacity must not become omission.
+			fmt.Fprintf(buf, "\tif args.%sSet || args.%s != 0 {\n", field, field)
 			action()
 			fmt.Fprintf(buf, "\t}\n")
 		case a.Type == "object" || a.Type == "array" || strings.HasPrefix(a.Type, "[]"):

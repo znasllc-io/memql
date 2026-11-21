@@ -164,3 +164,18 @@ func isNotFound(err error) bool {
 	var twerr twirp.Error
 	return errors.As(err, &twerr) && twerr.Code() == twirp.NotFound
 }
+
+// Server-origin packets have an empty participant identity. A peer data packet
+// must never be accepted as trusted processing merely because its sender is not
+// currently resolved in the client's roster.
+func (b *liveKitBackend) PublishProcessing(ctx context.Context, room string, data []byte, recipients []string) error {
+	sender, ok := b.rooms.(interface {
+		SendData(context.Context, *livekit.SendDataRequest) (*livekit.SendDataResponse, error)
+	})
+	if !ok {
+		return errors.New("calls: server data unavailable")
+	}
+	topic := processingTopic
+	_, e := sender.SendData(ctx, &livekit.SendDataRequest{Room: room, Data: data, Kind: livekit.DataPacket_RELIABLE, DestinationIdentities: recipients, Topic: &topic})
+	return e
+}

@@ -17,6 +17,25 @@ func mustParseCall(t *testing.T, call string) {
 	}
 }
 
+// A deliberate zero differs from omission: disabling processing must not leave
+// the previous policy enabled, and a numeric limit must not become a default.
+// Existing nonzero callers keep their behavior without setting the new flag.
+func TestGeneratedBuilder_OptionalNumbersPreserveExplicitZero(t *testing.T) {
+	for _, tc := range []struct{ call, want string }{
+		{CallsPolicySetBuild(CallsPolicySetArgs{SiteId: "callkey", ProcessingEnabledSet: true}), `builtin callsPolicySet(processingEnabled: 0, siteId: "callkey")`},
+		{CallsPolicySetBuild(CallsPolicySetArgs{SiteId: "callkey", ProcessingEnabled: 1}), `builtin callsPolicySet(processingEnabled: 1, siteId: "callkey")`},
+		{CallsPolicySetBuild(CallsPolicySetArgs{SiteId: "callkey"}), `builtin callsPolicySet(siteId: "callkey")`},
+		{MyBudgetSaveBuild(MyBudgetSaveArgs{MonthlyLimitUSDSet: true}), `builtin myBudgetSave(monthlyLimitUSD: 0)`},
+		{MyBudgetSaveBuild(MyBudgetSaveArgs{MonthlyLimitUSD: 12.5}), `builtin myBudgetSave(monthlyLimitUSD: 12.5)`},
+		{MyBudgetSaveBuild(MyBudgetSaveArgs{}), `builtin myBudgetSave()`},
+	} {
+		if tc.call != tc.want {
+			t.Errorf("call = %q, want %q", tc.call, tc.want)
+		}
+		mustParseCall(t, tc.call)
+	}
+}
+
 // TestGeneratedBuilder_OmittedLeadingOptionalHasNoDanglingComma pins
 // memql#1319 against the REAL generated builder: omitting the leading
 // optional arg of a long-named mutation must not emit a dangling comma

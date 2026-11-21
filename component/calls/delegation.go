@@ -80,37 +80,38 @@ type DelegationResult struct {
 // AgentRequest exposes named product operations, never an arbitrary HTTP, SQL,
 // shell, or engine call. The bearer credential cannot perform account ceremonies.
 type AgentRequest struct {
-	PortraitID        string                `json:"portraitId,omitempty"`
-	PortraitData      string                `json:"portraitData,omitempty"`
-	Acceptance        *AgentAcceptance      `json:"acceptance,omitempty"`
-	GuestToken        string                `json:"guestToken,omitempty"`
-	RequestID         string                `json:"requestId,omitempty"`
-	Invitation        *InviteRequest        `json:"invitation,omitempty"`
-	Proposal          *AgentProposalRequest `json:"proposal,omitempty"`
-	ProposalID        string                `json:"proposalId,omitempty"`
-	Workflow          *WorkflowRequest      `json:"workflow,omitempty"`
-	Resource          *ResourceRequest      `json:"resource,omitempty"`
-	Action            string                `json:"action"`
-	IdempotencyKey    string                `json:"idempotencyKey,omitempty"`
-	ParticipantLimit  int                   `json:"participantLimit,omitempty"`
-	DurationMinutes   int                   `json:"durationMinutes,omitempty"`
-	Insights          bool                  `json:"insights,omitempty"`
-	Resources         bool                  `json:"resources,omitempty"`
-	QuoteID           string                `json:"quoteId,omitempty"`
-	Title             string                `json:"title,omitempty"`
-	Name              string                `json:"name,omitempty"`
-	Terms             string                `json:"terms,omitempty"`
-	Participation     string                `json:"participation,omitempty"`
-	AuthorityAccepted bool                  `json:"authorityAccepted,omitempty"`
-	Start             time.Time             `json:"start,omitempty"`
-	CallID            string                `json:"callId,omitempty"`
-	Control           string                `json:"control,omitempty"`
-	Seat              string                `json:"seat,omitempty"`
-	ConfirmationToken string                `json:"confirmationToken,omitempty"`
-	Acknowledged      bool                  `json:"acknowledged,omitempty"`
+	Processing        *ProcessingConsentRequest `json:"processing,omitempty"`
+	PortraitID        string                    `json:"portraitId,omitempty"`
+	PortraitData      string                    `json:"portraitData,omitempty"`
+	Acceptance        *AgentAcceptance          `json:"acceptance,omitempty"`
+	GuestToken        string                    `json:"guestToken,omitempty"`
+	RequestID         string                    `json:"requestId,omitempty"`
+	Invitation        *InviteRequest            `json:"invitation,omitempty"`
+	Proposal          *AgentProposalRequest     `json:"proposal,omitempty"`
+	ProposalID        string                    `json:"proposalId,omitempty"`
+	Workflow          *WorkflowRequest          `json:"workflow,omitempty"`
+	Resource          *ResourceRequest          `json:"resource,omitempty"`
+	Action            string                    `json:"action"`
+	IdempotencyKey    string                    `json:"idempotencyKey,omitempty"`
+	ParticipantLimit  int                       `json:"participantLimit,omitempty"`
+	DurationMinutes   int                       `json:"durationMinutes,omitempty"`
+	Insights          bool                      `json:"insights,omitempty"`
+	Resources         bool                      `json:"resources,omitempty"`
+	QuoteID           string                    `json:"quoteId,omitempty"`
+	Title             string                    `json:"title,omitempty"`
+	Name              string                    `json:"name,omitempty"`
+	Terms             string                    `json:"terms,omitempty"`
+	Participation     string                    `json:"participation,omitempty"`
+	AuthorityAccepted bool                      `json:"authorityAccepted,omitempty"`
+	Start             time.Time                 `json:"start,omitempty"`
+	CallID            string                    `json:"callId,omitempty"`
+	Control           string                    `json:"control,omitempty"`
+	Seat              string                    `json:"seat,omitempty"`
+	ConfirmationToken string                    `json:"confirmationToken,omitempty"`
+	Acknowledged      bool                      `json:"acknowledged,omitempty"`
 }
 
-var DelegationScopes = []string{"read", "join", "host", "schedule", "control", "topup", "skills_read", "skills_write", "skills_control", "resources_read", "resources_publish", "resources_control", "invite", "portraits_write"}
+var DelegationScopes = []string{"read", "join", "host", "schedule", "control", "topup", "skills_read", "skills_write", "skills_control", "resources_read", "resources_publish", "resources_control", "invite", "portraits_write", "processing"}
 
 func ValidDelegation(r DelegationRequest, now time.Time) bool {
 	if r.PortraitData != "" || !ValidPortraitReference(r.PortraitID, r.PortraitDigest) {

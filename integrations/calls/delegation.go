@@ -18,6 +18,7 @@ import (
 
 type agentCallContext struct{}
 type agentScopeContext struct{}
+type processingWithdrawalContext struct{}
 
 func delegatedSeatKind(ctx context.Context) string {
 	if ctx.Value(agentCallContext{}) != nil {
@@ -304,7 +305,8 @@ func (s *Service) Agent(ctx context.Context, site callrules.SiteRef, token strin
 	if err != nil {
 		return nil, err
 	}
-	if scope != "authority" && !slices.Contains(d.State.Request.Scopes, scope) {
+	withdrawal := req.Action == "processing_consent" && req.Processing != nil && !req.Processing.Safety && !req.Processing.Transcription && !req.Processing.Insights
+	if scope != "authority" && !slices.Contains(d.State.Request.Scopes, scope) && !withdrawal {
 		return nil, accountRefusal("delegation_scope")
 	}
 	// A client cannot accept a later proposal by racing its old request through
@@ -316,6 +318,9 @@ func (s *Service) Agent(ctx context.Context, site callrules.SiteRef, token strin
 	}
 	ctx = context.WithValue(ctx, agentCallContext{}, d.ID)
 	ctx = context.WithValue(ctx, agentScopeContext{}, scope)
+	if withdrawal {
+		ctx = context.WithValue(ctx, processingWithdrawalContext{}, true)
+	}
 	ctx = context.WithValue(ctx, agentPresentationContext{}, callrules.AgentParticipant{Purpose: d.State.Request.Purpose, ApprovalRevision: d.State.ApprovalRevision, ConductVersion: d.State.Request.ConductVersion, PortraitID: d.State.Request.PortraitID, PortraitDigest: d.State.Request.PortraitDigest})
 	if req.Action == "authority" {
 		return callrules.AgentAuthority{Grant: delegationInfo(d, s.now()), Policy: callrules.CurrentAgentPolicy()}, nil
@@ -334,6 +339,19 @@ func (s *Service) Agent(ctx context.Context, site callrules.SiteRef, token strin
 		defer release()
 	}
 	switch req.Action {
+	case "processing_consent":
+		if !reflect.DeepEqual(req, callrules.AgentRequest{Action: req.Action, Processing: req.Processing}) {
+			return nil, callrules.ErrInvalid
+		}
+		err := s.processingConsent(ctx, sess, callrules.HostActionRequest{Action: req.Action, Processing: req.Processing})
+		if err != nil {
+			return nil, err
+		}
+		current, e := s.SessionCall(ctx, sess)
+		if e != nil {
+			return nil, e
+		}
+		return current.Processing, nil
 	case "portrait_upload":
 		return s.uploadPortrait(ctx, sess, req.PortraitData)
 	case "portrait_get":
@@ -675,7 +693,7 @@ func (s *Service) delegatedEffectAllowed(ctx context.Context, site callrules.Sit
 			return err
 		}
 	}
-	if scope, ok := ctx.Value(agentScopeContext{}).(string); ok && !slices.Contains(d.State.Request.Scopes, scope) {
+	if scope, ok := ctx.Value(agentScopeContext{}).(string); ok && !slices.Contains(d.State.Request.Scopes, scope) && !(scope == "processing" && ctx.Value(processingWithdrawalContext{}) == true) {
 		return accountRefusal("delegation_scope")
 	}
 	return nil
