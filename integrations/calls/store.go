@@ -567,8 +567,12 @@ func witnessedAbsent(ctx context.Context, concept, rowID string) context.Context
 // versionStamp is how a write's version is passed: the row's createdAt is
 // `args.versionTime ?? now` on every calls mutation, and PostgreSQL keeps microseconds.
 func versionStamp(at time.Time) string {
-	return at.UTC().Truncate(time.Microsecond).Format(time.RFC3339Nano)
+	return persistedCallTime(at).Format(time.RFC3339Nano)
 }
+
+// Admission generations compare returned and persisted timestamps exactly.
+// Normalize their in-memory values to the same precision as every native write.
+func persistedCallTime(at time.Time) time.Time { return at.UTC().Truncate(time.Microsecond) }
 
 // ---------------------------------------------------------------------------
 // keeping secrets out of errors

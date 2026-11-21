@@ -221,9 +221,10 @@ func (s *Service) Host(ctx context.Context, sess callrules.Session, req callrule
 // acting is who makes a host control: the host's deployable, session and seat, and their
 // call, as read before the gates.
 type acting struct {
-	site callrules.SiteRef
-	seat seatRow
-	room roomRow
+	site    callrules.SiteRef
+	seat    seatRow
+	room    roomRow
+	session sessionRow
 }
 
 // hostOf resolves the session making a host control: a host seat in an open call, in it
@@ -254,7 +255,7 @@ func (s *Service) hostOf(ctx context.Context, sess callrules.Session) (acting, e
 	if err := s.delegatedEffectAllowed(ctx, site, seat.KeyID); err != nil {
 		return acting{}, err
 	}
-	return acting{site: site, seat: *seat, room: *room}, nil
+	return acting{site: site, seat: *seat, room: *room, session: *row}, nil
 }
 
 // stillHost asks again, fresh and under the gates, what hostOf asked: the call is open and
@@ -271,6 +272,16 @@ func (s *Service) stillHost(ctx context.Context, h acting) (roomRow, error) {
 	if room == nil || !room.open() {
 		return roomRow{}, callEnded()
 	}
+	// An occupied stable seat alone is not current authority. Its session may
+	// have ended, moved elsewhere or lost its credential while provider I/O was
+	// pending; real re-entry also replaces the media admission generation.
+	session, err := s.store.sessionByID(ctx, owner, h.session.ID)
+	if err != nil {
+		return roomRow{}, err
+	}
+	if !session.usable(s.now()) || session.SiteID != h.site.SiteID || session.KeyID != h.session.KeyID || session.CredentialID != h.session.CredentialID || session.SeatID != h.seat.ID || session.RoomID != room.ID {
+		return roomRow{}, notHost()
+	}
 	seat, err := s.store.seatByID(ctx, owner, h.seat.ID)
 	if err != nil {
 		return roomRow{}, err
@@ -278,7 +289,7 @@ func (s *Service) stillHost(ctx context.Context, h acting) (roomRow, error) {
 	if familyRoom(*room) && (seat == nil || seat.KeyID != room.KeyID || seat.Kind != string(callrules.KindPerson)) {
 		return roomRow{}, notHost()
 	}
-	if seat == nil || seat.RoomID != room.ID || !seat.Host || !seat.occupying() {
+	if seat == nil || seat.RoomID != room.ID || !seat.Host || !seat.occupying() || seat.Identity != h.seat.Identity || !seat.JoinedAt.Equal(h.seat.JoinedAt) {
 		return roomRow{}, notHost()
 	}
 	return *room, nil
@@ -656,10 +667,16 @@ func (s *Service) admit(ctx context.Context, h acting, target string) error {
 // rows under them (the file note). A call some other request ended meanwhile is no
 // failure: the state asked for holds.
 func (s *Service) end(ctx context.Context, h acting) error {
-	if familyRoom(h.room) {
-		if _, err := s.stillHost(memql.ContextWithFreshRead(ctx), h); err != nil {
-			return err
+	// Revalidate before dispatching an irreversible provider effect as well as
+	// before recording its result. Provider I/O still runs outside room gates;
+	// an already-dispatched authorized effect cannot be retroactively canceled.
+	if _, err := s.stillHost(memql.ContextWithFreshRead(ctx), h); err != nil {
+		if errors.Is(err, callrules.ErrEnded) {
+			return nil
 		}
+		return err
+	}
+	if familyRoom(h.room) {
 		return s.closeFamily(ctx, h.room, "family_host_ended")
 	}
 	if err := s.deleteMediaRoom(ctx, h.room); err != nil {

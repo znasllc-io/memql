@@ -641,7 +641,7 @@ func (s *Service) openRoom(ctx context.Context, site callrules.SiteRef, server M
 	}
 	joinedAt := time.Time{}
 	if decision.Outcome == callrules.OutcomeAdmit {
-		seat.Status, joinedAt = seatAdmitted, now
+		seat.Status, joinedAt = seatAdmitted, persistedCallTime(now)
 		seat.JoinedAt = joinedAt
 		if funding.bounded() {
 			funding.FundingStartedAt, funding.FundingDeadline = now, allowance.AvailableUntil
@@ -1193,7 +1193,7 @@ func (s *Service) joinGated(ctx context.Context, site callrules.SiteRef, room ro
 	}
 	joinedAt := time.Time{}
 	if decision.Outcome == callrules.OutcomeAdmit {
-		taken.Status, joinedAt = seatAdmitted, now
+		taken.Status, joinedAt = seatAdmitted, persistedCallTime(now)
 		taken.JoinedAt = joinedAt
 	}
 
@@ -1347,7 +1347,7 @@ func (s *Service) recordJoin(ctx context.Context, owner string, seat seatRow, as
 		seat.Identity = identity
 	}
 	if joinedAt, ok := fields["joinedAt"].(time.Time); ok {
-		seat.JoinedAt = joinedAt
+		seat.JoinedAt = persistedCallTime(joinedAt)
 	}
 	if host, ok := fields["host"].(bool); ok {
 		seat.Host = host
@@ -1526,7 +1526,7 @@ func (s *Service) answerWaiting(ctx context.Context, site callrules.SiteRef, roo
 	switch decision.Outcome {
 	case callrules.OutcomeAdmit:
 		admittedSeat := seat
-		admittedSeat.Status, admittedSeat.JoinedAt = seatAdmitted, now
+		admittedSeat.Status, admittedSeat.JoinedAt = seatAdmitted, persistedCallTime(now)
 		if err := s.store.updateSeat(ctx, owner, seat, map[string]any{"status": seatAdmitted, "joinedAt": now}, memql.VersionTimeAfter(seat.Version, now)); err != nil {
 			return callrules.JoinResult{}, seatRow{}, err
 		}
