@@ -111,6 +111,33 @@ describe("the share view", () => {
     ]);
   });
 
+  it("shows who is picked as chips inside the search box, not as 'N selected' (Nov 20 call)", async () => {
+    const connection = connect({ shareDirectory: [...people, { userId: "u-ada", displayName: "Ada Park" }, { groupId: "g-fylo", displayName: "Fylo", members: 4 }] });
+    await renderFiles();
+    await openShare();
+    const box = () => searchBox().closest(".os-card-search-input")!;
+    expect(box().hasAttribute("data-picker-field")).toBe(false);
+    await pick("Dana Cole");
+    await click(screen.getByRole("option", { name: "Fylo" }));
+    // Both stand in the box, in the order picked, each with its own x.
+    expect([...box().querySelectorAll(".os-chip")].map((chip) => chip.textContent)).toEqual(["Dana Cole", "Fylo"]);
+    expect(box().hasAttribute("data-picker-field")).toBe(true);
+    // The count is for screen readers only now.
+    expect(screen.getByText("2 selected").className).toBe("os-sr-only");
+    // The x un-picks that one; Backspace in the empty box takes off the last.
+    await click(within(box() as HTMLElement).getByRole("button", { name: "Remove Dana Cole" }));
+    expect([...box().querySelectorAll(".os-chip")].map((chip) => chip.textContent)).toEqual(["Fylo"]);
+    await pick("Ada Park");
+    await act(async () => { fireEvent.keyDown(searchBox(), { key: "Backspace" }); });
+    expect([...box().querySelectorAll(".os-chip")].map((chip) => chip.textContent)).toEqual(["Fylo"]);
+    // What stays picked is what is shared.
+    await click(addButton());
+    expect(connection.callsNamed("libraryShareFile")).toEqual([
+      'builtin libraryShareFile(artifactId: "a-1", recipientGroupId: "g-fylo", days: 7)',
+    ]);
+    expect(box().querySelectorAll(".os-chip")).toHaveLength(0);
+  });
+
   it("offers groups beside people, and shares with a whole group", async () => {
     const connection = connect({ shareDirectory: [...people, { groupId: "g-fylo", displayName: "Fylo", members: 4 }] });
     await renderFiles();
