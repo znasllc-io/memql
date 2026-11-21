@@ -3,6 +3,7 @@ import { useDraggable } from "@dnd-kit/core";
 
 import type { DeskFileDrag } from "../../chrome/Desktop";
 import { artifactName, deskEntryOf, type ArtifactRow } from "./rows";
+import { useOneAtATime } from "../../kit/oneAtATime";
 
 // The grid's glyphs: one thin outline each, the way Fleet draws a machine, with
 // a file's type written inside it in the data face rather than a coloured icon
@@ -102,7 +103,13 @@ export function FileTile({
   /** The live list's arrival cue: a file that just landed says so. */
   tick: "added" | "updated" | null;
   onPick: () => void;
-  onOpen: () => void;
+  /**
+   * Double-click or Enter. An open that returns its promise (a download: a
+   * shared file, a zip) is held like a kit button (kit/oneAtATime), so a burst
+   * of double-clicks downloads once and the next only after half a second
+   * (Jesús, Nov 20 2026).
+   */
+  onOpen: () => unknown;
   onMenu: (x: number, y: number) => void;
   /** A quiet line under the name (who shared a file with you). */
   caption?: string;
@@ -126,6 +133,8 @@ export function FileTile({
     disabled: fixed,
   });
   const name = artifactName(row);
+  const guard = useOneAtATime();
+  const open = () => guard.press(onOpen, false);
   const press = useLongPress((x, y) => {
     onPick();
     onMenu(x, y);
@@ -158,11 +167,11 @@ export function FileTile({
         onClick={() => {
           if (!press.consumed()) onPick();
         }}
-        onDoubleClick={onOpen}
+        onDoubleClick={open}
         onKeyDown={(event) => {
           if (event.key === "Enter") {
             event.preventDefault();
-            onOpen();
+            open();
           } else if (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) {
             event.preventDefault();
             onPick();
