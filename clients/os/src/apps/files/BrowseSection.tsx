@@ -573,10 +573,8 @@ export function BrowseSection({
   };
 
   const openVsCodeFor = (row: ArtifactRow) => {
-    if (isZipArtifact(row)) {
-      void downloadRow(row);
-      return;
-    }
+    // A zip downloads; its promise goes back so the tile holds a burst.
+    if (isZipArtifact(row)) return downloadRow(row);
     setVsNoAnswer(false);
     openInVsCode(config.domain, row.id, () => setVsNoAnswer(true), undefined, editorFilename(row));
   };
@@ -1129,7 +1127,7 @@ export function BrowseSection({
                   hint={`Shared with you until ${new Date(notice.expiresAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`}
                   tick={tick}
                   onPick={() => setPicked(notice.id)}
-                  onOpen={() => void downloadNotice(notice)}
+                  onOpen={() => downloadNotice(notice)}
                   onMenu={(x, y) => setNoticeMenu({ x, y, notice })}
                 />
               )}

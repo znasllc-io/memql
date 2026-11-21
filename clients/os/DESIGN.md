@@ -131,7 +131,7 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    (`onClick={() => save(file)}`, not `void save(file)`); the engine refuses
    the same save while one runs, for agents with no button.
    Download is one of these acts (Head icon, right-click, Shared with me, a
-   version's icon): a burst downloads once, the icon dims for at least half a
+   version's icon, and a double-click on a shared file's or a zip's tile): a burst downloads once, the icon dims for at least half a
    second, and longer while the file is prepared, and the rail says `Downloaded "name".` for five seconds, as it
    says `Saved ...` after Save.
 

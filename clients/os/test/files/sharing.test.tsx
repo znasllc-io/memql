@@ -433,6 +433,21 @@ describe("Shared with me", () => {
     expect(screen.getByText(/This share has ended\./)).toBeTruthy();
   });
 
+  // Jesús, Nov 20: a double-click on a Shared-with-me tile downloads too, so
+  // spamming it is held like the Download icon -- one download, then another
+  // only after the half second.
+  it("a burst of double-clicks on a shared file downloads it once", async () => {
+    connect({});
+    await renderFiles();
+    await click(within(rail()).getByRole("button", { name: "Shared with me" }));
+    const tile = await screen.findByRole("button", { name: /Budget 2027\.xlsx/ });
+    await act(async () => { for (let i = 0; i < 20; i++) fireEvent.doubleClick(tile); });
+    expect(h.download).toHaveBeenCalledTimes(1);
+    await holdOver();
+    await act(async () => { fireEvent.doubleClick(tile); });
+    expect(h.download).toHaveBeenCalledTimes(2);
+  });
+
   it("downloads the shared file on a double-click", async () => {
     connect({});
     await renderFiles();
