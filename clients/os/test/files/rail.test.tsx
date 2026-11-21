@@ -46,6 +46,17 @@ describe("the Add control", () => {
     expect(screen.queryByText("Into Library")).toBeNull();
   });
 
+  it("is absent where nothing can be added: the Bin, Shared with me and Sharing", async () => {
+    await renderFiles();
+    const rail = screen.getByRole("navigation", { name: "File locations" });
+    for (const place of ["Bin", "Shared with me", "Sharing"]) {
+      await click(within(rail).getByRole("button", { name: place }));
+      expect(screen.queryByRole("button", { name: /^Add$/ }), place).toBeNull();
+    }
+    await click(within(rail).getByRole("button", { name: "Library" }));
+    expect(screen.getByRole("button", { name: /^Add$/ })).toBeTruthy();
+  });
+
   it("creates the folder inside the folder being looked at", async () => {
     const connection = fakeConnection({ folders: [folderRow({ id: "f-a", name: "Contracts" })] });
     h.connection = connection;

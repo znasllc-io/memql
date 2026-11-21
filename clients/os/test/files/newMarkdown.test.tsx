@@ -28,7 +28,8 @@ it("opens Make a file with Markdown, this folder and the way back", async () => 
   expect(draft.fileKind).toEqual({ kind: "document", format: "markdown" });
   expect(openingStep(draft, { templates: [], templatesLoaded: true, inference: null, files: () => undefined })).toBe("name");
 });
-it.each(["library", "bin", "materializer"])("names no folder at the %s root", async (place) => {
+// The Bin has no Add at all (rail.test.tsx: "is absent where nothing can be added").
+it.each(["library", "materializer"])("names no folder at the %s root", async (place) => {
   await renderFiles({ intent: { id: "place", payload: { place } } });
   await addMarkdown();
   expect(h.open.mock.calls[0]![2]).toEqual({ compose: { format: "markdown", returnTo: { appId: "files", sectionId: "browse" } } });
