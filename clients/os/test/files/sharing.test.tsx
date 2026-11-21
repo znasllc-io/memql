@@ -14,6 +14,7 @@ vi.mock("../../src/apps/files/actions/download", async (importOriginal) => ({
   downloadArtifact: h.download,
 }));
 
+import { MIN_HOLD_MS } from "../../src/kit/oneAtATime";
 import { setEffectiveCapabilities } from "../../src/system/roles";
 import { chooseOption, openSelect } from "../selectControl";
 import { installSeededAccess, seededAccessWithout } from "../seededAccess";
@@ -63,6 +64,9 @@ async function pick(name: string) {
   await click(await screen.findByRole("option", { name }));
 }
 const addButton = () => screen.getByRole("button", { name: "Add selected users and groups" });
+
+/** Waits out the half second a press holds its button (kit/oneAtATime). */
+const holdOver = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, MIN_HOLD_MS)); });
 
 describe("the share view", () => {
   it("takes the place of the tiles, the rail beside it, and the back arrow returns", async () => {
@@ -372,6 +376,9 @@ describe("Shared with me", () => {
 
     await act(async () => { answer(); });
     expect(screen.getByText('Saved "Budget 2027.xlsx" to your Library.')).toBeTruthy();
+    // A fast save still holds the icon for its half second (Jesús, Nov 20).
+    expect(save.hasAttribute("data-busy")).toBe(true);
+    await holdOver();
     expect(save.hasAttribute("data-busy")).toBe(false);
     await click(save);
     expect(connection.callsNamed("librarySaveSharedCopy")).toHaveLength(2);
@@ -393,6 +400,10 @@ describe("Shared with me", () => {
 
     await act(async () => { answer(); });
     expect(screen.getByText('Downloaded "Budget 2027.xlsx".')).toBeTruthy();
+    // A local download finishes in hundredths of a second; the icon still
+    // holds for half a second, so spamming it downloads once (Jesús, Nov 20).
+    expect(download.hasAttribute("data-busy")).toBe(true);
+    await holdOver();
     expect(download.hasAttribute("data-busy")).toBe(false);
     await click(download);
     expect(h.download).toHaveBeenCalledTimes(2);
