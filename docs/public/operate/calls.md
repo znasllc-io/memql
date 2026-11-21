@@ -772,9 +772,33 @@ requested `periodDays`, `currency:"USD"`, nullable `hostedCalls`, `joinedCalls` 
 Counts include retained active and ended hosted/joined calls in that period, not
 scheduled or cancelled bookings. Duration totals and daily durations include completed
 **hosted** rooms only. Archived history remains included until its deadline. A scan
-exceeding 1,000 retained rows in either history list returns unavailable totals rather
-than partial totals. Monetary fields `availableCents`, `reservedCents`, `spendCents`
-and daily costs are `null`: this projection does not invent wallet or billing records.
+exceeding 1,000 retained rows or 20 native pages in either history list returns
+unavailable totals rather than partial totals. The list follows actual native
+continuation even when an operator configures a smaller result window; a short
+page alone does not prove that history is complete.
+
+Monetary fields come from the authoritative wallet independently of retained call
+history. `availableCents` and `reservedCents` reflect a coherent wallet snapshot;
+`spendCents` and daily `costCents` count immutable posted debits on their UTC posting
+date. Pending checkouts, reservations and estimated call costs are excluded.
+`overview.ledger` declares `basis:"posted_wallet_entries"`, a status of `complete`,
+`incomplete` or `limited`, and nullable `creditedCents`, `usageDebitedCents`,
+`passDebitedCents` and `financialReview`. The pass field describes existing legacy
+records. Refund/dispute callbacks can place funding under review; these totals are
+wallet entries, not a net-cash or refund statement. History deletion does not erase
+posted charges or recreate deleted call details. A stable account without a wallet
+has a known zero balance. Changed snapshots are retried at most three times; a scan
+that cannot finish within five native cursor pages of at most 200 rows exposes
+unavailable totals rather than a partial sum.
+
+`overview.usage` declares `basis:"retained_hosted_call_configuration"`, the same
+three status values, and nullable `insightsCalls`, `resourcesCalls` and
+`agentHostedCalls`. These count the configuration of retained hosted calls, not
+measured inference or media processing. The opening host's kind is immutable;
+handover cannot reclassify an earlier human-hosted call. Missing legacy facts stay
+unknown. Financial and call-configuration statuses are independent, so clients may
+show known wallet totals while history is still collecting. Final response checks
+revalidate current account or delegated authority after all reads.
 
 To archive finished or cancelled history, first post
 `{"action":"archive_preview","id":"<history id>"}`. The server returns `deleteAt`
@@ -1812,6 +1836,31 @@ cleanup is best effort if the media provider is unavailable, so revocation is no
 a promise of instantaneous media disconnection. Scheduled bookings hold grant
 allowance but do not pre-reserve the account wallet or future server capacity;
 opening rechecks both and can refuse when either is unavailable.
+
+### Static agent portraits
+
+An agent may upload a bounded PNG or JPEG under `portraits_write`, or use an
+owner-supplied asset authorized by recent Passkey verification. Native decoding,
+pixel/byte limits and re-encoding produce an immutable portrait reference and
+digest for exact host review. Arbitrary remote image URLs are not accepted. A
+static portrait does not satisfy a live-camera readiness requirement or establish
+the subject's identity, age or safety. Reads require current owner, admission or
+eligible pending-review authority.
+
+Cleanup starts only after an asset has been continuously unreferenced for 24 hours.
+Live approved grants, pending proposals and occupying agent seats preserve their
+portraits. Successful reuse resets that grace period. Incomplete reference
+inventories preserve assets. Retirement records a durable barrier before storage
+work; readers and approvals cannot revive an asset while a provider result is
+uncertain. Retries reuse the same storage retirement identity. Re-upload after
+retirement receives a fresh asset ID, so an old reference cannot adopt new bytes.
+
+Confirmed retirement makes metadata eligible for physical deletion after another
+24 hours. Native retention deletes bounded oldest-first batches under account and
+row-admission checks, retaining the final retirement marker until earlier versions
+are removed. Storage retirement preserves a zero-byte write fence to reject late
+writes. Provider backups, snapshots or soft-deleted historical versions have their
+own retention policy; this cleanup does not claim to remove them.
 
 ### Skills, workflow controls and resource publication
 

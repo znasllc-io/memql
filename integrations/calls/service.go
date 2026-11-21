@@ -150,17 +150,19 @@ const (
 // Service is the calls service. New builds it beside the integration's operator acts,
 // over the same store, gate pool, pepper, clock and randomness.
 type Service struct {
-	portraitStorage  PortraitStorage
-	guestRetirement  *guestRetirementScan
-	commerce         func() CommerceConfig
-	store            *Store
-	gateDB           func() *sql.DB
-	pepper           func(context.Context) ([]byte, error)
-	random           io.Reader
-	now              func() time.Time
-	media            func(MediaServer, MediaCredential) (MediaBackend, error)
-	logger           *slog.Logger
-	invitationSender func() email.Sender
+	lifecycle           *lifecycleScans
+	portraitMaintenance *portraitMaintenanceState
+	portraitStorage     PortraitStorage
+	guestRetirement     *guestRetirementScan
+	commerce            func() CommerceConfig
+	store               *Store
+	gateDB              func() *sql.DB
+	pepper              func(context.Context) ([]byte, error)
+	random              io.Reader
+	now                 func() time.Time
+	media               func(MediaServer, MediaCredential) (MediaBackend, error)
+	logger              *slog.Logger
+	invitationSender    func() email.Sender
 }
 
 // ---------------------------------------------------------------------------
@@ -676,14 +678,14 @@ func (s *Service) openRoom(ctx context.Context, site callrules.SiteRef, server M
 	if mediaRoom == "" {
 		mediaRoom = o.roomID
 	}
-	hostSeat := ""
+	hostSeat, originalHostKind := "", ""
 	if seat.Host {
-		hostSeat = seat.ID
+		hostSeat, originalHostKind = seat.ID, seat.Kind
 	}
 	if err := s.store.createRoom(ctx, owner, newRoom{
 		roomFunding: funding,
 		ID:          o.roomID, SiteID: site.SiteID, Deployable: site.Deployable, KeyID: o.keyID,
-		MediaServerID: server.ID, MediaRoom: mediaRoom, HostSeatID: hostSeat,
+		MediaServerID: server.ID, MediaRoom: mediaRoom, HostSeatID: hostSeat, OriginalHostKind: originalHostKind,
 		GuestDigest: o.guestDigest, HostDigest: o.hostDigest, ScheduledCallID: o.scheduledCallID, Locked: o.locked,
 		OpenedAt: now, Window: window, Title: callTitle(o.title, now),
 	}, now); err != nil {

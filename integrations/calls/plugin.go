@@ -148,8 +148,9 @@ func New(d Deps) *Integration {
 		media = liveKitFor
 	}
 	i.service = &Service{
-		store: i.store, gateDB: i.gateDB, pepper: i.pepper, random: i.random,
-		now: i.now, media: media, logger: i.logger, guestRetirement: &guestRetirementScan{},
+		lifecycle: &lifecycleScans{},
+		store:     i.store, gateDB: i.gateDB, pepper: i.pepper, random: i.random,
+		now: i.now, media: media, logger: i.logger, guestRetirement: &guestRetirementScan{}, portraitMaintenance: &portraitMaintenanceState{},
 	}
 	return i
 }

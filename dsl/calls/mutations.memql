@@ -107,6 +107,7 @@ mutation session updateCallsSession {
 @serverOnly
 mutation room createCallsRoom {
   args {
+    originalHostKind enum("person", "agent")
     messageProtocol string @maxLength(64)
     usageConfig string
     usageOperation string
@@ -139,7 +140,7 @@ mutation room createCallsRoom {
     joinWindowCount  int
   }
   insert {
-    accept { messageProtocol, usageConfig, usageOperation, usageDigest, usageReservedCents, usageMeter, usageCostCents, fundingMode, fundingPassId, fundingStartedAt, fundingDeadline, fundingMaxPeople, historyPending, title, siteId, deployable, keyId, mediaServerId, mediaRoom, locked, hostSeatId, scheduledCallId, guestDigest, hostDigest, openedAt, joinWindowStartedAt, joinWindowCount }
+    accept { originalHostKind, messageProtocol, usageConfig, usageOperation, usageDigest, usageReservedCents, usageMeter, usageCostCents, fundingMode, fundingPassId, fundingStartedAt, fundingDeadline, fundingMaxPeople, historyPending, title, siteId, deployable, keyId, mediaServerId, mediaRoom, locked, hostSeatId, scheduledCallId, guestDigest, hostDigest, openedAt, joinWindowStartedAt, joinWindowCount }
     stamp {
       id: args.roomId
       ownerUserId: actor.userId
@@ -639,6 +640,9 @@ mutation credential updateCallsCredential {
 @serverOnly
 mutation history createCallsHistory {
   args {
+    configuredInsights bool
+    configuredResources bool
+    agentHosted bool
     costCents int
     historyId string!
     versionTime datetime
@@ -656,7 +660,7 @@ mutation history createCallsHistory {
     purgeAt datetime
   }
   insert {
-    accept { costCents, siteId, keyId, sourceKind, sourceId, title, role, status, orderKey, startedAt, endedAt, archivedAt, purgeAt }
+    accept { configuredInsights, configuredResources, agentHosted, costCents, siteId, keyId, sourceKind, sourceId, title, role, status, orderKey, startedAt, endedAt, archivedAt, purgeAt }
     stamp {
       id: args.historyId
       ownerUserId: actor.userId
@@ -669,6 +673,9 @@ mutation history createCallsHistory {
 @serverOnly
 mutation history updateCallsHistory {
   args {
+    configuredInsights bool
+    configuredResources bool
+    agentHosted bool
     costCents int
     historyId string!
     versionTime datetime
@@ -681,7 +688,7 @@ mutation history updateCallsHistory {
     purgeAt datetime
   }
   update {
-    accept { costCents, title, role, status, startedAt, endedAt, archivedAt, purgeAt }
+    accept { configuredInsights, configuredResources, agentHosted, costCents, title, role, status, startedAt, endedAt, archivedAt, purgeAt }
     stamp {
       id: args.historyId
       createdAt: args.versionTime ?? now
@@ -953,9 +960,17 @@ mutation agentPortrait saveCallsPortrait {
  height int!
  blobRef string
  issuedAt datetime!
+ status string
+ byteSize int
+ unusedSince datetime
+ retiredAt datetime
+ purgeAt datetime
+ retirementId string
+ retirementETag string
+ retirementReady bool
  }
  insert {
- accept { siteId, keyId, digest, mimeType, width, height, blobRef, issuedAt }
+ accept { siteId, keyId, digest, mimeType, width, height, blobRef, issuedAt, status, byteSize, unusedSince, retiredAt, purgeAt, retirementId, retirementETag, retirementReady }
  stamp { id: args.portraitId, ownerUserId: actor.userId, createdAt: args.versionTime }
  }
 }

@@ -128,25 +128,70 @@ func (s *Store) reportPage(ctx context.Context, owner, site, key, actor, cursor 
 	}
 	return cases, next, nil
 }
+
+// The caller holds the site's report-budget gate. Consume native continuations:
+// a DSL page larger than the engine's MaxResults is not a complete inventory.
 func (s *Store) reportBudget(ctx context.Context, owner, site, key, room string, now time.Time) error {
+	owned, ok := asOwner(auth.ContextWithInternalOrigin(memql.ContextWithFreshRead(ctx)), owner)
+	if !ok {
+		return errNoOwner
+	}
 	call, e := langparser.RenderCall("callsReportBudget", map[string]any{"siteId": site, "since": versionStamp(now.Add(-24 * time.Hour))})
-	rows, e := s.readAs(auth.ContextWithInternalOrigin(memql.ContextWithFreshRead(ctx)), owner, "report submission budget", call, e)
 	if e != nil {
-		return e
+		return accountRefusal("report_unavailable")
 	}
-	byKey, byRoom := 0, 0
-	for _, r := range rows {
-		if memql.BareShortId(rowString(r, "reporterKeyId")) == key {
-			byKey++
+	byKey, byRoom, total := 0, 0, 0
+	cursor := ""
+	seen := map[string]bool{}
+	cursors := map[string]bool{}
+	for range 5 {
+		if e := ctx.Err(); e != nil {
+			return e
 		}
-		if memql.BareShortId(rowString(r, "roomId")) == room {
-			byRoom++
+		result, e := s.engine.Execute(memql.ContextWithCursor(memql.ContextWithRootsOnlyRead(owned), cursor), "query "+call)
+		if e != nil {
+			return accountRefusal("report_unavailable")
 		}
+		if e := ctx.Err(); e != nil {
+			return e
+		}
+		out, rows, e := accountingInventoryPage(result)
+		if e != nil {
+			return accountRefusal("report_unavailable")
+		}
+		for _, r := range rows {
+			id := rowString(r, "id")
+			if id == "" || seen[id] {
+				return accountRefusal("report_unavailable")
+			}
+			seen[id] = true
+			total++
+			if memql.BareShortId(rowString(r, "reporterKeyId")) == key {
+				byKey++
+			}
+			if memql.BareShortId(rowString(r, "roomId")) == room {
+				byRoom++
+			}
+			if total >= 1000 || byKey >= 5 || byRoom >= 100 {
+				return accountRefusal("report_rate_limited")
+			}
+		}
+		next, e := memql.ResultPageCursor(out)
+		if e != nil {
+			return accountRefusal("report_rate_limited")
+		}
+		if next == "" {
+			return nil
+		}
+		if cursors[next] || len(rows) == 0 {
+			return accountRefusal("report_rate_limited")
+		}
+		cursors[next] = true
+		cursor = next
 	}
-	if len(rows) >= 1000 || byKey >= 5 || byRoom >= 100 {
-		return accountRefusal("report_rate_limited")
-	}
-	return nil
+	// An operator may impose a lower result ceiling. Never treat a bounded,
+	// unfinished scan as permission to exceed a shared submission budget.
+	return accountRefusal("report_rate_limited")
 }
 func (s *Store) reportAudits(ctx context.Context, owner, caseID string) ([]map[string]any, error) {
 	call, e := langparser.RenderCall("callsReportAudit", map[string]any{"caseId": caseID})

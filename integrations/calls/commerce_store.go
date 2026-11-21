@@ -3,6 +3,7 @@ package calls
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -119,12 +120,12 @@ func (s *Store) saveCommerce(ctx context.Context, owner string, v *commerceState
 }
 func (s *Store) commerceAll(ctx context.Context) ([]*commerceState, error) {
 	call, err := langparser.RenderCall("callsCommerceStates", nil)
-	rows, err := s.readAsCluster(auth.ContextWithInternalOrigin(ctx), "the global commerce commitments", call, err)
+	rows, err := s.readCompleteClusterInventory(ctx, "the global commerce commitments", call, err, 1000)
+	if errors.Is(err, errIncompleteInventory) {
+		return nil, allowanceUnavailable()
+	}
 	if err != nil {
 		return nil, err
-	}
-	if len(rows) >= 1000 {
-		return nil, allowanceUnavailable()
 	}
 	out := make([]*commerceState, 0, len(rows))
 	for _, row := range rows {
@@ -138,12 +139,12 @@ func (s *Store) commerceAll(ctx context.Context) ([]*commerceState, error) {
 }
 func (s *Store) commerceRooms(ctx context.Context) ([]roomRow, error) {
 	call, err := langparser.RenderCall("callsCommerceRooms", nil)
-	rows, err := s.readAsCluster(auth.ContextWithInternalOrigin(ctx), "the global call commitments", call, err)
+	rows, err := s.readCompleteClusterInventory(ctx, "the global call commitments", call, err, 1000)
+	if errors.Is(err, errIncompleteInventory) {
+		return nil, allowanceUnavailable()
+	}
 	if err != nil {
 		return nil, err
-	}
-	if len(rows) >= 1000 {
-		return nil, allowanceUnavailable()
 	}
 	out := make([]roomRow, 0, len(rows))
 	for _, row := range rows {
@@ -153,12 +154,12 @@ func (s *Store) commerceRooms(ctx context.Context) ([]roomRow, error) {
 }
 func (s *Store) commerceAccountCount(ctx context.Context) (int, error) {
 	call, err := langparser.RenderCall("callsCommerceAccounts", nil)
-	rows, err := s.readAsCluster(auth.ContextWithInternalOrigin(ctx), "the global private-account count", call, err)
+	rows, err := s.readCompleteClusterInventory(ctx, "the global private-account count", call, err, 1000)
+	if errors.Is(err, errIncompleteInventory) {
+		return 0, allowanceUnavailable()
+	}
 	if err != nil {
 		return 0, err
-	}
-	if len(rows) >= 1000 {
-		return 0, allowanceUnavailable()
 	}
 	return len(rows), nil
 }

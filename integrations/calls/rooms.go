@@ -270,7 +270,8 @@ func (s *Store) keyByID(ctx context.Context, owner, keyID string) (*Key, error) 
 // ShareSeatID and ShareStartedAt are the newest screen share the media server reported
 // (events.go), the zero time before any.
 type roomRow struct {
-	MessageProtocol string
+	OriginalHostKind string
+	MessageProtocol  string
 	roomFunding
 	SpotlightData                                                                string
 	HistoryPending                                                               bool
@@ -287,29 +288,30 @@ func (r roomRow) open() bool { return r.Status != "ended" }
 
 func roomFromRow(r map[string]any) roomRow {
 	return roomRow{
-		SpotlightData:   rowString(r, "spotlightData"),
-		MessageProtocol: rowString(r, "messageProtocol"),
-		roomFunding:     fundingFromRow(r),
-		HistoryPending:  rowBool(r, "historyPending"),
-		ID:              memql.BareShortId(rowString(r, "id")),
-		SiteID:          memql.BareShortId(rowString(r, "siteId")),
-		OwnerUserID:     memql.BareShortId(rowString(r, "ownerUserId")),
-		KeyID:           memql.BareShortId(rowString(r, "keyId")),
-		MediaServerID:   memql.BareShortId(rowString(r, "mediaServerId")),
-		MediaRoom:       rowString(r, "mediaRoom"),
-		Status:          rowString(r, "status"),
-		HostSeatID:      memql.BareShortId(rowString(r, "hostSeatId")),
-		ScheduledCallID: memql.BareShortId(rowString(r, "scheduledCallId")),
-		EndReason:       rowString(r, "endReason"),
-		Title:           rowString(r, "title"),
-		ShareSeatID:     memql.BareShortId(rowString(r, "shareSeatId")),
-		Locked:          rowBool(r, "locked"),
-		OpenedAt:        rowTime(r, "openedAt"),
-		HostLeftAt:      rowTime(r, "hostLeftAt"),
-		EndedAt:         rowTime(r, "endedAt"),
-		ShareStartedAt:  rowTime(r, "shareStartedAt"),
-		Window:          callrules.JoinWindow{StartedAt: rowTime(r, "joinWindowStartedAt"), Count: rowInt(r, "joinWindowCount")},
-		Version:         rowTime(r, "createdAt"),
+		OriginalHostKind: rowString(r, "originalHostKind"),
+		SpotlightData:    rowString(r, "spotlightData"),
+		MessageProtocol:  rowString(r, "messageProtocol"),
+		roomFunding:      fundingFromRow(r),
+		HistoryPending:   rowBool(r, "historyPending"),
+		ID:               memql.BareShortId(rowString(r, "id")),
+		SiteID:           memql.BareShortId(rowString(r, "siteId")),
+		OwnerUserID:      memql.BareShortId(rowString(r, "ownerUserId")),
+		KeyID:            memql.BareShortId(rowString(r, "keyId")),
+		MediaServerID:    memql.BareShortId(rowString(r, "mediaServerId")),
+		MediaRoom:        rowString(r, "mediaRoom"),
+		Status:           rowString(r, "status"),
+		HostSeatID:       memql.BareShortId(rowString(r, "hostSeatId")),
+		ScheduledCallID:  memql.BareShortId(rowString(r, "scheduledCallId")),
+		EndReason:        rowString(r, "endReason"),
+		Title:            rowString(r, "title"),
+		ShareSeatID:      memql.BareShortId(rowString(r, "shareSeatId")),
+		Locked:           rowBool(r, "locked"),
+		OpenedAt:         rowTime(r, "openedAt"),
+		HostLeftAt:       rowTime(r, "hostLeftAt"),
+		EndedAt:          rowTime(r, "endedAt"),
+		ShareStartedAt:   rowTime(r, "shareStartedAt"),
+		Window:           callrules.JoinWindow{StartedAt: rowTime(r, "joinWindowStartedAt"), Count: rowInt(r, "joinWindowCount")},
+		Version:          rowTime(r, "createdAt"),
 	}
 }
 
@@ -363,6 +365,7 @@ func (s *Store) openRoomsForKey(ctx context.Context, owner, keyID string) ([]roo
 // call's room names its booking and opens locked, and has no host seat when a guest
 // opened it.
 type newRoom struct {
+	OriginalHostKind string
 	roomFunding
 	ID, SiteID, Deployable, KeyID, MediaServerID, MediaRoom, HostSeatID string
 	GuestDigest, HostDigest, ScheduledCallID, Title                     string
@@ -389,7 +392,7 @@ func (s *Store) createRoom(ctx context.Context, owner string, n newRoom, version
 	}
 	// Absent rather than empty: a room a guest opened has no host seat yet, an ad hoc
 	// call's names no booking, and a deployable may have no name.
-	for name, value := range map[string]string{"deployable": n.Deployable, "hostSeatId": n.HostSeatID, "scheduledCallId": n.ScheduledCallID, "title": n.Title} {
+	for name, value := range map[string]string{"originalHostKind": n.OriginalHostKind, "deployable": n.Deployable, "hostSeatId": n.HostSeatID, "scheduledCallId": n.ScheduledCallID, "title": n.Title} {
 		if value != "" {
 			args[name] = value
 		}

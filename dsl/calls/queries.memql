@@ -24,7 +24,7 @@ query agentPortrait callsPortraitById {
 @cache(0)
 query agentPortrait callsPortraitsForKey {
  args { siteId string! keyId string! }
- filter row => row.siteId == args.siteId && row.keyId == args.keyId && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ filter row => row.siteId == args.siteId && row.keyId == args.keyId && (row.status == nil || row.status != "retired") && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
  paginate 33
  shape callsPortraitFull
 }
@@ -41,6 +41,18 @@ query simulatedWalletEntry callsSimulatedWalletLatest {
   filter row => row.siteId == args.siteId && row.keyId == args.keyId && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   sort "row.createdAt", "desc"
   paginate 1
+  shape callsSimulatedWalletEntryFull
+}
+
+/// Posted wallet ledger, bounded independently of private history. actor.userId scoping is not the fix: this construct is internal-origin only.
+@serverOnly
+@actor
+@cache(0)
+query simulatedWalletEntry callsWalletEntriesForPeriod {
+  args { siteId string! keyId string! since datetime! until datetime! }
+  filter row => row.siteId == args.siteId && row.keyId == args.keyId && row.createdAt >= args.since && row.createdAt < args.until && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  sort "row.createdAt", "asc"
+  paginate 200
   shape callsSimulatedWalletEntryFull
 }
 
@@ -657,7 +669,8 @@ query commerceState callsCommerceStateById {
 @cache(0)
 query commerceState callsCommerceStates {
  filter row => actor.isClusterOwner == true
- paginate 1000
+ sort "row.id", "asc"
+ paginate 200
  shape callsCommerceStateFull
 }
 
@@ -667,7 +680,8 @@ query commerceState callsCommerceStates {
 @cache(0)
 query room callsCommerceRooms {
  filter row => actor.isClusterOwner == true
- paginate 1000
+ sort "row.id", "asc"
+ paginate 200
  shape callsRoomFull
 }
 
@@ -677,7 +691,8 @@ query room callsCommerceRooms {
 @cache(0)
 query key callsCommerceAccounts {
  filter row => actor.isClusterOwner == true && row.userHandle != nil && row.userHandle != ""
- paginate 1000
+ sort "row.id", "asc"
+ paginate 200
  shape callsKeyFull
 }
 
@@ -733,7 +748,8 @@ query resourceState callsResourceStateById {
 @cache(0)
 query workflowState callsWorkflowStates {
  filter row => actor.isClusterOwner == true && row.kind == "run" && isActiveRecord(row)
- paginate 1000
+ sort "row.id", "asc"
+ paginate 200
  shape callsWorkflowStateFull
 }
 
@@ -744,7 +760,7 @@ query workflowState callsWorkflowStates {
 query resourceState callsResourceStates {
  filter row => actor.isClusterOwner == true && isActiveRecord(row)
  sort "row.id", "asc"
- paginate 1000
+ paginate 200
  shape callsResourceStateFull
 }
 
@@ -970,7 +986,8 @@ query reportCase callsReportsForRecipient {
 query reportCase callsReportBudget {
  args { siteId string! since datetime! }
  filter row => row.siteId == args.siteId && row.issuedAt > args.since && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
- paginate 1001
+ sort "row.id", "asc"
+ paginate 200
  shape callsReportBudget
 }
 /// Private audit inventory; actor.userId scoping is not the fix: the native operator and case gate are mandatory.
@@ -1059,4 +1076,28 @@ query session callsMessageSessions {
  filter row => row.id in args.ids && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
  paginate 100
  shape callsSessionFull
+}
+
+/// Native cluster maintenance inventory; actor.userId scoping cannot authorize cross-site orphan cleanup.
+@serverOnly
+@actor
+@cache(0)
+query agentPortrait callsPortraitMaintenanceCandidates {
+ filter row => actor.isClusterOwner == true && (row.status == nil || row.status != "retired")
+ sort "row.id", "asc"
+ paginate 2
+ shape callsPortraitFull
+}
+/// Native reference inventory; actor.userId scoping is not the fix because owner reads are not current portrait cleanup authority.
+@serverOnly
+@actor
+@cache(0)
+query seat callsPortraitOccupiedSeats {
+ args {
+ siteId string!
+ keyId string!
+ }
+ filter row => row.siteId == args.siteId && row.keyId == args.keyId && (row.status == "admitted" || row.status == "in_call") && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ paginate 101
+ shape callsSeatFull
 }

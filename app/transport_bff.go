@@ -14,6 +14,7 @@ func (a *App) transportBFF() {
 	// transport_blobstore.go.
 	uploader, container := a.resolveBlobStore()
 	a.callsPortraitStorage = newCallsPortraitBlobStore(uploader, container)
+	a.wireCallPortraitMaintenance()
 	// Atomic bundle-publish endpoint (POST /sites/{id}/bundles, memql#3713).
 	// Bff-only per the epic's controller ruling: component/edge is a
 	// library here, not a node-mounted endpoint, and the edge node itself

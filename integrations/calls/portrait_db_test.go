@@ -193,8 +193,8 @@ func TestPortraitRateBoundsFreshAssertionAndExplicitAgentScope(t *testing.T) {
 	cw.clock.Advance(6 * time.Minute)
 	_, err = cw.svc.Delegation(ctx, cw.ref, owner.result.Session.Token, &callrules.DelegationRequest{Action: "portrait_upload", PortraitData: portraitSource(t, 1)})
 	require.ErrorContains(t, err, "verification_required")
-	// The lifetime cap also counts durable slots whose images are no longer
-	// referenced. New hours never turn an account into unbounded blob storage.
+	// The active-slot cap also counts durable images awaiting safe retirement.
+	// New hours never turn an account into unbounded active blob storage.
 	for i := 9; i <= 32; i++ {
 		if i%8 == 1 {
 			cw.clock.Advance(time.Hour)

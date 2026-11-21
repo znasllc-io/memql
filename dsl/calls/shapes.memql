@@ -66,6 +66,7 @@ shape simulatedWalletEntry callsSimulatedWalletEntryFull {
 /// The room row as the calls integration reads it. No digest is projected.
 @row
 shape room callsRoomFull {
+  originalHostKind
   messageProtocol
   spotlightData
   usageConfig
@@ -282,6 +283,9 @@ shape credential callsCredentialFull {
 /// Private history service projection; never client-readable.
 @row
 shape history callsHistoryFull {
+  configuredInsights
+  configuredResources
+  agentHosted
   costCents
   row.id
   row.createdAt
@@ -402,6 +406,7 @@ shape agentAdmissionState callsAgentAdmissionFull {
 shape agentPortrait callsPortraitFull {
  row.id
  row.createdAt
+ ownerUserId
  siteId
  keyId
  digest
@@ -409,6 +414,14 @@ shape agentPortrait callsPortraitFull {
  width
  height
  blobRef
+ status
+ byteSize
+ unusedSince
+ retiredAt
+ purgeAt
+ retirementId
+ retirementETag
+ retirementReady
  issuedAt
 }
 

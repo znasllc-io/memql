@@ -19,6 +19,7 @@ const historySyncConcept = "v1:calls:historySync"
 // operation additionally binds the authenticated key and site. Internal origin is
 // stamped at this named-construct seam; raw client graph reads remain closed.
 type historyRow struct {
+	ConfiguredInsights, ConfiguredResources, AgentHosted                                *bool
 	CostCents                                                                           *int64
 	CanRename                                                                           bool // Derived from the fresh operational owner, never stored.
 	ID, SiteID, OwnerUserID, KeyID, SourceKind, SourceID, Title, Role, Status, OrderKey string
@@ -26,7 +27,16 @@ type historyRow struct {
 }
 
 func historyFromRow(r map[string]any) historyRow {
-	return historyRow{CostCents: optionalRoomCents(r, "costCents"), ID: memql.BareShortId(rowString(r, "id")), SiteID: memql.BareShortId(rowString(r, "siteId")), OwnerUserID: memql.BareShortId(rowString(r, "ownerUserId")), KeyID: memql.BareShortId(rowString(r, "keyId")), SourceKind: rowString(r, "sourceKind"), SourceID: memql.BareShortId(rowString(r, "sourceId")), Title: rowString(r, "title"), Role: rowString(r, "role"), Status: rowString(r, "status"), OrderKey: rowString(r, "orderKey"), StartedAt: rowTime(r, "startedAt"), EndedAt: rowTime(r, "endedAt"), ArchivedAt: rowTime(r, "archivedAt"), PurgeAt: rowTime(r, "purgeAt"), Version: rowTime(r, "createdAt")}
+	return historyRow{ConfiguredInsights: optionalHistoryBool(r, "configuredInsights"), ConfiguredResources: optionalHistoryBool(r, "configuredResources"), AgentHosted: optionalHistoryBool(r, "agentHosted"), CostCents: optionalRoomCents(r, "costCents"), ID: memql.BareShortId(rowString(r, "id")), SiteID: memql.BareShortId(rowString(r, "siteId")), OwnerUserID: memql.BareShortId(rowString(r, "ownerUserId")), KeyID: memql.BareShortId(rowString(r, "keyId")), SourceKind: rowString(r, "sourceKind"), SourceID: memql.BareShortId(rowString(r, "sourceId")), Title: rowString(r, "title"), Role: rowString(r, "role"), Status: rowString(r, "status"), OrderKey: rowString(r, "orderKey"), StartedAt: rowTime(r, "startedAt"), EndedAt: rowTime(r, "endedAt"), ArchivedAt: rowTime(r, "archivedAt"), PurgeAt: rowTime(r, "purgeAt"), Version: rowTime(r, "createdAt")}
+}
+func optionalHistoryBool(row map[string]any, field string) *bool {
+	if v, ok := row[field].(bool); ok {
+		return &v
+	}
+	return nil
+}
+func equalHistoryBool(a, b *bool) bool {
+	return a == nil && b == nil || a != nil && b != nil && *a == *b
 }
 func (s *Store) historyByID(ctx context.Context, owner, id string) (*historyRow, error) {
 	call, err := langparser.RenderCall("callsHistoryById", map[string]any{"id": id})
@@ -37,17 +47,55 @@ func (s *Store) historyByID(ctx context.Context, owner, id string) (*historyRow,
 	r := historyFromRow(rows[0])
 	return &r, nil
 }
-func (s *Store) historyForKey(ctx context.Context, owner, site, key, after string, archived bool) ([]historyRow, error) {
+
+// Keep the public cursor as the authenticated last orderKey, but obtain
+// exhaustion from native continuation metadata. An operator may cap this
+// query below its declared 51 rows; a short page is not proof of exhaustion.
+func (s *Store) historyForKey(ctx context.Context, owner, site, key, after string, archived bool) ([]historyRow, bool, error) {
 	call, err := langparser.RenderCall("callsHistoryForKey", map[string]any{"siteId": site, "keyId": key, "afterKey": after, "archived": archived})
-	rows, err := s.readAs(auth.ContextWithInternalOrigin(ctx), owner, "private call history page", call, err)
 	if err != nil {
-		return nil, err
+		return nil, false, quietly("calls: render private history page", err)
+	}
+	owned, ok := rowsAs(ctx, owner)
+	if !ok {
+		return nil, false, errNoOwner
+	}
+	if s == nil || s.engine == nil {
+		return nil, false, errNoEngine
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
+	result, err := s.engine.Execute(memql.ContextWithCursor(memql.ContextWithRootsOnlyRead(owned), ""), "query "+call)
+	if err != nil {
+		return nil, false, quietly("calls: private history page", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
+	executed, rows, err := accountingInventoryPage(result)
+	if err != nil || len(rows) > 51 {
+		return nil, false, errIncompleteInventory
+	}
+	next, err := memql.ResultPageCursor(executed)
+	if err != nil || next != "" && len(rows) == 0 {
+		return nil, false, errIncompleteInventory
 	}
 	out := make([]historyRow, 0, len(rows))
+	ids := make(map[string]bool, len(rows))
+	previous := after
 	for _, r := range rows {
-		out = append(out, historyFromRow(r))
+		row := historyFromRow(r)
+		if row.SiteID != site || row.KeyID != key || row.OwnerUserID != owner {
+			return nil, false, callrules.ErrForbidden
+		}
+		if row.ID == "" || ids[row.ID] || row.OrderKey == "" || previous != "" && row.OrderKey >= previous || archived != !row.ArchivedAt.IsZero() {
+			return nil, false, errIncompleteInventory
+		}
+		ids[row.ID], previous = true, row.OrderKey
+		out = append(out, row)
 	}
-	return out, nil
+	return out, next != "", nil
 }
 
 // Source bits are authoritative even if an event hook failed or its process
@@ -72,6 +120,11 @@ func historyFields(r historyRow) map[string]any {
 	fields := map[string]any{"title": r.Title, "role": r.Role, "status": r.Status}
 	if r.CostCents != nil {
 		fields["costCents"] = *r.CostCents
+	}
+	for k, v := range map[string]*bool{"configuredInsights": r.ConfiguredInsights, "configuredResources": r.ConfiguredResources, "agentHosted": r.AgentHosted} {
+		if v != nil {
+			fields[k] = *v
+		}
 	}
 	for k, v := range map[string]time.Time{"startedAt": r.StartedAt, "endedAt": r.EndedAt, "archivedAt": r.ArchivedAt, "purgeAt": r.PurgeAt} {
 		if !v.IsZero() {

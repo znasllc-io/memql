@@ -96,6 +96,9 @@ func (s *Sweeper) Run(ctx context.Context, dry bool) (Report, error) {
 	if err := s.sweepCallMessages(pass, now, dry, &report); err != nil {
 		failures = append(failures, err)
 	}
+	if err := s.sweepCallPortraits(pass, now, dry, &report); err != nil {
+		failures = append(failures, err)
+	}
 	for n, c := range concepts {
 		deadline, _ := pass.Deadline()
 		share := time.Until(deadline) / time.Duration(len(concepts)-n)

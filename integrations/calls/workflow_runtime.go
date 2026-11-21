@@ -6,9 +6,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/znasllc-io/memql/component/auth"
 	callrules "github.com/znasllc-io/memql/component/calls"
-	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -256,22 +254,18 @@ func workflowProjection(run callrules.WorkflowRun, seat seatRow, agent bool, now
 
 // ReconcileWorkflows is called by the existing durable thirty-second calls pass.
 // No browser or in-process timer owns a workflow clock. The bounded active-run
-// projection excludes historical runs, libraries and bookings. Every mutation
+// projection excludes historical runs, libraries and bookings; its cursor advances
+// after every completed page, including held runs and per-row errors. Every mutation
 // is freshly read under its room gate. This is the first released workflow schema;
 // pre-release fixtures without projections are replaced by normal native writes.
 func (s *Service) ReconcileWorkflows(ctx context.Context) error {
-	call, err := langparser.RenderCall("callsWorkflowStates", nil)
-	rows, err := s.store.readAsCluster(auth.ContextWithInternalOrigin(memql.ContextWithFreshRead(ctx)), "workflow reconciliation", call, err)
-	if err != nil {
-		return err
+	if s.lifecycle == nil {
+		return fmt.Errorf("calls: workflow scanner is unavailable")
 	}
-	if len(rows) >= 1000 {
-		return accountRefusal("workflow_reconciliation_limit")
-	}
-	for _, row := range rows {
+	return s.lifecycle.workflows.run(ctx, s.store, "callsWorkflowStates", 200, func(row map[string]any) error {
 		owner := memql.BareShortId(rowString(row, "ownerUserId"))
 		stateID := memql.BareShortId(rowString(row, "id"))
-		if owner == "" {
+		if owner == "" || stateID == "" {
 			return accountRefusal("workflow_state_unavailable")
 		}
 		v, err := s.store.workflowState(memql.ContextWithFreshRead(ctx), owner, stateID)
@@ -279,13 +273,10 @@ func (s *Service) ReconcileWorkflows(ctx context.Context) error {
 			return err
 		}
 		if v == nil || v.Kind != "run" || workflowTerminal(v.Run) {
-			continue
+			return nil
 		}
-		if err = s.workflowReconcileOne(ctx, owner, v); err != nil {
-			return err
-		}
-	}
-	return nil
+		return s.workflowReconcileOne(ctx, owner, v)
+	})
 }
 func (s *Service) workflowReconcileOne(ctx context.Context, owner string, v *workflowState) error {
 	release, err := s.gates(ctx, roomGate(v.Run.RoomID))

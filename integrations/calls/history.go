@@ -47,6 +47,19 @@ func (s *Service) roomHistory(ctx context.Context, site callrules.SiteRef, key s
 		role = "host"
 	}
 	row := historyRow{SiteID: site.SiteID, OwnerUserID: site.OwnerUserID, KeyID: key, SourceKind: kind, SourceID: source, Title: callTitle(room.Title, room.OpenedAt), CanRename: room.KeyID == key, Role: role, Status: "active", StartedAt: room.OpenedAt, EndedAt: room.EndedAt}
+	if room.KeyID == key {
+		if room.FundingMode == usageMeteredMode {
+			config, err := decodeUsageConfig(room.UsageConfig)
+			if err != nil {
+				return historyRow{}, err
+			}
+			row.ConfiguredInsights, row.ConfiguredResources = &config.Insights, &config.Resources
+		}
+		if room.OriginalHostKind == string(callrules.KindPerson) || room.OriginalHostKind == string(callrules.KindAgent) {
+			agent := room.OriginalHostKind == string(callrules.KindAgent)
+			row.AgentHosted = &agent
+		}
+	}
 	if !room.open() {
 		if room.KeyID == key {
 			row.CostCents = room.UsageCostCents
@@ -120,7 +133,19 @@ func (s *Service) upsertHistory(ctx context.Context, row historyRow) (*historyRo
 	if !prior.ArchivedAt.IsZero() {
 		return prior, nil
 	}
-	if equalOptionalCents(prior.CostCents, row.CostCents) && prior.Title == row.Title && prior.Role == row.Role && prior.Status == row.Status && prior.StartedAt.Equal(row.StartedAt) && prior.EndedAt.Equal(row.EndedAt) {
+	// These are immutable facts about this same source. Operational cleanup may
+	// remove the original seat; losing that source must not erase a known fact or
+	// repeatedly rewrite the projection. Purge receipts are still checked above.
+	if row.ConfiguredInsights == nil {
+		row.ConfiguredInsights = prior.ConfiguredInsights
+	}
+	if row.ConfiguredResources == nil {
+		row.ConfiguredResources = prior.ConfiguredResources
+	}
+	if row.AgentHosted == nil {
+		row.AgentHosted = prior.AgentHosted
+	}
+	if equalOptionalCents(prior.CostCents, row.CostCents) && equalHistoryBool(prior.ConfiguredInsights, row.ConfiguredInsights) && equalHistoryBool(prior.ConfiguredResources, row.ConfiguredResources) && equalHistoryBool(prior.AgentHosted, row.AgentHosted) && prior.Title == row.Title && prior.Role == row.Role && prior.Status == row.Status && prior.StartedAt.Equal(row.StartedAt) && prior.EndedAt.Equal(row.EndedAt) {
 		prior.CanRename = row.CanRename
 		return prior, nil
 	}
@@ -295,7 +320,7 @@ func (s *Service) History(ctx context.Context, sess callrules.Session, req callr
 	if err != nil {
 		return none, err
 	}
-	rows, err := s.store.historyForKey(ctx, h.site.OwnerUserID, h.site.SiteID, h.row.KeyID, after, req.Archive)
+	rows, more, err := s.store.historyForKey(ctx, h.site.OwnerUserID, h.site.SiteID, h.row.KeyID, after, req.Archive)
 	if err != nil {
 		return none, err
 	}
@@ -322,7 +347,7 @@ func (s *Service) History(ctx context.Context, sess callrules.Session, req callr
 			break
 		}
 	}
-	if processed < len(rows) || len(rows) == 51 {
+	if processed < len(rows) || more {
 		data, _ := json.Marshal(historyCursor{Scope: scope, After: after, Until: s.now().Add(30 * time.Minute).Unix()})
 		out.NextCursor = callrules.SealHistoryToken(h.pepper, "cursor", data)
 	}
@@ -345,12 +370,24 @@ func (s *Service) History(ctx context.Context, sess callrules.Session, req callr
 			out.Overview = callrules.HistoryOverview{Currency: "USD", PeriodDays: req.Period, Series: []callrules.HistorySeries{}}
 		}
 	}
-	wallet, available, reserved, walletErr := s.usageWalletSnapshot(ctx, h.site.OwnerUserID, h.site.SiteID, h.row.KeyID)
-	if walletErr != nil {
-		return none, walletErr
+	if out.Overview.Usage == nil {
+		out.Overview.Usage = historyUsageStatus("incomplete")
 	}
-	if wallet != nil {
-		out.Overview.AvailableCents, out.Overview.ReservedCents = &available, &reserved
+	if err = s.historyLedger(ctx, h, &out.Overview); err != nil {
+		return none, err
+	}
+	// Projection repair and ledger reads may yield to other requests. A revoked
+	// credential or logged-out session must not receive a previously authorized
+	// private balance/history snapshot after that work completes.
+	current, err := s.authenticatedKey(memql.ContextWithFreshRead(ctx), sess)
+	if err != nil {
+		return none, err
+	}
+	if current.row.ID != h.row.ID || current.row.KeyID != h.row.KeyID || current.row.CredentialID != h.row.CredentialID {
+		return none, callrules.ErrNoSession
+	}
+	if err = s.delegatedEffectAllowed(memql.ContextWithFreshRead(ctx), current.site, current.row.KeyID); err != nil {
+		return none, err
 	}
 	return out, nil
 }
@@ -519,26 +556,36 @@ func (s *Service) currentHistoryCall(ctx context.Context, h keyHolder) (*callrul
 }
 
 // Overview is bounded independently of pagination. If more than 1,000 retained
-// records in either list need scanning, totals remain unavailable rather than
-// turning a partial scan into a claimed account total. Costs stay null: history
-// duration is not metered/billable time and no ledger is invented here.
+// records or twenty native pages in either list need scanning, totals remain
+// unavailable rather than turning a partial scan into a claimed account total.
+// The page bound also applies when an operator lowers the native result cap.
+// Posted-wallet costs are
+// filled independently by historyLedger; history duration is not billable time.
 func (s *Service) historyOverview(ctx context.Context, h keyHolder, period int) (callrules.HistoryOverview, error) {
 	out := callrules.HistoryOverview{Currency: "USD", PeriodDays: period, Series: []callrules.HistorySeries{}}
+	out.Usage = historyUsageStatus("limited")
 	now := s.now().UTC()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	first := today.AddDate(0, 0, 1-period)
 	counts := make([]int64, period)
 	durations := make([]int64, period)
 	var hosted, hostedCalls, joinedCalls int64
+	var insights, resources, agents int64
+	insightsKnown, resourcesKnown, agentsKnown := true, true, true
+	seen := make(map[string]bool)
 	for _, archived := range []bool{false, true} {
 		after := ""
 		scanned := 0
-		for {
-			rows, err := s.store.historyForKey(ctx, h.site.OwnerUserID, h.site.SiteID, h.row.KeyID, after, archived)
+		for page := 0; page < 20; page++ {
+			rows, more, err := s.store.historyForKey(ctx, h.site.OwnerUserID, h.site.SiteID, h.row.KeyID, after, archived)
 			if err != nil {
 				return out, err
 			}
 			for _, row := range rows {
+				if seen[row.ID] {
+					return out, errIncompleteInventory
+				}
+				seen[row.ID] = true
 				scanned++
 				if scanned > 1000 {
 					return out, nil
@@ -554,6 +601,9 @@ func (s *Service) historyOverview(ctx context.Context, h keyHolder, period int) 
 				counts[day]++
 				if row.Role == "host" {
 					hostedCalls++
+					countHistoryFlag(row.ConfiguredInsights, &insights, &insightsKnown)
+					countHistoryFlag(row.ConfiguredResources, &resources, &resourcesKnown)
+					countHistoryFlag(row.AgentHosted, &agents, &agentsKnown)
 				} else {
 					joinedCalls++
 				}
@@ -565,8 +615,11 @@ func (s *Service) historyOverview(ctx context.Context, h keyHolder, period int) 
 					}
 				}
 			}
-			if len(rows) < 51 {
+			if !more {
 				break
+			}
+			if page == 19 {
+				return out, nil
 			}
 		}
 	}
@@ -575,6 +628,19 @@ func (s *Service) historyOverview(ctx context.Context, h keyHolder, period int) 
 	}
 	out.HostedCalls, out.JoinedCalls = &hostedCalls, &joinedCalls
 	out.HostedSeconds = &hosted
+	out.Usage = historyUsageStatus("complete")
+	if insightsKnown {
+		out.Usage.InsightsCalls = &insights
+	}
+	if resourcesKnown {
+		out.Usage.ResourcesCalls = &resources
+	}
+	if agentsKnown {
+		out.Usage.AgentHostedCalls = &agents
+	}
+	if !insightsKnown || !resourcesKnown || !agentsKnown {
+		out.Usage.Status = "incomplete"
+	}
 	return out, nil
 }
 

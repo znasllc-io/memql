@@ -183,7 +183,11 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// Site row ownership alone is not permission to read participant images.
 		{Path: "calls/queries.memql", Name: "callsPortraitById"}:    true,
 		{Path: "calls/queries.memql", Name: "callsPortraitsForKey"}: true,
-		{Path: "calls/mutations.memql", Name: "saveCallsPortrait"}:  true,
+		// Cross-site maintenance and occupied reference inventory are internal
+		// cleanup authority; actor scoping alone must never expose these wires.
+		{Path: "calls/queries.memql", Name: "callsPortraitMaintenanceCandidates"}: true,
+		{Path: "calls/queries.memql", Name: "callsPortraitOccupiedSeats"}:         true,
+		{Path: "calls/mutations.memql", Name: "saveCallsPortrait"}:                true,
 		// The retirement sweep has no requesting guest. It reads cross-session
 		// inactivity and commitments under native account/key gates; the owner
 		// actor is borrowed only after the retirement policy has been selected.
@@ -314,6 +318,7 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// Private history reads/writes need authenticated per-key scope, archive confirmations and replica gates; actor.userId is only the site owner.
 		{Path: "calls/queries.memql", Name: "callsHistoryById"}:                  true,
 		{Path: "calls/queries.memql", Name: "callsSimulatedWalletLatest"}:        true,
+		{Path: "calls/queries.memql", Name: "callsWalletEntriesForPeriod"}:       true, // Native private accounting checks authenticated key/site and complete cursor inventory.
 		{Path: "calls/queries.memql", Name: "callsSimulatedWalletEntryById"}:     true,
 		{Path: "calls/queries.memql", Name: "callsRoomsForFundingPass"}:          true,
 		{Path: "calls/mutations.memql", Name: "createCallsSimulatedWalletEntry"}: true,

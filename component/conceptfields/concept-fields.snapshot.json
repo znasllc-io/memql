@@ -738,13 +738,21 @@
       "fields": [
         "accountId",
         "blobRef",
+        "byteSize",
         "digest",
         "height",
         "issuedAt",
         "keyId",
         "mimeType",
         "ownerUserId",
+        "purgeAt",
+        "retiredAt",
+        "retirementETag",
+        "retirementId",
+        "retirementReady",
         "siteId",
+        "status",
+        "unusedSince",
         "width"
       ],
       "required": [
@@ -761,6 +769,11 @@
         "mimeType": [
           "image/jpeg",
           "image/png"
+        ],
+        "status": [
+          "active",
+          "retired",
+          "retiring"
         ]
       }
     },
@@ -859,7 +872,10 @@
       "file": "calls/concepts.memql",
       "fields": [
         "accountId",
+        "agentHosted",
         "archivedAt",
+        "configuredInsights",
+        "configuredResources",
         "costCents",
         "endedAt",
         "keyId",
@@ -1327,6 +1343,7 @@
         "mediaServerId",
         "messageProtocol",
         "openedAt",
+        "originalHostKind",
         "ownerUserId",
         "scheduledCallId",
         "shareSeatId",
@@ -1350,6 +1367,10 @@
         "fundingMode": [
           "usage_metered_preview",
           "usage_preview"
+        ],
+        "originalHostKind": [
+          "agent",
+          "person"
         ],
         "status": [
           "ended",

@@ -3,6 +3,7 @@ package calls
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"slices"
 	"sort"
 	"time"
@@ -456,42 +457,50 @@ func (s *Service) StopRoomResources(ctx context.Context, room roomRow) error {
 // ReconcileResources also visits ended rooms and unknown provider outcomes. It
 // must run before normal room reconciliation, on the same periodic automation.
 func (s *Service) ReconcileResources(ctx context.Context) error {
-	rows, err := s.store.resourceStatePage(ctx, "callsResourceStates")
-	if err != nil {
+	if s.lifecycle == nil {
+		return fmt.Errorf("calls: resource scanner is unavailable")
+	}
+	first := s.lifecycle.resources.run(ctx, s.store, "callsResourceStates", 200, func(row map[string]any) error {
+		snapshot, err := resourceFromRow(row)
+		if err != nil {
+			return err
+		}
+		return s.reconcileResourceLeases(ctx, snapshot)
+	})
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	var first error
-	for _, snapshot := range rows {
-		for _, prior := range snapshot.State.Leases {
-			if !prior.active() {
-				continue
-			}
-			if err = s.reconcileResource(ctx, snapshot, prior); err != nil && first == nil {
-				first = err
-			}
-		}
-	}
 	// Legacy metadata is normalized in a separate bounded queue after current
-	// lease cleanup. Even a full queue cannot prevent active revocation.
-	legacy, err := s.store.resourceStatePage(ctx, "callsResourceLegacyStates")
-	if err != nil {
-		if first == nil {
-			first = err
+	// lease cleanup. Its independent cursor also passes unrepairable old rows;
+	// neither a full migration queue nor one broken state may block revocation.
+	err := s.lifecycle.legacyResources.run(ctx, s.store, "callsResourceLegacyStates", 100, func(row map[string]any) error {
+		snapshot, err := resourceFromRow(row)
+		if err != nil {
+			return err
 		}
-		return first
-	}
-	for _, snapshot := range legacy {
 		if err = s.projectLegacyResources(ctx, snapshot); err != nil {
-			if first == nil {
-				first = err
-			}
-			continue
+			return err
 		}
-		for _, lease := range snapshot.State.Leases {
-			if lease.active() {
-				if err = s.reconcileResource(ctx, snapshot, lease); err != nil && first == nil {
-					first = err
-				}
+		return s.reconcileResourceLeases(ctx, snapshot)
+	})
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if first == nil {
+		first = err
+	}
+	return first
+}
+
+func (s *Service) reconcileResourceLeases(ctx context.Context, snapshot *resourceRow) error {
+	var first error
+	for _, prior := range snapshot.State.Leases {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if prior.active() {
+			if err := s.reconcileResource(ctx, snapshot, prior); err != nil && first == nil {
+				first = err
 			}
 		}
 	}

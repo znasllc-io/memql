@@ -61,7 +61,7 @@ func (s *Store) delegation(ctx context.Context, owner, id string) (*delegationRo
 }
 func (s *Store) delegations(ctx context.Context, owner, site, key string) ([]*delegationRow, error) {
 	call, err := langparser.RenderCall("callsDelegationsForKey", map[string]any{"siteId": site, "keyId": key})
-	rows, err := s.readAs(auth.ContextWithInternalOrigin(ctx), owner, "the account's delegated authorities", call, err)
+	rows, err := s.readCompleteOwnerPage(auth.ContextWithInternalOrigin(ctx), owner, "the account's delegated authorities", call, err)
 	if err != nil {
 		return nil, err
 	}

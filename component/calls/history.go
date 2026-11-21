@@ -40,15 +40,38 @@ type HistorySeries struct {
 }
 
 type HistoryOverview struct {
-	HostedCalls    *int64          `json:"hostedCalls"`
-	JoinedCalls    *int64          `json:"joinedCalls"`
-	Currency       string          `json:"currency"`
-	PeriodDays     int             `json:"periodDays"`
-	AvailableCents *int64          `json:"availableCents"`
-	ReservedCents  *int64          `json:"reservedCents"`
-	SpendCents     *int64          `json:"spendCents"`
-	HostedSeconds  *int64          `json:"hostedSeconds"`
-	Series         []HistorySeries `json:"series"`
+	HostedCalls    *int64                  `json:"hostedCalls"`
+	JoinedCalls    *int64                  `json:"joinedCalls"`
+	Currency       string                  `json:"currency"`
+	PeriodDays     int                     `json:"periodDays"`
+	AvailableCents *int64                  `json:"availableCents"`
+	ReservedCents  *int64                  `json:"reservedCents"`
+	SpendCents     *int64                  `json:"spendCents"`
+	HostedSeconds  *int64                  `json:"hostedSeconds"`
+	Series         []HistorySeries         `json:"series"`
+	Ledger         *HistoryLedger          `json:"ledger,omitempty"`
+	Usage          *HistoryConfiguredUsage `json:"usage,omitempty"`
+}
+
+// HistoryLedger counts posted wallet entries in the selected UTC period. It is
+// not provider cash revenue, net refunds, reserved funds, or an expense estimate.
+type HistoryLedger struct {
+	Basis             string `json:"basis"`
+	Status            string `json:"status"`
+	CreditedCents     *int64 `json:"creditedCents"`
+	UsageDebitedCents *int64 `json:"usageDebitedCents"`
+	PassDebitedCents  *int64 `json:"passDebitedCents"`
+	FinancialReview   *bool  `json:"financialReview"`
+}
+
+// HistoryConfiguredUsage describes retained hosted calls, including archives
+// before their deletion deadline. Configuration is not evidence of AI runtime.
+type HistoryConfiguredUsage struct {
+	Basis            string `json:"basis"`
+	Status           string `json:"status"`
+	InsightsCalls    *int64 `json:"insightsCalls"`
+	ResourcesCalls   *int64 `json:"resourcesCalls"`
+	AgentHostedCalls *int64 `json:"agentHostedCalls"`
 }
 
 type HistoryPage struct {

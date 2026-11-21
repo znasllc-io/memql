@@ -122,6 +122,7 @@ concept session {
 @displayCard(primary="mediaRoom", secondary="siteId", status="status")
 @belongsTo(account, via="siteId")
 concept room {
+  originalHostKind enum("person", "agent") @description("Immutable kind of the host that opened this room; absent for legacy or guest-opened rooms. Host handover never changes this analytics fact.")
   messageProtocol string @maxLength(64)
   spotlightData string @maxLength(2048) @description("Bounded native shared spotlight selection, admission generation, optimistic revision and mutation budget. Never changes media permissions or private viewer pins.")
   @relationship(type="references", as="simulationPass", field="fundingPassId", target=simulatedWalletEntry, direction="outgoing")
@@ -421,6 +422,9 @@ concept credential {
 @belongsTo(account, via="siteId")
 @displayCard(primary="title", secondary="startedAt", status="status")
 concept history {
+  configuredInsights bool @description("Payer-only persisted call configuration, not measured inference use; absent means unknown.")
+  configuredResources bool @description("Payer-only persisted call configuration, not measured resource generation; absent means unknown.")
+  agentHosted bool @description("Whether the host that opened the room was an agent; absent means unknown. No participant identity retained.")
   costCents int @description("Final local simulated settlement snapshot for the payer only. Never billing authority; absent means unknown or uncharged legacy mode.")
   siteId string! @description("Deployable v1:platform:site that owns this private projection.")
   ownerUserId string! @description("Platform v1:identity:user owner used for internal row admission, not the participant account.")
@@ -586,6 +590,7 @@ concept agentAdmissionState {
 @serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @belongsTo(account, via="siteId", stays="signin")
+@retention(ttl="1d", keepLatest=true, archive="none")
 concept agentPortrait {
  siteId string!
  ownerUserId string!
@@ -596,6 +601,14 @@ concept agentPortrait {
  height int!
  blobRef string @maxLength(2048)
  issuedAt datetime!
+ status enum("active", "retiring", "retired")
+ byteSize int
+ unusedSince datetime
+ retiredAt datetime
+ purgeAt datetime
+ retirementId string @maxLength(36)
+ retirementETag string @maxLength(128)
+ retirementReady bool
  accountId string
  @relationship(type="references", as="portraitSite", field="siteId", target=site, direction="outgoing")
  @relationship(type="references", as="portraitKey", field="keyId", target=key, direction="outgoing")

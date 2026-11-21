@@ -3,6 +3,7 @@ package calls
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -86,20 +87,30 @@ func (s *Store) resourceState(ctx context.Context, owner, site, key string) (*re
 	return d, err
 }
 func (s *Store) resourceStates(ctx context.Context) ([]*resourceRow, error) {
-	active, err := s.resourceStatePage(ctx, "callsResourceStates")
-	if err != nil {
-		return nil, err
+	// Budget decisions require exhaustion, never merely a short page: the
+	// engine may clamp authored page sizes below the accounting threshold.
+	out := []*resourceRow{}
+	for _, inventory := range []struct {
+		query string
+		limit int
+	}{{"callsResourceStates", 1000}, {"callsResourceLegacyStates", 100}} {
+		call, err := langparser.RenderCall(inventory.query, nil)
+		rows, err := s.readCompleteClusterInventory(ctx, "the resource commitments", call, err, inventory.limit)
+		if errors.Is(err, errIncompleteInventory) {
+			return nil, resourceRefusal("resource_capacity")
+		}
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			d, err := resourceFromRow(row)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, d)
+		}
 	}
-	legacy, err := s.resourceStatePage(ctx, "callsResourceLegacyStates")
-	if err != nil {
-		return nil, err
-	}
-	// Unknown legacy pages block admission, never cleanup. Reconciliation drains
-	// them separately so historical accounts cannot hide current revocations.
-	if len(active) >= 1000 || len(legacy) >= 100 {
-		return nil, resourceRefusal("resource_capacity")
-	}
-	return append(active, legacy...), nil
+	return out, nil
 }
 func (s *Store) resourceStatePage(ctx context.Context, query string) ([]*resourceRow, error) {
 	call, err := langparser.RenderCall(query, nil)

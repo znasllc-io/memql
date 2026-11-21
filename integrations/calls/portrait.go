@@ -7,6 +7,7 @@ import (
 
 	callrules "github.com/znasllc-io/memql/component/calls"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // PortraitStorage is a narrow blob port. Object names and ownership are composed
@@ -33,7 +34,7 @@ func (s *Service) humanPortraitUpload(ctx context.Context, site callrules.SiteRe
 }
 
 // A durable pending row reserves one bounded asset slot before provider I/O.
-// Content-bound identity/path coalesces retries even after a lost response or
+// The active digest inventory coalesces retries onto the same opaque path after a lost response or
 // process crash. A failed upload cannot leak a fresh object on each retry.
 func (s *Service) uploadPortrait(ctx context.Context, sess callrules.Session, encoded string) (*callrules.PortraitInfo, error) {
 	if s.portraitStorage == nil {
@@ -74,22 +75,35 @@ func (s *Service) uploadPortrait(ctx context.Context, sess callrules.Session, en
 	if err != nil {
 		return nil, err
 	}
-	id := callrules.HistoryDigest(nil, "agent-portrait", h.site.SiteID+":"+key.ID+":"+image.Portrait.Digest)
-	p, err := s.store.portrait(fresh, h.site.OwnerUserID, id)
+	items, err := s.store.portraits(fresh, h.site.OwnerUserID, h.site.SiteID, key.ID)
 	if err != nil {
 		return nil, err
 	}
-	if p != nil && (p.SiteID != h.site.SiteID || p.KeyID != key.ID || p.Digest != image.Portrait.Digest) {
-		return nil, accountRefusal("portrait_unavailable")
+	var p *portraitRow
+	for _, item := range items {
+		if item.Status == "retired" {
+			continue
+		}
+		if item.Digest == image.Portrait.Digest {
+			if !item.available() {
+				return nil, accountRefusal("portrait_retiring")
+			}
+			if p != nil {
+				return nil, accountRefusal("portrait_unavailable")
+			}
+			p = item
+		}
 	}
 	if p != nil && p.BlobRef != "" {
+		// An explicit successful selection gets its own approval window. Provider
+		// maintenance retries never update this timestamp.
+		p.UnusedSince = s.now()
+		if err = s.store.savePortrait(fresh, h.site.OwnerUserID, p, s.now()); err != nil {
+			return nil, err
+		}
 		return &p.PortraitInfo, nil
 	}
 	if p == nil {
-		items, e := s.store.portraits(fresh, h.site.OwnerUserID, h.site.SiteID, key.ID)
-		if e != nil {
-			return nil, e
-		}
 		if len(items) >= 32 {
 			return nil, accountRefusal("portrait_limit")
 		}
@@ -102,15 +116,17 @@ func (s *Service) uploadPortrait(ctx context.Context, sess callrules.Session, en
 		if recent >= 8 {
 			return nil, accountRefusal("portrait_rate_limit")
 		}
-		image.Portrait.ID = id
-		p = &portraitRow{PortraitInfo: image.Portrait, SiteID: h.site.SiteID, KeyID: key.ID, IssuedAt: s.now()}
+		// A retired blob path is permanently fenced. New opaque IDs never reuse it.
+		assetID := id.NewShortId()
+		image.Portrait.ID = assetID
+		p = &portraitRow{PortraitInfo: image.Portrait, SiteID: h.site.SiteID, KeyID: key.ID, IssuedAt: s.now(), Status: "active", Size: int64(len(image.Data))}
 		if err = s.store.savePortrait(fresh, h.site.OwnerUserID, p, s.now()); err != nil {
 			return nil, err
 		}
 	}
 	bounded, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	ref, err := s.portraitStorage.Put(bounded, h.site.OwnerUserID, "objects/"+h.site.OwnerUserID+"/calls/"+h.site.SiteID+"/portraits/"+id, image.Data, p.MimeType)
+	ref, err := s.portraitStorage.Put(bounded, h.site.OwnerUserID, portraitObject(h.site.OwnerUserID, p), image.Data, p.MimeType)
 	if err != nil || ref == "" {
 		return nil, accountRefusal("portrait_upload_failed")
 	}
@@ -118,6 +134,7 @@ func (s *Service) uploadPortrait(ctx context.Context, sess callrules.Session, en
 		return nil, err
 	}
 	p.BlobRef = ref
+	p.UnusedSince = s.now()
 	if err = s.store.savePortrait(fresh, h.site.OwnerUserID, p, s.now()); err != nil {
 		return nil, err
 	}
@@ -135,8 +152,14 @@ func (s *Service) approvedPortrait(ctx context.Context, site callrules.SiteRef, 
 	if err != nil {
 		return err
 	}
-	if p == nil || p.SiteID != site.SiteID || p.KeyID != key || p.Digest != req.PortraitDigest || p.BlobRef == "" {
+	if !p.available() || p.SiteID != site.SiteID || p.KeyID != key || p.Digest != req.PortraitDigest || p.BlobRef == "" {
 		return accountRefusal("portrait_unavailable")
+	}
+	// Publication validation and cleanup share the key or exact grant gate. A
+	// reference acquired between maintenance scans must restart the unused grace.
+	if !p.UnusedSince.IsZero() {
+		p.UnusedSince = time.Time{}
+		return s.store.savePortrait(ctx, site.OwnerUserID, p, s.now())
 	}
 	return nil
 }
@@ -160,7 +183,7 @@ func (s *Service) Portrait(ctx context.Context, sess callrules.Session, id strin
 	if err != nil {
 		return out, err
 	}
-	if p == nil || p.SiteID != site.SiteID || p.BlobRef == "" {
+	if !p.available() || p.SiteID != site.SiteID || p.BlobRef == "" {
 		return out, callrules.ErrNotFound
 	}
 	if err = s.portraitReadable(fresh, sess, p); err != nil {
@@ -179,6 +202,13 @@ func (s *Service) Portrait(ctx context.Context, sess callrules.Session, id strin
 }
 
 func (s *Service) portraitReadable(ctx context.Context, sess callrules.Session, p *portraitRow) error {
+	current, e := s.store.portrait(memql.ContextWithFreshRead(ctx), sess.Site.OwnerUserID, p.ID)
+	if e != nil {
+		return e
+	}
+	if !current.available() || current.SiteID != p.SiteID || current.KeyID != p.KeyID || current.Digest != p.Digest || current.BlobRef != p.BlobRef {
+		return callrules.ErrNotFound
+	}
 	row, _, err := s.session(ctx, sess.Site, sess.Token, s.now())
 	if err != nil {
 		return err
@@ -233,4 +263,8 @@ func (s *Service) portraitReadable(ctx context.Context, sess callrules.Session, 
 		}
 	}
 	return callrules.ErrNotFound
+}
+
+func portraitObject(owner string, p *portraitRow) string {
+	return "objects/" + owner + "/calls/" + p.SiteID + "/portraits/" + p.ID
 }
