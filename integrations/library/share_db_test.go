@@ -545,9 +545,9 @@ func testOwnerSharesWithViewer(t *testing.T, x *shareFixture) {
 	far := time.Now().Add(365 * 24 * time.Hour).UTC().Format(time.RFC3339Nano)
 	for who, ctx := range map[string]context.Context{"vera": x.vera(), "alice": x.alice()} {
 		for _, attempt := range []struct{ call, refusal string }{
-			{fmt.Sprintf(`mutation putLibraryShare(shareId: %q, recipientUserId: %q, recipientDisplayName: "x", artifactId: %q, days: 30, expiresAt: %q)`, shareID, x.ids["vera"], artifact, far), "server-only"},
-			{fmt.Sprintf(`mutation endLibraryShareNotice(noticeId: %q)`, shareID), "server-only"},
-			{fmt.Sprintf(`mutation putLibraryShareNotice(noticeId: %q, shareId: %q, artifactId: %q, sharerUserId: %q, sharerDisplayName: "x", title: "x", expiresAt: %q)`, shareID, shareID, artifact, x.ids["alice"], far), "server-only"},
+			{fmt.Sprintf(`mutation putLibraryShare(shareId: %s, recipientUserId: %s, recipientDisplayName: "x", artifactId: %s, days: 30, expiresAt: %s)`, langparser.QuoteString(shareID), langparser.QuoteString(x.ids["vera"]), langparser.QuoteString(artifact), langparser.QuoteString(far)), "server-only"},
+			{fmt.Sprintf(`mutation endLibraryShareNotice(noticeId: %s)`, langparser.QuoteString(shareID)), "server-only"},
+			{fmt.Sprintf(`mutation putLibraryShareNotice(noticeId: %s, shareId: %s, artifactId: %s, sharerUserId: %s, sharerDisplayName: "x", title: "x", expiresAt: %s)`, langparser.QuoteString(shareID), langparser.QuoteString(shareID), langparser.QuoteString(artifact), langparser.QuoteString(x.ids["alice"]), langparser.QuoteString(far)), "server-only"},
 			{fmt.Sprintf(`insert("v1:library:share", id=%q, payload={"recipientUserId":%q,"recipientDisplayName":"x","artifactId":%q,"days":30,"expiresAt":%q})`, "v1:library:share:"+shareID, x.ids["vera"], artifact, far), "@serverWritten"},
 			{fmt.Sprintf(`insert("v1:library:shareNotice", id=%q, payload={"shareId":%q,"artifactId":%q,"sharerUserId":%q,"sharerDisplayName":"x","title":"x","expiresAt":%q})`, "v1:library:shareNotice:"+shareID, shareID, artifact, x.ids["alice"], far), "@serverWritten"},
 		} {
