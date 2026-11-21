@@ -89,7 +89,7 @@ export function BootCurtain() {
   return (
     <div className="os-boot-curtain" data-leaving={leaving || undefined} aria-hidden="true">
       <div className="os-boot-curtain-content">
-        <svg className="os-boot-mark" viewBox="0 0 24 24" width={43} height={43}>
+        <svg className="os-boot-mark" viewBox="0 0 24 24" width={86} height={86}>
           <g className="os-boot-mark-base">
             {E.map(([a, b]) => <line key={edgeKey(a, b)} x1={N[a]![0]} y1={N[a]![1]} x2={N[b]![0]} y2={N[b]![1]} />)}
             {N.map(([x, y], dot) => <circle key={dot} cx={x} cy={y} r={1.53} />)}
