@@ -759,6 +759,7 @@ func (h *callsHandler) serveQueue(w http.ResponseWriter, r *http.Request, c call
 // and that capability, and the service chooses the fixed template and transport.
 func (h *callsHandler) serveHost(w http.ResponseWriter, r *http.Request, c callsCall) {
 	var body struct {
+		Spotlight    *calls.SpotlightRequest         `json:"spotlight"`
 		Processing   *calls.ProcessingConsentRequest `json:"processing"`
 		Action       string                          `json:"action"`
 		RequestID    *string                         `json:"requestId"`
@@ -778,6 +779,8 @@ func (h *callsHandler) serveHost(w http.ResponseWriter, r *http.Request, c calls
 	reviewing := body.Action == "agent_approve" || body.Action == "agent_reject"
 	invalid := false
 	switch {
+	case body.Action == "spotlight":
+		invalid = body.Spotlight == nil || body.RequestID != nil || body.ReviewDigest != nil || body.Title != nil || body.Seat != nil || body.Identity != nil || body.Email != nil || body.Token != nil
 	case body.Action == "processing_consent":
 		invalid = body.Processing == nil || body.RequestID != nil || body.ReviewDigest != nil || body.Title != nil || body.Seat != nil || body.Identity != nil || body.Email != nil || body.Token != nil
 	case reviewing:
@@ -801,6 +804,9 @@ func (h *callsHandler) serveHost(w http.ResponseWriter, r *http.Request, c calls
 		invalid = body.Title != nil || body.Email != nil || body.Token != nil || body.Identity != nil
 	}
 	if body.Action != "processing_consent" && body.Processing != nil {
+		invalid = true
+	}
+	if body.Action != "spotlight" && body.Spotlight != nil {
 		invalid = true
 	}
 	if !reviewing && (body.RequestID != nil || body.ReviewDigest != nil) {
@@ -865,7 +871,7 @@ func (h *callsHandler) serveHost(w http.ResponseWriter, r *http.Request, c calls
 	if body.ReviewDigest != nil {
 		reviewDigest = *body.ReviewDigest
 	}
-	if err := h.svc.Host(r.Context(), c.session(), calls.HostActionRequest{Action: body.Action, Seat: seat, RequestID: requestID, ReviewDigest: reviewDigest, Processing: body.Processing}); err != nil {
+	if err := h.svc.Host(r.Context(), c.session(), calls.HostActionRequest{Action: body.Action, Seat: seat, RequestID: requestID, ReviewDigest: reviewDigest, Processing: body.Processing, Spotlight: body.Spotlight}); err != nil {
 		h.refuse(w, c, err, calls.JoinResult{})
 		return
 	}
@@ -1036,6 +1042,7 @@ func setCallsRetryAfter(w http.ResponseWriter, d time.Duration) {
 // page the server's now (expiresAt less expiresInMs), which is what `countdownEndsAt` is
 // counted down from and an occupying seat's elapsed call time is measured from.
 type callsSessionReply struct {
+	Spotlight         *calls.Spotlight         `json:"spotlight,omitempty"`
 	Reports           calls.ReportCapabilities `json:"reports"`
 	ParticipationMode string                   `json:"participationMode,omitempty"`
 	Family            *calls.FamilySession     `json:"family,omitempty"`
@@ -1106,6 +1113,7 @@ type callsRosterWaiterReply struct {
 
 func (h *callsHandler) sessionReply(sess calls.Session, call calls.SeatCall) callsSessionReply {
 	reply := callsSessionReply{
+		Spotlight:         call.Spotlight,
 		ParticipationMode: call.ParticipationMode, Family: call.Family,
 		Identity:      call.Identity,
 		LeaveToken:    call.LeaveToken,

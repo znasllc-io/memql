@@ -271,6 +271,7 @@ func (s *Store) keyByID(ctx context.Context, owner, keyID string) (*Key, error) 
 // (events.go), the zero time before any.
 type roomRow struct {
 	roomFunding
+	SpotlightData                                                                string
 	HistoryPending                                                               bool
 	ID, SiteID, OwnerUserID, KeyID, MediaServerID, MediaRoom, Status, HostSeatID string
 	ScheduledCallID, EndReason, ShareSeatID, Title                               string
@@ -285,6 +286,7 @@ func (r roomRow) open() bool { return r.Status != "ended" }
 
 func roomFromRow(r map[string]any) roomRow {
 	return roomRow{
+		SpotlightData:   rowString(r, "spotlightData"),
 		roomFunding:     fundingFromRow(r),
 		HistoryPending:  rowBool(r, "historyPending"),
 		ID:              memql.BareShortId(rowString(r, "id")),

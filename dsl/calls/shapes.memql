@@ -66,6 +66,7 @@ shape simulatedWalletEntry callsSimulatedWalletEntryFull {
 /// The room row as the calls integration reads it. No digest is projected.
 @row
 shape room callsRoomFull {
+  spotlightData
   usageConfig
   usageOperation
   usageDigest

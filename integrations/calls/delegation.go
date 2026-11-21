@@ -419,7 +419,10 @@ func (s *Service) Agent(ctx context.Context, site callrules.SiteRef, token strin
 	case "history":
 		return s.History(ctx, sess, callrules.HistoryRequest{Limit: 50, Period: 30})
 	case "host":
-		return map[string]bool{"ok": true}, s.Host(ctx, sess, callrules.HostActionRequest{Action: req.Control, Seat: req.Seat})
+		if req.Control == "spotlight" && !reflect.DeepEqual(req, callrules.AgentRequest{Action: req.Action, Control: req.Control, Spotlight: req.Spotlight}) {
+			return nil, callrules.ErrInvalid
+		}
+		return map[string]bool{"ok": true}, s.Host(ctx, sess, callrules.HostActionRequest{Action: req.Control, Seat: req.Seat, Spotlight: req.Spotlight})
 	case "leave":
 		return map[string]bool{"ok": true}, s.Leave(ctx, sess)
 	case "cancel":

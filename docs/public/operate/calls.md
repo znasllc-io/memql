@@ -122,6 +122,23 @@ and, for one done to a seat, the `seat`:
 | `end` | ends the call for everyone in it |
 | `invite` | sends one guest invitation through the configured MemQL email transport; takes `email` and `token`, never `seat` |
 | `invitation_link` | recovers a guest invitation for the current host; takes its admitted media `identity`, never `seat`, `email` or `token` |
+| `spotlight` | selects or clears shared layout guidance; takes the revision-bound nested `spotlight` object described below |
+
+**Shared spotlight** is separate from a viewer's private pin and never changes
+camera or publication permission. Current admitted sessions receive
+`spotlight: {revision, participant?}`; the participant contains `seat`, `identity`
+and `displayName`. A current host posts `action: "spotlight"` with a nested object
+containing `roomId`, their own `actorIdentity`, the current `revision`, a stable
+`requestId`, and the target `seat` and `identity`. Empty target strings clear it.
+The request ID is 16–128 ASCII letters, digits, underscores or hyphens.
+
+Authority and target admission are rechecked under the room gate. A departed,
+removed or re-entered target disappears from the shared projection; an old
+admission cannot inherit a selection. Identical selections and the latest exact
+retry do not write another room version. Stale revisions conflict, and distinct
+changes share a 30-per-minute fixed room budget. Agent hosts use `callkey_host`
+under approved `control` scope with the same nested object and checks. Clients
+may preserve their own private pin and view preference over this shared guidance.
 
 **Invitation recovery** lets a host keep inviting after a browser refresh, when
 its original fragment has already been removed. Post
@@ -1800,6 +1817,61 @@ runner joins approved bookings and publishes voice through the native media SDK;
 an external agent still supplies conversational reasoning. No server-side model
 or remote device command runner is installed by these features.
 
+
+### Consented processing contracts
+
+Processing is disabled unless the site operator enables `processingEnabled` and
+an authorized worker is available. Current sessions expose capabilities and
+consent revision. `processing_consent` on the host route, or
+`callkey_processing_consent` with separately approved agent `processing` scope,
+acts only on that current admission's own media. A host cannot consent for peers;
+family calls are excluded. Transcription and text-tone also require Insights.
+
+The cluster-owner-only `callsProcessingRooms`, `callsProcessingLease` and
+`callsProcessingPublish` builtins refuse persisted runs. A lease binds the exact
+consented identities, publication SIDs, sources and generations. Its sampler
+token can receive the whole room, so exact subscription filtering remains the
+trusted worker's duty. The qualified lease ceiling is ten visual publications
+(camera, shared-screen or agent video), independent of the total track budget;
+over-capacity refuses the whole lease before issuing a token.
+
+Results are ephemeral and server-attributed. Compact receipts retain publication
+position/digests, not transcript or observation bodies. Captions and text-wording
+observations may reach current participants; visual scores are neither broadcast
+nor automatically enforced. Consent withdrawal stops new processing but cannot
+recall downloaded text. Neither contract availability nor a model score proves
+continuous safety coverage, a person's age or an authorized hash-feed match.
+
+### Private participant reports
+
+`callsPolicySet` enables metadata reports only with `reportsEnabled: 1` and an
+explicit `reportMetadataDays` from 1 to 365. This is configuration, not a legal
+retention policy. Human account and admitted-session replies expose `reports`
+capabilities. The account route accepts `report_submit`, `report_status`,
+`report_list` and `report_appeal` with their closed nested `report` payloads.
+The corresponding UTCP tools require separate human-approved `report` scope.
+Only a current admitted participant can submit about their own open room and an
+optional current peer. Reports contain bounded plain text and call identifiers;
+there is no attachment, recording or image intake.
+
+Stable operation IDs coalesce retries. Submissions share rolling daily budgets
+of five per Callkey, 100 per room and 1,000 per site. Receipt reads expose only
+the submitting human or exact agent grant's cases, with opaque cursor pagination.
+They continue until the receipt's immutable expiry even when new submission is
+disabled. An ordinary guest can claim the same Callkey with a Passkey and retain
+receipt access; otherwise access ends with that session. A supervised child cannot
+claim an account, and their guardian does not inherit private report access.
+
+Only a cluster owner outside persisted runs can use `callsReportList`,
+`callsReportRead` and `callsReportReview`. Reading allegations or recording a review
+first writes private access audit. Review requires the exact revision and a stable
+operation ID. One further review request is allowed after the initial outcome;
+neither review nor appeal extends expiry. Outcomes `no_action` and
+`action_recommended` record recommendations, never automatic sanctions or external
+reports. Access stops at expiry; scheduled maintenance atomically purges all case
+and audit versions, preserving the complete record if validation or authorization
+fails. Evidence preservation, legal holds and external reporting are separate,
+unimplemented paths.
 
 ### Local supervised family prototype
 

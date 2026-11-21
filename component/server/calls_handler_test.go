@@ -1318,14 +1318,14 @@ func TestAHostsSessionCarriesTheCallsRoster(t *testing.T) {
 			ExpiresAt: callsT0.Add(calls.SessionLifetime), Site: calls.SiteRef{SiteID: callsTestSite}}
 		rec := rig.get("/calls/session", rig.secrets.guestSession)
 		assertCallsReply(t, rec, http.StatusOK,
-			`{"kind":"guest","seatId":"seat2","roomId":"room1","expiresAt":"2026-11-19T12:00:00Z","expiresInMs":86400000}`)
+			`{"reports":{"available":false,"metadataDays":0},"kind":"guest","seatId":"seat2","roomId":"room1","expiresAt":"2026-11-19T12:00:00Z","expiresInMs":86400000}`)
 	})
 
 	t.Run("an ended call's host session has no roster", func(t *testing.T) {
 		rig := newCallsRig(t)
 		rec := rig.get("/calls/session", rig.secrets.hostSession)
 		assertCallsReply(t, rec, http.StatusOK,
-			`{"kind":"host","keyId":"key1","seatId":"seat1","roomId":"room1","expiresAt":"2026-11-19T12:00:00Z","expiresInMs":86400000}`)
+			`{"reports":{"available":false,"metadataDays":0},"kind":"host","keyId":"key1","seatId":"seat1","roomId":"room1","expiresAt":"2026-11-19T12:00:00Z","expiresInMs":86400000}`)
 		if got := rig.svc.ops(); !reflect.DeepEqual(got, []string{"SiteAsOwner", "Session", "SessionCall"}) {
 			t.Fatalf("calls = %v: the service was not asked, so the handler decided who is a host", got)
 		}
@@ -1340,7 +1340,7 @@ func TestAHostsSessionCarriesTheCallsRoster(t *testing.T) {
 		rig.svc.rosters[rig.secrets.hostSession] = &calls.Roster{InCall: []calls.RosterSeat{hostSeat, canonical}}
 		rec := rig.get("/calls/session", rig.secrets.hostSession)
 		assertCallsReply(t, rec, http.StatusOK,
-			`{"kind":"host","keyId":"key1","seatId":"seat1","roomId":"room1","expiresAt":"2026-11-19T12:00:00Z","expiresInMs":86400000,`+
+			`{"reports":{"available":false,"metadataDays":0},"kind":"host","keyId":"key1","seatId":"seat1","roomId":"room1","expiresAt":"2026-11-19T12:00:00Z","expiresInMs":86400000,`+
 				`"host":true,"roster":{"locked":false,"inCall":[`+
 				`{"seat":"seat1","displayName":"Ada","kind":"person","host":true,"status":"in_call","identity":"identity1"},`+
 				`{"seat":"seat2","displayName":"Grace","kind":"person","host":false,"status":"admitted","identity":"identity2"}],`+
@@ -1413,7 +1413,7 @@ func TestASeatsSessionSaysWhetherItHostsAndWhenTheCountdownEnds(t *testing.T) {
 		token := guest(rig)
 		rig.svc.countdowns[token] = callsT0.Add(4*time.Minute + 30*time.Second)
 		assertCallsReply(t, rig.get("/calls/session", token), http.StatusOK,
-			`{"kind":"guest","seatId":"seat2","roomId":"room1","expiresAt":"2026-11-19T12:00:00Z","expiresInMs":86400000,`+
+			`{"reports":{"available":false,"metadataDays":0},"kind":"guest","seatId":"seat2","roomId":"room1","expiresAt":"2026-11-19T12:00:00Z","expiresInMs":86400000,`+
 				`"countdownEndsAt":"2026-11-18T12:04:30Z"}`)
 	})
 

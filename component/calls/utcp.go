@@ -29,6 +29,7 @@ func UTCPManual(endpoint string) map[string]any {
 		all["acceptance"] = agentAcceptanceSchema()
 		all["portraitId"] = map[string]any{"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9_-]+$"}
 		all["processing"] = dtoSchema(reflect.TypeOf(ProcessingConsentRequest{}))
+		all["spotlight"] = dtoSchema(reflect.TypeOf(SpotlightRequest{}))
 		all["portraitData"] = map[string]any{"type": "string", "minLength": 1, "maxLength": 54616, "contentEncoding": "base64", "description": "PNG/JPEG bytes only, no data URL. Maximum 40,960 decoded source bytes; each dimension 1–512px. Native service strips metadata and reencodes."}
 		fields := map[string][]string{
 			"processing_consent": {"processing"}, "portrait_upload": {"portraitData"}, "portrait_get": {"portraitId"},
@@ -36,7 +37,7 @@ func UTCPManual(endpoint string) map[string]any {
 			"start":      {"idempotencyKey", "quoteId", "title", "name", "terms", "participation", "authorityAccepted", "acceptance"},
 			"schedule":   {"idempotencyKey", "quoteId", "title", "start", "acceptance"},
 			"reschedule": {"idempotencyKey", "quoteId", "title", "start", "callId", "acceptance"},
-			"cancel":     {"callId"}, "host": {"control", "seat"}, "topup": {"idempotencyKey", "acceptance"},
+			"cancel":     {"callId"}, "host": {"control", "seat", "spotlight"}, "topup": {"idempotencyKey", "acceptance"},
 			"join":         {"callId", "name", "idempotencyKey", "acceptance"},
 			"request_join": {"guestToken", "name", "idempotencyKey"}, "join_status": {"callId", "requestId"},
 			"guest_join": {"guestToken", "callId", "requestId", "idempotencyKey", "acceptance"},
@@ -57,6 +58,8 @@ func UTCPManual(endpoint string) map[string]any {
 		description := "Callkey " + action + " under the authenticated grant's separately approved scope and limits. Never infer host privileges from a facilitator role."
 		output := map[string]any{"type": "object"}
 		switch action {
+		case "host":
+			description = "Apply an approved host control only while this agent is a current host and its grant permits control. For control=spotlight, read session first, then send only spotlight {roomId, actorIdentity, revision, requestId, seat, identity}; requestId is 16–128 ASCII letters/digits/underscore/hyphen and stable for retries. Clear with empty target seat and identity. Stale revisions or admissions refuse; refresh before a new intent. Shared spotlight is layout guidance, separate from private pins and media permissions. Identical selections and retries coalesce; distinct changes share a 30-per-minute fixed room window."
 		case "processing_consent":
 			description = "Explicitly opt only this agent admission into optional trusted processing under separately human-approved processing scope. Read session first and send exact roomId, identity and consent revision. Never consent for another participant. Safety checks require native availability and explicit consent; speech transcription and text-tone also require the configured Insights feature. Family calls are excluded. Insights requires transcription. Captions and text-tone are ephemeral and visible to current room participants. Withdraw by setting all flags false; re-entry resets consent. This grants no room monitoring or host privilege."
 			output = dtoSchema(reflect.TypeOf(ProcessingStatus{}))
@@ -103,7 +106,7 @@ func UTCPManual(endpoint string) map[string]any {
 	tools = append(tools, reportUTCPTools(endpoint)...)
 	tools = append(tools, workflowUTCPTools(endpoint)...)
 	tools = append(tools, proposalUTCPTools(endpoint)...)
-	return map[string]any{"utcp_version": "1.1.0", "manual_version": "2.3.0", "agent_policy": CurrentAgentPolicy(), "tools": tools}
+	return map[string]any{"utcp_version": "1.1.0", "manual_version": "2.4.0", "agent_policy": CurrentAgentPolicy(), "tools": tools}
 }
 func agentAcceptanceSchema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{"approvalRevision": map[string]any{"type": "integer", "minimum": 1}, "approvalDigest": map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"}, "conductVersion": map[string]any{"type": "string", "const": AgentConductVersion}, "terms": map[string]any{"type": "string", "const": AgentTermsVersion}}, "required": []string{"approvalRevision", "approvalDigest", "conductVersion", "terms"}, "additionalProperties": false}

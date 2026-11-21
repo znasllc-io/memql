@@ -8,6 +8,9 @@ import (
 )
 
 func agentRequestScope(r callrules.AgentRequest) string {
+	if r.Spotlight != nil && (r.Action != "host" || r.Control != "spotlight") {
+		return ""
+	}
 	if reportAction(r.Action) {
 		if r.Report == nil {
 			return ""

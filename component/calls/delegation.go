@@ -80,6 +80,7 @@ type DelegationResult struct {
 // AgentRequest exposes named product operations, never an arbitrary HTTP, SQL,
 // shell, or engine call. The bearer credential cannot perform account ceremonies.
 type AgentRequest struct {
+	Spotlight         *SpotlightRequest         `json:"spotlight,omitempty"`
 	Report            *ReportRequest            `json:"report,omitempty"`
 	Processing        *ProcessingConsentRequest `json:"processing,omitempty"`
 	PortraitID        string                    `json:"portraitId,omitempty"`

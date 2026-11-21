@@ -172,6 +172,9 @@ import (
 
 // Host makes one host control with a session (the file note).
 func (s *Service) Host(ctx context.Context, sess callrules.Session, req callrules.HostActionRequest) error {
+	if req.Spotlight != nil && strings.TrimSpace(req.Action) != "spotlight" {
+		return callrules.ErrInvalid
+	}
 	if req.Action == "processing_consent" {
 		return s.processingConsent(ctx, sess, req)
 	}
@@ -180,6 +183,12 @@ func (s *Service) Host(ctx context.Context, sess callrules.Session, req callrule
 	}
 	ctx = context.WithValue(ctx, agentScopeContext{}, "control")
 	action := strings.TrimSpace(req.Action)
+	if action == "spotlight" {
+		return s.setSpotlight(ctx, sess, req)
+	}
+	if req.Spotlight != nil {
+		return callrules.ErrInvalid
+	}
 	if action == "agent_approve" || action == "agent_reject" {
 		return s.reviewGuestAgent(ctx, sess, req)
 	}
@@ -375,6 +384,10 @@ func (s *Service) SessionCall(ctx context.Context, sess callrules.Session) (call
 		}
 	}
 	if seat.occupying() {
+		out.Spotlight, err = spotlightView(*room, v.seats)
+		if err != nil {
+			return none, err
+		}
 		out.OpenedAt = room.OpenedAt
 		out.Identity = seat.Identity
 		out.LeaveToken = leaveToken(pepper, site.SiteID, *row, *seat)

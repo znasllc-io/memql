@@ -14,6 +14,7 @@ import (
 // HostActionRequest is one host control: what to do, and the seat it is done to. Lock,
 // unlock and end act on the call and name no seat.
 type HostActionRequest struct {
+	Spotlight    *SpotlightRequest
 	Processing   *ProcessingConsentRequest
 	Action       string
 	Seat         string
@@ -73,6 +74,7 @@ const (
 // CountdownKind distinguishes a firm wrap_up from the legacy host_left grace.
 // Identity and LeaveToken are given only to an occupying seat.
 type SeatCall struct {
+	Spotlight         *Spotlight
 	Reports           ReportCapabilities
 	Processing        *ProcessingStatus
 	PendingAgents     []PendingAgent

@@ -152,6 +152,7 @@ mutation room createCallsRoom {
 @serverOnly
 mutation room updateCallsRoom {
   args {
+    spotlightData string @maxLength(2048)
     usageMeter string
     usageCostCents int
     fundingStartedAt datetime
@@ -174,7 +175,7 @@ mutation room updateCallsRoom {
     shareStartedAt  datetime
   }
   update {
-    accept { usageMeter, usageCostCents, fundingStartedAt, fundingDeadline, historyPending, title, mediaServerId, mediaRoom, status, locked, hostSeatId, hostLeftAt, endedAt, endReason, joinWindowStartedAt, joinWindowCount, shareSeatId, shareStartedAt }
+    accept { spotlightData, usageMeter, usageCostCents, fundingStartedAt, fundingDeadline, historyPending, title, mediaServerId, mediaRoom, status, locked, hostSeatId, hostLeftAt, endedAt, endReason, joinWindowStartedAt, joinWindowCount, shareSeatId, shareStartedAt }
     stamp {
       id: args.roomId
       createdAt: args.versionTime ?? now

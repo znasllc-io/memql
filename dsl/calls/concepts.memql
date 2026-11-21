@@ -122,6 +122,7 @@ concept session {
 @displayCard(primary="mediaRoom", secondary="siteId", status="status")
 @belongsTo(account, via="siteId")
 concept room {
+  spotlightData string @maxLength(2048) @description("Bounded native shared spotlight selection, admission generation, optimistic revision and mutation budget. Never changes media permissions or private viewer pins.")
   @relationship(type="references", as="simulationPass", field="fundingPassId", target=simulatedWalletEntry, direction="outgoing")
   fundingMode enum("usage_preview", "usage_metered_preview") @description("Explicit bounded local usage preview; absent keeps the original pass or legacy room behavior. Immutable at room creation.")
   usageConfig string
