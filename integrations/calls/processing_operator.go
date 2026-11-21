@@ -27,6 +27,13 @@ type processingBundle struct {
 	Tracks        []processingTrack `json:"tracks"`
 }
 
+// The pinned self-hosted media configuration permits ten simultaneous video
+// subscriptions per participant. Refuse the whole lease before minting its
+// sampler token: a larger track budget must never imply silent visual coverage.
+// Keep this conservative limit across providers until their receive path is
+// independently qualified.
+const processingVisualPublicationLimit = 10
+
 // Results are ephemeral. Refuse run contexts before parsing anything because a
 // run journal persists its statements and results, including tokens or captions.
 func (i *Integration) processingOperator(ctx context.Context, args map[string]any, allowed ...string) (*siteView, string, error) {
@@ -217,7 +224,13 @@ func (s *Service) processingLease(ctx context.Context, site callrules.SiteRef, r
 	if e != nil {
 		return none, e
 	}
-	if maxTracks == 0 || len(tracks) > maxTracks {
+	visualPublications := 0
+	for _, track := range tracks {
+		if track.SafetyAllowed {
+			visualPublications++
+		}
+	}
+	if maxTracks == 0 || len(tracks) > maxTracks || visualPublications > processingVisualPublicationLimit {
 		oldIdentity = j.Lease.Identity
 		j.revoke()
 		j.Reason = "processing_capacity"

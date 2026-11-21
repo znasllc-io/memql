@@ -36,7 +36,10 @@ func TestProcessingPublicationStorageDoesNotScaleWithRoomSize(t *testing.T) {
 	ctx := context.Background()
 	current := consentProcessing(t, cw, host, true, true, true)
 	tracks := []MediaTrack{{SID: "TR_microphone", Source: "microphone"}}
-	for n := 0; n < 99; n++ {
+	for n := 0; n < 89; n++ {
+		tracks = append(tracks, MediaTrack{SID: fmt.Sprintf("TR_microphone_%03d", n), Source: "microphone"})
+	}
+	for n := 0; n < 10; n++ {
 		tracks = append(tracks, MediaTrack{SID: fmt.Sprintf("TR_camera_%03d", n), Source: "camera"})
 	}
 	cw.media.setPresent(start.Call.ID, MediaParticipant{Identity: current.Identity, Tracks: tracks})
