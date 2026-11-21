@@ -179,6 +179,9 @@ func (i *Integration) IntegrationName() string { return pluginName }
 // (events.go), declared in dsl/calls/builtins.memql.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
+		{Name: "reportList", Description: "Private bounded report metadata inventory.", Handler: i.handleReportList, ArgsSchema: map[string]string{"siteId": "string required", "cursor": "string optional"}},
+		{Name: "reportRead", Description: "Audited private report read.", Handler: i.handleReportRead, ArgsSchema: map[string]string{"siteId": "string required", "caseId": "string required"}},
+		{Name: "reportReview", Description: "Revision-bound private report review, with no sanction side effect.", Handler: i.handleReportReview, ArgsSchema: map[string]string{"siteId": "string required", "caseId": "string required", "revision": "integer required", "outcome": "string required", "note": "string required", "idempotencyKey": "string required"}},
 		{Name: "processingRooms", Description: "Bounded trusted worker room discovery.", Handler: i.handleProcessingRooms, ArgsSchema: map[string]string{"siteId": "string required"}},
 		{Name: "processingLease", Description: "Trusted processing lease; operator only, outside runs.", Handler: i.handleProcessingLease, ArgsSchema: map[string]string{"siteId": "string required", "roomId": "string required", "leaseId": "string optional", "reset": "boolean optional", "maxTracks": "integer required"}},
 		{Name: "processingPublish", Description: "Ephemeral consent-bound processing result; operator only, outside runs.", Handler: i.handleProcessingPublish, ArgsSchema: map[string]string{"siteId": "string required", "roomId": "string required", "leaseId": "string required", "revision": "integer required", "event": "object required"}},

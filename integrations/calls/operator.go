@@ -329,6 +329,9 @@ func (i *Integration) handlePolicySet(ctx context.Context, args map[string]any, 
 	for name, value := range changed {
 		merged[name] = value
 	}
+	if merged["reportsEnabled"] == 1 && (merged["reportMetadataDays"] < 1 || merged["reportMetadataDays"] > 365) {
+		return nil, refuse("Choose an explicit report metadata expiry before enabling reports.")
+	}
 	effective := policyFromValues(merged)
 	// A waiter proves it is still there by polling; an entry that expires sooner than
 	// the next poll would expire every waiter.

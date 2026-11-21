@@ -936,3 +936,51 @@ query processingRate callsProcessingRateById {
  paginate 1
  shape callsProcessingRateFull
 }
+
+/// Private allegations; actor.userId scoping is not the fix: the native report authority gate is mandatory.
+@serverOnly
+@actor
+@cache(0)
+query reportCase callsReportById {
+ args { id string! }
+ filter row => row.id == args.id && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ paginate 1
+ shape callsReportFull
+}
+/// Private report inventory; actor.userId scoping is not the fix: only native recipient/operator authorization may read it.
+@serverOnly
+@actor
+@cache(0)
+query reportCase callsReportsForRecipient {
+ args {
+ siteId string!
+ reporterKeyId string
+ reporterActor string
+ asOf datetime!
+ }
+ filter row => row.siteId == args.siteId && (args.reporterKeyId == nil || row.reporterKeyId == args.reporterKeyId) && (args.reporterActor == nil || row.reporterActor == args.reporterActor) && row.expiresAt > args.asOf && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ sort "row.id", "asc"
+ paginate 25
+ shape callsReportFull
+}
+/// Bounded native submission budget; actor.userId scoping is not the fix: this private inventory has no public reader.
+@serverOnly
+@actor
+@cache(0)
+query reportCase callsReportBudget {
+ args { siteId string! since datetime! }
+ filter row => row.siteId == args.siteId && row.issuedAt > args.since && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ paginate 1001
+ shape callsReportBudget
+}
+/// Private audit inventory; actor.userId scoping is not the fix: the native operator and case gate are mandatory.
+@serverOnly
+@actor
+@cache(0)
+query reportAccessAudit callsReportAudit {
+ args { caseId string! }
+ filter row => row.caseId == args.caseId && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ sort "row.id", "asc"
+ paginate 257
+ shape callsReportAudit
+}

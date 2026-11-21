@@ -90,7 +90,7 @@ func (h *callsHandler) agentReply(result any) any {
 		// The native agent result contains call state only, not a human session.
 		// Reuse its normalization without inventing an expiry or cookie identity.
 		r := h.sessionReply(calls.Session{}, v)
-		return callsAgentSessionReply{RoomID: memql.BareShortId(v.RoomID), Identity: r.Identity, LeaveToken: r.LeaveToken, CountdownKind: r.CountdownKind, ParticipantLimit: r.ParticipantLimit, DurationMinutes: r.DurationMinutes, Insights: r.Insights, Resources: r.Resources, ReservedCents: r.ReservedCents, CostCents: r.CostCents, Host: r.Host, OpenedAt: r.OpenedAt, Title: r.Title, CountdownEndsAt: r.CountdownEndsAt, AllowanceEndsAt: r.AllowanceEndsAt, FundingMode: r.FundingMode, Roster: r.Roster, Agents: r.Agents}
+		return callsAgentSessionReply{Reports: r.Reports, Processing: r.Processing, RoomID: memql.BareShortId(v.RoomID), Identity: r.Identity, LeaveToken: r.LeaveToken, CountdownKind: r.CountdownKind, ParticipantLimit: r.ParticipantLimit, DurationMinutes: r.DurationMinutes, Insights: r.Insights, Resources: r.Resources, ReservedCents: r.ReservedCents, CostCents: r.CostCents, Host: r.Host, OpenedAt: r.OpenedAt, Title: r.Title, CountdownEndsAt: r.CountdownEndsAt, AllowanceEndsAt: r.AllowanceEndsAt, FundingMode: r.FundingMode, Roster: r.Roster, Agents: r.Agents}
 	case calls.InvitationLinkResult:
 		return struct {
 			GuestToken string `json:"guestToken"`
@@ -121,6 +121,8 @@ func (h *callsHandler) agentReply(result any) any {
 }
 
 type callsAgentSessionReply struct {
+	Reports          calls.ReportCapabilities `json:"reports"`
+	Processing       *calls.ProcessingStatus  `json:"processing,omitempty"`
 	Agents           []calls.AgentParticipant `json:"agents,omitempty"`
 	RoomID           string                   `json:"roomId,omitempty"`
 	Identity         string                   `json:"identity,omitempty"`

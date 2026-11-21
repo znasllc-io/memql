@@ -419,6 +419,8 @@ mutation policy createCallsPolicy {
     policyId  string!
     versionTime  datetime
     siteId  string!
+    reportsEnabled int
+    reportMetadataDays int
     processingEnabled int
   callConfiguration int
     usagePreview int
@@ -437,7 +439,7 @@ mutation policy createCallsPolicy {
     queuePoll  int
   }
   insert {
-    accept { siteId, processingEnabled, callConfiguration, usagePreview, simulatedFunding, requirePasskeys, maxPeople, maxAgents, roomJoinsPerMinute, maxUpcomingScheduled, guestInactiveDays, maxScheduledMinutes, hostLeftGrace, passTtl, scheduleHorizon, queueEntryTtl, queuePoll }
+    accept { siteId, reportsEnabled, reportMetadataDays, processingEnabled, callConfiguration, usagePreview, simulatedFunding, requirePasskeys, maxPeople, maxAgents, roomJoinsPerMinute, maxUpcomingScheduled, guestInactiveDays, maxScheduledMinutes, hostLeftGrace, passTtl, scheduleHorizon, queueEntryTtl, queuePoll }
     stamp {
       id: args.policyId
       ownerUserId: actor.userId
@@ -452,6 +454,8 @@ mutation policy updateCallsPolicy {
   args {
     policyId  string!
     versionTime  datetime
+    reportsEnabled int
+    reportMetadataDays int
     processingEnabled int
   callConfiguration int
     usagePreview int
@@ -470,7 +474,7 @@ mutation policy updateCallsPolicy {
     queuePoll  int
   }
   update {
-    accept { processingEnabled, callConfiguration, usagePreview, simulatedFunding, requirePasskeys, maxPeople, maxAgents, roomJoinsPerMinute, maxUpcomingScheduled, guestInactiveDays, maxScheduledMinutes, hostLeftGrace, passTtl, scheduleHorizon, queueEntryTtl, queuePoll }
+    accept { reportsEnabled, reportMetadataDays, processingEnabled, callConfiguration, usagePreview, simulatedFunding, requirePasskeys, maxPeople, maxAgents, roomJoinsPerMinute, maxUpcomingScheduled, guestInactiveDays, maxScheduledMinutes, hostLeftGrace, passTtl, scheduleHorizon, queueEntryTtl, queuePoll }
     stamp {
       id: args.policyId
       createdAt: args.versionTime ?? now
@@ -1004,5 +1008,47 @@ mutation processingRate saveCallsProcessingRate {
  insert {
  accept { siteId, roomId, rateSecond, rateCount }
  stamp { id: args.stateId, ownerUserId: actor.userId, createdAt: args.versionTime }
+ }
+}
+
+/// Fenced immutable-expiry case metadata; actor.userId scoping is not the fix: only native report authority can write.
+@serverOnly
+@actor
+mutation reportCase saveCallsReport {
+ args {
+ caseId string!
+ versionTime datetime!
+ siteId string!
+ reporterKeyId string!
+ reporterActor string!
+ subjectKeyId string
+ roomId string!
+ issuedAt datetime!
+ expiresAt datetime!
+ revision int!
+ stateData string!
+ }
+ insert {
+ accept { siteId, reporterKeyId, reporterActor, subjectKeyId, roomId, issuedAt, expiresAt, revision, stateData }
+ stamp { id: args.caseId, ownerUserId: actor.userId, createdAt: args.versionTime }
+ }
+}
+/// Immutable private access record; actor.userId scoping is not the fix: native operator gate and expiry are mandatory.
+@serverOnly
+@actor
+mutation reportAccessAudit createCallsReportAudit {
+ args {
+ auditId string!
+ siteId string!
+ caseId string!
+ actorId string!
+ action string!
+ recordedAt datetime!
+ expiresAt datetime!
+ revision int!
+ }
+ insert {
+ accept { siteId, caseId, actorId, action, recordedAt, expiresAt, revision }
+ stamp { id: args.auditId, ownerUserId: actor.userId, createdAt: args.recordedAt }
  }
 }

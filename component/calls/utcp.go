@@ -100,9 +100,10 @@ func UTCPManual(endpoint string) map[string]any {
 		}
 		tools = append(tools, map[string]any{"name": "callkey_" + action, "description": description, "inputs": map[string]any{"type": "object", "properties": map[string]any{"request": map[string]any{"type": "object", "properties": props, "required": required, "additionalProperties": false}}, "required": []string{"request"}, "additionalProperties": false}, "outputs": output, "tool_call_template": map[string]any{"call_template_type": "http", "url": endpoint, "http_method": "POST", "content_type": "application/json", "body_field": "request", "auth": map[string]any{"auth_type": "api_key", "api_key": "Bearer ${CALLKEY_AGENT_TOKEN}", "var_name": "Authorization", "location": "header"}}})
 	}
+	tools = append(tools, reportUTCPTools(endpoint)...)
 	tools = append(tools, workflowUTCPTools(endpoint)...)
 	tools = append(tools, proposalUTCPTools(endpoint)...)
-	return map[string]any{"utcp_version": "1.1.0", "manual_version": "2.2.0", "agent_policy": CurrentAgentPolicy(), "tools": tools}
+	return map[string]any{"utcp_version": "1.1.0", "manual_version": "2.3.0", "agent_policy": CurrentAgentPolicy(), "tools": tools}
 }
 func agentAcceptanceSchema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{"approvalRevision": map[string]any{"type": "integer", "minimum": 1}, "approvalDigest": map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"}, "conductVersion": map[string]any{"type": "string", "const": AgentConductVersion}, "terms": map[string]any{"type": "string", "const": AgentTermsVersion}}, "required": []string{"approvalRevision", "approvalDigest", "conductVersion", "terms"}, "additionalProperties": false}

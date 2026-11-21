@@ -1376,7 +1376,7 @@ func TestAHostsSessionCarriesTheCallsRoster(t *testing.T) {
 			ExpiresAt: callsT0.Add(calls.SessionLifetime), Site: calls.SiteRef{SiteID: callsTestSite}}
 		var rec *httptest.ResponseRecorder
 		cost := rig.costOf(func() { rec = rig.get("/calls/session", unseated) })
-		assertCallsReply(t, rec, http.StatusOK, `{"kind":"host","keyId":"key1","expiresAt":"2026-11-19T12:00:00Z","expiresInMs":86400000}`)
+		assertCallsReply(t, rec, http.StatusOK, `{"reports":{"available":false,"metadataDays":0},"kind":"host","keyId":"key1","expiresAt":"2026-11-19T12:00:00Z","expiresInMs":86400000}`)
 		if want := []string{"SiteAsOwner", "Session"}; !reflect.DeepEqual(cost, want) {
 			t.Fatalf("cost = %v, want %v", cost, want)
 		}
@@ -1584,14 +1584,14 @@ func TestCallsRepliesSpeakLowerCamel(t *testing.T) {
 		// expiresAt and expiresInMs are one instant, stated twice: the remainder is the one a
 		// client schedules from, so a wrong client clock does not move the moment.
 		assertCallsReply(t, rec, http.StatusOK,
-			`{"kind":"host","keyId":"key1","seatId":"seat1","roomId":"room1","expiresAt":"2026-11-19T12:00:00Z","expiresInMs":82800000}`)
+			`{"reports":{"available":false,"metadataDays":0},"kind":"host","keyId":"key1","seatId":"seat1","roomId":"room1","expiresAt":"2026-11-19T12:00:00Z","expiresInMs":82800000}`)
 	})
 
 	t.Run("an unlock answers the session it opened", func(t *testing.T) {
 		rig := newCallsRig(t)
 		rec := rig.post("/calls/unlock", callsJSON(t, map[string]string{"key": rig.secrets.key}), "")
 		assertCallsReply(t, rec, http.StatusOK,
-			`{"kind":"host","keyId":"key1","expiresAt":"2026-11-19T12:00:00Z","expiresInMs":86400000}`)
+			`{"reports":{"available":false,"metadataDays":0},"kind":"host","keyId":"key1","expiresAt":"2026-11-19T12:00:00Z","expiresInMs":86400000}`)
 	})
 
 	t.Run("an admission", func(t *testing.T) {

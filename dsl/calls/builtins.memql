@@ -76,6 +76,8 @@ builtin callsSiteEnable {
 @description("Set any of a deployable's calls limits, which are per site; a limit not named keeps its value and one never set is the shipped default. Counts are whole numbers and durations are whole seconds, each held to the cluster's bounds so no site claims more than the cluster allows. Judged in the deployable's organization; refused for a deployable the caller cannot read, one with no owner, a caller who is not a person and any call inside a run. Returns the effective limits: {policyId, siteId, maxPeople, maxAgents, roomJoinsPerMinute, maxUpcomingScheduled, maxScheduledMinutes, hostLeftGrace, passTtl, scheduleHorizon, queueEntryTtl, queuePoll}.")
 builtin callsPolicySet {
   requirePasskeys int @description("Require a currently credential-backed session at join: 0 optional guest access, 1 required.")
+  reportsEnabled int @description("Explicit operator opt-in for private participant report metadata; disabled by default.")
+  reportMetadataDays int @description("Required explicit report metadata expiry in whole days, from 1 to 365; not a legal retention policy.")
   processingEnabled int @description("Operator opt-in for trusted processing in consented, configured Insights calls; no family processing.")
   callConfiguration int @description("Operator opt-in for configured local simulated prepaid rooms. Requires simulatedFunding; never real payment authority.")
   usagePreview int @description("Operator-only opt-in for bounded local usage preview. Requires simulatedFunding. Never charges usage or enables real payments.")
@@ -183,4 +185,36 @@ builtin callsProcessingPublish {
 @description("List at most 100 eligible open rooms with current participant processing consent for one configured site. Trusted operator only, outside runs. No media credentials or participant data.")
 builtin callsProcessingRooms {
  siteId string!
+}
+
+/// Private operator inventory; no descriptions, reporter identities or allegations.
+@sdk
+@executor("integration.calls.reportList")
+@requiresCapability("execute", "app:deployables/calls")
+@description("List at most 25 private case receipts under cluster-owner authority outside runs. No allegations or identity disclosure; use the audited read for review.")
+builtin callsReportList {
+ siteId string!
+ cursor string
+}
+/// Private audited review read. Always refused inside persisted runs.
+@sdk
+@executor("integration.calls.reportRead")
+@requiresCapability("execute", "app:deployables/calls")
+@description("Read a nonexpired participant report after recording private access audit. Cluster owner only, outside runs; bounded metadata only, no evidence or external reporting.")
+builtin callsReportRead {
+ siteId string!
+ caseId string!
+}
+/// Exact-version review with immutable expiry and stable operation receipt.
+@sdk
+@executor("integration.calls.reportReview")
+@requiresCapability("execute", "app:deployables/calls")
+@description("Review a report or one appeal with exact revision and idempotency key. Cluster owner only, outside runs. no_action or action_recommended records a recommendation, never an automatic account sanction or external report. Note is private untrusted text.")
+builtin callsReportReview {
+ siteId string!
+ caseId string!
+ revision int!
+ outcome string!
+ note string! @secret
+ idempotencyKey string!
 }

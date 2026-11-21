@@ -204,6 +204,8 @@ shape mediaServer callsMediaServerFull {
 /// The policy row as the calls integration reads it. No digest is projected.
 @row
 shape policy callsPolicyFull {
+  reportsEnabled
+  reportMetadataDays
   processingEnabled
   callConfiguration
   usagePreview
@@ -438,4 +440,33 @@ shape processingRate callsProcessingRateFull {
  roomId
  rateSecond
  rateCount
+}
+
+@row
+shape reportCase callsReportFull {
+ row.id
+ row.createdAt
+ siteId
+ reporterKeyId
+ reporterActor
+ subjectKeyId
+ roomId
+ issuedAt
+ expiresAt
+ revision
+ stateData
+}
+@row
+shape reportCase callsReportBudget {
+ row.id
+ reporterKeyId
+ roomId
+}
+@row
+shape reportAccessAudit callsReportAudit {
+ row.id
+ actorId
+ action
+ recordedAt
+ revision
 }

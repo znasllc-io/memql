@@ -1079,6 +1079,8 @@
         "processingEnabled",
         "queueEntryTtl",
         "queuePoll",
+        "reportMetadataDays",
+        "reportsEnabled",
         "requirePasskeys",
         "roomJoinsPerMinute",
         "scheduleHorizon",
@@ -1182,6 +1184,65 @@
       }
     },
     {
+      "concept": "v1:calls:reportAccessAudit",
+      "file": "calls/concepts.memql",
+      "fields": [
+        "accountId",
+        "action",
+        "actorId",
+        "caseId",
+        "expiresAt",
+        "ownerUserId",
+        "recordedAt",
+        "revision",
+        "siteId"
+      ],
+      "required": [
+        "action",
+        "actorId",
+        "caseId",
+        "expiresAt",
+        "ownerUserId",
+        "recordedAt",
+        "revision",
+        "siteId"
+      ],
+      "enums": {
+        "action": [
+          "read",
+          "review"
+        ]
+      }
+    },
+    {
+      "concept": "v1:calls:reportCase",
+      "file": "calls/concepts.memql",
+      "fields": [
+        "accountId",
+        "expiresAt",
+        "issuedAt",
+        "ownerUserId",
+        "reporterActor",
+        "reporterKeyId",
+        "revision",
+        "roomId",
+        "siteId",
+        "stateData",
+        "subjectKeyId"
+      ],
+      "required": [
+        "expiresAt",
+        "issuedAt",
+        "ownerUserId",
+        "reporterActor",
+        "reporterKeyId",
+        "revision",
+        "roomId",
+        "siteId",
+        "stateData"
+      ]
+    },
+    {
       "concept": "v1:calls:resourceState",
       "file": "calls/concepts.memql",
       "fields": [
@@ -1229,6 +1290,7 @@
         "shareSeatId",
         "shareStartedAt",
         "siteId",
+        "spotlightData",
         "status",
         "title",
         "usageConfig",

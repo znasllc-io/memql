@@ -810,6 +810,12 @@ type CallsPolicySetArgs struct {
 	// Require a currently credential-backed session at join: 0 optional guest access, 1 required.
 	RequirePasskeys    int
 	RequirePasskeysSet bool // set true to send an explicit zero; nonzero values are always sent
+	// Explicit operator opt-in for private participant report metadata; disabled by default.
+	ReportsEnabled    int
+	ReportsEnabledSet bool // set true to send an explicit zero; nonzero values are always sent
+	// Required explicit report metadata expiry in whole days, from 1 to 365; not a legal retention policy.
+	ReportMetadataDays    int
+	ReportMetadataDaysSet bool // set true to send an explicit zero; nonzero values are always sent
 	// Operator opt-in for trusted processing in consented, configured Insights calls; no family processing.
 	ProcessingEnabled    int
 	ProcessingEnabledSet bool // set true to send an explicit zero; nonzero values are always sent
@@ -871,6 +877,20 @@ func CallsPolicySetBuild(args CallsPolicySetArgs) string {
 	if args.RequirePasskeysSet || args.RequirePasskeys != 0 {
 		b.WriteString("requirePasskeys: ")
 		b.WriteString(fmt.Sprintf("%v", args.RequirePasskeys))
+	}
+	if args.ReportsEnabledSet || args.ReportsEnabled != 0 {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("reportsEnabled: ")
+		b.WriteString(fmt.Sprintf("%v", args.ReportsEnabled))
+	}
+	if args.ReportMetadataDaysSet || args.ReportMetadataDays != 0 {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("reportMetadataDays: ")
+		b.WriteString(fmt.Sprintf("%v", args.ReportMetadataDays))
 	}
 	if args.ProcessingEnabledSet || args.ProcessingEnabled != 0 {
 		if b.Len() > 23 {
@@ -1095,6 +1115,110 @@ func CallsProcessingRoomsBuild(args CallsProcessingRoomsArgs) string {
 	b.WriteString("builtin callsProcessingRooms(")
 	b.WriteString("siteId: ")
 	b.WriteString(quoteMemQL(args.SiteId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CallsReportList -- Private operator inventory; no descriptions, reporter identities or allegations.
+type CallsReportListArgs struct {
+	SiteId string
+	Cursor string
+}
+
+// CallsReportList calls the engine builtin callsReportList.
+func (qc *QueryClient) CallsReportList(ctx context.Context, args CallsReportListArgs) (*Result, error) {
+	call := CallsReportListBuild(args)
+	return qc.executeNamed(ctx, "callsReportList", call)
+}
+
+func CallsReportListBuild(args CallsReportListArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin callsReportList(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if args.Cursor != "" {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("cursor: ")
+		b.WriteString(quoteMemQL(args.Cursor))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CallsReportRead -- Private audited review read. Always refused inside persisted runs.
+type CallsReportReadArgs struct {
+	SiteId string
+	CaseId string
+}
+
+// CallsReportRead calls the engine builtin callsReportRead.
+func (qc *QueryClient) CallsReportRead(ctx context.Context, args CallsReportReadArgs) (*Result, error) {
+	call := CallsReportReadBuild(args)
+	return qc.executeNamed(ctx, "callsReportRead", call)
+}
+
+func CallsReportReadBuild(args CallsReportReadArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin callsReportRead(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("caseId: ")
+	b.WriteString(quoteMemQL(args.CaseId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CallsReportReview -- Exact-version review with immutable expiry and stable operation receipt.
+type CallsReportReviewArgs struct {
+	SiteId         string
+	CaseId         string
+	Revision       int
+	Outcome        string
+	Note           string
+	IdempotencyKey string
+}
+
+// CallsReportReview calls the engine builtin callsReportReview.
+func (qc *QueryClient) CallsReportReview(ctx context.Context, args CallsReportReviewArgs) (*Result, error) {
+	call := CallsReportReviewBuild(args)
+	return qc.executeNamed(ctx, "callsReportReview", call)
+}
+
+func CallsReportReviewBuild(args CallsReportReviewArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin callsReportReview(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("caseId: ")
+	b.WriteString(quoteMemQL(args.CaseId))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("revision: ")
+	b.WriteString(fmt.Sprintf("%v", args.Revision))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("outcome: ")
+	b.WriteString(quoteMemQL(args.Outcome))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("note: ")
+	b.WriteString(quoteMemQL(args.Note))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("idempotencyKey: ")
+	b.WriteString(quoteMemQL(args.IdempotencyKey))
 	b.WriteString(")")
 	return b.String()
 }

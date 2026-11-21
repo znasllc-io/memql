@@ -27,6 +27,8 @@ var stayingKinds = map[string]string{
 	"v1:calls:processingRate":      "signin",
 	"v1:calls:processingReceipt":   "signin",
 	"v1:calls:processingState":     "signin",
+	"v1:calls:reportCase":          "signin",
+	"v1:calls:reportAccessAudit":   "signin",
 	"v1:calls:agentPortrait":       "signin",
 	// A credential is bound to this deployable origin and stays with sign-in authority.
 	"v1:calls:credential": "signin",

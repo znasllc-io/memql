@@ -441,6 +441,8 @@ func (h *Handler) serveCallsSurface(w http.ResponseWriter, r *http.Request, site
 		}
 		if callsAccountIsLogout(r) {
 			budget = callsOpLogout
+		} else if callsAccountIsReportRead(r) {
+			budget = callsOpAccountRead
 		}
 	}
 	if allowed, wait := h.callsRate.allow(budget, site.ID, accessClientAddress(r)); !allowed {

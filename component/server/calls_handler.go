@@ -1036,23 +1036,24 @@ func setCallsRetryAfter(w http.ResponseWriter, d time.Duration) {
 // page the server's now (expiresAt less expiresInMs), which is what `countdownEndsAt` is
 // counted down from and an occupying seat's elapsed call time is measured from.
 type callsSessionReply struct {
-	ParticipationMode string               `json:"participationMode,omitempty"`
-	Family            *calls.FamilySession `json:"family,omitempty"`
-	Identity          string               `json:"identity,omitempty"`
-	LeaveToken        string               `json:"leaveToken,omitempty"`
-	CountdownKind     string               `json:"countdownKind,omitempty"`
-	ParticipantLimit  int                  `json:"participantLimit,omitempty"`
-	Insights          bool                 `json:"insights,omitempty"`
-	Resources         bool                 `json:"resources,omitempty"`
-	DurationMinutes   int                  `json:"durationMinutes,omitempty"`
-	ReservedCents     *int64               `json:"reservedCents,omitempty"`
-	CostCents         *int64               `json:"costCents,omitempty"`
-	Kind              string               `json:"kind"`
-	KeyID             string               `json:"keyId,omitempty"`
-	SeatID            string               `json:"seatId,omitempty"`
-	RoomID            string               `json:"roomId,omitempty"`
-	ExpiresAt         string               `json:"expiresAt"`
-	ExpiresInMs       int64                `json:"expiresInMs"`
+	Reports           calls.ReportCapabilities `json:"reports"`
+	ParticipationMode string                   `json:"participationMode,omitempty"`
+	Family            *calls.FamilySession     `json:"family,omitempty"`
+	Identity          string                   `json:"identity,omitempty"`
+	LeaveToken        string                   `json:"leaveToken,omitempty"`
+	CountdownKind     string                   `json:"countdownKind,omitempty"`
+	ParticipantLimit  int                      `json:"participantLimit,omitempty"`
+	Insights          bool                     `json:"insights,omitempty"`
+	Resources         bool                     `json:"resources,omitempty"`
+	DurationMinutes   int                      `json:"durationMinutes,omitempty"`
+	ReservedCents     *int64                   `json:"reservedCents,omitempty"`
+	CostCents         *int64                   `json:"costCents,omitempty"`
+	Kind              string                   `json:"kind"`
+	KeyID             string                   `json:"keyId,omitempty"`
+	SeatID            string                   `json:"seatId,omitempty"`
+	RoomID            string                   `json:"roomId,omitempty"`
+	ExpiresAt         string                   `json:"expiresAt"`
+	ExpiresInMs       int64                    `json:"expiresInMs"`
 	// Host is true while the session's seat hosts its open call (a host seat admitted or in
 	// the call), and absent otherwise.
 	Host bool `json:"host,omitempty"`
@@ -1119,6 +1120,7 @@ func (h *callsHandler) sessionReply(sess calls.Session, call calls.SeatCall) cal
 		Roster:        rosterReply(call.Roster),
 		Agents:        call.Agents,
 		PendingAgents: call.PendingAgents,
+		Reports:       call.Reports,
 		Processing:    call.Processing,
 	}
 	if !call.CountdownEndsAt.IsZero() {

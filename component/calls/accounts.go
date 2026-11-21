@@ -8,6 +8,7 @@ import (
 // AccountRequest is one bounded account ceremony or credential-management act.
 // Credential is the browser's WebAuthn response, verified by the service.
 type AccountRequest struct {
+	Report            *ReportRequest  `json:"report,omitempty"`
 	ParticipationMode string          `json:"participationMode,omitempty"`
 	OperationID       string          `json:"operationId,omitempty"`
 	Outcome           string          `json:"outcome,omitempty"`
@@ -31,15 +32,16 @@ type AccountRequest struct {
 }
 
 type AccountCapabilities struct {
-	FamilyMode        string `json:"familyMode,omitempty"`
-	Resources         bool   `json:"resources"`
-	Insights          bool   `json:"insights"`
-	CallConfiguration bool   `json:"callConfiguration"`
-	Passkeys          bool   `json:"passkeys"`
-	RequirePasskeys   bool   `json:"requirePasskeys"`
-	Payments          bool   `json:"payments"`
-	SimulatedFunding  bool   `json:"simulatedFunding"`
-	UsagePreview      bool   `json:"usagePreview"`
+	Reports           ReportCapabilities `json:"reports"`
+	FamilyMode        string             `json:"familyMode,omitempty"`
+	Resources         bool               `json:"resources"`
+	Insights          bool               `json:"insights"`
+	CallConfiguration bool               `json:"callConfiguration"`
+	Passkeys          bool               `json:"passkeys"`
+	RequirePasskeys   bool               `json:"requirePasskeys"`
+	Payments          bool               `json:"payments"`
+	SimulatedFunding  bool               `json:"simulatedFunding"`
+	UsagePreview      bool               `json:"usagePreview"`
 }
 
 // AccountID is the durable calls key id, not a MemQL operator identity or the
@@ -97,6 +99,7 @@ type AccountCredential struct {
 }
 
 type AccountResult struct {
+	Report          *ReportResult       `json:"report,omitempty"`
 	Lifecycle       *AccountLifecycle   `json:"lifecycle,omitempty"`
 	Quote           *CallQuote          `json:"quote,omitempty"`
 	Authenticated   bool                `json:"authenticated"`

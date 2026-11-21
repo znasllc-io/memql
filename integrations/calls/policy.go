@@ -47,6 +47,13 @@ type policyField struct {
 // person (the rules refuse a room of agents); a pass lives long enough to connect with
 // and no longer than MintPass mints; a waiter polls at least once a minute.
 var policyFields = []policyField{
+	{"reportsEnabled", false, 0, 1, func(p callrules.Policy) int {
+		if p.ReportsEnabled {
+			return 1
+		}
+		return 0
+	}, func(p *callrules.Policy, v int) { p.ReportsEnabled = v == 1 }},
+	{"reportMetadataDays", false, 1, 365, func(p callrules.Policy) int { return p.ReportMetadataDays }, func(p *callrules.Policy, v int) { p.ReportMetadataDays = v }},
 	{"processingEnabled", false, 0, 1, func(p callrules.Policy) int {
 		if p.ProcessingEnabled {
 			return 1

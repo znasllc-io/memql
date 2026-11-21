@@ -16,7 +16,7 @@ func TestAgentPolicyPurposeAndManualAdmissionContract(t *testing.T) {
 		t.Fatal("Unicode purpose bounded by runes, not bytes")
 	}
 	manual := UTCPManual("https://calls.example/_memql/calls/agent")
-	if manual["manual_version"] != "2.2.0" {
+	if manual["manual_version"] != "2.3.0" {
 		t.Fatal("admission contract version not bumped")
 	}
 	data, e := json.Marshal(manual["agent_policy"])

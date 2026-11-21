@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -39,6 +40,22 @@ func (s *Service) Account(ctx context.Context, site callrules.SiteRef, token str
 		return s.accountSnapshot(ctx, site, token)
 	}
 	req := *request
+	if reportAction(req.Action) {
+		if req.Report == nil || !reflect.DeepEqual(req, callrules.AccountRequest{Action: req.Action, Report: req.Report}) {
+			return callrules.AccountResult{}, callrules.ErrInvalid
+		}
+		result, e := s.report(ctx, site, token, req.Action, *req.Report)
+		if e != nil {
+			return callrules.AccountResult{}, e
+		}
+		base, e := s.accountBase(ctx, site)
+		base.Authenticated = true
+		base.Report = &result
+		return base, e
+	}
+	if req.Report != nil {
+		return callrules.AccountResult{}, callrules.ErrInvalid
+	}
 	if req.Action != "logout" && callrules.TokenWellFormed(token) {
 		row, _, e := s.session(ctx, site, token, s.now())
 		if e != nil && !errors.Is(e, callrules.ErrNoSession) {
@@ -146,7 +163,7 @@ func validAccountRequest(r callrules.AccountRequest) bool {
 
 func (s *Service) accountBase(ctx context.Context, site callrules.SiteRef) (callrules.AccountResult, error) {
 	policy, err := s.store.PolicyFor(ctx, site.OwnerUserID, site.SiteID)
-	return callrules.AccountResult{Capabilities: callrules.AccountCapabilities{FamilyMode: s.familyCapability(), Insights: policy.SimulatedFunding && policy.CallConfiguration && s.commerceConfig().admission(s.now()) == nil,
+	return callrules.AccountResult{Capabilities: callrules.AccountCapabilities{Reports: reportCapabilities(policy), FamilyMode: s.familyCapability(), Insights: policy.SimulatedFunding && policy.CallConfiguration && s.commerceConfig().admission(s.now()) == nil,
 		Resources: policy.SimulatedFunding && policy.CallConfiguration && s.commerceConfig().admission(s.now()) == nil, Passkeys: true, RequirePasskeys: policy.RequirePasskeys, Payments: false, SimulatedFunding: policy.SimulatedFunding, CallConfiguration: policy.SimulatedFunding && policy.CallConfiguration, UsagePreview: policy.SimulatedFunding && policy.UsagePreview}, Credentials: []callrules.AccountCredential{}}, err
 }
 func (s *Service) accountSnapshot(ctx context.Context, site callrules.SiteRef, token string) (callrules.AccountResult, error) {

@@ -308,6 +308,8 @@ concept policy {
   siteId  string!  @description("The v1:platform:site (deployable) these limits apply to. One policy per site.")
   ownerUserId  string!  @description("The v1:identity:user who owns the site -- the row-authz key. STAMPED from the actor the write runs as and never an argument: the calls integration writes as the site's owner (borrowed authority), so this is the site's owner and never the operator who set the limits.")
   requirePasskeys int @description("0 preserves optional guest access; 1 requires a currently credential-backed session at join.")
+  reportsEnabled int @description("Explicit operator opt-in for private participant report metadata; disabled by default.")
+  reportMetadataDays int @description("Required explicit report metadata expiry in whole days, from 1 to 365; not a legal retention policy.")
   processingEnabled int @description("Operator opt-in for trusted processing in consented, configured Insights calls; no family processing.")
   callConfiguration int @description("Operator opt-in for configured local simulated prepaid rooms. Requires simulatedFunding; never real payment authority.")
   usagePreview int @description("Operator-only opt-in for bounded local usage preview. Requires simulatedFunding. Never charges usage or enables real payments.")
@@ -645,4 +647,45 @@ concept processingRate {
  accountId string
  @relationship(type="references", as="processingRateSite", field="siteId", target=site, direction="outgoing")
  @relationship(type="references", as="processingRateRoom", field="roomId", target=room, direction="outgoing")
+}
+
+/// Private participant allegations; immutable explicit expiry is purged by the native report retention sweep.
+// @no-displayCard: private allegations and review metadata are never exposed by generic display cards or account exports.
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@belongsTo(account, via="siteId", stays="signin")
+concept reportCase {
+ siteId string!
+ ownerUserId string!
+ reporterKeyId string!
+ reporterActor string! @maxLength(160)
+ subjectKeyId string
+ roomId string!
+ issuedAt datetime!
+ expiresAt datetime!
+ revision int!
+ stateData string! @maxLength(16384)
+ accountId string
+ @relationship(type="references", as="reportSite", field="siteId", target=site, direction="outgoing")
+ @relationship(type="references", as="reportRoom", field="roomId", target=room, direction="outgoing")
+ @relationship(type="references", as="reporterKey", field="reporterKeyId", target=key, direction="outgoing")
+}
+
+/// Immutable private access audit, removed with every case version at its original expiry.
+// @no-displayCard: private report access audit is available only to authorized operators, never participant-facing cards.
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@belongsTo(account, via="siteId", stays="signin")
+concept reportAccessAudit {
+ siteId string!
+ ownerUserId string!
+ caseId string!
+ actorId string! @maxLength(256)
+ action enum("read", "review")!
+ recordedAt datetime!
+ expiresAt datetime!
+ revision int!
+ accountId string
+ @relationship(type="references", as="reportAuditSite", field="siteId", target=site, direction="outgoing")
+ @relationship(type="references", as="reportAuditCase", field="caseId", target=reportCase, direction="outgoing")
 }

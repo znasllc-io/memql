@@ -339,6 +339,11 @@ func (s *Service) Agent(ctx context.Context, site callrules.SiteRef, token strin
 		defer release()
 	}
 	switch req.Action {
+	case "report_submit", "report_status", "report_list", "report_appeal":
+		if req.Report == nil || !reflect.DeepEqual(req, callrules.AgentRequest{Action: req.Action, Report: req.Report}) {
+			return nil, callrules.ErrInvalid
+		}
+		return s.report(ctx, site, sess.Token, req.Action, *req.Report)
 	case "processing_consent":
 		if !reflect.DeepEqual(req, callrules.AgentRequest{Action: req.Action, Processing: req.Processing}) {
 			return nil, callrules.ErrInvalid

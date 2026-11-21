@@ -387,6 +387,11 @@ func (s *Service) SessionCall(ctx context.Context, sess callrules.Session) (call
 		}
 	}
 	if seat.occupying() {
+		reportPolicy, e := s.store.PolicyFor(fresh, site.OwnerUserID, site.SiteID)
+		if e != nil {
+			return callrules.SeatCall{}, e
+		}
+		out.Reports = reportCapabilities(reportPolicy)
 		out.Processing, err = s.processingStatus(fresh, *room, *seat, v.seats)
 		if err != nil {
 			return none, err

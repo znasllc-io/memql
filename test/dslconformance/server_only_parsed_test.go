@@ -204,6 +204,15 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "calls/mutations.memql", Name: "saveCallsProcessing"}:         true,
 		{Path: "calls/mutations.memql", Name: "saveCallsProcessingReceipt"}:  true,
 		{Path: "calls/mutations.memql", Name: "saveCallsProcessingRate"}:     true,
+		// A deployable owner is not a report recipient or private reviewer. Native
+		// authority binds current admission, immutable expiry, exact revisions,
+		// submission budgets and audited operator access before disclosure.
+		{Path: "calls/queries.memql", Name: "callsReportById"}:          true,
+		{Path: "calls/queries.memql", Name: "callsReportsForRecipient"}:          true,
+		{Path: "calls/queries.memql", Name: "callsReportBudget"}:        true,
+		{Path: "calls/queries.memql", Name: "callsReportAudit"}:         true,
+		{Path: "calls/mutations.memql", Name: "saveCallsReport"}:        true,
+		{Path: "calls/mutations.memql", Name: "createCallsReportAudit"}: true,
 		// A borrowed owner is not an occupied room host or delegated source owner.
 		// Native checks bind runs, private instructions and media lease secrets to
 		// the current site/session/grant; caller row ownership alone cannot do so.

@@ -8,6 +8,15 @@ import (
 )
 
 func agentRequestScope(r callrules.AgentRequest) string {
+	if reportAction(r.Action) {
+		if r.Report == nil {
+			return ""
+		}
+		return "report"
+	}
+	if r.Report != nil {
+		return ""
+	}
 	if r.Action == "processing_consent" {
 		if r.Processing == nil {
 			return ""

@@ -22,7 +22,7 @@ var callsConcepts = []string{
 	"v1:calls:credential", "v1:calls:delegationState", "v1:calls:familyState", "v1:calls:history", "v1:calls:historyReceipt", "v1:calls:historySync",
 	"v1:calls:invitationBudget", "v1:calls:invitationLink", "v1:calls:invitationReceipt",
 	"v1:calls:key", "v1:calls:mediaServer", "v1:calls:policy", "v1:calls:processingRate", "v1:calls:processingReceipt", "v1:calls:processingState", "v1:calls:queueEntry",
-	"v1:calls:resourceState", "v1:calls:room", "v1:calls:scheduledCall", "v1:calls:seat", "v1:calls:session",
+	"v1:calls:reportAccessAudit", "v1:calls:reportCase", "v1:calls:resourceState", "v1:calls:room", "v1:calls:scheduledCall", "v1:calls:seat", "v1:calls:session",
 	"v1:calls:simulatedWalletEntry", "v1:calls:workflowState",
 }
 

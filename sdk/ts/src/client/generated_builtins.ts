@@ -684,6 +684,10 @@ PER SITE: the limits are the site's, on a row its owner owns, because a package 
 export interface CallsPolicySetArgs {
   /** Require a currently credential-backed session at join: 0 optional guest access, 1 required. */
   requirePasskeys?: number;
+  /** Explicit operator opt-in for private participant report metadata; disabled by default. */
+  reportsEnabled?: number;
+  /** Required explicit report metadata expiry in whole days, from 1 to 365; not a legal retention policy. */
+  reportMetadataDays?: number;
   /** Operator opt-in for trusted processing in consented, configured Insights calls; no family processing. */
   processingEnabled?: number;
   /** Operator opt-in for configured local simulated prepaid rooms. Requires simulatedFunding; never real payment authority. */
@@ -721,6 +725,8 @@ export interface CallsPolicySetArgs {
 export function buildCallsPolicySet(args: CallsPolicySetArgs): string {
   const parts: string[] = [];
   if (args.requirePasskeys !== undefined) parts.push("requirePasskeys: " + renderMemQLValue(args.requirePasskeys));
+  if (args.reportsEnabled !== undefined) parts.push("reportsEnabled: " + renderMemQLValue(args.reportsEnabled));
+  if (args.reportMetadataDays !== undefined) parts.push("reportMetadataDays: " + renderMemQLValue(args.reportMetadataDays));
   if (args.processingEnabled !== undefined) parts.push("processingEnabled: " + renderMemQLValue(args.processingEnabled));
   if (args.callConfiguration !== undefined) parts.push("callConfiguration: " + renderMemQLValue(args.callConfiguration));
   if (args.usagePreview !== undefined) parts.push("usagePreview: " + renderMemQLValue(args.usagePreview));
@@ -827,6 +833,83 @@ declare module "./query.js" {
 
 QueryClient.prototype.callsProcessingRooms = function (this: QueryClient, args: CallsProcessingRoomsArgs = {} as CallsProcessingRoomsArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("callsProcessingRooms", buildCallsProcessingRooms(args), opts);
+};
+
+/** Private operator inventory; no descriptions, reporter identities or allegations. */
+export interface CallsReportListArgs {
+  siteId: string;
+  cursor?: string;
+}
+
+export function buildCallsReportList(args: CallsReportListArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  if (args.cursor !== undefined) parts.push("cursor: " + renderMemQLValue(args.cursor));
+  return "builtin callsReportList(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    callsReportList(args: CallsReportListArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.callsReportList = function (this: QueryClient, args: CallsReportListArgs = {} as CallsReportListArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("callsReportList", buildCallsReportList(args), opts);
+};
+
+/** Private audited review read. Always refused inside persisted runs. */
+export interface CallsReportReadArgs {
+  siteId: string;
+  caseId: string;
+}
+
+export function buildCallsReportRead(args: CallsReportReadArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  parts.push("caseId: " + renderMemQLValue(args.caseId));
+  return "builtin callsReportRead(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    callsReportRead(args: CallsReportReadArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.callsReportRead = function (this: QueryClient, args: CallsReportReadArgs = {} as CallsReportReadArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("callsReportRead", buildCallsReportRead(args), opts);
+};
+
+/** Exact-version review with immutable expiry and stable operation receipt. */
+export interface CallsReportReviewArgs {
+  siteId: string;
+  caseId: string;
+  revision: number;
+  outcome: string;
+  note: string;
+  idempotencyKey: string;
+}
+
+export function buildCallsReportReview(args: CallsReportReviewArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  parts.push("caseId: " + renderMemQLValue(args.caseId));
+  parts.push("revision: " + renderMemQLValue(args.revision));
+  parts.push("outcome: " + renderMemQLValue(args.outcome));
+  parts.push("note: " + renderMemQLValue(args.note));
+  parts.push("idempotencyKey: " + renderMemQLValue(args.idempotencyKey));
+  return "builtin callsReportReview(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    callsReportReview(args: CallsReportReviewArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.callsReportReview = function (this: QueryClient, args: CallsReportReviewArgs = {} as CallsReportReviewArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("callsReportReview", buildCallsReportReview(args), opts);
 };
 
 /** Turn the calls capability on or off for a deployable.
