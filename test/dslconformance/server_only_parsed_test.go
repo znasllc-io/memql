@@ -173,6 +173,37 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 			"attribute name changed, which would silently exempt nothing and gate nothing.")
 	}
 	want := map[serverOnlyKey]bool{
+		// Agent admission is a human-reviewed, exact grant/purpose/room revision.
+		// A borrowed site-owner actor proves none of that; raw access would forge
+		// approval or expose another guest's unreviewed declaration.
+		{Path: "calls/queries.memql", Name: "callsAgentAdmissionById"}:   true,
+		{Path: "calls/mutations.memql", Name: "saveCallsAgentAdmission"}: true,
+		// Portrait reads require current owner/reviewer/admitted-room authority;
+		// writes also prove decoded image bounds, immutable digest and quota.
+		// Site row ownership alone is not permission to read participant images.
+		{Path: "calls/queries.memql", Name: "callsPortraitById"}:    true,
+		{Path: "calls/queries.memql", Name: "callsPortraitsForKey"}: true,
+		{Path: "calls/mutations.memql", Name: "saveCallsPortrait"}:  true,
+		// The retirement sweep has no requesting guest. It reads cross-session
+		// inactivity and commitments under native account/key gates; the owner
+		// actor is borrowed only after the retirement policy has been selected.
+		{Path: "calls/queries.memql", Name: "callsGuestRetirementCandidates"}: true,
+		{Path: "calls/queries.memql", Name: "callsGuestRecentSessions"}:       true,
+		{Path: "calls/queries.memql", Name: "callsGuestRecentSeats"}:          true,
+		{Path: "calls/queries.memql", Name: "callsGuestActiveSeats"}:          true,
+		{Path: "calls/queries.memql", Name: "callsGuestHeldRooms"}:            true,
+		{Path: "calls/queries.memql", Name: "callsGuestHeldBookings"}:         true,
+		// Only the native processing protocol proves a current seat's explicit
+		// consent and the operator's exact leased identity/track/generation. Owner
+		// scoping cannot establish that authority, protect its lease secret, or
+		// serialize receipt/rate writes across replicas before an ephemeral send.
+		{Path: "calls/queries.memql", Name: "callsProcessingById"}:           true,
+		{Path: "calls/queries.memql", Name: "callsProcessingRoomCandidates"}: true,
+		{Path: "calls/queries.memql", Name: "callsProcessingReceiptById"}:    true,
+		{Path: "calls/queries.memql", Name: "callsProcessingRateById"}:       true,
+		{Path: "calls/mutations.memql", Name: "saveCallsProcessing"}:         true,
+		{Path: "calls/mutations.memql", Name: "saveCallsProcessingReceipt"}:  true,
+		{Path: "calls/mutations.memql", Name: "saveCallsProcessingRate"}:     true,
 		// A borrowed owner is not an occupied room host or delegated source owner.
 		// Native checks bind runs, private instructions and media lease secrets to
 		// the current site/session/grant; caller row ownership alone cannot do so.

@@ -22,9 +22,11 @@ type processingJournal struct {
 	Epoch              int64
 	Consents           map[string]processingConsent
 	Lease              processingLeaseState
-	RateSecond         int64
-	Receipts           map[string]processingReceipt
-	RateCount          int
+	// Read compatibility only. The next renewal replaces the old lease generation;
+	// until then publication must still honor receipts issued by the previous server.
+	LegacyReceipts map[string]processingReceipt `json:"Receipts,omitempty"`
+	LegacySecond   int64                        `json:"RateSecond,omitempty"`
+	LegacyCount    int                          `json:"RateCount,omitempty"`
 }
 type processingConsent struct {
 	callrules.ProcessingConsent
@@ -97,4 +99,9 @@ func (j *processingJournal) consent(s seatRow) processingConsent {
 	}
 	return c
 }
-func (j *processingJournal) revoke() { j.Reason = ""; j.Epoch++; j.Lease = processingLeaseState{} }
+func (j *processingJournal) revoke() {
+	j.Reason = ""
+	j.Epoch++
+	j.Lease = processingLeaseState{}
+	j.LegacyReceipts, j.LegacySecond, j.LegacyCount = nil, 0, 0
+}

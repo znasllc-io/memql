@@ -416,3 +416,26 @@ shape processingState callsProcessingFull {
  roomId
  stateData
 }
+
+/// Private compact processing metadata.
+@row
+shape processingReceipt callsProcessingReceiptFull {
+ row.id
+ row.createdAt
+ siteId
+ roomId
+ trackId
+ epoch
+ receiptData
+}
+
+/// Private compact processing metadata.
+@row
+shape processingRate callsProcessingRateFull {
+ row.id
+ row.createdAt
+ siteId
+ roomId
+ rateSecond
+ rateCount
+}

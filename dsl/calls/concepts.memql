@@ -560,7 +560,7 @@ concept familyState {
 }
 
 /// Native room-scoped agent review journal. No bearer secrets or media stored.
-// @no-displayCard: private host review and one-admission receipts.
+// @no-displayCard: private host approval digests and one-admission authority are protocol state, not human-facing records.
 @serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @belongsTo(account, via="siteId", stays="signin")
@@ -597,11 +597,11 @@ concept agentPortrait {
 }
 
 /// Native processing authority only. No media, transcription text or model observations persist here.
-// @no-displayCard: private consent and bounded lease/receipt metadata.
+// @no-displayCard: private consent revisions and trusted sampler leases are authority metadata with no client-visible primary slot.
 @serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @belongsTo(account, via="siteId", stays="signin")
-@retention(ttl="30d", keepLatest=false, archive="none")
+@retention(ttl="1d", keepLatest=false, archive="none")
 concept processingState {
  siteId string!
  ownerUserId string!
@@ -610,4 +610,39 @@ concept processingState {
  accountId string
  @relationship(type="references", as="processingSite", field="siteId", target=site, direction="outgoing")
  @relationship(type="references", as="processingRoom", field="roomId", target=room, direction="outgoing")
+}
+
+/// Compact replay protection for one publication track and lease generation. No message text or observations.
+// @no-displayCard: private replay hashes and rate counters have no client-visible content or meaningful human-facing primary slot.
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@belongsTo(account, via="siteId", stays="signin")
+@retention(ttl="1d", keepLatest=false, archive="none")
+concept processingReceipt {
+ siteId string!
+ ownerUserId string!
+ roomId string!
+ trackId string!
+ epoch int!
+ receiptData string! @maxLength(4096)
+ accountId string
+ @relationship(type="references", as="processingReceiptSite", field="siteId", target=site, direction="outgoing")
+ @relationship(type="references", as="processingReceiptRoom", field="roomId", target=room, direction="outgoing")
+}
+
+/// Compact room-wide publication rate counter, serialized by the native room gate.
+// @no-displayCard: private replay hashes and rate counters have no client-visible content or meaningful human-facing primary slot.
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@belongsTo(account, via="siteId", stays="signin")
+@retention(ttl="1d", keepLatest=false, archive="none")
+concept processingRate {
+ siteId string!
+ ownerUserId string!
+ roomId string!
+ rateSecond int!
+ rateCount int!
+ accountId string
+ @relationship(type="references", as="processingRateSite", field="siteId", target=site, direction="outgoing")
+ @relationship(type="references", as="processingRateRoom", field="roomId", target=room, direction="outgoing")
 }

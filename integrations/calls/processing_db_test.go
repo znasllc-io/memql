@@ -29,19 +29,25 @@ func (b *processingTestMedia) PublishProcessing(_ context.Context, _ string, dat
 	return nil
 }
 func processingFixture(t *testing.T, insights bool) (*callWorld, accountTestKey, callrules.Session, callrules.StartResult, *processingTestMedia) {
+	return processingDurationFixture(t, insights, 60)
+}
+func processingDurationFixture(t *testing.T, insights bool, minutes int) (*callWorld, accountTestKey, callrules.Session, callrules.StartResult, *processingTestMedia) {
 	t.Helper()
 	cw, k, _ := commerceFixture(t, "processing")
 	if cw == nil {
 		return nil, k, callrules.Session{}, callrules.StartResult{}, nil
 	}
 	commerceVerified(t, cw, k)
+	if minutes > 60 {
+		commercePurchase(t, cw, k, "processing-long-call-funds")
+	}
 	ctx := context.Background()
 	_, e := cw.builtin(actorContext(cw.developer, auth.RoleDeveloper), "callsPolicySet", map[string]any{"siteId": cw.site, "processingEnabled": 1})
 	require.NoError(t, e)
 	t.Cleanup(func() {
-		_, _ = cw.db.NewDelete().TableExpr(`"MemoryNodes"`).Where("concept = ?", processingConcept).Where("payload->>'siteId' = ?", siteConcept+":"+cw.site).Exec(ctx)
+		_, _ = cw.db.NewDelete().TableExpr(`"MemoryNodes"`).Where("concept IN (?, ?, ?)", processingConcept, processingReceiptConcept, processingRateConcept).Where("payload->>'siteId' = ?", siteConcept+":"+cw.site).Exec(ctx)
 	})
-	quoted := commerceDo(t, cw, k, callrules.AccountRequest{Action: "quote_call", ParticipantLimit: 3, DurationMinutes: 60, Insights: insights})
+	quoted := commerceDo(t, cw, k, callrules.AccountRequest{Action: "quote_call", ParticipantLimit: 3, DurationMinutes: minutes, Insights: insights})
 	host := *k.result.Session
 	start, e := cw.svc.Start(ctx, host, callrules.StartBody{Name: "Host", Confirm: confirmed, QuoteID: quoted.Quote.QuoteID, IdempotencyKey: "processing-start-0001"})
 	require.NoError(t, e)
@@ -143,6 +149,8 @@ func TestProcessingBaseVisualCapacityResetAndAdmissionBinding(t *testing.T) {
 	require.NoError(t, e)
 	require.True(t, c.Processing.Capabilities.Safety)
 	require.False(t, c.Processing.Capabilities.Transcription)
+	_, e = cw.svc.processingLease(ctx, cw.ref, room, "operator", "", false, 0)
+	require.ErrorContains(t, e, "processing_capacity", "zero operator budget is an explicit capacity refusal even before a track is eligible")
 	req := callrules.HostActionRequest{Action: "processing_consent", Processing: &callrules.ProcessingConsentRequest{RoomID: room, Identity: c.Identity, Revision: "0", Transcription: true}}
 	require.ErrorContains(t, cw.svc.Host(ctx, host, req), "processing_not_available")
 	c = consentProcessing(t, cw, host, true, false, false)

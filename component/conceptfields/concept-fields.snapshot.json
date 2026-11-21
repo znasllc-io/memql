@@ -1092,6 +1092,46 @@
       ]
     },
     {
+      "concept": "v1:calls:processingRate",
+      "file": "calls/concepts.memql",
+      "fields": [
+        "accountId",
+        "ownerUserId",
+        "rateCount",
+        "rateSecond",
+        "roomId",
+        "siteId"
+      ],
+      "required": [
+        "ownerUserId",
+        "rateCount",
+        "rateSecond",
+        "roomId",
+        "siteId"
+      ]
+    },
+    {
+      "concept": "v1:calls:processingReceipt",
+      "file": "calls/concepts.memql",
+      "fields": [
+        "accountId",
+        "epoch",
+        "ownerUserId",
+        "receiptData",
+        "roomId",
+        "siteId",
+        "trackId"
+      ],
+      "required": [
+        "epoch",
+        "ownerUserId",
+        "receiptData",
+        "roomId",
+        "siteId",
+        "trackId"
+      ]
+    },
+    {
       "concept": "v1:calls:processingState",
       "file": "calls/concepts.memql",
       "fields": [

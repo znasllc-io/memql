@@ -5,7 +5,7 @@
 // conjunct, as siteAccessSessionByToken does; actor.userId scoping alone is not the fix for a digest lookup,
 // because a client-callable lookup by digest is an oracle for guessed secrets.
 
-use common.traits.{ isOpen, isActiveRecord }
+use common.traits.{ isOpen, isActiveRecord, statusIsActive }
 
 /// actor.userId scoping is not the fix: only native portrait authorization may read this row.
 @serverOnly
@@ -826,7 +826,7 @@ query agentAdmissionState callsAgentAdmissionById {
 @actor
 @cache(0)
 query key callsGuestRetirementCandidates {
- filter row => actor.isClusterOwner == true && row.kind == "guest" && row.status == "active" && (row.userHandle == nil || row.userHandle == "")
+ filter row => actor.isClusterOwner == true && row.kind == "guest" && statusIsActive(row) && (row.userHandle == nil || row.userHandle == "")
  sort "row.id", "asc"
  paginate 50
  shape callsKeyFull
@@ -913,4 +913,26 @@ query room callsProcessingRoomCandidates {
  sort "row.id", "asc"
  paginate 100
  shape callsRoomFull
+}
+
+/// Native metadata only; actor.userId scoping is not the fix.
+@serverOnly
+@actor
+@cache(0)
+query processingReceipt callsProcessingReceiptById {
+ args { id string! }
+ filter row => row.id == args.id && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ paginate 1
+ shape callsProcessingReceiptFull
+}
+
+/// Native metadata only; actor.userId scoping is not the fix.
+@serverOnly
+@actor
+@cache(0)
+query processingRate callsProcessingRateById {
+ args { id string! }
+ filter row => row.id == args.id && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ paginate 1
+ shape callsProcessingRateFull
 }

@@ -969,3 +969,40 @@ mutation processingState saveCallsProcessing {
  stamp { id: args.stateId, ownerUserId: actor.userId, createdAt: args.versionTime }
  }
 }
+
+/// Fenced native metadata; actor.userId scoping is not the fix.
+@serverOnly
+@actor
+mutation processingReceipt saveCallsProcessingReceipt {
+ args {
+ stateId string!
+ versionTime datetime!
+ siteId string!
+ roomId string!
+ trackId string!
+ epoch int!
+ receiptData string!
+ }
+ insert {
+ accept { siteId, roomId, trackId, epoch, receiptData }
+ stamp { id: args.stateId, ownerUserId: actor.userId, createdAt: args.versionTime }
+ }
+}
+
+/// Fenced native metadata; actor.userId scoping is not the fix.
+@serverOnly
+@actor
+mutation processingRate saveCallsProcessingRate {
+ args {
+ stateId string!
+ versionTime datetime!
+ siteId string!
+ roomId string!
+ rateSecond int!
+ rateCount int!
+ }
+ insert {
+ accept { siteId, roomId, rateSecond, rateCount }
+ stamp { id: args.stateId, ownerUserId: actor.userId, createdAt: args.versionTime }
+ }
+}

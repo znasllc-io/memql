@@ -217,7 +217,7 @@ func (s *Service) processingLease(ctx context.Context, site callrules.SiteRef, r
 	if e != nil {
 		return none, e
 	}
-	if len(tracks) > maxTracks {
+	if maxTracks == 0 || len(tracks) > maxTracks {
 		oldIdentity = j.Lease.Identity
 		j.revoke()
 		j.Reason = "processing_capacity"
@@ -236,7 +236,7 @@ func (s *Service) processingLease(ctx context.Context, site callrules.SiteRef, r
 		}
 		return none, accountRefusal("processing_no_consent")
 	}
-	changed := !alive || reset || !sameProcessingTracks(tracks, j.Lease.Tracks)
+	changed := !alive || reset || len(j.LegacyReceipts) > 0 || !sameProcessingTracks(tracks, j.Lease.Tracks)
 	if changed {
 		oldIdentity = j.Lease.Identity
 		j.revoke()
@@ -246,7 +246,6 @@ func (s *Service) processingLease(ctx context.Context, site callrules.SiteRef, r
 		}
 		j.Lease.Identity = "sampler-" + id.NewShortId()
 		j.Lease.Owner = actor
-		j.Receipts = map[string]processingReceipt{}
 	}
 	j.Reason = ""
 	j.Lease.ExpiresAt = s.now().Add(processingTTL)
@@ -282,6 +281,10 @@ func (s *Service) processingTracks(ctx context.Context, r roomRow, j *processing
 	if e != nil {
 		return nil, e
 	}
+	return s.processingTracksForSeats(ctx, r, j, present, seats)
+}
+
+func (s *Service) processingTracksForSeats(ctx context.Context, r roomRow, j *processingJournal, present []MediaParticipant, seats []seatRow) ([]processingTrack, error) {
 	config, e := decodeUsageConfig(r.UsageConfig)
 	if e != nil {
 		return nil, e

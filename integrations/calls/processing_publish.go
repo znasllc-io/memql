@@ -200,13 +200,6 @@ func (s *Service) processingPublish(ctx context.Context, site callrules.SiteRef,
 	if j == nil || j.Lease.ID != leaseID || j.Lease.Owner != actor || j.Epoch != revision || !s.now().Before(j.Lease.ExpiresAt) {
 		return nil, accountRefusal("processing_lease_expired")
 	}
-	tracks, e := s.processingTracks(fresh, *room, j, observed)
-	if e != nil {
-		return nil, e
-	}
-	if !sameProcessingTracks(tracks, j.Lease.Tracks) {
-		return nil, accountRefusal("processing_tracks_changed")
-	}
 	var track *processingTrack
 	for n := range j.Lease.Tracks {
 		t := &j.Lease.Tracks[n]
@@ -218,11 +211,46 @@ func (s *Service) processingPublish(ctx context.Context, site callrules.SiteRef,
 	if track == nil || ev.RoomID != room.ID || ev.ParticipantID != track.ParticipantID || ev.MediaIdentity != track.MediaIdentity || ev.Source != track.Source || ev.ConsentRevision != track.ConsentRevision || ev.Epoch != j.Epoch {
 		return nil, accountRefusal("processing_authority_changed")
 	}
+	// Recheck only this speaker's current native admission, credential, consent
+	// and publication. A result does not need to reread every other account.
+	seat, e := s.store.seatByID(fresh, room.OwnerUserID, track.ParticipantID)
+	if e != nil {
+		return nil, e
+	}
+	if seat == nil || seat.RoomID != room.ID {
+		return nil, accountRefusal("processing_tracks_changed")
+	}
+	current, e := s.processingTracksForSeats(fresh, *room, j, observed, []seatRow{*seat})
+	if e != nil {
+		return nil, e
+	}
+	valid := false
+	for _, candidate := range current {
+		if candidate.TrackID == track.TrackID && sameProcessingTracks([]processingTrack{candidate}, []processingTrack{*track}) {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		return nil, accountRefusal("processing_tracks_changed")
+	}
 	if ev.Kind == "transcript" && !track.TranscriptionAllowed || ev.Kind == "text_tone" && !track.InsightsAllowed || ev.Kind == "visual_observation" && !track.SafetyAllowed {
 		return nil, accountRefusal("processing_not_consented")
 	}
 	if ev.Kind == "visual_observation" && (ev.CapturedAt < float64(s.now().Unix())-30 || ev.CapturedAt > float64(s.now().Unix())+1) {
 		return nil, callrules.ErrInvalid
+	}
+	// Visual scores are observations only: there is no broadcast, stored finding,
+	// or automatic enforcement. Retrying one cannot repeat a downstream effect,
+	// so only the compact shared rate counter is written, never a result receipt.
+	if ev.Kind == "visual_observation" {
+		if e = s.store.takeProcessingPublication(fresh, site.OwnerUserID, j, s.now()); e != nil {
+			if callrules.ReasonOf(e) == "processing_rate_limited" {
+				return map[string]any{"status": "rate_limited"}, nil
+			}
+			return nil, e
+		}
+		return map[string]any{"status": "published", "event_id": id.NewShortId()}, nil
 	}
 	ev.DisplayName = track.DisplayName // never trust worker-supplied attribution
 	raw, e := json.Marshal(ev)
@@ -230,79 +258,72 @@ func (s *Service) processingPublish(ctx context.Context, site callrules.SiteRef,
 		return nil, callrules.ErrInvalid
 	}
 	digest := string(id.NewUntracked().FromBytes(raw))
-	key := ev.TrackID + ":" + ev.Kind
-	if j.Receipts == nil {
-		j.Receipts = map[string]processingReceipt{}
+	receipts, e := s.store.processingReceipts(fresh, site.OwnerUserID, j, ev.TrackID)
+	if e != nil {
+		return nil, e
 	}
-	prior, had := j.Receipts[key]
+	prior, had := receipts.Receipts[ev.Kind]
 	if had && prior.Digest == digest {
 		return map[string]any{"status": "duplicate", "event_id": prior.EventID}, nil
 	}
-	if ev.Kind == "transcript" && had && ev.StartSample < prior.Position || ev.Kind == "visual_observation" && had && ev.Sequence <= prior.Position {
-		return nil, accountRefusal("processing_event_old")
+	if ev.Kind == "transcript" && had && ev.StartSample < prior.Position {
+		return map[string]any{"status": "stale"}, nil
 	}
 	if ev.Kind == "text_tone" {
-		spoken, ok := j.Receipts[ev.TrackID+":transcript"]
+		spoken, ok := receipts.Receipts["transcript"]
 		if !ok || spoken.Segment != ev.SegmentID || had && prior.Segment == ev.SegmentID {
-			return nil, accountRefusal("processing_event_old")
+			return map[string]any{"status": "stale"}, nil
 		}
 	}
 	if ev.Kind == "incomplete" && had && s.now().Sub(prior.At) < time.Second {
-		return nil, accountRefusal("processing_rate_limited")
+		return map[string]any{"status": "rate_limited"}, nil
 	}
-	if j.RateSecond != s.now().Unix() {
-		j.RateSecond = s.now().Unix()
-		j.RateCount = 0
+	if e = s.store.takeProcessingPublication(fresh, site.OwnerUserID, j, s.now()); e != nil {
+		if callrules.ReasonOf(e) == "processing_rate_limited" {
+			return map[string]any{"status": "rate_limited"}, nil
+		}
+		return nil, e
 	}
-	if j.RateCount >= 16 {
-		return nil, accountRefusal("processing_rate_limited")
-	}
-	j.RateCount++
 	receipt := processingReceipt{Digest: digest, EventID: id.NewShortId(), Segment: ev.SegmentID, At: s.now()}
 	if ev.Kind == "transcript" {
 		receipt.Position = ev.EndSample
 	}
-	if ev.Kind == "visual_observation" {
-		receipt.Position = ev.Sequence
-	}
-	j.Receipts[key] = receipt
+	receipts.Receipts[ev.Kind] = receipt
 	// Persist only the digest/sequence before sending. An uncertain send may lose one
 	// ephemeral caption, but retry cannot duplicate it or persist its text in a run.
-	if e = s.store.saveProcessing(fresh, site.OwnerUserID, j, s.now()); e != nil {
+	if e = s.store.saveProcessingReceipts(fresh, site.OwnerUserID, receipts, s.now()); e != nil {
 		return nil, e
 	}
-	if ev.Kind != "visual_observation" {
-		var packet map[string]any
-		_ = json.Unmarshal(raw, &packet)
-		packet["event_id"] = receipt.EventID
-		packet["published_at"] = s.now().Unix()
-		packet["expires_at"] = j.Lease.ExpiresAt.Unix()
-		if ev.Kind == "transcript" {
-			packet["start_sample"] = ev.StartSample
-			packet["end_sample"] = ev.EndSample
+	var packet map[string]any
+	_ = json.Unmarshal(raw, &packet)
+	packet["event_id"] = receipt.EventID
+	packet["published_at"] = s.now().Unix()
+	packet["expires_at"] = j.Lease.ExpiresAt.Unix()
+	if ev.Kind == "transcript" {
+		packet["start_sample"] = ev.StartSample
+		packet["end_sample"] = ev.EndSample
+	}
+	if ev.Kind == "text_tone" {
+		packet["score"] = ev.Score
+	}
+	seats, e := s.store.seatsForRoom(fresh, site.OwnerUserID, room.ID)
+	if e != nil {
+		return nil, e
+	}
+	recipients := []string{}
+	for _, seat := range seats {
+		if seat.occupying() {
+			recipients = append(recipients, seat.Identity)
 		}
-		if ev.Kind == "text_tone" {
-			packet["score"] = ev.Score
-		}
-		seats, e := s.store.seatsForRoom(fresh, site.OwnerUserID, room.ID)
-		if e != nil {
-			return nil, e
-		}
-		recipients := []string{}
-		for _, seat := range seats {
-			if seat.occupying() {
-				recipients = append(recipients, seat.Identity)
-			}
-		}
-		payload, _ := json.Marshal(packet)
-		// A short server data send shares the admission/consent gate, so consent cannot
-		// commit withdrawn and then have an earlier result published afterwards.
-		sendCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		defer cancel()
-		if len(recipients) > 0 {
-			if e = sender.PublishProcessing(sendCtx, room.MediaRoom, payload, recipients); e != nil {
-				return nil, accountRefusal("processing_delivery_uncertain")
-			}
+	}
+	payload, _ := json.Marshal(packet)
+	// A short server data send shares the admission/consent gate, so consent cannot
+	// commit withdrawn and then have an earlier result published afterwards.
+	sendCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if len(recipients) > 0 {
+		if e = sender.PublishProcessing(sendCtx, room.MediaRoom, payload, recipients); e != nil {
+			return nil, accountRefusal("processing_delivery_uncertain")
 		}
 	}
 	return map[string]any{"status": "published", "event_id": receipt.EventID}, nil
