@@ -447,8 +447,14 @@ export function BrowseSection({
     filter.search.trim() !== "" || filter.place === "bin" || filter.place === "materializer" || filter.place === "shared" || filter.place === "sharing"
       ? ""
       : (filter.folderId ?? "");
+  // NO ADD WHERE NOTHING CAN BE ADDED (Jesús, Nov 20 2026). The Bin holds
+  // what you deleted, Shared with me holds other people's files, and Sharing
+  // is the list of what you share: the "+" there only ever filed the new
+  // thing at the Library root, out of sight, so it is absent (rule 12). A
+  // file dropped on the window still lands in the Library root, as above.
+  const canAdd = filter.place !== "bin" && filter.place !== "shared" && filter.place !== "sharing";
 
-  const onDrop = (event: React.DragEvent) => {
+  const onDrop =(event: React.DragEvent) => {
     if (!event.dataTransfer.files.length && !event.dataTransfer.items.length) return;
     // BOTH PHASES STOP PROPAGATION (the Training rule): the app window sits
     // inside the desk plate and the desk plate takes file drops -- without
@@ -926,7 +932,7 @@ export function BrowseSection({
         >
           <Search size={16} aria-hidden />
         </IconButton>
-        <AddMenu
+        {canAdd ? <AddMenu
           disabled={connection === null}
           onUpload={() => pickRef.current?.click()}
           newFileKinds={canOpen(registry, MATERIALIZER_APP_ID) ? [{
@@ -940,7 +946,7 @@ export function BrowseSection({
             ),
           }] : []}
           onNewFolder={() => void newFolderIn(destinationFolderId)}
-        />
+        /> : null}
       </Head>
       {searchOpen ? (
         <div id={searchPanelId} className="os-files-search">
