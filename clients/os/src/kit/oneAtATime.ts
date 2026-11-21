@@ -23,6 +23,14 @@ import { useEffect, useRef, useState } from "react";
 //     no press, then reads as it did;
 //   - an ICON-ONLY button just dims while the act runs.
 //
+// THE HALF SECOND. Either way a press holds its button for at least
+// MIN_HOLD_MS, however fast the act finishes. Holding only while the promise
+// was pending let a burst through: a download or save on a local cluster
+// finishes in a few hundredths of a second, so every spammed click found the
+// button free again, the dim never showed, and Jesús's Downloads folder filled
+// with copies (Nov 20 2026: "It should be half a second of delay"). A slower
+// act simply holds for as long as it runs.
+//
 // A done word is a claim that the act happened, so it is shown only for a
 // promise that resolved to something other than `false`. An act that reports
 // its own failure in place (most of them do, beside the button) resolves
@@ -37,6 +45,9 @@ import { useEffect, useRef, useState } from "react";
 
 /** How long a done word stands, in milliseconds. */
 export const DONE_MS = 2000;
+
+/** The shortest a press holds its button, in milliseconds, however fast its act finishes. */
+export const MIN_HOLD_MS = 500;
 
 export type PressPhase = "idle" | "busy" | "done";
 
@@ -73,15 +84,25 @@ export function useOneAtATime(): { phase: PressPhase; press: (run: () => unknown
     if (!isPromise(result)) return;
     held.current = true;
     setPhase("busy");
+    const pressedAt = Date.now();
+    // Moves on only once the press has held for its half second.
+    const afterHold = (next: () => void) => {
+      const wait = pressedAt + MIN_HOLD_MS - Date.now();
+      if (wait <= 0) next();
+      else timer.current = setTimeout(next, wait);
+    };
     result.then(
       (outcome) => {
         if (!live.current) return;
-        if (!sayDone || outcome === false) return settle();
-        setPhase("done");
-        timer.current = setTimeout(settle, DONE_MS);
+        if (!sayDone || outcome === false) return afterHold(settle);
+        afterHold(() => {
+          if (!live.current) return;
+          setPhase("done");
+          timer.current = setTimeout(settle, DONE_MS);
+        });
       },
       (err: unknown) => {
-        settle();
+        afterHold(settle);
         throw err;
       },
     );
