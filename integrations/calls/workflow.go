@@ -399,11 +399,20 @@ func (s *Service) workflowRunCommand(ctx context.Context, site callrules.SiteRef
 		return out, accountRefusal("workflow_state_unavailable")
 	}
 	agent := ctx.Value(agentCallContext{}) != nil
+	changed := false
 	if v != nil {
-		changed, observeErr := s.workflowObserve(ctx, site, *room, v.Run, s.now())
+		var observeErr error
+		changed, observeErr = s.workflowObserve(ctx, site, *room, v.Run, s.now())
 		if observeErr != nil {
 			return out, observeErr
 		}
+	}
+	// Observation may wait on the media provider. Recheck the caller before
+	// persisting that observation or disclosing any private run/binding projection.
+	if err = s.workflowCurrentActor(ctx, site, token, *held, *seat, *room, req.Action); err != nil {
+		return callrules.WorkflowResult{ServerNow: s.now()}, err
+	}
+	if v != nil {
 		if changed {
 			if err = s.store.saveWorkflow(ctx, site.OwnerUserID, v, s.now()); err != nil {
 				return out, err
@@ -629,16 +638,12 @@ func (s *Service) workflowRunCommand(ctx context.Context, site callrules.SiteRef
 	}
 	// Media readiness may require a remote read. Refresh the credential after
 	// that boundary, before committing even a purely local player transition.
-	finalSession, _, e := s.session(memql.ContextWithFreshRead(ctx), site, token, s.now())
-	if e != nil {
-		return out, e
-	}
-	if finalSession.ID != held.ID || finalSession.SeatID != seat.ID {
-		return out, callrules.ErrNoSession
+	if err = s.workflowCurrentActor(ctx, site, token, *held, *seat, *room, req.Action); err != nil {
+		return callrules.WorkflowResult{ServerNow: s.now()}, err
 	}
 	if slices.Contains([]string{"start", "change", "resume", "handoff", "next", "previous", "seek", "end_turn"}, req.Action) {
-		if e = s.workflowEntitlement(ctx, site, *room); e != nil {
-			return out, e
+		if err = s.workflowEntitlement(ctx, site, *room); err != nil {
+			return out, err
 		}
 	}
 	workflowRecord(v, req, held.ID, v.Run.Revision)
@@ -652,4 +657,30 @@ func (s *Service) workflowRunCommand(ctx context.Context, site callrules.SiteRef
 	out.Run = &projected
 	out.ServerNow = now
 	return out, nil
+}
+
+// The room gate fences normal admission changes, but account-session,
+// credential and grant revocation can commit independently while provider I/O
+// is pending. Use the same checked session/agent rules as request admission and
+// require its exact seat generation and role before returning private guidance.
+func (s *Service) workflowCurrentActor(ctx context.Context, site callrules.SiteRef, token string, held sessionRow, seat seatRow, room roomRow, action string) error {
+	fresh := memql.ContextWithFreshRead(ctx)
+	current, _, err := s.session(fresh, site, token, s.now())
+	if err != nil {
+		return err
+	}
+	if current.ID != held.ID || current.KeyID != held.KeyID || current.CredentialID != held.CredentialID || current.RoomID != room.ID || current.SeatID != seat.ID {
+		return callrules.ErrNoSession
+	}
+	if err = s.workflowAgentAllowed(fresh, site, current.KeyID, action); err != nil {
+		return err
+	}
+	member, currentRoom, err := s.seatAndRoom(fresh, site.OwnerUserID, current)
+	if err != nil {
+		return err
+	}
+	if member == nil || currentRoom == nil || currentRoom.ID != room.ID || currentRoom.SiteID != site.SiteID || !member.occupying() || member.ID != seat.ID || member.Identity != seat.Identity || !member.JoinedAt.Equal(seat.JoinedAt) || member.Host != seat.Host || member.Kind != seat.Kind {
+		return callrules.ErrNoSession
+	}
+	return s.agentSeatAllowed(fresh, *currentRoom, *member)
 }
