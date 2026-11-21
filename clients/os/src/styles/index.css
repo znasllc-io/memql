@@ -8051,10 +8051,12 @@ a.os-button {
 .os-entry-preferences { flex: none; padding: 20px 20px 0; }
 .os-entry-layout > .os-wizard { flex: 1; min-height: 0; }
 .os-entry-pending { flex: 1; display: grid; place-items: center; animation: os-entry-arrive 160ms ease-out; }
-.os-entry-pending-content { display: grid; justify-items: center; gap: 32px; }
-/* Loading lockup at 2x (Jesús, Nov 20 2026): mark 86px, text 24px; the vmin/vw caps keep it on a small phone. */
-.os-entry-pending-label { margin: 0; color: var(--os-muted); font-size: min(1.5rem, calc(6.4vw / var(--os-scale, 1))); }
-.os-entry-pending-mark svg { width: min(86px, calc(23vmin / var(--os-scale, 1))); height: min(86px, calc(23vmin / var(--os-scale, 1))); }
+.os-entry-pending-content { display: grid; justify-items: center; gap: calc(32px / var(--os-scale, 1)); }
+/* Loading lockup at 2x (Jesús, Nov 20 2026): mark 86px, text 24px; the vmin/vw caps keep it on a small phone.
+   Every length is divided by --os-scale: the shell zooms <html> while this is still on screen, and the
+   logo must not grow mid-load (test/kit/loadingLockupScale.test.ts). */
+.os-entry-pending-label { margin: 0; color: var(--os-muted); font-size: min(calc(1.5rem / var(--os-scale, 1)), calc(6.4vw / var(--os-scale, 1))); }
+.os-entry-pending-mark svg { width: min(calc(86px / var(--os-scale, 1)), calc(23vmin / var(--os-scale, 1))); height: min(calc(86px / var(--os-scale, 1)), calc(23vmin / var(--os-scale, 1))); }
 .os-entry-pending-mark {
   color: var(--os-muted);
   display: flex;
@@ -8080,8 +8082,8 @@ a.os-button {
   pointer-events: none; --os-boot-r: 0px; opacity: 0;
   transition: --os-boot-r 650ms cubic-bezier(.6, 0, .4, 1), opacity 260ms ease-in 390ms;
 }
-.os-boot-curtain-content { display: grid; justify-items: center; gap: 28px; }
-.os-boot-mark { overflow: visible; width: min(86px, calc(23vmin / var(--os-scale, 1))); height: min(86px, calc(23vmin / var(--os-scale, 1))); } /* 2x of 43px, capped on small windows */
+.os-boot-curtain-content { display: grid; justify-items: center; gap: calc(28px / var(--os-scale, 1)); }
+.os-boot-mark { overflow: visible; width: min(calc(86px / var(--os-scale, 1)), calc(23vmin / var(--os-scale, 1))); height: min(calc(86px / var(--os-scale, 1)), calc(23vmin / var(--os-scale, 1))); } /* 2x of 43px, capped on small windows; same size on screen before and after the desktop zoom */
 .os-boot-mark line { stroke-width: .78; stroke-linecap: round; fill: none; }
 .os-boot-mark-base line { stroke: color-mix(in srgb, var(--os-ink) 16%, transparent); }
 .os-boot-mark-base circle { fill: color-mix(in srgb, var(--os-ink) 16%, transparent); }
@@ -8091,7 +8093,7 @@ a.os-button {
 .os-boot-edge[data-on] { opacity: 1; transition: opacity 200ms ease 120ms; }
 .os-boot-dot { fill: var(--os-accent); opacity: 0; transform-box: fill-box; transform-origin: center; transform: scale(.4); }
 .os-boot-dot[data-on] { opacity: 1; transform: none; transition: opacity 140ms ease 120ms, transform 200ms cubic-bezier(.3, 1.6, .5, 1) 120ms; }
-.os-boot-steps { position: relative; width: min(560px, calc(92vw / var(--os-scale, 1))); height: 4.6em; font-size: min(1.5rem, calc(6.4vw / var(--os-scale, 1))); } /* 2x of 12px text */
+.os-boot-steps { position: relative; width: min(calc(560px / var(--os-scale, 1)), calc(92vw / var(--os-scale, 1))); height: 4.6em; font-size: min(calc(1.5rem / var(--os-scale, 1)), calc(6.4vw / var(--os-scale, 1))); } /* 2x of 12px text */
 .os-boot-step {
   position: absolute; inset: 0 0 auto; margin: 0; text-align: center; white-space: nowrap;
   color: var(--os-ink); transform-origin: 50% 0; animation: os-boot-step-in 400ms ease-out;
