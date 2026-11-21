@@ -2,8 +2,6 @@ package calls
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -48,8 +46,7 @@ func WorkflowScope(action string) string {
 }
 func workflowDigest(req callrules.WorkflowRequest) string {
 	raw, _ := json.Marshal(req)
-	sum := sha256.Sum256(raw)
-	return hex.EncodeToString(sum[:])
+	return string(id.NewUntracked().FromBytes(raw))
 }
 func workflowOperationSeen(v *workflowState, req callrules.WorkflowRequest, actor string) (bool, error) {
 	if !callrules.ValidWorkflowID(req.IdempotencyKey) {

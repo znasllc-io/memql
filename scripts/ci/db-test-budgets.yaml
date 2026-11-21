@@ -89,4 +89,11 @@ classes: |
   # suites take on the bounded AKS runner, expect about 570s; give it about
   # twice that. Keep every test and its operation deadlines.
   db      storestats component/storestats 1140s serial    1
+  # Callkey now includes full account, commerce, family, grant and workflow DB
+  # lifecycles. Main's 2026-11-21 package alarm fired at 180s while a new test
+  # was 0s old, killing cleanup and leaving a bootstrap seat for the following
+  # clustere2e package. The complete suite takes about 300s locally. Give it its
+  # own isolated DB class and aggregate headroom; retain every operation timeout
+  # and all exact cross-replica capacity assertions.
+  db      calls     integrations/calls  900s     serial    1
   db      default   -                   180s     -         2

@@ -348,7 +348,14 @@ func TestRuntimeOutcomeAloneClearsInferenceActivity(t *testing.T) {
 
 func TestInferenceLeaseAcrossProcesses(t *testing.T) {
 	if root := os.Getenv("MEMQL_TEST_INFERENCE_LEASE_ROOT"); root != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		// Success proves that the separate build lock is not in the admission
+		// path, not that a fresh child gets CPU within 100 ms on a busy runner.
+		// The occupied inference gate keeps its short deadline: it must block.
+		timeout := 5 * time.Second
+		if os.Getenv("MEMQL_TEST_INFERENCE_LEASE_BUSY") == "1" {
+			timeout = 100 * time.Millisecond
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 		lease, err := acquireInferenceLease(ctx, root, time.Millisecond)
 		if os.Getenv("MEMQL_TEST_INFERENCE_LEASE_BUSY") == "1" {
