@@ -11,6 +11,7 @@ package router
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -405,4 +406,181 @@ func equalStrings(got, want []string) bool {
 		}
 	}
 	return true
+}
+
+// ---- the vendor selectors follow the job (design record 2026-11-21, R2) ----
+
+type jobRecordSpec struct {
+	name, providerType, levels string
+	rank                       int
+	in, out                    float64
+}
+
+// jobRouter is a router whose one chain entry is a vendor selector, over
+// records that declare a job.
+func jobRouter(t *testing.T, entry string, records ...jobRecordSpec) *Router {
+	t.Helper()
+	providers := memql.NewProviderRegistryForTest()
+	for _, rec := range records {
+		params := map[string]any{"contextWindow": 200000}
+		if rec.levels != "" {
+			params["levels"] = rec.levels
+		}
+		if rec.rank != 0 {
+			params["rank"] = rec.rank
+		}
+		if rec.in != 0 || rec.out != 0 {
+			params["inputCostPerMillion"], params["outputCostPerMillion"] = rec.in, rec.out
+		}
+		providers.RegisterWithParamsForTest(rec.name, rec.providerType, "model-"+rec.name, params, pricedProvider{})
+	}
+	policies := memql.NewPolicyRegistryForTest(map[string][]string{"p": {entry}})
+	return New(providers, policies, testRules(t, defaultRule("p")), nil, nil)
+}
+
+var jobCatalog = []jobRecordSpec{
+	{"haiku", "Anthropic", "fast", 300, 0.1, 0.5},
+	{"sonnet", "Anthropic", "fast strong", 600, 2, 10},
+	{"opus", "Anthropic", "strong reasoning", 900, 5, 25},
+	{"astra", "OpenAI", "strong reasoning", 900, 8, 40},
+	{"legacy", "OpenAI", "", 0, 1, 2},
+}
+
+// "The strongest vendor" is the highest-ranked model that serves the level the
+// call asks for. Before this it was the first record by name, so with only
+// Anthropic set up Haiku answered a reasoning call ahead of Opus.
+func TestTheStrongestVendorIsTheHighestRankAtTheCallsLevel(t *testing.T) {
+	r := jobRouter(t, "federation:strongest", jobCatalog...)
+	for level, want := range map[airoute.Level][]string{
+		airoute.LevelReasoning: {"astra", "opus"},
+		airoute.LevelStrong:    {"astra", "opus", "sonnet"},
+		airoute.LevelFast:      {"sonnet", "haiku"},
+	} {
+		_, resolved, err := r.ResolveChat(ResolveRequest{Level: level})
+		if err != nil {
+			t.Fatalf("%s: %v", level, err)
+		}
+		if resolved.ProviderName != want[0] || !equalStrings(resolved.Chain, want) {
+			t.Errorf("%s resolved %q over %v, want %v", level, resolved.ProviderName, resolved.Chain, want)
+		}
+	}
+}
+
+func TestTheCheapestVendorIsThePriceOrderAtTheCallsLevel(t *testing.T) {
+	r := jobRouter(t, "federation:cheapest", jobCatalog...)
+	for level, want := range map[airoute.Level][]string{
+		airoute.LevelReasoning: {"opus", "astra"},
+		airoute.LevelStrong:    {"sonnet", "opus", "astra"},
+		airoute.LevelFast:      {"haiku", "sonnet"},
+	} {
+		_, resolved, err := r.ResolveChat(ResolveRequest{Level: level})
+		if err != nil {
+			t.Fatalf("%s: %v", level, err)
+		}
+		if !equalStrings(resolved.Chain, want) {
+			t.Errorf("%s chain = %v, want %v", level, resolved.Chain, want)
+		}
+	}
+}
+
+// What a selector left out is on the decision, once per record, with why.
+func TestTheDecisionSaysWhichVendorRecordsASelectorLeftOut(t *testing.T) {
+	r := jobRouter(t, "federation:strongest", jobCatalog...)
+	_, resolved, err := r.ResolveChat(ResolveRequest{Level: airoute.LevelReasoning})
+	if err != nil {
+		t.Fatal(err)
+	}
+	notes := map[string][]string{}
+	for _, c := range resolved.Decision.Considered {
+		notes[c.Entry] = append(notes[c.Entry], c.Reason)
+	}
+	for name, want := range map[string]string{
+		"haiku":  "serves fast, not reasoning",
+		"sonnet": "serves fast and strong, not reasoning",
+		"legacy": "declares no level, so a vendor selector does not choose it",
+	} {
+		if got := notes[name]; len(got) != 1 || got[0] != want {
+			t.Errorf("%s is noted as %q, want exactly %q", name, got, want)
+		}
+	}
+}
+
+// No record declares the level: the selector yields nothing and the refusal
+// says which level had no model, so the fix (declare one, or choose another
+// source) is readable from the record of the call.
+func TestASelectorWithNoRecordAtTheLevelSaysSo(t *testing.T) {
+	r := jobRouter(t, "federation:strongest", jobRecordSpec{"haiku", "Anthropic", "fast", 300, 0.1, 0.5})
+	_, _, err := r.ResolveChat(ResolveRequest{Level: airoute.LevelReasoning})
+	var refusal *InferenceUnavailable
+	if !errors.As(err, &refusal) {
+		t.Fatalf("err = %v, want a refusal", err)
+	}
+	said := false
+	for _, door := range refusal.Doors {
+		if door.Name == "federation:strongest" && strings.Contains(door.Reason, "no vendor model declares the reasoning level") {
+			said = true
+		}
+	}
+	if !said {
+		t.Fatalf("the refusal does not say which level had no model: %+v", refusal.Doors)
+	}
+}
+
+// A record that declares no level still resolves by its own name.
+func TestARecordWithNoLevelStillServesByName(t *testing.T) {
+	r := jobRouter(t, "federation:legacy", jobCatalog...)
+	_, resolved, err := r.ResolveChat(ResolveRequest{Level: airoute.LevelReasoning})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.ProviderName != "legacy" {
+		t.Fatalf("resolved %q, want the record named", resolved.ProviderName)
+	}
+}
+
+// THE JOB IS ABOUT TEXT MODELS. A call for speech or transcription asks a
+// selector for a record of another kind entirely, which declares no level and
+// may not: for those calls the selector offers every record, as it always did,
+// and the walk's own check of what each record can do chooses.
+func TestASelectorStillOffersEveryRecordToACallThatIsNotForATextModel(t *testing.T) {
+	for _, mod := range []providerModality{modalitySpeech, modalityTranscribe, modalityImage, modalityEmbedding} {
+		if selectsByJob(mod) {
+			t.Errorf("modality %v is chosen by a text model's level and rank", mod)
+		}
+	}
+	for _, mod := range []providerModality{modalityStreamTools, modalityChat, modalityStreamChat, modalityTools, modalityStructured, modalityVision} {
+		if !selectsByJob(mod) {
+			t.Errorf("modality %v is served by a vendor's text model and is not chosen by its job", mod)
+		}
+	}
+	r := jobRouter(t, "federation:cheapest", append([]jobRecordSpec{{"speech", "OpenAITTS", "", 0, 0, 0}}, jobCatalog...)...)
+	var report doorReporter
+	names := []string{}
+	for _, c := range r.federationCandidates(FederationSelectorCheapest, ResolveRequest{Level: airoute.LevelFast}, modalitySpeech, &report) {
+		names = append(names, c.Name)
+	}
+	found := false
+	for _, n := range names {
+		found = found || n == "speech"
+	}
+	if !found {
+		t.Fatalf("a speech call under a selector was offered %v, without the speech record", names)
+	}
+}
+
+// A request that names no level, or the embeddings level, is not a job a text
+// record can declare: the selector keeps the order it always had.
+func TestASelectorKeepsItsOldOrderForACallWithNoJobLevel(t *testing.T) {
+	r := jobRouter(t, "federation:cheapest", jobCatalog...)
+	for _, level := range []airoute.Level{"", airoute.LevelEmbeddings} {
+		var report doorReporter
+		var names []string
+		for _, c := range r.federationCandidates(FederationSelectorCheapest, ResolveRequest{Level: level}, modalityChat, &report) {
+			names = append(names, c.Name)
+		}
+		want := []string{"haiku", "legacy", "sonnet", "opus", "astra"}
+		if !equalStrings(names, want) {
+			t.Errorf("level %q: %v, want every record by price, %v", level, names, want)
+		}
+	}
 }

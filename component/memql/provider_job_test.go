@@ -185,3 +185,157 @@ provider claudeBad {
 		t.Fatalf("the report does not name the record and the word: %s", detail)
 	}
 }
+
+// ---- the order a vendor selector answers in (R2) ----
+
+// jobRecord registers a vendor text record with a job and a price.
+func jobRecord(reg *ProviderRegistry, name, vendor, levels string, rank int, in, out float64) {
+	entry := vendorRecord(name, vendor, true, "")
+	entry.Config.Params = map[string]any{"contextWindow": float64(200000)}
+	if levels != "" {
+		entry.Config.Params["levels"] = levels
+	}
+	if rank != 0 {
+		entry.Config.Params["rank"] = float64(rank)
+	}
+	if in != 0 || out != 0 {
+		entry.Config.Params["inputCostPerMillion"] = in
+		entry.Config.Params["outputCostPerMillion"] = out
+	}
+	reg.setEntry(entry)
+}
+
+// catalogForTest is two vendors' models, registered in the order given so a
+// test can build the same catalog two ways.
+func catalogForTest(order ...string) *ProviderRegistry {
+	reg := newProviderRegistry()
+	add := map[string]func(){
+		"opus":   func() { jobRecord(reg, "opus", VendorAnthropic, "strong reasoning", 900, 5, 25) },
+		"sonnet": func() { jobRecord(reg, "sonnet", VendorAnthropic, "fast strong", 600, 2, 10) },
+		"haiku":  func() { jobRecord(reg, "haiku", VendorAnthropic, "fast", 300, 0.1, 0.5) },
+		"astra":  func() { jobRecord(reg, "astra", VendorOpenAI, "strong reasoning", 900, 8, 40) },
+		"luna":   func() { jobRecord(reg, "luna", VendorOpenAI, "fast", 300, 0.1, 0.5) },
+		"legacy": func() { jobRecord(reg, "legacy", VendorOpenAI, "", 0, 1, 2) },
+		"free":   func() { jobRecord(reg, "free", VendorOpenAI, "fast", 100, 0, 0) },
+	}
+	for _, name := range order {
+		add[name]()
+	}
+	return reg
+}
+
+func TestStrongestIsRankOrderAtTheLevel(t *testing.T) {
+	reg := catalogForTest("haiku", "luna", "sonnet", "astra", "opus", "legacy", "free")
+	for level, want := range map[airoute.Level][]string{
+		// Highest rank first; a tie is broken by name, so two replicas agree.
+		airoute.LevelReasoning: {"astra", "opus"},
+		airoute.LevelStrong:    {"astra", "opus", "sonnet"},
+		airoute.LevelFast:      {"sonnet", "haiku", "luna", "free"},
+	} {
+		got, _ := reg.VendorRecordsFor(level, VendorSelectorStrongest)
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("strongest at %s = %v, want %v", level, got, want)
+		}
+	}
+}
+
+func TestCheapestIsPriceOrderAtTheLevel(t *testing.T) {
+	reg := catalogForTest("haiku", "luna", "sonnet", "astra", "opus", "legacy", "free")
+	for level, want := range map[airoute.Level][]string{
+		// Lowest input plus output first; ties by name; a record with no
+		// price is last and never reads as free.
+		airoute.LevelFast:      {"haiku", "luna", "sonnet", "free"},
+		airoute.LevelStrong:    {"sonnet", "opus", "astra"},
+		airoute.LevelReasoning: {"opus", "astra"},
+	} {
+		got, _ := reg.VendorRecordsFor(level, VendorSelectorCheapest)
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("cheapest at %s = %v, want %v", level, got, want)
+		}
+	}
+}
+
+func TestARecordAtAnotherLevelIsNotChosen(t *testing.T) {
+	reg := catalogForTest("haiku", "opus")
+	got, passed := reg.VendorRecordsFor(airoute.LevelReasoning, VendorSelectorStrongest)
+	if !reflect.DeepEqual(got, []string{"opus"}) {
+		t.Fatalf("reasoning = %v, want the one record that declares it", got)
+	}
+	if passed["haiku"] != "serves fast, not reasoning" {
+		t.Fatalf("haiku was passed over with %q, want what it serves and what was asked", passed["haiku"])
+	}
+	if _, listed := passed["opus"]; listed {
+		t.Fatal("the chosen record is also listed as passed over")
+	}
+}
+
+func TestARecordWithNoLevelIsPassedOverAndStillResolvesByName(t *testing.T) {
+	reg := catalogForTest("legacy", "opus")
+	for _, selector := range []string{VendorSelectorStrongest, VendorSelectorCheapest} {
+		got, passed := reg.VendorRecordsFor(airoute.LevelStrong, selector)
+		if !reflect.DeepEqual(got, []string{"opus"}) {
+			t.Fatalf("%s = %v, want the record that declares a level", selector, got)
+		}
+		if passed["legacy"] != "declares no level, so a vendor selector does not choose it" {
+			t.Fatalf("legacy was passed over with %q", passed["legacy"])
+		}
+	}
+	if _, ok := reg.Entry("legacy"); !ok {
+		t.Fatal("a record with no level no longer resolves by name")
+	}
+}
+
+// Records that are not a vendor's text model are neither chosen nor reported:
+// a selector was never about them.
+func TestOnlyAVendorsTextRecordsAreASelectorsBusiness(t *testing.T) {
+	reg := catalogForTest("opus")
+	reg.setEntry(&ProviderConfigEntry{Config: ProviderConfig{Name: "embed", Type: "OpenAIEmbedding", Modality: "embedding"}, Available: true})
+	reg.setEntry(&ProviderConfigEntry{Config: ProviderConfig{Name: "anthropic", Type: "Anthropic", Base: true}})
+	got, passed := reg.VendorRecordsFor(airoute.LevelStrong, VendorSelectorStrongest)
+	if !reflect.DeepEqual(got, []string{"opus"}) || len(passed) != 0 {
+		t.Fatalf("got %v, passed over %v; want opus and nothing else said", got, passed)
+	}
+}
+
+// The same catalog, built in two orders, answers in one order: nothing in the
+// answer depends on the order records were registered or on map iteration.
+func TestTwoReplicasOrderAlike(t *testing.T) {
+	one := catalogForTest("haiku", "luna", "sonnet", "astra", "opus", "legacy", "free")
+	two := catalogForTest("free", "legacy", "opus", "astra", "sonnet", "luna", "haiku")
+	for _, selector := range []string{VendorSelectorStrongest, VendorSelectorCheapest} {
+		for _, level := range []airoute.Level{airoute.LevelFast, airoute.LevelStrong, airoute.LevelReasoning} {
+			for range 20 {
+				a, passedA := one.VendorRecordsFor(level, selector)
+				b, passedB := two.VendorRecordsFor(level, selector)
+				if !reflect.DeepEqual(a, b) || !reflect.DeepEqual(passedA, passedB) {
+					t.Fatalf("%s at %s: %v / %v, and passed over %v / %v", selector, level, a, b, passedA, passedB)
+				}
+			}
+		}
+	}
+}
+
+// A level that is not one of the three has no vendor text model declared for
+// it, by the loader's own rule, and a selector answers nothing for it.
+func TestASelectorAnswersNothingForALevelNoRecordMayDeclare(t *testing.T) {
+	reg := catalogForTest("haiku", "opus")
+	for _, level := range []airoute.Level{airoute.LevelEmbeddings, ""} {
+		if got, _ := reg.VendorRecordsFor(level, VendorSelectorStrongest); len(got) != 0 {
+			t.Errorf("level %q = %v, want nothing", level, got)
+		}
+	}
+}
+
+// The chain cloud consent walks means the same thing by "strongest": rank,
+// then declared window, then name.
+func TestConsentChainIsRankOrder(t *testing.T) {
+	reg := catalogForTest("haiku", "luna", "sonnet", "astra", "opus", "legacy", "free")
+	// legacy declares no rank and the widest window: a window does not outrank
+	// a rank, and it orders the records that declare none.
+	legacy, _ := reg.Entry("legacy")
+	legacy.Config.Params["contextWindow"] = float64(1000000)
+	want := []string{"astra", "opus", "sonnet", "haiku", "luna", "free", "legacy"}
+	if got := reg.FederatedByStrength(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("FederatedByStrength = %v, want %v", got, want)
+	}
+}

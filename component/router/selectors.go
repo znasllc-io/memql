@@ -83,7 +83,7 @@ type candidate struct {
 // An entry that legitimately resolves to nothing returns an empty list with
 // its reason already on the report, because "the fleet had nothing eligible"
 // is an answer rather than a fault.
-func (r *Router) expandEntry(ctx context.Context, req ResolveRequest, entry string, report *doorReporter) ([]candidate, error) {
+func (r *Router) expandEntry(ctx context.Context, req ResolveRequest, mod providerModality, entry string, report *doorReporter) ([]candidate, error) {
 	entry = strings.TrimSpace(entry)
 	if entry == "" {
 		report.note(entry, "the chain contains an empty entry")
@@ -153,7 +153,7 @@ func (r *Router) expandEntry(ctx context.Context, req ResolveRequest, entry stri
 		name := strings.TrimSpace(strings.TrimPrefix(entry, FederationReferencePrefix))
 		switch name {
 		case FederationSelectorCheapest, FederationSelectorStrongest:
-			return r.federationCandidates(name, report), nil
+			return r.federationCandidates(name, req, mod, report), nil
 		case "":
 			report.note(entry, "the entry names the federation door with no provider or selector after it")
 			return nil, nil
@@ -253,24 +253,58 @@ func fleetNeedsFor(req ResolveRequest) memql.FleetNeeds {
 	return needs
 }
 
-// federationCandidates orders the registry's federated records.
+// selectsByJob reports whether a call on this surface is served by a vendor's
+// TEXT model, and so chosen by the level and rank such a model declares
+// (design record 2026-11-21, R2). Chat, streaming, both tool surfaces,
+// structured output and a picture are. Speech, transcription, an image and an
+// embedding are served by records of other kinds, which declare no level and
+// may not: for those a selector offers every record, as it always did, and the
+// walk's check of what each record can do chooses.
+func selectsByJob(mod providerModality) bool {
+	switch mod {
+	case modalityStreamTools, modalityChat, modalityStreamChat, modalityTools, modalityStructured, modalityVision:
+		return true
+	}
+	return false
+}
+
+// isJobLevel reports whether a level is one a vendor's text model can declare.
+func isJobLevel(level airoute.Level) bool {
+	switch level {
+	case airoute.LevelFast, airoute.LevelStrong, airoute.LevelReasoning:
+		return true
+	}
+	return false
+}
+
+// federationCandidates answers a vendor selector: the records it offers, in
+// the order they are tried.
 //
-// CHEAPEST is input plus output cost per million, ascending, and A RECORD WITH
-// NO COST FIGURES SORTS LAST. Sorting it first is the natural bug and the
-// expensive one: an unpriced record reads as zero, zero is the smallest sum in
-// the catalog, and the record nobody filled in becomes the cheapest thing the
-// router can find -- silently free rather than visibly unpriced. The note says
-// which it is.
+// FOR A TEXT MODEL'S JOB (selectsByJob, at one of the three levels) the set and
+// the order are the registry's (memql.VendorRecordsFor): the vendor text
+// records that DECLARE the call's level, by rank for `strongest` and by price
+// for `cheapest`. "The strongest vendor" used to be the first record by name,
+// which tried Haiku ahead of Opus. A vendor record left out is noted on the
+// decision once, with why. When no record declares the level the selector
+// offers nothing and says which level had no model.
 //
-// STRONGEST has NO MEASURE THIS EPIC. There is no capability figure on a
-// provider record and no benchmark behind one, so the order is the registry's
-// own -- stable, replica-identical, and a PLACEHOLDER rather than a ranking.
-// Epic 4 fills it in. A proxy computed from context window or price would rank
-// the catalog convincingly and mean nothing, which is worse than an order that
-// admits what it is.
-func (r *Router) federationCandidates(selector string, report *doorReporter) []candidate {
+// The selector orders and the walk filters: whether a candidate has an account
+// for this person, holds the context floor and serves the modality is asked of
+// each candidate in order, where it always was.
+//
+// FOR ANY OTHER CALL it is what it was: every record. CHEAPEST is input plus
+// output cost per million, ascending, and A RECORD WITH NO COST FIGURES SORTS
+// LAST. Sorting it first is the natural bug and the expensive one: an unpriced
+// record reads as zero, zero is the smallest sum in the catalog, and the
+// record nobody filled in becomes the cheapest thing the router can find --
+// silently free rather than visibly unpriced. The note says which it is.
+// STRONGEST there is the registry's own order, stable and replica-identical.
+func (r *Router) federationCandidates(selector string, req ResolveRequest, mod providerModality, report *doorReporter) []candidate {
 	if r == nil || r.providers == nil {
 		return nil
+	}
+	if selectsByJob(mod) && isJobLevel(req.Level) {
+		return r.jobCandidates(selector, req.Level, report)
 	}
 	type priced struct {
 		name    string
@@ -340,4 +374,39 @@ func contextFloorMiss(cfg memql.ProviderConfig, floor int) string {
 		return fmt.Sprintf("context window %d is under the floor %d", window, floor)
 	}
 	return ""
+}
+
+// jobCandidates is federationCandidates for a text model's job.
+func (r *Router) jobCandidates(selector string, level airoute.Level, report *doorReporter) []candidate {
+	ordered, passedOver := r.providers.VendorRecordsFor(level, selector)
+
+	// What the selector left out, once per record however many selectors the
+	// chain names, in name order so two replicas write the same record.
+	left := make([]string, 0, len(passedOver))
+	for name := range passedOver {
+		left = append(left, name)
+	}
+	sort.Strings(left)
+	for _, name := range left {
+		if !report.considers(name, passedOver[name]) {
+			report.noteConsidered(name, DoorFederation, passedOver[name])
+		}
+	}
+
+	if len(ordered) == 0 {
+		report.note(FederationReferencePrefix+selector, fmt.Sprintf("no vendor model declares the %s level", level))
+		return nil
+	}
+	out := make([]candidate, 0, len(ordered))
+	for _, name := range ordered {
+		if selector == FederationSelectorCheapest {
+			if entry, ok := r.providers.Entry(name); ok && entry != nil && !entry.Config.Pricing().Configured() {
+				report.noteConsidered(name, DoorFederation,
+					"declares no inputCostPerMillion or outputCostPerMillion, so it sorts last among federated records "+
+						"rather than reading as free")
+			}
+		}
+		out = append(out, candidate{Name: name, Door: DoorFederation})
+	}
+	return out
 }

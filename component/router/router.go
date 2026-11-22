@@ -834,7 +834,7 @@ func (r *Router) walkChain(
 			sawLocalDoor = true
 		}
 
-		candidates, err := r.expandEntry(ctx, req, rawEntry, report)
+		candidates, err := r.expandEntry(ctx, req, mod, rawEntry, report)
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
@@ -1008,7 +1008,7 @@ func (r *Router) remainingNames(
 	}
 	discard := &doorReporter{}
 	for _, entry := range laterEntries {
-		cands, err := r.expandEntry(ctx, req, entry, discard)
+		cands, err := r.expandEntry(ctx, req, mod, entry, discard)
 		if err != nil {
 			continue
 		}

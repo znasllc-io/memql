@@ -35,6 +35,7 @@ package memql
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 
 	"github.com/znasllc-io/memql/core/airoute"
@@ -185,4 +186,97 @@ func isJobLevel(word string) bool {
 		}
 	}
 	return false
+}
+
+// The two questions a vendor selector asks of the catalog (design record R2).
+const (
+	// VendorSelectorStrongest orders by declared rank, highest first.
+	VendorSelectorStrongest = "strongest"
+	// VendorSelectorCheapest orders by declared input plus output price per
+	// million tokens, lowest first. A record with no price is last.
+	VendorSelectorCheapest = "cheapest"
+)
+
+// VendorRecordsFor orders the vendor text records for one selector at one
+// level (design record R2): the answer to `federation:strongest` and
+// `federation:cheapest` for a call that asks for that level.
+//
+// THE SET is every registered text model of Anthropic or OpenAI that DECLARES
+// the level. Whether the cluster has an account for a record is not asked
+// here: a record the cluster cannot pay for may be paid by a person's API key,
+// and the walk asks each candidate's accounts in order. Neither are the
+// context floor and the modality: the selector orders, the walk filters.
+//
+// THE ORDER. strongest: highest rank first. cheapest: lowest input plus output
+// price first, a record with no price last, because an unpriced record read as
+// zero would be the cheapest thing in the catalog. Every tie is broken by
+// name, so two replicas holding the same catalog answer alike whatever order
+// their records were registered in.
+//
+// passedOver names the vendor text records left out and why: one that declares
+// no level, and one that serves other levels. A record that is not a vendor's
+// text model is neither chosen nor named; a selector was never about it.
+//
+// A level no vendor text record may declare (embeddings, or none) answers
+// nothing and names nothing.
+func (r *ProviderRegistry) VendorRecordsFor(level airoute.Level, selector string) (ordered []string, passedOver map[string]string) {
+	if r == nil || !isJobLevel(string(level)) {
+		return nil, nil
+	}
+	type record struct {
+		name    string
+		rank    int
+		price   float64
+		unknown bool
+	}
+	var chosen []record
+	passedOver = map[string]string{}
+	r.mu.RLock()
+	for name, e := range r.byName {
+		if e == nil || !isVendorTextRecord(e.Config) {
+			continue
+		}
+		declared := e.Config.Levels()
+		switch {
+		case len(declared) == 0:
+			passedOver[name] = "declares no level, so a vendor selector does not choose it"
+		case !e.Config.ServesLevel(level):
+			words := make([]string, 0, len(declared))
+			for _, l := range declared {
+				words = append(words, string(l))
+			}
+			passedOver[name] = fmt.Sprintf("serves %s, not %s", strings.Join(words, " and "), level)
+		default:
+			p := e.Config.Pricing()
+			chosen = append(chosen, record{
+				name:    name,
+				rank:    e.Config.Rank(),
+				price:   p.InputPerMillion + p.OutputPerMillion,
+				unknown: p.InputPerMillion <= 0 && p.OutputPerMillion <= 0,
+			})
+		}
+	}
+	r.mu.RUnlock()
+
+	sort.Slice(chosen, func(i, j int) bool {
+		a, b := chosen[i], chosen[j]
+		if selector == VendorSelectorCheapest {
+			if a.unknown != b.unknown {
+				return !a.unknown
+			}
+			if a.price != b.price {
+				return a.price < b.price
+			}
+			return a.name < b.name
+		}
+		if a.rank != b.rank {
+			return a.rank > b.rank
+		}
+		return a.name < b.name
+	})
+	ordered = make([]string, 0, len(chosen))
+	for _, c := range chosen {
+		ordered = append(ordered, c.name)
+	}
+	return ordered, passedOver
 }

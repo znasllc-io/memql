@@ -243,6 +243,20 @@ func (r *doorReporter) noteConsidered(name, door, reason string) {
 	r.considered = append(r.considered, airoute.ConsideredEntry{Entry: name, Door: door, Reason: reason})
 }
 
+// considers reports whether the decision already carries this line for this
+// entry, so a note that several chain entries would each make is written once.
+func (r *doorReporter) considers(name, reason string) bool {
+	if r == nil {
+		return false
+	}
+	for _, c := range r.considered {
+		if c.Entry == name && c.Reason == reason {
+			return true
+		}
+	}
+	return false
+}
+
 // noteAccount records one ACCOUNT that could not pay for a vendor model that
 // was served by another (accounts.go, design record K9). It belongs on the
 // decision and not in a refusal's door list: the model was not passed over,

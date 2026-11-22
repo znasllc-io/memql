@@ -566,12 +566,14 @@ func (r *ProviderRegistry) Names() []string {
 // escape for when the ordinary chain already refused -- so making the escape
 // depend on the corpus would leave a person saying yes and nothing happening.
 //
-// ORDERED BY DECLARED CONTEXT WINDOW, TIE-BROKEN BY NAME, and both halves are
-// deliberate. Context window is the one capability every chat record declares,
-// so it is the only ordering available without epic memql#5146's measurements;
-// the name tie-break is what makes two replicas choose identically and a person
-// able to predict the answer. Map order -- which is what the deleted default
-// actually was -- would fail both.
+// ORDERED BY DECLARED RANK, THEN DECLARED CONTEXT WINDOW, THEN NAME. Rank is
+// what "strongest" means everywhere else (provider_job.go, the vendor
+// selectors), so the consent chain means the same thing by it. A record that
+// declares no rank sorts after every record that does, and the window orders
+// those: it is the one capability every chat record declares. The name
+// tie-break is what makes two replicas choose identically and a person able to
+// predict the answer. Map order -- which is what the deleted default actually
+// was -- would fail both.
 func (r *ProviderRegistry) FederatedByStrength() []string {
 	if r == nil {
 		return nil
@@ -581,6 +583,7 @@ func (r *ProviderRegistry) FederatedByStrength() []string {
 
 	type entry struct {
 		name   string
+		rank   int
 		window int
 	}
 	var candidates []entry
@@ -598,9 +601,12 @@ func (r *ProviderRegistry) FederatedByStrength() []string {
 		if e.Config.ResolvedModality() != ModalityText {
 			continue
 		}
-		candidates = append(candidates, entry{name: name, window: e.Config.ContextWindow()})
+		candidates = append(candidates, entry{name: name, rank: e.Config.Rank(), window: e.Config.ContextWindow()})
 	}
 	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].rank != candidates[j].rank {
+			return candidates[i].rank > candidates[j].rank
+		}
 		if candidates[i].window != candidates[j].window {
 			return candidates[i].window > candidates[j].window
 		}
