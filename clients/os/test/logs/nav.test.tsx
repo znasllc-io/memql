@@ -26,6 +26,8 @@ describe("the Logs section in a window's nav", () => {
     renderShell({ access: { ...OWNER, role } });
     openFromLauncher("Fleet");
     expect(screen.getByRole("button", { name: "Fleet logs" })).toBeTruthy();
+    // API keys is not here: a person's keys live in Settings, which everybody
+    // opens (owner decision 2026-11-22).
     expect(navNames("Fleet")).toEqual([
       "Overview", "Machines", "Routing", "Model library", "Activity", "Cloud workbenches",
     ]);

@@ -92,7 +92,7 @@ func TestSandboxClassifiesBuiltinByRegisteredExecutor(t *testing.T) {
 		name    string
 		allowed bool
 	}{
-		{"memqlDocs", true}, {"routerSetApiKey", false},
+		{"memqlDocs", true}, {"vendorKeyAdd", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			sandbox, rec := sandboxWithRecorder(t, automations.StepTypeFunction)

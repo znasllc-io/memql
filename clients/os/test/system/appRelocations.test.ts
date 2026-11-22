@@ -48,7 +48,10 @@ describe("approved app relocations preserve existing authority", () => {
     expect(navigationTarget(OS_REGISTRY, "settings", { section: "appearance" })?.app).toBe("profile");
     if (role === "user" || role === "viewer") {
       expect(canOpen(OS_REGISTRY, "identity")).toBe(false);
-      expect(canOpen(OS_REGISTRY, "settings")).toBe(false);
+      // Settings opens for them on their own API keys and nothing else (owner
+      // decision 2026-11-22): every other section keeps its floor.
+      expect(canOpen(OS_REGISTRY, "settings")).toBe(true);
+      expect(sections("settings")).toEqual(["apikeys"]);
     }
   });
 

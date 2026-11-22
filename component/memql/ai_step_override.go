@@ -131,6 +131,10 @@ func ApplyStepOverride(ctx context.Context, req airoute.ResolveRequest) (airoute
 		// session's owner made (AppDoorPin).
 		req.ExplicitProvider = model
 		req.PinnedBy = strings.TrimSpace(ov.RequestedBy)
+		// The pin replaces whatever the run's own choice was, and with it the
+		// answer to whether a person made it: a re-run asked for through an
+		// app session is the app naming a model (common.StepOverride.ByMachine).
+		req.ChoiceByMachine = ov.ByMachine
 	}
 	if effort := strings.TrimSpace(ov.Effort); effort != "" {
 		req.Effort = effort

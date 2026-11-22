@@ -304,6 +304,21 @@ organization for any change of either binding, clearing included, so the deny
 holds there too. The two named mutations ask for the part on every call,
 clearing included.
 
+**Settings carries one part that every predefined role holds,
+`app:settings/apikeys`** (vendor accounts design, K4 as amended 2026-11-22).
+`execute app:settings/apikeys` adds an API key and is seeded on owner,
+developer, admin, user and viewer: model access is bring-your-own for
+everybody, and an operator stops a person or a group from adding keys with a
+deny of the part. There is no `read` beside it. **Settings > API keys** has no
+floor of its own, so it opens for everybody who opens Settings and is what
+makes Settings open for a user or a viewer at all. The part gates the act of
+adding and nothing else. What a caller may
+do to a key that exists is decided by the key's own row and not by the part:
+its owner changes, lends and removes it, a cluster owner may check and remove
+it and may not change or lend it, and a person it is lent to pays with it
+holding no part at all. A key is added only in a person's own session, never
+by a token, a delegation or a step of a run ([API keys](../api-keys.md)).
+
 **The Modules pack switch is a grant plus a declaration** (Connect Shopify
 design, D4). Reading the inventory is `read` on `app:cluster/modules`, seeded
 on owner, developer and admin -- the same name the OS registry puts on the

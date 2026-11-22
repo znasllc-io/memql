@@ -11,14 +11,31 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
 )
 
+// sessionContext is a person's own signed-in session: the verified claims and
+// the access context, naming the same person. An Ask turn arrives on one.
+func sessionContext(userId string) context.Context {
+	return credentialContext(userId, "")
+}
+
+// credentialContext is a call made as userId through a credential of the given
+// class ("" is a person's own session).
+func credentialContext(userId, class string) context.Context {
+	claims := map[string]any{"sub": userId}
+	if class != "" {
+		claims["class"] = class
+	}
+	return auth.ContextWithAccess(auth.ContextWithClaims(context.Background(), claims), &auth.AccessContext{UserId: userId, Role: auth.RoleWriter})
+}
+
 func TestCreateGoalWritesTheRequestsRouteChoiceOnTheGoalAndItsRun(t *testing.T) {
 	i, eng := newTestIntegration(t)
 	// The choice arrives beside the request, never as an argument.
-	ctx := memql.ContextWithGoalRouteChoice(callerContext("u-alice"),
+	ctx := memql.ContextWithGoalRouteChoice(sessionContext("u-alice"),
 		common.RouteChoice{Source: "app:claude-code", Level: "strong", By: "u-alice"})
 	input := map[string]any{"conversation": map[string]any{"id": "c1", "turnId": "t1"}}
 	if _, err := i.handleCreateGoal(ctx, map[string]any{"statement": "hi", "requestedVia": "ask", "input": input}, 0); err != nil {
@@ -42,7 +59,7 @@ func TestCreateGoalWritesTheRequestsRouteChoiceOnTheGoalAndItsRun(t *testing.T) 
 // planner and the agent read it from there (design record 2026-10-18-routes).
 func TestCreateGoalWritesAPersonsRouteOnTheGoalAndItsRun(t *testing.T) {
 	i, eng := newTestIntegration(t)
-	ctx := memql.ContextWithGoalRouteChoice(callerContext("u-alice"),
+	ctx := memql.ContextWithGoalRouteChoice(sessionContext("u-alice"),
 		common.RouteChoice{Source: "route:apps", By: "u-alice"})
 	if _, err := i.handleCreateGoal(ctx, map[string]any{"statement": "hi", "requestedVia": "ask"}, 0); err != nil {
 		t.Fatalf("createGoal: %v", err)
@@ -55,10 +72,40 @@ func TestCreateGoalWritesAPersonsRouteOnTheGoalAndItsRun(t *testing.T) {
 	}
 }
 
+// A GOAL AN APP SESSION OPENS WITH A SOURCE SAYS THE APP CHOSE IT (vendor
+// accounts design, K8 line 4 and O4). createGoal takes a source from an API
+// caller, and an app session is one: the coding agent on a person's machine,
+// acting as them. The run executes later on a context that no longer knows
+// which credential opened it, so the rows say so, and the person's API key
+// does not pay for a route they never picked.
+func TestAGoalAnAppSessionOpensWithASourceSaysWhoChose(t *testing.T) {
+	for name, tc := range map[string]struct {
+		ctx  context.Context
+		want map[string]any
+	}{
+		"an app session": {credentialContext("u-alice", auth.ForwardedClassAppSession),
+			map[string]any{"source": "federation:strongest", "by": "u-alice", "byMachine": true}},
+		"the person's own session": {sessionContext("u-alice"),
+			map[string]any{"source": "federation:strongest", "by": "u-alice"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			i, eng := newTestIntegration(t)
+			if _, err := i.handleCreateGoal(tc.ctx, map[string]any{"statement": "hi", "requestedVia": "api", "source": "federation:strongest"}, 0); err != nil {
+				t.Fatalf("createGoal: %v", err)
+			}
+			for _, row := range []string{"createWorkGoal", "createWorkRun"} {
+				if got := eng.callTo(t, row).Args(t)["routing"]; !reflect.DeepEqual(got, tc.want) {
+					t.Errorf("%s routing = %v, want %v", row, got, tc.want)
+				}
+			}
+		})
+	}
+}
+
 func TestHumanAPISourcePinsBothRowsAndChildCannotReplaceIt(t *testing.T) {
 	i, eng := newTestIntegration(t)
 	args := map[string]any{"statement": "evaluate fixture", "noPaidProviders": true, "source": "fleet:qwen3.8:27b", "level": "reasoning", "requestedVia": "api"}
-	if _, err := i.handleCreateGoal(callerContext("u-alice"), args, 0); err != nil {
+	if _, err := i.handleCreateGoal(sessionContext("u-alice"), args, 0); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"createWorkGoal", "createWorkRun"} {
@@ -75,6 +122,50 @@ func TestHumanAPISourcePinsBothRowsAndChildCannotReplaceIt(t *testing.T) {
 	}
 	if got := eng.summary(); got != "(none)" {
 		t.Fatalf("wrote before refusal: %s", got)
+	}
+}
+
+// A goal a visitor's request opens (a shopper form, an access-code call) is
+// written as its owner's, because the owner's authority was borrowed for it.
+// It is still a stranger's click, and a person's API key never pays for one
+// (design record 2026-11-21-vendor-accounts-and-api-keys, K8 line 2). The run
+// executes later, on a node that never saw the request, so the mark rides the
+// rows, and a goal that run opens inherits it.
+func TestAGoalOpenedByAVisitorsRequestStaysAVisitors(t *testing.T) {
+	i, eng := newTestIntegration(t)
+	ctx := auth.ContextWithVisitorBorrow(callerContext("u-merchant"))
+	if _, err := i.handleCreateGoal(ctx, map[string]any{"statement": "answer the shopper"}, 0); err != nil {
+		t.Fatalf("createGoal: %v", err)
+	}
+	want := map[string]any{"by": "u-merchant", "forVisitor": true}
+	for _, name := range []string{"createWorkGoal", "createWorkRun"} {
+		if got := eng.callTo(t, name).Args(t)["routing"]; !reflect.DeepEqual(got, want) {
+			t.Errorf("%s routing = %v, want %v", name, got, want)
+		}
+	}
+
+	// A goal the visitor's run opens is the same stranger's work.
+	i, eng = newTestIntegration(t)
+	child := common.ContextWithRun(callerContext("u-merchant"), common.RunContext{
+		RunId: "run-parent", GoalId: "goal-parent", OwnerUserId: "u-merchant", StepKey: "reason",
+		Routing: common.RouteChoice{By: "u-merchant", ForVisitor: true},
+	})
+	if _, err := i.handleCreateGoal(child, map[string]any{"statement": "look it up"}, 0); err != nil {
+		t.Fatalf("child createGoal: %v", err)
+	}
+	for _, name := range []string{"createWorkGoal", "createWorkRun"} {
+		if got := eng.callTo(t, name).Args(t)["routing"]; !reflect.DeepEqual(got, want) {
+			t.Errorf("child %s routing = %v, want %v", name, got, want)
+		}
+	}
+
+	// And no argument makes or clears it.
+	i, eng = newTestIntegration(t)
+	if _, err := i.handleCreateGoal(callerContext("u-merchant"), map[string]any{"statement": "hi", "forVisitor": true}, 0); err != nil {
+		t.Fatalf("createGoal: %v", err)
+	}
+	if got, present := eng.callTo(t, "createWorkGoal").Args(t)["routing"]; present {
+		t.Errorf("an argument marked the owner's own goal as a visitor's: %v", got)
 	}
 }
 

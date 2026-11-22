@@ -1,6 +1,6 @@
 import { useReadEffect } from "../../../live/useReadEffect";
 import { useGraphRevision } from "../../../live/useGraphRevision";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { Connection } from "@znasllc-io/memql-sdk-core/client";
 
 import { useOsConnection } from "../../../live/connection";
@@ -140,38 +140,65 @@ export async function readShareDirectory(
   return directory;
 }
 
+/** The rows whose changes move a machine's directory. */
+const MACHINE_DIRECTORY_CONCEPTS = ["v1:identity:user", "v1:identity:group", "v1:identity:groupMembership", "v1:worker:registration"];
+
 /**
- * The directory, read once when enabled, and again when `retry` asks.
+ * A share directory, read once when enabled, and again when `retry` asks or a
+ * row it is computed from changes.
+ *
+ * `key` names what is being lent (a machine and its resource, an API key) and
+ * restarts the reading when it changes. `read` is the one call that answers
+ * for it; `concepts` are the rows whose changes move its answer.
  */
-export function useShareDirectory(registrationId: string, enabled = true, resource: SharingResource = "models"): { read: DirectoryRead; refreshing: boolean; retry: () => void } {
+export function useDirectory(
+  key: string,
+  enabled: boolean,
+  read: (connection: Connection, signal: AbortSignal) => Promise<ShareDirectory>,
+  concepts: readonly string[],
+): { read: DirectoryRead; refreshing: boolean; retry: () => void } {
   const connection = useOsConnection();
-  const [read, setRead] = useState<DirectoryRead>({ state: "loading" });
+  const [state, setState] = useState<DirectoryRead>({ state: "loading" });
   const [refreshing, setRefreshing] = useState(false);
   const [attempt, setAttempt] = useState(0);
-  const liveRevision = useGraphRevision(["v1:identity:user", "v1:identity:group", "v1:identity:groupMembership", "v1:worker:registration"], enabled);
+  const liveRevision = useGraphRevision(concepts, enabled);
+  // The reader is the caller's closure and changes identity with every render.
+  // The reading restarts on `key`, never on that.
+  const reader = useRef(read);
+  reader.current = read;
 
   useReadEffect((signal) => {
     if (!enabled) return;
     if (connection === null) {
       setRefreshing(false);
-      setRead({ state: "failed", error: "Not connected to the cluster, so nobody could be looked up." });
+      setState({ state: "failed", error: "Not connected to the cluster, so nobody could be looked up." });
       return;
     }
     setRefreshing(true);
-    setRead(held => held.state === "ready" ? held : { state: "loading" });
-    return readShareDirectory(connection, registrationId, signal, resource).then(
+    setState(held => held.state === "ready" ? held : { state: "loading" });
+    return reader.current(connection, signal).then(
       (directory) => {
-        if (!signal.aborted) { setRead({ state: "ready", directory }); setRefreshing(false); }
+        if (!signal.aborted) { setState({ state: "ready", directory }); setRefreshing(false); }
       },
       (err: unknown) => {
         if (!signal.aborted) {
-          setRead(held => held.state === "ready" ? { ...held, error: describe(err) } : { state: "failed", error: describe(err) });
+          setState(held => held.state === "ready" ? { ...held, error: describe(err) } : { state: "failed", error: describe(err) });
           setRefreshing(false);
         }
       },
     );
-  }, [connection, registrationId, enabled, resource], `${attempt}:${liveRevision}`);
+  }, [connection, key, enabled], `${attempt}:${liveRevision}`);
 
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
-  return { read, refreshing, retry };
+  return { read: state, refreshing, retry };
+}
+
+/** The directory for one of the caller's own machines. */
+export function useShareDirectory(registrationId: string, enabled = true, resource: SharingResource = "models"): { read: DirectoryRead; refreshing: boolean; retry: () => void } {
+  return useDirectory(
+    `${registrationId}:${resource}`,
+    enabled,
+    (connection, signal) => readShareDirectory(connection, registrationId, signal, resource),
+    MACHINE_DIRECTORY_CONCEPTS,
+  );
 }

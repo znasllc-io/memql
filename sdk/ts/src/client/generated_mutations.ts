@@ -1360,7 +1360,7 @@ export interface CreateAuditEventArgs {
   actorEmail?: string;
   actorRole?: string;
   actorIdentityId?: string;
-  // Enum: user | session | identity | invitation | accessRequest | config | magicLinkRequest | authCode | clusterSettings | deviceCode | delegation | workerPairingCode | enrolmentToken | passkeyIdentity | badgeIdentity | appSession | shopifyStore | releaseCut | oauthClient | upstreamIdentity | rowOwnership | githubGrant | role | group | groupMembership | grant | worker | agent | siteAccessCode | accountExport | account
+  // Enum: user | session | identity | invitation | accessRequest | config | magicLinkRequest | authCode | clusterSettings | deviceCode | delegation | workerPairingCode | enrolmentToken | passkeyIdentity | badgeIdentity | appSession | shopifyStore | releaseCut | oauthClient | upstreamIdentity | rowOwnership | githubGrant | role | group | groupMembership | grant | worker | agent | siteAccessCode | accountExport | account | vendorKey
   targetType?: string;
   targetId?: string;
   targetEmail?: string;
@@ -4958,6 +4958,13 @@ export interface RecordRouterCallArgs {
   machineOwnerUserId?: string;
   /** The route a person chose for this call in Ask. Empty means Auto. */
   route?: string;
+  /** Which account paid a vendor text call: cluster | key. Absent means the source takes none. */
+  // Enum: cluster | key
+  accountKind?: string;
+  /** The id of the API key that paid, when a key did. Never its name. */
+  accountKeyId?: string;
+  /** The id of the person that key belongs to. */
+  accountKeyOwnerUserId?: string;
 }
 
 export function buildRecordRouterCall(args: RecordRouterCallArgs): string {
@@ -5009,6 +5016,9 @@ export function buildRecordRouterCall(args: RecordRouterCallArgs): string {
   if (args.minContextTokens !== undefined) parts.push("minContextTokens: " + renderMemQLValue(args.minContextTokens));
   if (args.machineOwnerUserId !== undefined) parts.push("machineOwnerUserId: " + renderMemQLValue(args.machineOwnerUserId));
   if (args.route !== undefined) parts.push("route: " + renderMemQLValue(args.route));
+  if (args.accountKind !== undefined) parts.push("accountKind: " + renderMemQLValue(args.accountKind));
+  if (args.accountKeyId !== undefined) parts.push("accountKeyId: " + renderMemQLValue(args.accountKeyId));
+  if (args.accountKeyOwnerUserId !== undefined) parts.push("accountKeyOwnerUserId: " + renderMemQLValue(args.accountKeyOwnerUserId));
   return "mutation recordRouterCall(" + parts.join(", ") + ")";
 }
 

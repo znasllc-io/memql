@@ -196,15 +196,23 @@ func TestAnthropicTokenFileAloneIsNotAConfiguration(t *testing.T) {
 		t.Fatalf("credential path = %q with %d options, want %q and none", path, len(opts), credentialPathUnavailable)
 	}
 
-	_, _, err = newAnthropicClient(cfg, guardedHTTPClient(nil))
-	if err == nil {
-		t.Fatal("a client was built with no credential")
+	// The record still builds, because a person's API key can pay through it
+	// (design 2026-11-21, part 2). What it must never do is read as a record
+	// the cluster can call: it says why the cluster's account cannot pay, and
+	// the loader registers it as unavailable with that sentence.
+	provider, err := newAnthropicProvider(cfg)
+	if err != nil {
+		t.Fatalf("a record on a cluster nobody set up did not build: %v", err)
 	}
-	if strings.Contains(err.Error(), "HALF-CONFIGURED") {
-		t.Errorf("a cluster nobody set up is told it is half-configured: %v", err)
+	missing := provider.(clusterAccountless).ClusterAccountMissing()
+	if missing == nil {
+		t.Fatal("a record with no credential says the cluster's account can pay for it")
 	}
-	if !strings.Contains(err.Error(), "is not configured on this cluster") {
-		t.Errorf("the error does not say the vendor is simply not set up: %v", err)
+	if strings.Contains(missing.Error(), "HALF-CONFIGURED") {
+		t.Errorf("a cluster nobody set up is told it is half-configured: %v", missing)
+	}
+	if !strings.Contains(missing.Error(), "is not configured on this cluster") {
+		t.Errorf("the error does not say the vendor is simply not set up: %v", missing)
 	}
 }
 

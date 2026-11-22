@@ -1001,12 +1001,19 @@ func rateCeilingResponse(req *http.Request, calls int) *http.Response {
 // deliberate: the budget is exhausted, so the call must surface as a clear
 // TERMINAL error to the agent/planner loop (ending the turn), not as a
 // transient limit it will keep retrying against.
+//
+// ITS BODY SAYS WHOSE ANSWER IT IS (guardStopErrorType). A 402 is also how
+// Anthropic says an account is out of credit, and this response travels up
+// through the same SDK as a vendor's. Whatever reads a vendor's answer for
+// what it says about an ACCOUNT (classifyVendorAnswer) recognises the type and
+// reads nothing into it: the stop is this process's budget, not the vendor's
+// verdict on anybody's key.
 func killSwitchResponse(req *http.Request, reason string) *http.Response {
 	msg := fmt.Sprintf(
 		"memql LLM kill-switch: %s. This call was HARD-STOPPED locally to prevent a runaway spend loop; it is terminal, not a retryable provider rate limit. The process-wide LLM budget stays latched until the process restarts (or the guard is reset).",
 		reason,
 	)
-	body := fmt.Sprintf(`{"type":"error","error":{"type":"budget_exceeded_error","message":%q}}`, msg)
+	body := fmt.Sprintf(`{"type":"error","error":{"type":%q,"message":%q}}`, guardStopErrorType, msg)
 	return &http.Response{
 		StatusCode: http.StatusPaymentRequired,
 		Status:     "402 Payment Required",
@@ -1022,10 +1029,17 @@ func killSwitchResponse(req *http.Request, reason string) *http.Response {
 	}
 }
 
+// guardStopErrorType is the error type in the body of the kill-switch's own
+// 402. No vendor sends it.
+const guardStopErrorType = "budget_exceeded_error"
+
 // guardedHTTPClient returns an *http.Client whose transport is fronted
 // by the shared circuit breaker. base may be nil (uses
 // http.DefaultTransport). Both vendor SDKs accept an *http.Client, so
 // this one helper covers every provider construction.
+//
+// It also refuses to follow a redirect for a request that carries a person's
+// API key (keyBoundRedirectPolicy).
 func guardedHTTPClient(base *http.Client) *http.Client {
 	var baseTransport http.RoundTripper
 	c := &http.Client{}
@@ -1034,6 +1048,7 @@ func guardedHTTPClient(base *http.Client) *http.Client {
 		baseTransport = base.Transport
 	}
 	c.Transport = &guardedTransport{base: baseTransport, guard: sharedLLMGuard}
+	c.CheckRedirect = keyBoundRedirectPolicy(c.CheckRedirect)
 	return c
 }
 

@@ -33,8 +33,15 @@ func (f *fallbackStreamChat) CallChatStream(
 	}
 	var lastErr error
 	var lastFailedResolved Resolved
+	// The selection each attempt's decision is copied from; a failed attempt
+	// is noted on it, so every later row names the source that failed.
+	selection := f.resolved
+	var hop accountHop
 
 	for i, name := range f.chain {
+		if hop.passOver(name) {
+			continue
+		}
 		client, resolved, ok := f.router.providerLookup(ctx, f.req, name, modalityStreamChat)
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -42,7 +49,7 @@ func (f *fallbackStreamChat) CallChatStream(
 		if !ok {
 			continue
 		}
-		resolved = resolved.withDecisionFrom(f.resolved)
+		resolved = resolved.withDecisionFrom(selection)
 		inner := client.(common.ChatStreamProvider)
 
 		// If the previous attempt failed pre-flight, that failure was
@@ -66,6 +73,8 @@ func (f *fallbackStreamChat) CallChatStream(
 		}
 		lastErr = err
 		lastFailedResolved = resolved
+		selection = selection.withAttemptFailed(resolved, err)
+		hop.failed(name, err)
 	}
 
 	if lastErr != nil {

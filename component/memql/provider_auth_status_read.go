@@ -21,12 +21,31 @@ package memql
 // here: the page shows availability and source, and "verify" is a live call
 // rather than a comparison against something rendered. `authSource` names a
 // TIER, never a value.
+//
+// THE ANSWERING NODE'S OWN SIGN-IN (design record
+// docs/superpowers/specs/2026-11-21-vendor-accounts-and-api-keys-design.md,
+// decisions A5 and U6). A row of a vendor this process has tried to sign in to
+// carries `signIn`: what that sign-in got, and when. It is THIS process's
+// record and nobody else's, for the reason the rows are per node: each node
+// signs in for itself, so one can be refused while another is accepted, and a
+// page that showed one answer for the cluster would be wrong about some node.
+// The page names it as the answering node's.
+//
+// It is a short list of fields copied one by one (signInOf), never the record
+// marshalled whole. The record also holds the federation ids, the identity
+// token's subject and audience, a configuration fingerprint and the process
+// id, which the check command prints for an operator at a shell and which a
+// page has no use for. The bearer is not on the record at all.
+//
+// Regression tests: provider_auth_status_signin_test.go.
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
+	"time"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
@@ -76,6 +95,9 @@ func (e *MemQLEngine) evaluateProviderAuthStatusExpression(ctx context.Context) 
 			"authSource": string(providerAuthSourceOf(entry)),
 			"reason":     providerUnavailableReason(entry),
 		}
+		if signIn := signInOf(entry.Config.Type); signIn != nil {
+			payload["signIn"] = signIn
+		}
 		raw, err := json.Marshal(payload)
 		if err != nil {
 			return nil, err
@@ -91,6 +113,71 @@ func (e *MemQLEngine) evaluateProviderAuthStatusExpression(ctx context.Context) 
 	}
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
 	return nodes, nil
+}
+
+// signInVendorOfType names the vendor whose sign-in a provider type uses, or ""
+// for a type that signs in to neither. Every record of a vendor shares the
+// vendor's one sign-in, whatever it does: chat, speech, embeddings.
+func signInVendorOfType(providerType string) string {
+	switch lower := strings.ToLower(strings.TrimSpace(providerType)); {
+	case anthropicProviderTypes[lower]:
+		return VendorAnthropic
+	case isOpenAIProviderType(lower):
+		return VendorOpenAI
+	}
+	return ""
+}
+
+// signInOf is what THIS process's sign-in at a provider type's vendor last got,
+// as a status row may show it, or nil when the process has made no attempt.
+//
+// "Nobody set this vendor up" and "this node type signs in to no vendor" are
+// records too, and are not sign-ins: the row's own `authSource` and `reason`
+// already say that. A set of ids the engine refuses before asking any vendor is
+// likewise the row's `reason`. Only an attempt, or a wait for the next token,
+// is reported here.
+//
+// A time that has not happened is absent, never a zero date.
+func signInOf(providerType string) map[string]any {
+	vendor := signInVendorOfType(providerType)
+	if vendor == "" {
+		return nil
+	}
+	held, ok := currentVendorSignIn(vendor)
+	if !ok {
+		return nil
+	}
+	rec, recorded := held.Record()
+	if !recorded {
+		return nil
+	}
+	switch rec.Outcome {
+	case signInOutcomeOK, signInOutcomeDenied, signInOutcomeError, signInOutcomeWaiting:
+	default:
+		return nil
+	}
+	out := map[string]any{"outcome": rec.Outcome}
+	stamp := func(key string, at time.Time) {
+		if !at.IsZero() {
+			out[key] = at.UTC().Format(time.RFC3339)
+		}
+	}
+	text := func(key, value string) {
+		if value != "" {
+			out[key] = value
+		}
+	}
+	stamp("at", rec.At)
+	stamp("nextTokenDue", rec.NextTokenDue)
+	stamp("proofAt", rec.ProofAt)
+	stamp("bearerDroppedAt", rec.BearerDroppedAt)
+	text("detail", rec.Detail)
+	text("proof", rec.Proof)
+	text("proofDetail", rec.ProofDetail)
+	if rec.MayBeReplay {
+		out["mayBeReplay"] = true
+	}
+	return out
 }
 
 // providerAuthSourceOf reports which tier supplied this provider's credential.

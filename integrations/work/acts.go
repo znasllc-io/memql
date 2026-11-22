@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/work"
@@ -340,7 +341,14 @@ func rowVersion(row map[string]any) int {
 // overrideFromArgs reads what a person asked to change about the version a
 // re-run or a branch opens, and refuses what the engine could not honour
 // before anything is read or written.
-func overrideFromArgs(args map[string]any, requestedBy string) (work.Override, error) {
+//
+// IT ALSO RECORDS WHOSE CREDENTIAL ASKED (Override.ByMachine). The model a
+// re-run names becomes the step's pin, attributed to requestedBy, and an app
+// session asks as the person who owns the machine. The step executes later, on
+// an agent that never saw this request, so the stored override is the only
+// place left to say the person did not name that model themselves, and their
+// API key does not pay for it on the strength of the pin.
+func overrideFromArgs(ctx context.Context, args map[string]any, requestedBy string) (work.Override, error) {
 	o := work.Override{
 		Level:       argString(args, "level"),
 		Model:       argString(args, "model"),
@@ -348,6 +356,7 @@ func overrideFromArgs(args map[string]any, requestedBy string) (work.Override, e
 		Prompt:      argString(args, "prompt"),
 		Inputs:      argMap(args, "inputs"),
 		RequestedBy: requestedBy,
+		ByMachine:   !auth.ChoiceIsThePersons(ctx),
 	}
 	if err := work.ValidateOverride(o); err != nil {
 		return o, fmt.Errorf("work: %w", err)

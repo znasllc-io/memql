@@ -44,7 +44,10 @@ export interface DoorsReading {
   runnableApps: string[];
   appSessionsInstalled: boolean;
   cloudConfigured: boolean;
+  /** The cluster's own account at a vendor. */
   federationConfigured: boolean;
+  /** This reader has an API key that can pay for a vendor model. */
+  keyAccount: boolean;
   fleetInferenceInstalled: boolean;
   fleetCatalogInstalled: boolean;
   minimumContextWindow: number;
@@ -150,6 +153,7 @@ export function doorsFromRow(row: Row | null): DoorsReading | null {
     appSessionsInstalled: boolOr(row, "appSessionsInstalled", false),
     cloudConfigured: boolOr(row, "cloudConfigured", false),
     federationConfigured: boolOr(row, "federationConfigured", false),
+    keyAccount: boolOr(row, "keyAccount", false),
     fleetInferenceInstalled: boolOr(row, "fleetInferenceInstalled", false),
     fleetCatalogInstalled: boolOr(row, "fleetCatalogInstalled", false),
     minimumContextWindow: numberOf(row, "minimumContextWindow"),

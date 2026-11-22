@@ -49,7 +49,15 @@ func TestResultCachePostureIsPinned(t *testing.T) {
 	// The third is the calls capability (v1:calls:): its keys, passes and links are
 	// bearer credentials whose revocation, freezing or expiry must take effect on the
 	// next request, so no default-on caching.
-	wantDenylist := []string{"v1:identity:", "v1:platform:siteAccess", "v1:calls:"}
+	// The fourth is a person's API key and what the engine observed about it
+	// (v1:router:vendorKey, covering vendorKeyState; vendor accounts design
+	// record, 2026-11-21, M1 and S9). Whether a key may pay is decided per call
+	// from the rows, so a removal, a pause or a refusal must reach every replica
+	// by the next call; and the cache is keyed on the caller and not on the
+	// call's origin, so a row read for the integration under its owner's actor
+	// would otherwise be replayed to that owner's raw read, which the engine
+	// refuses. Its row is in the caching design record's adoption table.
+	wantDenylist := []string{"v1:identity:", "v1:platform:siteAccess", "v1:calls:", "v1:router:vendorKey"}
 	if !reflect.DeepEqual(cacheDenylistedConceptPrefixes, wantDenylist) {
 		t.Errorf("cacheDenylistedConceptPrefixes = %v, want exactly %v.\n"+
 			"EMPTYING it would let authn/authz state ride the 60s default: a revoked session, a "+

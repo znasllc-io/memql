@@ -5,6 +5,8 @@ import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { AutoRefresh, Button, Caption, Head, Notice, Details, DetailsSection, boolOr, stringsOf, useAppReach } from "../../../kit";
 import { useSession } from "../../../chrome/access";
+import { vendorDoorWords } from "../../settings/routingFacts";
+import { holds } from "../../../system/roles";
 import { useOsConnection } from "../../../live/connection";
 import { useReading } from "../../../cluster/reading";
 
@@ -111,6 +113,7 @@ function InferenceLine({
       appSessionsInstalled: boolOr(row, "appSessionsInstalled", false),
       cloudConfigured: boolOr(row, "cloudConfigured", false),
       federationConfigured: boolOr(row, "federationConfigured", false),
+      keyAccount: boolOr(row, "keyAccount", false),
       fleetCatalogInstalled: boolOr(row, "fleetCatalogInstalled", false),
       minimumContextWindow: numberOf(row, "minimumContextWindow"),
     };
@@ -134,7 +137,7 @@ function InferenceLine({
       {facts === null ? null : facts.eligible ? (
         <>
           <p className="os-cluster-fact">
-            This cluster can reach a model through {doorPhrase(facts.doorsOpen)}.
+            This cluster can reach a model through {doorPhrase(facts.doorsOpen, facts)}.
           </p>
           {facts.localModelCount === 0 ? null : (
             <Caption>
@@ -155,7 +158,7 @@ function InferenceLine({
         <Notice
           tone="warn"
           sentence="No door to a model is open, so anything that needs one will refuse."
-          next={notReadyNext(facts)}
+          next={notReadyNext({ ...facts, mayAddKey: holds("execute", "app:settings/apikeys") })}
         >
           <Caption>
             {!facts.fleetCatalogInstalled
@@ -205,6 +208,8 @@ function notReadyNext(facts: {
   federationConfigured: boolean;
   fleetCatalogInstalled: boolean;
   appSessionsInstalled: boolean;
+  /** The reader holds the Settings part that adds an API key. */
+  mayAddKey: boolean;
 }): string {
   const routes: string[] = [];
   if (facts.fleetCatalogInstalled) {
@@ -228,6 +233,12 @@ function notReadyNext(facts: {
       "set up Anthropic or OpenAI workload-identity federation (Settings -> Vendors)",
     );
   }
+  // A person's own account at a vendor (design record
+  // 2026-11-21-vendor-accounts-and-api-keys). Named only to somebody who may
+  // add one: a route nobody on the page can take is not a way to open a door.
+  if (facts.mayAddKey) {
+    routes.push("add an API key of your own for Anthropic or OpenAI (Settings -> API keys)");
+  }
   // THE KEY ROUTE IS GONE, and `cloudConfigured` no longer earns one of its
   // own (epic memql#5088). "Add a provider key" pointed at a box that no
   // longer exists, and `cloudConfigured` now means what federation means -- a
@@ -241,13 +252,14 @@ function notReadyNext(facts: {
  *  value is printed as it came, never dropped: a door this build has no name
  *  for is still a door, and hiding it would under-report readiness.
  *
- *  `apiKey` loses its case with the key itself (epic memql#5088) rather than
- *  keeping a phrase for a door the engine no longer opens. It falls through to
- *  the pass-through arm above, which is the right treatment for a value from
- *  an older node: printed as it came, not silently dropped. `federation` drops
- *  the vendor name, because both vendors federate now and the reading does not
- *  say which one answered. */
-function doorPhrase(doors: readonly string[]): string {
+ *  `apiKey` has no case: a person's API key is an account behind the vendor
+ *  door, not a door of its own, and nothing produces that value. An older
+ *  node still reporting it falls through to the pass-through arm above:
+ *  printed as it came, not silently dropped. `federation` is the VENDOR door,
+ *  named by what pays for it (`vendorDoorWords`): the cluster's federation, an
+ *  API key of the reader's, or both. It drops the vendor's name, because both
+ *  vendors sit behind it and the reading does not say which would answer. */
+function doorPhrase(doors: readonly string[], accounts: { federationConfigured: boolean; keyAccount: boolean }): string {
   if (doors.length === 0) return "a door it did not name";
   const named = doors.map((door) =>
     door === "local"
@@ -255,7 +267,7 @@ function doorPhrase(doors: readonly string[]): string {
       : door === "app"
         ? "a signed-in app on one of your machines"
         : door === "federation"
-          ? "workload-identity federation"
+          ? vendorDoorWords(accounts.federationConfigured, accounts.keyAccount)
           : door,
   );
   if (named.length === 1) return named[0] as string;

@@ -293,7 +293,7 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	// record.
 	//
 	// What is left is the PIN, which still wins over every rule -- turnPin.
-	explicitProvider, pinnedBy := r.turnPin(ctx, msg, data)
+	explicitProvider, pinnedBy, pinByMachine := r.turnPin(ctx, msg, data)
 
 	// operatorEnabled still travels on the prepared turn -- it gates the
 	// operator tool surface -- it just no longer picks a policy here.
@@ -342,6 +342,7 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 		Role:             role,
 		ExplicitProvider: explicitProvider,
 		PinnedBy:         pinnedBy,
+		ChoiceByMachine:  pinByMachine,
 	}
 	// A PERSON'S OVERRIDE FOR THIS STEP (epic memql#5414, design D20). A work
 	// turn somebody re-ran or branched runs at the level they asked for, on
@@ -1609,7 +1610,14 @@ func ensureDomain(existing []string, needed string) []string {
 // that user's own. A hint is the CALLER's -- the person on the stream the turn
 // arrived on; an agent's stored preference is the AGENT OWNER's, who is not
 // the acting user when somebody else's agent answers their turn.
-func (r *Replier) turnPin(ctx context.Context, msg *memqlv1.AgentGenerateTurnMsg, data map[string]any) (provider, pinnedBy string) {
+//
+// byMachine says a HINT came on a credential that acts as that person without
+// being them. An app session may send an agent turn and its subject is the
+// person who owns the machine, so the pin is attributed to them; it is still
+// the coding agent naming a model, and for which ACCOUNT pays it is counted as
+// work nobody chose (auth.ChoiceIsThePersons). An agent's stored preference
+// was set by its owner and is never so marked.
+func (r *Replier) turnPin(ctx context.Context, msg *memqlv1.AgentGenerateTurnMsg, data map[string]any) (provider, pinnedBy string, byMachine bool) {
 	for _, source := range []struct {
 		value  string
 		hinted bool
@@ -1623,11 +1631,11 @@ func (r *Replier) turnPin(ctx context.Context, msg *memqlv1.AgentGenerateTurnMsg
 			continue
 		}
 		if source.hinted {
-			return source.value, turnOwnerFromActor(ctx)
+			return source.value, turnOwnerFromActor(ctx), !auth.ChoiceIsThePersons(ctx)
 		}
-		return source.value, r.resolveOwnerForAgent(ctx, msg.AgentId)
+		return source.value, r.resolveOwnerForAgent(ctx, msg.AgentId), false
 	}
-	return "", ""
+	return "", "", false
 }
 
 // agentLLMField reads a field from data["assistant"].providerConfig.llm,

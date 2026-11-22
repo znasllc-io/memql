@@ -1,11 +1,13 @@
 package work
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/work"
 )
 
@@ -73,7 +75,8 @@ func TestARerunWritesTheRequestOnTheRunForTheAgent(t *testing.T) {
 	run["humanResumeId"] = "previously-approved-permission"
 	eng.reply("workRunForOwner", run)
 
-	nodes, err := i.handleRerunStep(callerContext(actOwner), map[string]any{
+	// A person, in their own session: the override names nobody else's choice.
+	nodes, err := i.handleRerunStep(sessionContext(actOwner), map[string]any{
 		"runId":   actRunId,
 		"stepKey": "draft",
 		"level":   "reasoning",
@@ -506,6 +509,43 @@ func TestRecoveryDoesNotPromoteUnrecordedOrNestedSteps(t *testing.T) {
 			_, err := i.handleRerunStep(callerContext(actOwner), map[string]any{"runId": actRunId, "stepKey": tc.key}, 0)
 			if err == nil || len(mutationsIn(eng)) != 0 {
 				t.Fatalf("unsafe recovery: err=%v writes=%s", err, eng.summary())
+			}
+		})
+	}
+}
+
+// A RE-RUN ON A NAMED MODEL, ASKED FOR THROUGH AN APP SESSION, SAYS SO (vendor
+// accounts design, K8 line 4 and O4). The model a re-run names becomes the
+// step's pin, attributed to whoever asked. An app session asks as the person
+// who owns the machine, and the step executes later on an agent that never saw
+// the request, so the stored override is the only place left to say that the
+// person did not name that model themselves.
+func TestARerunAskedForThroughAnAppSessionSaysSo(t *testing.T) {
+	for name, tc := range map[string]struct {
+		ctx  context.Context
+		want any
+	}{
+		"an app session":           {credentialContext(actOwner, auth.ForwardedClassAppSession), true},
+		"the person's own session": {sessionContext(actOwner), nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			i, eng, store := newActsIntegration(t)
+			addPristineRun(store, actRunId, "fetch", "draft", "publish")
+			eng.reply("workRunForOwner", actRunRow(runStatusCancelled))
+			if _, err := i.handleRerunStep(tc.ctx, map[string]any{"runId": actRunId, "stepKey": "draft", "model": "federation:claudeSonnet"}, 0); err != nil {
+				t.Fatalf("rerunStep: %v", err)
+			}
+			writes := mutationsIn(eng)
+			if len(writes) != 1 {
+				t.Fatalf("a re-run writes one run update; got %s", eng.summary())
+			}
+			rerun, _ := writes[0].Args(t)["rerun"].(map[string]any)
+			override, _ := rerun["override"].(map[string]any)
+			if override["model"] != "federation:claudeSonnet" || override["requestedBy"] != actOwner {
+				t.Fatalf("override = %v", override)
+			}
+			if got := override["byMachine"]; got != tc.want {
+				t.Errorf("override.byMachine = %v, want %v", got, tc.want)
 			}
 		})
 	}

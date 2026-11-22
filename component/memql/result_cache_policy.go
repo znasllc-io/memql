@@ -67,6 +67,16 @@ const (
 //     must not read another replica's stale answer. Every calls query is
 //     @cache(0) besides; the prefix keeps a construct written without it off
 //     the default path.
+//   - "v1:router:vendorKey" -- a person's API key and what the engine
+//     observed about it (design record 2026-11-21-vendor-accounts-and-api-keys,
+//     M1 and S9). Whether a key may pay is decided per call from the rows, so
+//     a removal, a pause or a refusal must reach every replica by the next
+//     call. And the cache is keyed on the caller, not on the call's origin: a
+//     row read for the integration under its owner's actor with internal
+//     origin would be replayed to that same owner's raw read, which
+//     clientUnreadableConcepts refuses. Every key query is @cache(0) besides;
+//     the prefix covers vendorKey and vendorKeyState and keeps a raw read off
+//     the default path.
 //
 // The denylist is a DEFAULT-CACHING guard only. It does NOT forbid an
 // explicit per-query @cache(ttl=N) -- if an author deliberately caches a
@@ -79,6 +89,7 @@ var cacheDenylistedConceptPrefixes = []string{
 	"v1:identity:",
 	"v1:platform:siteAccess",
 	"v1:calls:",
+	"v1:router:vendorKey",
 }
 
 // isCacheDenylistedConcept reports whether a single concept id falls under

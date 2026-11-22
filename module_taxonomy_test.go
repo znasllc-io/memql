@@ -128,6 +128,16 @@ var pluginKinds = map[string]moduleKind{
 	// the cluster's own rows and tables, the campaign rows through the engine
 	// and its own fact and watermark tables with SQL.
 	"emailStats": kindComponent,
+	// A person's API keys at a model vendor (vendor accounts design, part 2),
+	// for siteTraffic's reasons and embedding's. Its builtins are declared in
+	// dsl/router/builtins.memql, which EVERY binary loads, so a node without
+	// the executor fails boot resolution; and it is the seam the provider
+	// registry asks which account pays for a vendor call, so a node without it
+	// has no keys and a call forwarded there would be paid by the wrong
+	// account. It makes no outbound call of its own: the one request it
+	// causes, listing a vendor's models with a key, is made by the provider
+	// registry (ProviderRegistry.ProbeVendorKey), as embedding's calls are.
+	"vendorkeys": kindComponent,
 	// The store statistics facts (the 2026-11-11 store statistics design), for
 	// emailStats' reasons: builtin storeStatisticsRollup is declared in
 	// dsl/shopify/overlay/builtins.memql, which EVERY binary loads, so a node

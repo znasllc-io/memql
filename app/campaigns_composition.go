@@ -81,6 +81,11 @@ func (s *compositionGoalStarter) StartComposition(ctx context.Context, g campaig
 		return "", err
 	}
 	choice.By = owner
+	// The PRODUCT chose this route, not the owner: they asked for a
+	// composition and never picked where it runs. So it is not their choice
+	// for the account rule either, whatever credential the request came on
+	// (common.RouteChoice.ByMachine).
+	choice.ByMachine = true
 	var accounts []string
 	if account := strings.TrimSpace(g.AccountID); account != "" {
 		accounts = []string{account}

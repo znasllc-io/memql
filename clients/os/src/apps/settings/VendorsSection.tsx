@@ -1,7 +1,7 @@
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { useEffect, useState } from "react";
 
-import { Button, Caption, RecordList, RecordRow, Field, Head, Input, Notice, Panel, Subhead } from "../../kit";
+import { Button, Caption, RecordList, RecordRow, Field, Head, Input, Notice, Panel, Subhead, formatMoment } from "../../kit";
 import { findRegion, revealRegion } from "../../kit";
 import { useSession } from "../../chrome/access";
 import { RoutingIsInFleet } from "./RoutingLink";
@@ -11,12 +11,16 @@ import {
   federationFields,
   localityOf,
   missingFederationFields,
+  signInFor,
+  signInNeedsAttention,
+  signInSentence,
   sourceCopy,
   summarize,
   useProviderActions,
   useProviderRegistry,
   vendorLabel,
   type IssuerReach,
+  type SignInReading,
   type VendorDoor,
 } from "./providerFacts";
 import { doorReadings, useInferenceStatus, type DoorId, type DoorReading } from "./routingFacts";
@@ -121,9 +125,16 @@ export function VendorsSection({
           Apply
         </Button>
       </Head>
+      {/* THE CLUSTER'S OWN ACCOUNT, and nothing else. No key is entered on
+          this page. A person's own API key is theirs, and is added under API
+          keys, the next section of this app; the page says where once, in
+          words (design record 2026-11-21-vendor-accounts-and-api-keys, U6 as
+          amended 2026-11-22). No control goes there: the tab is one along. It
+          used to say there was no API key anywhere, which stopped being true. */}
       <p className="os-caption">
-        Ids from each vendor&apos;s own console. There is no API key to enter,
-        here or anywhere else. A vendor bills per call.
+        Ids from each vendor&apos;s own console, for the cluster&apos;s own account.
+        No API key is entered here. A key of your own is added under API keys.
+        A vendor bills per call.
       </p>
       <RoutingIsInFleet tab="routes" />
 
@@ -137,7 +148,7 @@ export function VendorsSection({
 
       <RecordList as="ul" label="Vendors">
         {vendors.map((door) => (
-          <VendorRow key={door.id} door={door} open={openVendor === door.id} onOpenVendor={() => setOpenVendor(openVendor === door.id ? "" : door.id)} />
+          <VendorRow key={door.id} door={door} signIn={signInFor(door.id, registry.rows)} open={openVendor === door.id} onOpenVendor={() => setOpenVendor(openVendor === door.id ? "" : door.id)} />
         ))}
       </RecordList>
 
@@ -184,19 +195,27 @@ export function VendorsSection({
  * own form, opened below. The same on a local cluster as on any other; what a
  * local cluster needs first is said in the form's panel, where it is acted on.
  */
-function VendorRow({ door, open, onOpenVendor }: { door: DoorReading; open: boolean; onOpenVendor: () => void }) {
+function VendorRow({ door, signIn, open, onOpenVendor }: { door: DoorReading; signIn?: SignInReading; open: boolean; onOpenVendor: () => void }) {
   const word =
     door.state === "open" ? VENDOR_WORDS.open
       : door.state === "half" ? VENDOR_WORDS.half
         : door.state === "unknown" ? VENDOR_WORDS.unknown
           : VENDOR_WORDS.unset;
+  // WHAT THE ANSWERING NODE'S OWN SIGN-IN GOT, on a vendor that is set up
+  // (design record 2026-11-21-vendor-accounts-and-api-keys, U6). It takes the
+  // row's quiet line, because it is what is true of the vendor right now and
+  // the line it replaces only said when a vendor is used. An unset or
+  // half-set vendor keeps its own sentence: its sign-in is not the news.
+  // A refusal an operator has to act on takes the warn tone; the state word
+  // still says the ids are set, which they are.
+  const signedIn = door.state === "open" ? signInSentence(door.name, signIn, formatMoment) : "";
   return (
     <div data-os-vendor-state={door.state} data-os-vendorid={door.id}>
       <RecordRow
         name={door.name}
-        secondary={door.said}
+        secondary={signedIn !== "" ? signedIn : door.said}
         state={word}
-        tone={door.state === "open" ? "accent" : "muted"}
+        tone={door.state !== "open" ? "muted" : signedIn !== "" && signInNeedsAttention(signIn) ? "warn" : "accent"}
         actions={<Button onClick={onOpenVendor} ariaExpanded={open}>{open ? "Close" : door.state === "open" ? `Edit ${door.name}` : `Set up ${door.name}`}</Button>}
       >
         <span>Billed per call.</span>{door.detail ? <span className="os-mono">{door.detail}</span> : null}

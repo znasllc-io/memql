@@ -561,6 +561,11 @@ the sources fetching under it. Rotation is adding a new credential and
 switching the source to it (`updatePackageSource`); revoking is one-way, and
 the row is kept because it is the history of what fetched under it.
 
+A credential never changes owner. When a person's rows are transferred to
+somebody else, their packages move and their credentials stay with them, so a
+package that was handed over stops fetching (`credential_not_found`) until its
+new owner selects a connection of their own on the Source stop.
+
 The whole shape -- the fields, the resolution rule, the cluster-owner case, and
 what replaced the old cluster-wide named secret -- is in
 [deployables.md](deployables.md). There is no cluster-wide source credential

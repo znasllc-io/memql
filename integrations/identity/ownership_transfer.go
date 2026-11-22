@@ -165,6 +165,21 @@ var stampedAtBirth = map[string]string{
 	"v1:platform:siteAccessSession": "a session is the bff's bookkeeping about a visitor, stamped when it " +
 		"opened and read as the cluster acting, and it lasts a day. It is the code's record of being opened, " +
 		"so it stays beside the code it was opened with",
+	"v1:router:vendorKey": "an API key spends the money of the person who added it, and nobody else may " +
+		"come to own it: not a cluster owner by naming the row, and not an heir during an offboarding, who " +
+		"would receive a key that is still active and still a default (vendor accounts design, K5 and K16). " +
+		"A leaver's keys stay theirs and stop serving because their owner is no longer an active user. The " +
+		"engine refuses the move as well, for every writer (owner_held_write_guard.go)",
+	"v1:router:vendorKeyState": "the engine's record of what a vendor said about one API key. It carries " +
+		"the key's owner so its row tier matches the key's, and it stays beside the key it is about",
+	"v1:platform:sourceCredential": "a source credential is one person's sealed access to their " +
+		"repositories, and a private source fetches under it as its owner. A transfer that moved it let an " +
+		"heir fetch as the person who left (owner decision 2026-11-22). It stays with the person who " +
+		"connected it. A package that was handed over stops fetching, with credential_not_found, until its " +
+		"new owner selects a connection of their own. The engine refuses the move as well, for every writer",
+	"v1:platform:sourceConnection": "a selection one person made from their own source credential. It " +
+		"names that credential, so it stays beside it: moved alone it would offer its new owner a connection " +
+		"that resolves nothing under them",
 }
 
 // transferableConcepts lists the concepts whose rows carry a transferable

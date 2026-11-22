@@ -262,6 +262,14 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
   and individually removable entries with validation and keyboard support.
   Do not require comma-separated input to manage a visible list. Explain the
   consequence of the collection once, and show it only for modes that use it.
+- A secret typed once and never shown again, such as an API key, is a concealed
+  `Input` (`conceal`). It is hidden as it is typed and is never written into the
+  page's markup. It is a text field with autocomplete off, not a password field,
+  so the browser does not offer to keep it. Say beside it where the value goes
+  and that nothing shows it again. Hold the value in the one component that
+  sends it, and nowhere else: not in a draft, the browser's storage, the page
+  context or a step's answer line. Keep it through a refusal so it can be
+  corrected in place, and drop it the moment it is saved.
 - Sharing gives each shared resource (models, fleet workbenches) its own toggle
   in one section, with one divider between the two groups whatever their state.
   A group's Users and groups collection appears beneath its toggle only while
@@ -432,6 +440,13 @@ access or add an existing user/group from the directory; it never creates an
 identity. A card edits that recipient's sharing state, with direct pause/resume
 and remove icons and live call counts. Keep drafts through heartbeats and prevent
 an edit from overwriting a newer sharing decision.
+
+Lending an API key uses the same editor (`ShareEditor`, with the thing being
+lent passed as its `target`), so a second resource never respells the picker,
+the cards or the retry. Its switch reads Lend this key. A card's figure is that
+person's calls with the key this month, because a key has nothing in flight to
+report and what its owner asks of a grant is what it cost. A group's card shows
+no figure. A key is lent to named users and groups and never to everyone.
 
 Routing label and sharing cards share a compact two-row layout and minimum
 height. Put the name above the details, with sharing call counts in the middle

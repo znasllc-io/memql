@@ -182,7 +182,7 @@ describe("a source's readiness, from real facts", () => {
     expect(readSource("federation:cheapest", facts({ vendor: "ready" })).readiness).toBe("ready");
     const none = readSource("federation:cheapest", facts({ vendor: "idle" }));
     expect(none.readiness).toBe("idle");
-    expect(none.reason).toBe("no vendor set up");
+    expect(none.reason).toBe("no API key or vendor account");
     expect(readSource("federation:cheapest", facts({ vendor: "unknown" })).readiness).toBe("unknown");
   });
 
@@ -420,6 +420,15 @@ describe("the tray", () => {
     expect(f.machines.map((m) => m.name)).toEqual(["Studio"]);
     expect(f.machines[0]!.models.map((m) => m.modelId)).toEqual(["qwen3.5:4b"]);
     expect(f.vendor).toBe("idle");
+  });
+
+  it("counts a vendor as ready when an API key of the reader's can pay, with no federation", () => {
+    const facts = (inference: { federationConfigured: boolean; keyAccount?: boolean }) =>
+      factsFrom({ machines: [], machinesRead: true, inference: { read: true, error: "", ...inference }, routes: [], preference: [] });
+    expect(facts({ federationConfigured: false, keyAccount: true }).vendor).toBe("ready");
+    expect(facts({ federationConfigured: true }).vendor).toBe("ready");
+    expect(facts({ federationConfigured: false, keyAccount: false }).vendor).toBe("idle");
+    expect(facts({ federationConfigured: false }).vendor).toBe("idle");
   });
 });
 

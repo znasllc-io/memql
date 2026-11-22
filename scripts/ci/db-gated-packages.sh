@@ -216,6 +216,12 @@ readonly MODULE_PATH="github.com/znasllc-io/memql"
 # stale read, the tier that admits one person and not another, the @serverOnly
 # gate that refuses a read with no origin stamped. A fake engine has none of
 # those, so it could not fail for the reason those tests exist.
+# API keys (design record 2026-11-21-vendor-accounts-and-api-keys) added
+# `integrations/vendorkeys`. Which of a person's keys can pay for a call is a
+# claim about rows read fresh as the cluster acting, on a replica that never
+# saw the key before; what a call learned about one is a write under a
+# cross-replica gate that an older verdict must not win. A fake engine answers
+# both whichever way a test wants.
 # memql#5705 added `component/datasync`. The sync runtime's health row
 # (v1:platform:syncState) is written through the real engine, and the defect
 # the PR fixes -- a row id whose short segment carried colons, refused by the
@@ -353,6 +359,7 @@ readonly DB_GATED_TREES=(
 	"integrations/email"
 	"integrations/siteaccess"
 	"integrations/sitepreview"
+	"integrations/vendorkeys"
 	"integrations/work"
 	"integrations/workbench"
 	"examples/referencepack"

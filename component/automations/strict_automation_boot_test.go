@@ -305,7 +305,13 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // webhooks, staged on the inbound seam, to the call it names (the calls
 // capability, 2026-11-18). One added, none removed; measured by the strict
 // loader.
-const shippedAutomationCount = 210
+// 210 -> 211: vendorKeysDailyCheck, the daily listing of the vendor's models
+// with every API key nothing has used or checked for a day (vendor accounts,
+// 2026-11-22). One added, none removed; measured by the strict loader.
+// 211 -> 212: vendorKeysOwnerNotices, the ten-minute pass that mails the owner
+// of each API key that stopped working, once per fall (vendor accounts,
+// 2026-11-22). One added, none removed; measured by the strict loader.
+const shippedAutomationCount = 212
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

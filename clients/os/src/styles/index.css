@@ -2294,6 +2294,16 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   font-family: var(--os-font-mono);
   font-variant-ligatures: none;
 }
+/* A secret typed once (kit `Input` with `conceal`): what is typed is drawn as
+ * dots, so a shared screen or a screenshot does not carry it. The field stays
+ * a text field, because a password field is what a browser offers to keep.
+ * The placeholder is a hint and is read as written. */
+.os-input-concealed {
+  -webkit-text-security: disc;
+}
+.os-input-concealed::placeholder {
+  -webkit-text-security: none;
+}
 /* Prose (kit `TextArea`): still the field -- colour, border, radius and text
  * size come from `.os-input` above -- but not a one-line field. It starts two
  * control lines tall and can be pulled taller. This rule has to FOLLOW the

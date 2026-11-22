@@ -79,6 +79,11 @@ type Override struct {
 	Inputs      map[string]any `json:"inputs,omitempty"`
 	Guidance    *Guidance      `json:"guidance,omitempty"`
 	RequestedBy string         `json:"requestedBy,omitempty"`
+	// ByMachine says the re-run was asked for through a credential acting as
+	// RequestedBy without being them: an app session, a badge, delegated
+	// access (auth.ChoiceIsThePersons). The model it names is then not the
+	// person's own pin, and their API key does not pay for it on that account.
+	ByMachine bool `json:"byMachine,omitempty"`
 }
 
 // Authored reports whether the person WROTE part of this version's input
@@ -162,6 +167,9 @@ func (o Override) Object() map[string]any {
 		out["guidance"] = guidance
 	}
 	put("requestedBy", o.RequestedBy)
+	if o.ByMachine {
+		out["byMachine"] = true
+	}
 	return out
 }
 
@@ -181,6 +189,7 @@ func ParseOverride(v any) Override {
 		Prompt:      str("prompt"),
 		WholePrompt: whole && strings.TrimSpace(str("prompt")) != "",
 		RequestedBy: str("requestedBy"),
+		ByMachine:   m["byMachine"] == true,
 	}
 	if in, ok := m["inputs"].(map[string]any); ok && len(in) > 0 {
 		o.Inputs = in

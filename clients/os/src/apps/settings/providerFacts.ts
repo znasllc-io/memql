@@ -19,10 +19,16 @@ import { useOsConnection } from "../../live/connection";
 // independently, so two Refreshes can be answered by two nodes. That is why
 // Apply broadcasts rather than relying on repeated reads.
 //
-// THERE IS NO KEY HERE ANY MORE (epic memql#5088, D5). `saveKey` and the
-// key-sealing builtin it called are deleted, not disabled: federation is the
-// only door for a cloud vendor, and the fleet is the other door. What is left
-// on the write side is the federation id form, per vendor, and Apply.
+// NO KEY IS ENTERED HERE (epic memql#5088, D5). `saveKey` and the key-sealing
+// builtin it called are deleted, not disabled: this page is the CLUSTER'S OWN
+// account at each vendor, which is workload identity federation and nothing
+// else. What is left on the write side is the federation id form, per vendor,
+// and Apply.
+//
+// A PERSON'S OWN API KEY IS A DIFFERENT THING, AND IS NOT ON THIS PAGE. It is
+// added in Settings > API keys, sealed as that person's row, and pays only for
+// calls a person makes (design record
+// 2026-11-21-vendor-accounts-and-api-keys). The cluster still has no key.
 
 export interface ProviderStatusRow {
   name: string;
@@ -31,6 +37,53 @@ export interface ProviderStatusRow {
   available: boolean;
   authSource: string;
   reason: string;
+  /** What the answering node's own sign-in at this vendor last got. Absent when it made no attempt. */
+  signIn?: SignInReading;
+}
+
+/**
+ * What ONE NODE's sign-in at a vendor last got: the node that answered the
+ * read (design record 2026-11-21-vendor-accounts-and-api-keys, A5 and U6).
+ *
+ * Each node signs in for itself, so two replicas can differ, and two Refreshes
+ * can be answered by two nodes. That is why every sentence made from this
+ * names "the node that answered" and never "the cluster".
+ *
+ * Times are the cluster's own strings and are shown through a formatter. A
+ * time that did not happen is "", never a date.
+ */
+export interface SignInReading {
+  /** ok, denied, error or waiting. Anything else is a build this one does not know. */
+  outcome: string;
+  at: string;
+  /** The vendor's reason on a refusal, or the fault when it did not answer. */
+  detail: string;
+  /** Whether the vendor's API then took the bearer: "" until something used it, then ok, refused or error. */
+  proof: string;
+  proofAt: string;
+  proofDetail: string;
+  /** A refusal that may only mean the identity token had been used before. */
+  mayBeReplay: boolean;
+  nextTokenDue: string;
+  bearerDroppedAt: string;
+}
+
+function signInFrom(v: unknown): SignInReading | undefined {
+  if (v === null || typeof v !== "object" || Array.isArray(v)) return undefined;
+  const row = v as RowBag;
+  const outcome = str(row, "outcome");
+  if (outcome === "") return undefined;
+  return {
+    outcome,
+    at: str(row, "at"),
+    detail: str(row, "detail"),
+    proof: str(row, "proof"),
+    proofAt: str(row, "proofAt"),
+    proofDetail: str(row, "proofDetail"),
+    mayBeReplay: bool(row, "mayBeReplay"),
+    nextTokenDue: str(row, "nextTokenDue"),
+    bearerDroppedAt: str(row, "bearerDroppedAt"),
+  };
 }
 
 type RowBag = Record<string, unknown>;
@@ -69,6 +122,7 @@ export function toProviderRows(rows: readonly RowBag[]): ProviderStatusRow[] {
     available: bool(row, "available"),
     authSource: str(row, "authSource"),
     reason: str(row, "reason"),
+    signIn: signInFrom(row["signIn"]),
   }));
 }
 
@@ -256,6 +310,67 @@ export function doorFor(vendor: string, rows: readonly ProviderStatusRow[]): Ven
   if (halfway) return { state: "half", said: halfway.reason };
   if (mine.some((r) => r.authSource === "federation")) return { state: "open", said: "" };
   return { state: "unset", said: "" };
+}
+
+/**
+ * The answering node's sign-in at a vendor, off any of that vendor's rows.
+ * Every record of a vendor shares the vendor's one sign-in, so the first row
+ * that carries one speaks for them all. Matched by prefix, as `doorFor` is.
+ */
+export function signInFor(vendor: string, rows: readonly ProviderStatusRow[]): SignInReading | undefined {
+  const want = vendor.toLowerCase();
+  return rows.find((r) => r.vendor.toLowerCase().startsWith(want) && r.signIn !== undefined)?.signIn;
+}
+
+/** A reason as the end of a sentence: no trailing stop of its own, so the sentence adds one. */
+function reasonOf(text: string, otherwise: string): string {
+  const trimmed = text.trim().replace(/[.\s]+$/, "");
+  return trimmed === "" ? otherwise : trimmed;
+}
+
+/**
+ * One sentence saying what the answering node's sign-in got, or "" when it
+ * made no attempt (or reports an outcome this build does not know: a sentence
+ * guessed for one would be a claim nobody checked).
+ *
+ * IT IS NAMED AS THAT NODE'S, every time. `when` writes a time; it is a
+ * parameter so the sentences can be read in a test without a time zone.
+ */
+export function signInSentence(vendorName: string, signIn: SignInReading | undefined, when: (at: string) => string): string {
+  if (signIn === undefined) return "";
+  const at = signIn.at === "" ? "" : ` at ${when(signIn.at)}`;
+  const due = signIn.nextTokenDue === "" ? "soon" : when(signIn.nextTokenDue);
+  switch (signIn.outcome) {
+    case "ok":
+      if (signIn.proof === "ok") return `The node that answered signed in${at} and ${vendorName} took its bearer.`;
+      if (signIn.proof === "refused") {
+        return `The node that answered signed in${at}, and ${vendorName} then refused its bearer: ${reasonOf(signIn.proofDetail, "it gave no reason")}.`;
+      }
+      if (signIn.proof === "error") return `The node that answered signed in${at}, and ${vendorName} did not answer its first call.`;
+      return `The node that answered signed in${at}; nothing has used the bearer yet.`;
+    case "denied":
+      if (signIn.mayBeReplay) {
+        return `The node that answered was refused by ${vendorName} in a way a used token alone explains; it tries again with the next token, due ${due}.`;
+      }
+      return `The node that answered was refused by ${vendorName}: ${reasonOf(signIn.detail, "it gave no reason")}.`;
+    case "waiting":
+      return `The node that answered is waiting for its next identity token, due ${due}.`;
+    case "error":
+      return `${vendorName} did not answer the node that answered: ${reasonOf(signIn.detail, "no reason was recorded")}.`;
+  }
+  return "";
+}
+
+/**
+ * Whether a sign-in is something for an operator to act on: the vendor refused
+ * the node, or refused its bearer, or did not answer. A wait for the next token
+ * and a refusal a used token explains settle themselves and are not.
+ */
+export function signInNeedsAttention(signIn: SignInReading | undefined): boolean {
+  if (signIn === undefined) return false;
+  if (signIn.outcome === "error") return true;
+  if (signIn.outcome === "denied") return !signIn.mayBeReplay;
+  return signIn.outcome === "ok" && signIn.proof === "refused";
 }
 
 /**

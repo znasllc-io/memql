@@ -77,6 +77,7 @@ export function useRoutingFacts(routes: readonly RouteLike[], enabled = true, ca
         inference: {
           read: inference.status.read,
           federationConfigured: inference.status.federationConfigured,
+          keyAccount: inference.status.keyAccount,
           error: inference.status.error,
           eligibleModelIds: inference.status.eligibleModelIds,
           fleetCatalogInstalled: inference.status.fleetCatalogInstalled,

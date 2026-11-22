@@ -83,6 +83,10 @@ func (r *Router) ResolveFor(ctx context.Context, req ResolveRequest) (memql.Reso
 	if err != nil {
 		return memql.ResolvedProvider{}, err
 	}
+	// AND WHETHER THE CALL IS A VISITOR'S, which decides only which account
+	// may pay at a vendor (chosen.go). Derived here and nowhere else: a caller
+	// that set the field itself is overruled in both directions.
+	req.ForVisitor = visitorCall(ctx, req)
 
 	var client any
 	var resolved Resolved

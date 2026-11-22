@@ -87,14 +87,14 @@ builtin identityValidateScope {
 /// Audited once for the whole transfer on v1:identity:auditEvent -- the
 /// DECISIONS log -- not once per row moved: the decision was taken once, by
 /// one person, about one pair of principals.
-@description("Reassign every row one principal owns to another, except a deployable's access codes and their sessions. Cluster-owner only; audited.")
+@description("Reassign every row one principal owns to another, except a deployable's access codes and their sessions, a person's API keys, and a person's source credentials and connections. Cluster-owner only; audited.")
 @executor("integration.identity.transferRowOwnership")
 builtin transferRowOwnership {
   /// The principal whose rows are being handed over.
   fromUserId  string!
   /// The principal receiving them. Must exist and be active.
   toUserId    string!
-  /// Narrow the transfer to a single concept. Absent transfers every concept declaring an owned tier, except a deployable's access codes and their sessions. Naming either of those moves nothing.
+  /// Narrow the transfer to a single concept. Absent transfers every concept declaring an owned tier, except a deployable's access codes and their sessions, a person's API keys with the engine's record of them, and a person's source credentials and source connections. Naming any of those moves nothing. A package that is handed over stops fetching a private source until its new owner selects a connection of their own.
   concept     string
   /// Narrow the transfer to a single row. Offboarding is per-user; a single stuck row is not.
   rowId       string

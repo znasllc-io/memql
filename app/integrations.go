@@ -33,5 +33,8 @@ func (a *App) integrationsCore() {
 	// Procedure learning's Gate 1 (epic memql#5408, gap G7): the plug-in is
 	// core, so its compile gate is installed on every node type too.
 	a.wireProcedureIntegration()
+	// What mails the owner of an API key that stops working. Installed on
+	// every node type; the pass that calls it is placed by its automation.
+	a.wireVendorKeyNotices()
 	a.Logger.Info("core integration providers registered")
 }
