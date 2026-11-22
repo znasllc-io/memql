@@ -43,6 +43,10 @@ function connect(seed: FakeSeed): FakeConnection {
 }
 
 const rail = () => screen.getByRole("navigation", { name: "File locations" });
+async function openSharing() {
+  await click(within(rail()).getByRole("button", { name: "Sharing" }));
+  return screen.findByRole("list", { name: "Sharing" });
+}
 
 beforeEach(() => {
   h.download.mockClear();
@@ -537,57 +541,88 @@ describe("the Shared folder and the Sharing place (Nov 19 2026)", () => {
     expect(within(rail()).getByRole("button", { name: "Sharing" })).toBeTruthy();
   });
 
-  it("lists every file you are sharing: the file, who has it, the time left and Stop", async () => {
-    const connection = connect({ artifacts: [brief, plan], shares });
+  // Draft 7B (Nov 22 2026): the files as tiles, a picked tile's people as cards below.
+  const groupShare = shareRow({ id: "s-3", artifactId: "a-1", recipientUserId: "", recipientGroupId: "g-design", recipientDisplayName: "Design team", title: "brief.pdf", createdAt: "2026-11-17T12:00:00Z" });
+  const people = () => screen.queryByRole("group", { name: /^Who has / });
+
+  it("shows one tile per file you are sharing, counted on the Head, and no people until one is picked", async () => {
+    const connection = connect({ artifacts: [brief, plan], shares: [...shares, groupShare] });
     await renderFiles();
     const browsed = connection.callsNamed("libraryArtifactsBrowse").length;
-    await click(within(rail()).getByRole("button", { name: "Sharing" }));
-    expect(screen.getByRole("heading", { name: "Sharing" })).toBeTruthy();
-    const list = await screen.findByRole("list", { name: "Sharing" });
-    const rows = within(list).getAllByRole("listitem");
+    const list = await openSharing();
+    const heading = screen.getByRole("heading", { name: "Sharing" });
+    // Three shares, two files: the Head counts files, as the tiles do.
+    expect(heading.parentElement?.querySelector(".os-head-meta")?.textContent).toBe("2");
+    const tiles = within(list).getAllByRole("listitem");
     // Newest first, as the Head's sort says.
-    expect(rows.map((row) => row.textContent)).toEqual([
-      expect.stringContaining("plan.md"),
-      expect.stringContaining("brief.pdf"),
-    ]);
-    expect(rows[0]!.textContent).toContain("Dana Cole");
-    expect(rows[0]!.textContent).toMatch(/\d+ days left/);
+    expect(tiles.map((tile) => tile.textContent)).toEqual([expect.stringContaining("plan.md"), expect.stringContaining("brief.pdf")]);
+    expect(list.querySelectorAll(".os-files-tile")).toHaveLength(2);
+    expect(people()).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Actions for / })).toBeNull();
     expect(connection.callsNamed("librarySharing")).toEqual(["query librarySharing()"]);
     // The Library is not read for this place.
     expect(connection.callsNamed("libraryArtifactsBrowse")).toHaveLength(browsed);
+  });
 
-    await click(within(rows[1]!).getByRole("button", { name: "Stop sharing brief.pdf with Sam Lee" }));
+  it("picking a tile opens a card per person or group it is shared with, and picking it again closes them", async () => {
+    connect({ artifacts: [brief, plan], shares: [...shares, groupShare] });
+    await renderFiles();
+    await openSharing();
+    const tile = screen.getByRole("button", { name: /brief\.pdf/ });
+    await click(tile);
+    expect(tile.getAttribute("aria-pressed")).toBe("true");
+    const cards = [...people()!.querySelectorAll(".os-editable-card")];
+    expect(cards.map((card) => card.textContent)).toEqual([
+      expect.stringMatching(/Sam Lee.*User · \d+ days left/),
+      expect.stringMatching(/Design team.*Group · \d+ days left/),
+    ]);
+    expect(within(cards[1] as HTMLElement).getByLabelText("Group")).toBeTruthy();
+    // Dana has plan.md, not brief.pdf.
+    expect(screen.queryByRole("button", { name: "Actions for Dana Cole" })).toBeNull();
+    await click(tile);
+    expect(people()).toBeNull();
+  });
+
+  it("each card's menu is the share page's: Renew renews that share, Remove sharing stops it", async () => {
+    const connection = connect({ artifacts: [brief, plan], shares: [...shares, groupShare] });
+    await renderFiles();
+    await openSharing();
+    await click(screen.getByRole("button", { name: /brief\.pdf/ }));
+    await click(screen.getByRole("button", { name: "Actions for Design team" }));
+    const menu = screen.getByRole("menu", { name: "Actions for Design team" });
+    expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Renew for 7 days", "Remove sharing"]);
+    expect(within(menu).getByRole("menuitem", { name: "Remove sharing" }).getAttribute("data-tone")).toBe("danger");
+    await click(within(menu).getByRole("menuitem", { name: "Renew for 7 days" }));
+    expect(connection.callsNamed("libraryShareFile")).toEqual(['builtin libraryShareFile(artifactId: "a-1", recipientGroupId: "g-design", days: 7)']);
+
+    await click(screen.getByRole("button", { name: "Actions for Sam Lee" }));
+    await click(screen.getByRole("menuitem", { name: "Remove sharing" }));
     expect(connection.callsNamed("libraryShareStop")).toEqual(['builtin libraryShareStop(shareId: "s-1")']);
-    // The stop lands on the share's own event, and the row leaves.
+    // The stop lands on the share's own event: its card leaves, the file stays for the group.
     await emit(connection, "v1:library:share", { ...shares[0]!, revokedAt: "2026-11-20T10:00:00Z" });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
-    expect(within(screen.getByRole("list", { name: "Sharing" })).getAllByRole("listitem")).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Actions for Sam Lee" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Actions for Design team" })).toBeTruthy();
+    expect(within(screen.getByRole("list", { name: "Sharing" })).getAllByRole("listitem")).toHaveLength(2);
   });
 
   it("names a file shared before shares carried its name, from your own Library", async () => {
     const old = shareRow({ id: "s-old", artifactId: "a-1", recipientUserId: "u-sam", recipientDisplayName: "Sam Lee" });
     connect({ shares: [old] });
     await renderFiles();
-    await click(within(rail()).getByRole("button", { name: "Sharing" }));
-    expect(await screen.findByRole("button", { name: "Stop sharing brief.pdf with Sam Lee" })).toBeTruthy();
+    await openSharing();
+    expect(await screen.findByRole("button", { name: /brief\.pdf/ })).toBeTruthy();
   });
 
   it("says so in place when the engine refuses the stop", async () => {
     connect({ shares, refuse: { libraryShareStop: "That share is not one of yours." } });
     await renderFiles();
-    await click(within(rail()).getByRole("button", { name: "Sharing" }));
-    await click(await screen.findByRole("button", { name: "Stop sharing plan.md with Dana Cole" }));
+    await openSharing();
+    await click(screen.getByRole("button", { name: /plan\.md/ }));
+    await click(screen.getByRole("button", { name: "Actions for Dana Cole" }));
+    await click(screen.getByRole("menuitem", { name: "Remove sharing" }));
     expect(screen.getByText("Sharing did not stop.")).toBeTruthy();
     expect(screen.getByText(/That share is not one of yours\./)).toBeTruthy();
-  });
-
-  it("names a whole group, with a group icon", async () => {
-    connect({ shares: [shareRow({ id: "s-g", artifactId: "a-1", recipientUserId: "", recipientGroupId: "g-design", recipientDisplayName: "Design team", title: "brief.pdf" })] });
-    await renderFiles();
-    await click(within(rail()).getByRole("button", { name: "Sharing" }));
-    const stop = await screen.findByRole("button", { name: "Stop sharing brief.pdf with Design team" });
-    const row = stop.closest("li")!;
-    expect(within(row).getByLabelText("Group")).toBeTruthy();
   });
 
   it("says so when you are sharing nothing", async () => {
@@ -633,9 +668,10 @@ describe("timeLeftLabel", () => {
     const card = (await screen.findByRole("button", { name: "Actions for Sam Lee" })).closest(".os-editable-card");
     expect(card?.textContent).toContain("User · 7 days left");
     // The rail stays beside the share view.
-    await click(within(rail()).getByRole("button", { name: "Sharing" }));
-    const list = await screen.findByRole("list", { name: "Sharing" });
-    expect(within(list).getAllByRole("listitem")[0]!.textContent).toContain("7 days left");
+    await openSharing();
+    await click(screen.getByRole("button", { name: /brief\.pdf/ }));
+    const there = screen.getByRole("button", { name: "Actions for Sam Lee" }).closest(".os-editable-card");
+    expect(there?.textContent).toContain("User · 7 days left");
   });
 });
 
@@ -679,7 +715,11 @@ describe("Shared by, for someone who oversees others' shares (item 13, Nov 20 20
     await click(within(rail()).getByRole("button", { name: "Sharing" }));
     chooseOption(sharedBy(), "Everyone");
     const reads = connection.callsNamed("librarySharesOverseen").length;
-    await click(await screen.findByRole("button", { name: "Stop sharing Lab results summary.pdf with Casey" }));
+    await click(await screen.findByRole("button", { name: /Lab results summary\.pdf/ }));
+    await click(screen.getByRole("button", { name: "Actions for Casey" }));
+    // Someone else's share can be stopped here, not renewed: a re-share would be yours.
+    expect(within(screen.getByRole("menu", { name: "Actions for Casey" })).getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Remove sharing"]);
+    await click(screen.getByRole("menuitem", { name: "Remove sharing" }));
     expect(connection.callsNamed("libraryShareStop")).toEqual(['builtin libraryShareStop(shareId: "s-enr")']);
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
     expect(connection.callsNamed("librarySharesOverseen").length).toBeGreaterThan(reads);

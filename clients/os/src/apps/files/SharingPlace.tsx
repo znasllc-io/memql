@@ -1,21 +1,36 @@
 import { useState } from "react";
-import { Clock, FileText, User, Users } from "lucide-react";
+import { User, Users } from "lucide-react";
 
-import { Button, LiveList, RecordRow } from "../../kit";
+import { LiveList } from "../../kit";
+import { CardCarousel } from "../../kit/CardCarousel";
 import { useNow } from "../../kit/useNow";
-import type { LiveView } from "../../live/liveView";
+import { useLiveView, type LiveView } from "../../live/liveView";
+import { artifactFromRow } from "./rows";
+import { ShareCardActions, shareMenuEntries } from "./ShareView";
+import { FileTile } from "./Tiles";
 import { timeLeftLabel, type OutgoingShare } from "./useSharing";
 
-// THE SHARING PLACE (Jesús, Nov 19 2026, draft A of "One Shared section with
-// two groups"): the files the caller is sharing, one row per share, each
-// saying four things -- the file, who has it (a person, or a whole group with
-// a group icon), how long until it ends on its own, and Stop, which ends it
-// now. A share is one file with one person or one group, so a file shared with
-// two is two rows: each has its own time and its own Stop.
+// THE SHARING PLACE: the files the caller is sharing, in the same tiles as
+// Shared with me and the Library (José, Nov 22 2026: Sharing should look like
+// Shared with me; Jesús picked draft 7B). One tile per FILE, however many
+// people and groups have it. Picking a tile opens, below the tiles, one card
+// per person or group it is shared with -- the name, then "User · 6 days left"
+// or "Group · 6 days left" -- each with the share view's own "⋯" menu (Renew,
+// Remove sharing; ShareView's shareMenuEntries), so a share is renewed or
+// stopped the same way in both places. Nothing picked: only the tiles.
 //
-// The column names sit once above the rows (the drawn rows carry them), on the
-// record row's own grid so they line up; on a narrow window the rows fold into
-// two lines and the names would point at nothing, so they go.
+// A share is one file with one person or one group, so a card is one share:
+// each has its own time and its own menu.
+
+/** Renew here is for the share view's starting length: there is no Expires on this page. */
+const RENEW_DAYS = 7;
+
+interface SharedFile {
+  id: string;
+  createdAt: string;
+  ownerDisplayName: string;
+  shares: OutgoingShare[];
+}
 
 export function SharingPlace({
   source,
@@ -23,6 +38,7 @@ export function SharingPlace({
   emptyText,
   titleOf,
   onStop,
+  onRenew,
   showSharer = false,
 }: {
   source: LiveView<OutgoingShare> | null;
@@ -32,78 +48,99 @@ export function SharingPlace({
   titleOf: (share: OutgoingShare) => string;
   /** Ends a share; a refusal is the caller's to say. */
   onStop: (share: OutgoingShare) => Promise<void>;
-  /** Each row says who shared it ("by Majo Zepeda"): the list is not only yours. */
+  /** Renews a share for `days`; absent where the caller may not renew (other people's shares). */
+  onRenew?: (share: OutgoingShare, days: number) => Promise<void>;
+  /** Each tile says who shared it ("by Majo Zepeda"): the list is not only yours. */
   showSharer?: boolean;
 }) {
-  // One clock for the list, so every row's time left agrees (kit/useNow).
+  // One clock for the cards, so every card's time left agrees (kit/useNow).
   const now = useNow(60_000);
-  const [stopping, setStopping] = useState<ReadonlySet<string>>(new Set());
-  const stop = async (share: OutgoingShare) => {
-    setStopping((prev) => new Set([...prev, share.id]));
+  const [picked, setPicked] = useState("");
+  const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
+  const run = async (share: OutgoingShare, act: () => Promise<void>) => {
+    setBusy((prev) => new Set([...prev, share.id]));
     try {
-      await onStop(share);
+      await act();
     } finally {
-      setStopping((prev) => {
+      setBusy((prev) => {
         const next = new Set(prev);
         next.delete(share.id);
         return next;
       });
     }
   };
-  const rows = source?.snapshot.rows.length ?? 0;
+  // The shares, folded into their files in the order the Head's sort gave them.
+  const files = useLiveView<OutgoingShare, SharedFile>(source, `${showSharer}`, (shares) => {
+    const byFile = new Map<string, SharedFile>();
+    for (const share of shares) {
+      const key = share.artifactId || share.id;
+      const file = byFile.get(key);
+      if (file) file.shares.push(share);
+      else byFile.set(key, { id: key, createdAt: share.createdAt, ownerDisplayName: share.ownerDisplayName, shares: [share] });
+    }
+    return [...byFile.values()];
+  });
+  // Named at render, not in the fold: an older share's name arrives later
+  // (useShareTitles) without a new snapshot behind it.
+  const titleOfFile = (file: SharedFile) => file.shares[0]!.title || titleOf(file.shares[0]!);
+  const pickedFile = picked === "" ? null : files?.snapshot.rows.find((file) => file.id === picked) ?? null;
+  const pick = (id: string) => setPicked((prev) => (prev === id ? "" : id));
   return (
     <div className="os-files-outgoing">
-      {rows > 0 ? (
-        <div className="os-record-list os-files-outgoing-columns" aria-hidden="true">
-          <RecordRow
-            icon={<span />}
-            name="File"
-            trailing="Time left"
-            actions={<span className="os-button os-files-outgoing-ghost">Stop</span>}
-          >
-            Shared with
-          </RecordRow>
+      <div className="os-files-files">
+        <LiveList<SharedFile>
+          source={files}
+          rowId={(file) => file.id}
+          // A renewal moves expiresAt: the same file, shared for longer.
+          fingerprint={(file) => `${file.shares[0]!.title}|${file.shares.map((s) => `${s.id}:${s.expiresAt}`).join(",")}`}
+          label={label}
+          emptyText={emptyText}
+          renderRow={(file, tick) => (
+            <FileTile
+              row={artifactFromRow({ id: file.id, kind: "file", title: titleOfFile(file), createdAt: file.createdAt })}
+              caption={showSharer ? `by ${file.ownerDisplayName || "Unnamed person"}` : ""}
+              fixed
+              picked={picked === file.id}
+              dim={false}
+              hint={`Shared with ${file.shares.map((s) => s.recipientDisplayName || (s.recipientGroupId ? "Unnamed group" : "Unnamed person")).join(", ")}`}
+              tick={tick}
+              onPick={() => pick(file.id)}
+              onOpen={() => setPicked(file.id)}
+              onMenu={() => {}}
+            />
+          )}
+        />
+      </div>
+      {pickedFile ? (
+        <div className="os-files-outgoing-people">
+          <CardCarousel
+            key={pickedFile.id}
+            items={pickedFile.shares}
+            itemKey={(share) => share.id}
+            minCardWidth={240}
+            label={`Who has ${titleOfFile(pickedFile)}`}
+            noun="entry"
+            plural="entries"
+            renderItem={(share) => {
+              const group = share.recipientGroupId !== "";
+              const who = share.recipientDisplayName || (group ? "Unnamed group" : "Unnamed person");
+              return (
+                <div className="os-editable-card os-files-share-card">
+                  <div className="os-editable-card-open">
+                    <strong>{group ? <Users size={13} aria-label="Group" /> : <User size={13} aria-hidden />} {who}</strong>
+                    <span>{group ? "Group" : "User"} · {timeLeftLabel(share.expiresAt, now)}</span>
+                  </div>
+                  <div className="os-editable-card-actions">
+                    <ShareCardActions who={who} disabled={busy.has(share.id)} entries={shareMenuEntries(
+                      onRenew ? { label: `Renew for ${RENEW_DAYS} days`, onSelect: () => run(share, () => onRenew(share, RENEW_DAYS)) } : null,
+                      () => run(share, () => onStop(share)))} />
+                  </div>
+                </div>
+              );
+            }}
+          />
         </div>
       ) : null}
-      <LiveList<OutgoingShare>
-        source={source}
-        rowId={(share) => share.id}
-        // A renewal moves expiresAt: the same share, for longer.
-        fingerprint={(share) => `${share.title}|${share.expiresAt}`}
-        label={label}
-        emptyText={emptyText}
-        renderRow={(share) => {
-          const title = share.title || titleOf(share);
-          return (
-            <RecordRow
-              icon={<FileText size={15} aria-hidden />}
-              name={title}
-              secondary={showSharer ? `by ${share.ownerDisplayName || "Unnamed person"}` : undefined}
-              trailing={
-                <span className="os-files-outgoing-left">
-                  <Clock size={13} aria-hidden /> {timeLeftLabel(share.expiresAt, now)}
-                </span>
-              }
-              actions={
-                <Button
-                  busy={stopping.has(share.id)}
-                  busyLabel="Stopping"
-                  ariaLabel={`Stop sharing ${title} with ${share.recipientDisplayName || "this person"}`}
-                  onClick={() => void stop(share)}
-                >
-                  Stop
-                </Button>
-              }
-            >
-              <span className="os-files-outgoing-who">
-                {share.recipientGroupId
-                  ? <><Users size={13} aria-label="Group" /> {share.recipientDisplayName || "Unnamed group"}</>
-                  : <><User size={13} aria-hidden /> {share.recipientDisplayName || "Unnamed person"}</>}
-              </span>
-            </RecordRow>
-          );
-        }}
-      />
     </div>
   );
 }
