@@ -201,7 +201,7 @@ func (s *Store) Key(ctx context.Context, keyId string) (Key, bool, error) {
 // the order they were added (ties by id, so every replica agrees).
 func (s *Store) ActiveKeysAtVendor(ctx context.Context, vendor string) ([]Key, error) {
 	call, err := langparser.RenderCall("vendorKeysActiveAtVendor", map[string]any{"vendor": vendor})
-	rows, err := s.read(ctx, "the active API keys at "+vendor, call, err)
+	rows, err := s.readAll(ctx, "the active API keys at "+vendor, call, err)
 	if err != nil {
 		return nil, err
 	}
@@ -229,15 +229,19 @@ func (s *Store) States(ctx context.Context, keyIds []string) (map[string]State, 
 	if len(keyIds) == 0 {
 		return map[string]State{}, nil
 	}
-	call, err := langparser.RenderCall("vendorKeyStatesForKeys", map[string]any{"keyIds": keyIds})
-	rows, err := s.read(ctx, "the API keys' states", call, err)
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[string]State, len(rows))
-	for _, row := range rows {
-		state := stateFromRow(row)
-		out[state.KeyId] = state
+	out := make(map[string]State, len(keyIds))
+	// In lots, so one statement never names more ids than a few hundred.
+	for start := 0; start < len(keyIds); start += statesPerRead {
+		lot := keyIds[start:min(start+statesPerRead, len(keyIds))]
+		call, err := langparser.RenderCall("vendorKeyStatesForKeys", map[string]any{"keyIds": lot})
+		rows, err := s.readAll(ctx, "the API keys' states", call, err)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			state := stateFromRow(row)
+			out[state.KeyId] = state
+		}
 	}
 	return out, nil
 }
@@ -414,6 +418,70 @@ func (s *Store) read(ctx context.Context, what, call string, rendered error) ([]
 		return nil, fmt.Errorf("vendorkeys: read %s: %w", what, scrubbed(err))
 	}
 	return memql.MaterializeRows(res), nil
+}
+
+// statesPerRead is how many keys' states one statement asks for.
+const statesPerRead = 200
+
+// maxListPages bounds one walk of a list read. At the engine's default page
+// of 500 rows it is 100,000 rows, far past anything a cluster holds; a walk
+// that would go further fails loudly instead of running on.
+const maxListPages = 200
+
+// readAll reads EVERY row a list read matches, a page at a time, as the
+// cluster acting.
+//
+// One read of the engine returns a bounded page (its MaxResults, 500 by
+// default) and says nothing when there were more rows than that. For the two
+// reads that span owners that silence would be a wrong answer: a key past the
+// first page would never be offered to the call it should pay for, and the
+// daily check would never reach it. So those reads walk the pages
+// (memql.WalkQueryPages), which either reaches the end or returns an error,
+// and never a short list presented as the whole one.
+//
+// The walk takes no snapshot time. A snapshot would be this replica's clock,
+// and a key removed a second ago on a replica whose clock runs ahead would
+// still be read as active here. Without one, a row rewritten between two pages
+// can be missed by that one walk, which for a key means it is not offered for
+// one call: the narrowing direction. Below one page, which is every cluster
+// today, neither can happen.
+func (s *Store) readAll(ctx context.Context, what, call string, rendered error) ([]map[string]any, error) {
+	if rendered != nil {
+		return nil, fmt.Errorf("vendorkeys: render the read of %s: %w", what, scrubbed(rendered))
+	}
+	if s == nil || s.engine == nil {
+		return nil, errNoEngine
+	}
+	execute := func(ctx context.Context, query string) (*memql.ExecuteResult, error) {
+		res, err := s.engine.Execute(ctx, query)
+		if err != nil {
+			return nil, err
+		}
+		page, ok := res.(*memql.ExecuteResult)
+		if !ok {
+			return nil, fmt.Errorf("the engine answered a read with %T", res)
+		}
+		return page, nil
+	}
+	var rows []map[string]any
+	seen := map[string]bool{}
+	err := memql.WalkQueryPages(asCluster(ctx), execute, "query "+call, maxListPages, func(page *memql.ExecuteResult) error {
+		for _, row := range memql.MaterializeRows(page) {
+			// A row rewritten between two pages can appear on both.
+			if id := rowString(row, "id"); id != "" {
+				if seen[id] {
+					continue
+				}
+				seen[id] = true
+			}
+			rows = append(rows, row)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("vendorkeys: read %s: %w", what, scrubbed(err))
+	}
+	return rows, nil
 }
 
 // write runs one rendered mutation under the context its caller chose.
