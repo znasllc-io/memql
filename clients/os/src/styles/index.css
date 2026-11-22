@@ -5131,12 +5131,6 @@ a.os-button {
  * The rule is drawn on each entry rather than once behind the list, so the
  * last entry can simply not draw one -- a single tall rule would hang past the
  * final node with nothing under it. */
-.os-files-versions-only {
-  margin: 0;
-  font-size: var(--os-text-sm);
-  color: var(--os-muted);
-  line-height: 1.5;
-}
 
 .os-files-spine {
   list-style: none;
@@ -7009,20 +7003,6 @@ a.os-button {
   height: 100%;
 }
 
-/*
- * THE INVARIANT, AS PROSE. Body ink at the base size rather than a muted
- * caption or a bordered callout: it is the one thing about this surface that
- * differs from every trash can the reader has used, and dressing it as a
- * notice would make it look like a warning about something going wrong. It
- * reads as the app talking, because that is what it is.
- */
-.os-bin-lede {
-  margin: 0;
-  max-width: 62ch;
-  color: var(--os-ink);
-  font-size: var(--os-text-sm);
-  line-height: 1.55;
-}
 
 .os-bin-body {
   flex: 1;
@@ -12721,7 +12701,7 @@ button.os-cluster-mesh-peer:focus-visible {
 
 /*
  * THE DISAMBIGUATION, AS PROSE. Body ink at the small size rather than a
- * muted caption or a bordered notice, for `.os-bin-lede`'s reason: it is not
+ * muted caption or a bordered notice, because it is not
  * a warning about something going wrong, it is the one fact that makes the
  * list mean anything -- these are billing accounts, not the clients the
  * Accounts section lists. A notice would read as an error about the surface;
