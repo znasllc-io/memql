@@ -1,3 +1,4 @@
+import { osScale } from "../system/scale";
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { IconButton } from "./IconButton";
@@ -37,7 +38,7 @@ export function CardCarousel<T>({ items, itemKey, renderItem, label, listLabel =
       if (focused) setFirst(Number(focused.dataset.cardIndex));
       setSize(width < minCardWidth * 2 + GAP ? 1 : 2);
     };
-    resize(element.getBoundingClientRect().width);
+    resize(element.getBoundingClientRect().width / osScale());
     const observer = new ResizeObserver(entries => resize(entries[0]?.contentRect.width ?? 0));
     observer.observe(element);
     return () => observer.disconnect();

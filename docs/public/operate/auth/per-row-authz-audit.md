@@ -254,6 +254,37 @@ The two reported states that are not buckets: **`srvOnly`**, checked
 first as above, and **`other`** — everything the classifier did not
 place. `other` is by far the largest column and is not a finding.
 
+### Shared Library files: two owned rows, and a read under the sharer
+
+File sharing (2026-11-18) opens ONE file to ONE other person without adding a
+`granted` bucket. Both of its concepts are plain composite owner tiers,
+`@rowAuthz(owner="ownerUserId", clusterOwner)`, and both are `@serverWritten`:
+
+- **`v1:library:share` is the sharer's.** It is the grant, and every access
+  reads it. A grant its holder owned would be a grant its holder could extend,
+  so the recipient never owns it -- and, being `@serverWritten`, the sharer
+  cannot write it around `libraryShareFile` either (the four lifetimes, the
+  directory, owning the file).
+- **`v1:library:shareNotice` is the recipient's.** It is a display row: row
+  admission gates graph events by owner, so this is what lets the recipient's
+  own stream hear a share arrive. It grants nothing.
+
+**How a recipient reaches a file they do not own.** Not by widening any tier.
+`EngineLibraryStore.SharedFile` (`component/server`) reads the recipient's own
+notice, then the share, the artifact and the file **under the sharer's
+borrowed authority** (`auth.ContextWithUserActor`), never internal origin, with
+fresh reads; it serves only while the share names the caller, is unrevoked and
+unexpired on the node's clock, and the file is still the sharer's and not
+archived. The recipient's ordinary Library queries never return the sharer's
+rows. The only two consumers are the content route's bytes and the recipient's
+own copy (`librarySaveSharedCopy`), which is a new row they own.
+
+`integrations/library/sharestore` holds the internal-origin stamp for the four
+writes and is on the call-origin allowlist; `integrations/library/share.go`
+decides each act first. Tests: `integrations/library/share_db_test.go` (every
+rank pairing the feature names, two replicas) and
+`integrations/library/sharestore/store_test.go` (the stamp's preconditions).
+
 ### RANK is not a fifth bucket (epic memql#4832)
 
 `rankVisible`, `rankStrict` and `unowned="<role>"` are **arguments of the

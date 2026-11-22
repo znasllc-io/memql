@@ -305,7 +305,9 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // webhooks, staged on the inbound seam, to the call it names (the calls
 // capability, 2026-11-18). One added, none removed; measured by the strict
 // loader.
-const shippedAutomationCount = 210
+// 210 -> 211: endSharesOnArtifactArchive, which ends every share of a Library
+// file its owner archived (file sharing, 2026-11-18). One added, none removed.
+const shippedAutomationCount = 211
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

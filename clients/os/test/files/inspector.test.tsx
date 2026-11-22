@@ -16,7 +16,7 @@ vi.mock("../../src/live/connection", () => ({
   useOsConnection: () => h.connection,
 }));
 
-import { artifactRow, click, fakeConnection, folderRow, renderFiles } from "./harness";
+import { artifactRow, click, fakeConnection, fileRow, folderRow, renderFiles, openDetails } from "./harness";
 
 /** What a real artifact id looks like: one unbreakable word, wider than the
  *  panel it lands in. The whole overflow story is about this string. */
@@ -27,7 +27,7 @@ beforeEach(() => {
 });
 
 async function openInspector(title: string): Promise<HTMLElement> {
-  await click(screen.getByRole("button", { name: new RegExp(title) }));
+  await openDetails(title);
   return screen.getByRole("region", { name: "File details" });
 }
 
@@ -79,6 +79,39 @@ describe("the inspector header", () => {
   });
 });
 
+// Item 11 (José, Nov 19: "this is how details should show up", on Fleet's
+// machine Details tab; Jesús picked draft A, Nov 20).
+describe("the details page in Fleet's layout", () => {
+  it("names each section in its own column, in today's order, with copy only where Fleet offers it", async () => {
+    h.connection = fakeConnection({
+      artifacts: [artifactRow({ id: "a-1", title: "q3.pdf", format: "pdf", sourceConceptRef: "v1:library:file:f-1" })],
+      files: [fileRow({ id: "f-1", name: "q3.pdf", versionNumber: 1 })],
+      versions: [],
+    });
+    await renderFiles();
+    const inspector = await openInspector("q3\\.pdf");
+
+    const details = inspector.querySelector(".os-details") as HTMLElement;
+    const sections = Array.from(details.querySelectorAll(":scope > .os-details-section"));
+    expect(sections.map((section) => section.getAttribute("aria-label"))).toEqual(["Details", "Labels", "Client", "Version history"]);
+    expect(sections.map((section) => section.querySelector(".os-subhead")?.firstChild?.textContent)).toEqual(["Details", "Labels", "Client", "Versions"]);
+
+    // Names, formats, exact times and identifiers copy; the origin sentence
+    // and the kind are read, not copied (DESIGN.md "Quiet copying").
+    const facts = within(sections[0] as HTMLElement);
+    for (const label of ["Filed in", "Format", "Created", "Id"]) {
+      expect(facts.getByRole("button", { name: `Copy ${label}` })).toBeTruthy();
+    }
+    expect(facts.queryByRole("button", { name: "Copy Origin" })).toBeNull();
+    expect(facts.queryByRole("button", { name: "Copy Kind" })).toBeNull();
+
+    // Client is one short row: the picker alone.
+    expect(within(sections[2] as HTMLElement).getByLabelText("The client this file is about")).toBeTruthy();
+    // The bottom bar stays.
+    expect(within(inspector).getByRole("group", { name: "What you can do with this" })).toBeTruthy();
+  });
+});
+
 describe("the move picker", () => {
   it("is gone from the inspector -- re-filing belongs to the row", async () => {
     h.connection = fakeConnection({
@@ -98,18 +131,19 @@ describe("the move picker", () => {
 });
 
 describe("a copyable value", () => {
-  it("renders the id inside the truncating line, not as a bare cell", async () => {
+  // Item 11 (Nov 20): the id is a copy row of Fleet's Details layout -- the
+  // whole value in the row, its copy icon at the row's end.
+  it("renders the id as a copy row, with the whole value on its title", async () => {
     h.connection = fakeConnection({
       artifacts: [artifactRow({ id: LONG_ID, title: "brief.pdf" })],
     });
     await renderFiles();
     const inspector = await openInspector("brief\\.pdf");
 
-    // The truncation itself is a LAYOUT fact and jsdom has no layout engine --
-    // every offsetWidth here is 0 -- so what is checkable is that the id is
-    // handed to the element the stylesheet truncates, and that the whole
-    // string is on `title` for the hover. The rendered proof is a screenshot.
-    const line = inspector.querySelector(".os-copyvalue-text") as HTMLElement | null;
+    // Layout is not checkable in jsdom (every offsetWidth here is 0), so what
+    // is checked is that the id is handed to the copy row's text element, with
+    // the whole string on `title`. The rendered proof is a screenshot.
+    const line = inspector.querySelector(`.os-copyvalue-row .os-copyvalue-text[title="${LONG_ID}"]`) as HTMLElement | null;
     expect(line).toBeTruthy();
     expect(line?.textContent).toBe(LONG_ID);
     expect(line?.getAttribute("title")).toBe(LONG_ID);
@@ -134,7 +168,7 @@ describe("a copyable value", () => {
     expect(writeText.mock.calls[0]![0]).toBe(LONG_ID);
     // The confirmation is the accessible name, so it reaches a screen reader
     // and not only somebody watching the glyph swap.
-    expect(within(inspector).getByRole("button", { name: "Copied" })).toBeTruthy();
+    expect(within(inspector).getByRole("button", { name: "Copied Id" })).toBeTruthy();
     expect(within(inspector).queryByRole("button", { name: "Copy Id" })).toBeNull();
     vi.unstubAllGlobals();
   });
@@ -175,8 +209,7 @@ describe("a copyable value", () => {
 
   it("offers no button for a value there is nothing to copy of", async () => {
     h.connection = fakeConnection({
-      // No plan produced this file, so the Plan fact does not render at all
-      // and the id is the only copyable value on the panel.
+      // No plan produced this file, so the Plan fact does not render at all.
       artifacts: [artifactRow({ id: LONG_ID, title: "brief.pdf", producedByRunId: "" })],
     });
     await renderFiles();

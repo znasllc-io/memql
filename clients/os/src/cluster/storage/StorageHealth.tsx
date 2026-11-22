@@ -1,3 +1,4 @@
+import { osScale } from "../../system/scale";
 import { useOsIfPresent } from "../../chrome/state";
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { QueryClient } from "@znasllc-io/memql-sdk-core/client";
@@ -66,7 +67,8 @@ export function StorageWarning({ onReview, inline = false, onHeightChange }: { o
   const element = useRef<HTMLDivElement>(null);
   const present = !!reading?.warning && !reviewing;
   useLayoutEffect(() => {
-    const update = () => onHeightChange?.(element.current?.getBoundingClientRect().height ?? 0);
+    // In CSS pixels: the shell reserves it in the desk's placement.
+    const update = () => onHeightChange?.((element.current?.getBoundingClientRect().height ?? 0) / osScale());
     update();
     const observer = new ResizeObserver(update);
     if (element.current) observer.observe(element.current);

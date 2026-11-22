@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   addItem,
   emptySurface,
+  fitSurface,
   moveItem,
   nearestFreeCell,
+  placeFileAt,
   removeItem,
   sortSurface,
   surfaceHasContent,
@@ -81,6 +83,36 @@ describe("desk surface grid", () => {
   });
 });
 
+describe("a file dragged out of Files onto the desk (Jesús, Nov 20 2026)", () => {
+  const entry = { id: "new", artifactId: "art-a", title: "a", fileKind: "file", source: "uploaded" };
+
+  it("lands at the drop cell, or the nearest free one", () => {
+    const landed = placeFileAt(place(emptySurface(), file("b"), 2, 1), entry, { col: 2, row: 1 }, GRID);
+    expect(landed?.itemId).toBe("new");
+    expect(landed?.surface.positions.new).not.toEqual({ col: 2, row: 1 });
+    expect(placeFileAt(emptySurface(), entry, { col: 4, row: 3 }, GRID)?.surface.positions.new).toEqual({ col: 4, row: 3 });
+  });
+
+  it("never makes a second icon: the file's own icon moves to the drop", () => {
+    const landed = placeFileAt(place(emptySurface(), file("a"), 0, 0), entry, { col: 5, row: 2 }, GRID);
+    expect(landed?.itemId).toBe("a");
+    expect(Object.keys(landed?.surface.items ?? {})).toEqual(["a"]);
+    expect(landed?.surface.positions.a).toEqual({ col: 5, row: 2 });
+  });
+
+  it("never lands under a window or the dock: covered cells count as taken", () => {
+    const hidden = [{ col: 5, row: 2 }, { col: 4, row: 2 }, { col: 6, row: 2 }];
+    const landed = placeFileAt(emptySurface(), entry, { col: 5, row: 2 }, GRID, hidden);
+    expect(hidden).not.toContainEqual(landed?.surface.positions.new);
+  });
+
+  it("refuses a new icon on a full desk", () => {
+    let full = emptySurface();
+    for (let i = 0; i < GRID.cols * GRID.rows; i += 1) full = place(full, file(`f${i}`), i % GRID.cols, Math.floor(i / GRID.cols));
+    expect(placeFileAt(full, entry, { col: 0, row: 0 }, GRID)).toBeNull();
+  });
+});
+
 describe("folders are shortcuts (design D4)", () => {
   const shortcut: DesktopItem = { kind: "folder", id: "dir", folderId: "f-lib-1", name: "Reports" };
 
@@ -127,5 +159,47 @@ describe("sorting and content", () => {
     s = removeItem(s, "a");
     expect(s.items.a).toBeUndefined();
     expect(s.positions.a).toBeUndefined();
+  });
+});
+
+describe("fitSurface", () => {
+  // Jesús's owner desk, Nov 20: saved on an 18-column grid, drawn on 14 after the x1.25 scale.
+  const wide = { cols: 18, rows: 8 };
+  const narrow = { cols: 14, rows: 8 };
+  function saved(): DeskSurface {
+    let s = emptySurface();
+    for (const [item, col, row] of [[widget("ask", 3, 2), 15, 0], [widget("setup", 4, 4), 14, 2], [file("a"), 0, 0]] as const) {
+      const next = addItem(s, item, { col, row }, wide);
+      if (!next) throw new Error("setup");
+      s = next;
+    }
+    return s;
+  }
+
+  it("returns the same surface when everything fits", () => {
+    const s = saved();
+    expect(fitSurface(s, wide)).toBe(s);
+  });
+
+  it("brings items saved past the edge back on screen without overlapping", () => {
+    const fitted = fitSurface(saved(), narrow);
+    expect(fitted.positions.a).toEqual({ col: 0, row: 0 });
+    for (const id of ["ask", "setup"]) {
+      const item = fitted.items[id] as Extract<DesktopItem, { kind: "widget" }>;
+      const pos = fitted.positions[id]!;
+      expect(pos.col + item.w).toBeLessThanOrEqual(narrow.cols);
+      expect(pos.row + item.h).toBeLessThanOrEqual(narrow.rows);
+    }
+    const cells = (id: string) => {
+      const item = fitted.items[id] as Extract<DesktopItem, { kind: "widget" }>;
+      const p = fitted.positions[id]!;
+      return Array.from({ length: item.w * item.h }, (_, i) => `${p.col + (i % item.w)}:${p.row + Math.floor(i / item.w)}`);
+    };
+    expect(cells("ask").filter((c) => cells("setup").includes(c))).toEqual([]);
+  });
+
+  it("keeps the saved spot of an item no spot on the grid can hold", () => {
+    const fitted = fitSurface(saved(), { cols: 14, rows: 2 });
+    expect(fitted.positions.setup).toEqual({ col: 14, row: 2 });
   });
 });

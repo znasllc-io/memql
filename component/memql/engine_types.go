@@ -591,6 +591,14 @@ const (
 	// share an active group with and those groups, or everyone from admin
 	// rank. See fleet_share_directory.go.
 	BuiltinExecutorFleetShareDirectory = "fleetShareDirectory"
+	// BuiltinExecutorLibraryShareDirectory answers who the caller may share a
+	// Library file with (file sharing, 2026-11-18): Fleet's directory narrowed
+	// to the caller's organization. See library_share_directory.go.
+	BuiltinExecutorLibraryShareDirectory = "libraryShareDirectory"
+	// BuiltinExecutorLibrarySharesOverseen answers which ACTIVE file shares
+	// the caller may see and stop -- their own, and, by rank, other people's
+	// (item 13 of the Nov 19 2026 call). See library_share_oversight.go.
+	BuiltinExecutorLibrarySharesOverseen = "librarySharesOverseen"
 	// BuiltinExecutorModuleReadiness folds every node's readiness rows into
 	// one verdict per module (design record 2026-09-06-configuration-readiness,
 	// section 4.5). See readiness_read.go.

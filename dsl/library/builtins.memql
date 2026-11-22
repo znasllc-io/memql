@@ -561,3 +561,67 @@ builtin libraryTrainingLessonsPage {
  search string
  cursor string
 }
+
+// ---- file sharing (2026-11-18) ----
+//
+// One file, one person or one group, for 1, 7, 10 or 30 days or until a picked
+// date up to 90 days away. Every rank may share (the part is seeded on all five
+// roles), and the people and groups a sharer may pick are their own
+// organization's -- or everyone and every group, for a holder of `read
+// principal`. The recipient views, downloads and saves a copy; nothing else.
+// Every access re-reads the share, under its sharer, fresh.
+// integrations/library/share.go.
+
+/// Who you may share a Library file with: people and groups.
+@sdk
+@executor("libraryShareDirectory")
+@requiresCapability("execute", "app:files/share")
+@description("Who you may share a Library file with: one row per person, {userId, displayName}, by display name only and never an email, then one row per group, {groupId, displayName, members} where members counts its active people. Everyone active on the cluster and every active group when you may already read every person (`read` on `principal`: owner, developer and admin by default); otherwise the active people of your own organization -- those with an active membership in an active group of kind account that you are also an active member of -- and those organization groups. Never you. With groupId, the people a share with that group would reach instead: its active members other than you, as person rows -- none when the group is not one you are offered.")
+builtin libraryShareDirectory {
+  groupId  string  @description("A group from this directory: answer the people a share with it would reach, rather than the whole directory.")
+}
+
+/// Share one of your Library files with one person or one group, for a length or until a date -- or renew a share.
+@sdk
+@executor("integration.library.shareFile")
+@requiresCapability("execute", "app:files/share")
+@description("Share one of YOUR Library files with one person -- or one group: everyone active in it but you -- on this cluster, for 1, 7, 10 or 30 days or until a date at most 90 days away. They see it under Shared with me, and may view it, download it and save a copy of their own; they cannot rename, move, delete or share it. A group share reaches the group's active members as of now; someone removed from the group loses access at once, and someone who joins later is reached when you share with the group again. Calling this again while that person's (or that group's) share of the file is active RENEWS it: the same share gets the new end -- there is never a second active share. After a stop or an expiry it makes a fresh share; the ended one stays as the record. Refused for a file that is not yours, an archived file, anything but a file, yourself, someone or a group libraryShareDirectory does not offer you (with one sentence for 'does not exist' and 'not yours to pick'), a group with nobody in it but you, both or neither of a person and a group, both or neither of days and until, any other number of days, and an end date that has passed or is more than 90 days away. Returns {shareId, expiresAt, days}.")
+builtin libraryShareFile {
+  artifactId        string!  @description("The v1:library:artifact (a file) to share. Must be yours.")
+  recipientUserId   string   @description("The person to share it with, as libraryShareDirectory names them. Give this or recipientGroupId.")
+  recipientGroupId  string   @description("The group to share it with, as libraryShareDirectory names it. Give this or recipientUserId.")
+  days              int      @description("How long the share lasts: 1, 7, 10 or 30. Give this or until.")
+  until             string   @description("When the share ends, as an RFC 3339 instant (the Files app sends the end of the picked day in the sharer's own time zone): after now, and at most 90 days away. Give this or days.")
+}
+
+/// Every active file share you may see and stop: your own, and other people's by rank.
+@sdk
+@executor("librarySharesOverseen")
+@description("Every ACTIVE file share you may see and stop, newest first: one row per share, {id, ownerUserId, ownerDisplayName, mine, recipientUserId, recipientGroupId, recipientDisplayName, artifactId, title, days, expiresAt, createdAt}. Always your own, plus the shares of everyone ranked strictly below you (an owner: everyone else's; a developer: admins', members' and viewers'; an admin: members' and viewers'; a member: viewers'; a viewer: none), never an equal's -- other owners' and other admins' stay private -- except that developers also see other developers'. Ranks are the cluster's role ladder, custom roles included. A borrowed, synthetic or client-account caller sees only their own. libraryShareStop stops exactly these.")
+builtin librarySharesOverseen { }
+
+/// Stop sharing a file with one person or group, at once.
+@sdk
+@executor("integration.library.stopShare")
+@description("Stop a share at once: the next view, download or copy by its recipient -- or by any member of the group it was shared with -- is refused, on every replica, and the file leaves their Shared with me list. The share stays as the record that it existed. Your own shares, and anybody else's that librarySharesOverseen lists for you (those of the people ranked below you, and a developer's fellow developers'); anything else is refused with one sentence whether or not it exists. Stopping a share that already ended answers as success. Returns {shareId, stopped}.")
+builtin libraryShareStop {
+  shareId  string!  @description("The share to stop -- the `id` librarySharesForArtifact lists.")
+}
+
+/// Save a copy of a file shared with you into your own Library.
+@sdk
+@executor("integration.library.saveSharedCopy")
+@description("Save a copy of a file someone shared with you into YOUR Library, while the share is active. The copy is yours: it keeps its own bytes and stays after the share ends, the sharer cannot see or change it, and it counts against your storage. Refused when the share has been stopped, has expired or its file was archived, and for anyone the file was not shared with. ONE SAVE AT A TIME: while your save of a file runs, the same save is refused and makes nothing, on every replica, so a burst of calls makes one copy; a save asked for after it finished makes a new copy. Returns {artifactId, fileId}.")
+builtin librarySaveSharedCopy {
+  artifactId  string!  @description("The shared file's artifact id, as librarySharedWithMe names it.")
+}
+
+/// End every share of a file its owner archived. The engine's endSharesOnArtifactArchive
+/// automation's act, and nobody else's: its handler refuses every other caller before it reads
+/// anything, so it is not @sdk.
+@executor("integration.library.endSharesForArtifact")
+@description("End every active share of an archived Library file, and its recipients' notices. Run by the engine's endSharesOnArtifactArchive automation and refused for every other caller. Access to an archived file is refused on every path anyway; this is what takes it off each recipient's list at once.")
+builtin libraryEndSharesForArtifact {
+  artifactId   string!  @description("The archived artifact.")
+  ownerUserId  string!  @description("Its owner, from the archived row; checked by reading the artifact under that owner.")
+}

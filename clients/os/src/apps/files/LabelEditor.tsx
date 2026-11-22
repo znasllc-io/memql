@@ -21,7 +21,9 @@ import { useArtifactLabels } from "./actions/labels";
 // which is what makes the revert exact: the value captured before the edit is
 // still the value to go back to when the answer lands.
 //
-// The short description precedes the input; saved labels follow it.
+// One short row, the field and Add, with the saved labels under it. The hint
+// line that preceded it ("Use labels to find related files.") was dropped on
+// the Details page's move to Fleet's layout (item 11, Jesús, Nov 20).
 
 /** Value-identity for a label list, so an effect can compare two arrays. */
 function labelKey(labels: readonly string[]): string {
@@ -82,8 +84,6 @@ export function LabelEditor({
 
   return (
     <div className="os-files-labeledit">
-      <p className="os-caption">Use labels to find related files.</p>
-
       <div className="os-form-row">
         <label className="os-sr-only" htmlFor={inputId}>
           Add a label
@@ -103,7 +103,7 @@ export function LabelEditor({
             void add();
           }}
         />
-        <Button onClick={() => void add()} disabled={write.busy || draft.trim() === ""}>
+        <Button onClick={add} disabled={write.busy || draft.trim() === ""}>
           Add
         </Button>
       </div>

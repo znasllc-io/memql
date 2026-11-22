@@ -2,6 +2,7 @@ import { rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import type { MachinePresence, ProvenanceTone } from "../../items/provenance";
 import { boolOr, flatten, stringsOf } from "../../kit/rows";
+import type { FileEntry } from "../../system/desktop";
 import { CONTENT_KINDS } from "./concepts";
 
 // The wire rows the Files app renders, projected into the shapes its surfaces
@@ -151,6 +152,18 @@ export function compositionFromRow(raw: Row): CompositionRow {
 export function artifactName(row: ArtifactRow): string {
   const title = row.title.trim();
   return title !== "" ? title : row.id;
+}
+
+/** The desk shortcut a row becomes ("Send to desktop", or dragged onto the desk). */
+export function deskEntryOf(row: ArtifactRow): Omit<FileEntry, "id"> {
+  return {
+    artifactId: row.id,
+    title: artifactName(row),
+    fileKind: row.kind,
+    source: row.source,
+    ...(row.producedByWorkerId ? { producedByWorkerId: row.producedByWorkerId } : {}),
+    ...(row.format ? { format: row.format } : {}),
+  };
 }
 
 /** The records lens stays out of this app (design D2). */

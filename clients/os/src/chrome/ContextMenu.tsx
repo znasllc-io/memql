@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { osScale } from "../system/scale";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 // One context menu for the whole shell: real menu semantics (role=menu,
@@ -76,7 +77,14 @@ export interface MenuEntry {
   id: string;
   label: string;
   disabled?: boolean;
-  onSelect: () => void;
+  /** A thin line above the entry, setting it apart from those before it. */
+  separated?: boolean;
+  /** "danger": drawn in the error colour, for an act that takes something
+   *  away (the share view's "Remove sharing", Jesús's Nov 20 pick). */
+  tone?: "danger";
+  /** May return the act's promise: an entry drawn as a kit button elsewhere
+   *  (Files' Head icons) then takes no second press until it settles. */
+  onSelect: () => unknown;
 }
 
 export function ContextMenu({
@@ -165,6 +173,9 @@ export function ContextMenu({
   // Unmeasured on the first pass, so it opens at the click and the layout
   // effect above corrects it before anything is painted.
   const placed = box === null ? { left: x, top: y } : placeContextMenu({ x, y, ...box });
+  // Placed in screen pixels (the pointer, the menu's measured box, the
+  // window); drawn in the zoomed page's CSS pixels (system/scale.ts).
+  const scale = osScale();
 
   return createPortal(
     <div
@@ -172,24 +183,27 @@ export function ContextMenu({
       role="menu"
       aria-label={label}
       className="os-menu os-context-menu"
-      style={{ left: placed.left, top: placed.top }}
+      style={{ left: placed.left / scale, top: placed.top / scale }}
       onKeyDown={onKeyDown}
       onContextMenu={(e) => e.preventDefault()}
     >
       {entries.map((entry) => (
-        <button
-          key={entry.id}
-          type="button"
-          role="menuitem"
-          className="os-menu-item"
-          disabled={entry.disabled}
-          onClick={() => {
-            onClose();
-            entry.onSelect();
-          }}
-        >
-          {entry.label}
-        </button>
+        <Fragment key={entry.id}>
+          {entry.separated ? <div role="separator" className="os-menu-separator" /> : null}
+          <button
+            type="button"
+            role="menuitem"
+            className="os-menu-item"
+            data-tone={entry.tone}
+            disabled={entry.disabled}
+            onClick={() => {
+              onClose();
+              entry.onSelect();
+            }}
+          >
+            {entry.label}
+          </button>
+        </Fragment>
       ))}
     </div>,
     document.body,

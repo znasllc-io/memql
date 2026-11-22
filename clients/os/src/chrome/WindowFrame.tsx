@@ -1,15 +1,12 @@
 import { LiveReadVisibility } from "../live/useGraphRevision";
-import { visiblePageContext, visiblePageLabel } from "../kit/pageContext";
 import { PageNavigationProvider } from "../kit/pageNavigation";
 import { TrailRow } from "../kit/TrailRow";
 import { PageContent } from "../kit/PageContent";
-import { WindowSearchContext, useWindowSearchHost } from "../kit/windowSearch";
 import { useDraggable } from "@dnd-kit/core";
 import { useEffect, useRef, useState } from "react";
-import { X, Search, ListFilter, Maximize, Maximize2, Minimize2, Minus, Settings2 } from "lucide-react";
+import { X, ListFilter, Maximize, Maximize2, Minimize2, Minus, Settings2 } from "lucide-react";
 
 import { useDrivingCue } from "../ask/useDrivingCue";
-import { useAsk } from "../ask/AskProvider";
 import { ProvenanceDot, Select } from "../kit";
 import { SurfaceRefused } from "../kit/RankStates";
 import {
@@ -19,7 +16,9 @@ import {
   SurfaceUnconfigured,
 } from "../kit/ReadinessStates";
 import { MODULE_DESCRIPTIONS } from "../system/modules";
+import { deskHasVacancy } from "../system/desks";
 import type { Rect } from "../system/placement";
+import { dragTranslate } from "../system/scale";
 import {
   allRequirementsFor,
   canOpen,
@@ -31,17 +30,23 @@ import {
 import type { OsWindow } from "../system/windows";
 import { useSession } from "./access";
 import { useAppSetupMark } from "./useAppSetupMark";
-import { Mark } from "./Mark";
 import { useOs } from "./state";
 import { WindowErrorBoundary } from "./WindowErrorBoundary";
 import { ContextMenu } from "./ContextMenu";
-import { useWindowAsk } from "./windowAsk";
+import { registerWindowAsk, useWindowAsk, type WindowAskContext } from "./windowAsk";
+import { visiblePageContext, visiblePageLabel } from "../kit/pageContext";
 
 // The window (spec A): glass frame on a token-carrying root, computed rect
 // (the desk animates BETWEEN rects; during a drag dnd-kit's transform
 // rides on top and transitions pause), title bar with the app identity,
-// section breadcrumb, Ask-in-context, settings gear, min / full / close.
-// Apps never open windows; they navigate sections inside this one.
+// settings gear and logs, min / full / close. Apps never open windows; they
+// navigate sections inside this one.
+//
+// NO ASK AND NO SEARCH IN THE TITLE BAR (José, Nov 19 2026; Jesús picked the
+// clean bar on Nov 20): Ask lives in the dock, one place for every app (it
+// carries the focused window's context, registered below), and
+// search lives inside the apps that need it -- each section's own `Refine`
+// draws its search button in the page, where the list it searches is.
 
 export function WindowFrame({
   win,
@@ -50,6 +55,9 @@ export function WindowFrame({
   focused,
   actorRole,
   hidden = false,
+  slide,
+  slideDx = 0,
+  split = false,
   deskId,
 }: {
   win: OsWindow;
@@ -58,46 +66,22 @@ export function WindowFrame({
   focused: boolean;
   actorRole: string;
   hidden?: boolean;
+  /** Riding a desk switch (Desktop's useDeskSlide): "in" arrives, "out" leaves and is inert. */
+  slide?: "in" | "out";
+  /** How far the desks travel in this switch, in pixels. */
+  slideDx?: number;
+  /** On one half of the borderless area: square corners, edge to edge. */
+  split?: boolean;
   deskId?: string;
 }) {
   const { actions, state, registry } = useOs();
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
-  const searchDialog = useRef<HTMLDialogElement>(null);
-  const [searchQuery, setSearchQuery] = useState("");
-  const { host: searchHost, openVisible: openContentSearch, revision: searchRevision } = useWindowSearchHost();
-  const [pendingSearch, setPendingSearch] = useState<{ sectionId: string; revision: number } | null>(null);
-  useEffect(() => {
-    if (pendingSearch === null) return;
-    if (hidden || win.sectionId !== pendingSearch.sectionId || (win.sectionNavigation?.revision ?? 0) !== pendingSearch.revision) { setPendingSearch(null); return; }
-    // The app may reveal a retained list in its layout effect after navigation.
-    const frame = requestAnimationFrame(() => {
-      if (!openContentSearch()) {
-        if (searchHost.loading > 0) return;
-        setSearchQuery(""); searchDialog.current?.showModal();
-      }
-      setPendingSearch(null);
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [pendingSearch, win.sectionId, win.sectionNavigation?.revision, searchRevision, hidden]);
-  const searchApp = () => {
-    if (openContentSearch()) return;
-    if (manifest.searchSection) {
-      actions.navigateSection(win.id, manifest.searchSection);
-      setPendingSearch({ sectionId: manifest.searchSection, revision: (win.sectionNavigation?.revision ?? 0) + 1 });
-    } else if (searchHost.loading > 0) {
-      // Every app can register a current-section search after its chunk loads,
-      // including apps without a default search destination in the manifest.
-      setPendingSearch({ sectionId: win.sectionId, revision: win.sectionNavigation?.revision ?? 0 });
-    } else { setSearchQuery(""); searchDialog.current?.showModal(); }
-  };
   const content = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!hidden) return;
     setMenu(null);
-    if (searchDialog.current?.open) searchDialog.current.close();
     content.current?.querySelectorAll<HTMLDialogElement>("dialog[open]").forEach(dialog => dialog.close());
   }, [hidden]);
-  const { canAsk, openAsk } = useAsk();
   const askActivity = useDrivingCue(manifest.id);
   const driving = askActivity ? askActivity.phase === "completed" ? "completed" : "running" : undefined;
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
@@ -141,21 +125,40 @@ export function WindowFrame({
   const Icon = manifest.icon;
   const Body = manifest.component;
   const contextTag = `app:${manifest.id}${current ? ` section:${current.id}` : ""}`;
-  // What the app noted rides on this window's Ask button; noting never opens.
+  // `askAbout` opens Ask about one chosen thing. What `askContext` notes, plus
+  // the visible page's declared data, rides on the dock's Ask while this
+  // window is focused (what the title bar's Ask carried before Nov 2026).
   const windowAsk = useWindowAsk(contextTag);
+  const readAsk = useRef<() => WindowAskContext>(null!);
+  readAsk.current = () => ({
+    context: visiblePageContext(content.current, windowAsk.contextTag()),
+    label: visiblePageLabel(content.current, `${manifest.name} / ${current?.name ?? ""}`),
+  });
+  useEffect(() => registerWindowAsk(win.id, () => readAsk.current()), [win.id]);
+  // What the size button does next (desks.ts cycleWindowMode): alone, window
+  // (centred or resting on a half) -> borderless -> full screen -> centred
+  // window on this desk; shared, full screen on a desk of its own, and back
+  // to its half while that desk has room.
+  const shared = (ownDesk?.windows.length ?? 0) > 1;
+  const returnDesk = win.expandedReturn && state.shell.desks.find(d => d.id === win.expandedReturn!.deskId);
   const sizeAction = win.mode === "fullscreen"
-    ? `Restore ${manifest.name} to previous desktop`
-    : win.mode === "maximized"
-      ? `Make ${manifest.name} full screen`
-      : `Maximize ${manifest.name} on its own desktop`;
+    ? returnDesk && deskHasVacancy(returnDesk, state.shell)
+      ? `Restore ${manifest.name} to previous desktop`
+      : `Restore ${manifest.name} to a window`
+    : shared
+      ? `Make ${manifest.name} full screen on its own desktop`
+      : win.mode === "maximized"
+        ? `Make ${manifest.name} full screen`
+        : `Make ${manifest.name} borderless`;
 
   const style: React.CSSProperties = {
     left: rect.x,
     top: rect.y,
     width: rect.w,
     height: rect.h,
-    transform: transform ? `translate(${transform.x}px, ${transform.y}px)` : undefined,
-  };
+    transform: dragTranslate(transform),
+    ...(slide ? { "--os-slide-dx": `${slideDx}px` } : null),
+  } as React.CSSProperties;
 
   return (
     <section
@@ -165,16 +168,27 @@ export function WindowFrame({
       data-ask-driving={driving}
       data-os-window-desk={deskId}
       hidden={hidden}
+      data-slide={slide}
+      inert={slide === "out" || undefined}
       data-focused={focused || undefined}
       data-maximized={win.mode === "maximized" || undefined}
       data-fullscreen={win.mode === "fullscreen" || undefined}
+      data-split={split || undefined}
       data-dragging={isDragging || undefined}
       style={style}
       role="dialog"
       aria-label={manifest.name}
       onPointerDown={() => actions.focusWindow(win.id)}
     >
-      <header className="os-window-bar">
+      <header
+        className="os-window-bar"
+        // Double-click the logo or the empty bar (Jesús, Nov 2026): never full
+        // screen (desks.ts toggleBorderless). Buttons and the app picker keep theirs.
+        onDoubleClick={event => {
+          const hit = (event.target as Element).closest("button, select, .os-window-app-selector");
+          if (!hit || hit.classList.contains("os-window-grip")) actions.toggleBorderless(win.id);
+        }}
+      >
         <button
           type="button"
           className="os-window-grip"
@@ -207,17 +221,6 @@ export function WindowFrame({
         <div className="os-window-drag-space" {...listeners} {...attributes} aria-label={`Drag ${manifest.name}`} />
         <div className="os-window-controls">
           <div className="os-window-control-group">
-          {canAsk && <button
-            type="button"
-            className="os-icon-button"
-            aria-label={`Ask about ${manifest.name}`}
-            title={`Ask about ${manifest.name}`}
-            onClick={() => openAsk(visiblePageContext(content.current, windowAsk.contextTag()), visiblePageLabel(content.current, `${manifest.name} / ${current?.name ?? ""}`))}
-          >
-            <Mark size={14} aria-hidden />
-          </button>}
-          <button type="button" className="os-icon-button" aria-label={`Search ${manifest.name}`} title={`Search ${manifest.name}`} onClick={searchApp}><Search size={14} aria-hidden /></button>
-          </div><div className="os-window-control-group">
           {manifest.settingsSection ? (
             <button
               type="button"
@@ -254,18 +257,12 @@ export function WindowFrame({
             title={sizeAction}
             onClick={() => actions.cycleWindowMode(win.id)}
           >
-            {win.mode === "fullscreen" ? <Minimize2 size={14} aria-hidden /> : win.mode === "maximized" ? <Maximize size={14} aria-hidden /> : <Maximize2 size={14} aria-hidden />}
+            {win.mode === "fullscreen" ? <Minimize2 size={14} aria-hidden /> : shared || win.mode === "maximized" ? <Maximize size={14} aria-hidden /> : <Maximize2 size={14} aria-hidden />}
           </button>
           <button type="button" className="os-icon-button os-window-close" aria-label={`Close ${manifest.name}`} title={`Close ${manifest.name}`} onClick={() => actions.closeWindow(win.id)}><X size={14} aria-hidden /></button>
           </div>
         </div>
       </header>
-      <dialog ref={searchDialog} className="os-window-search" aria-label={`Search ${manifest.name} destinations`}>
-        <header><strong>{manifest.name} destinations</strong><button type="button" className="os-icon-button" aria-label="Close destination search" onClick={() => searchDialog.current?.close()}><X size={14} aria-hidden /></button></header>
-        <input autoFocus className="os-input" aria-label="Find a destination" placeholder="Find a destination…" value={searchQuery} onChange={event => setSearchQuery(event.target.value)} />
-        <nav aria-label="Matching destinations">{sections.filter(section => section.name.toLowerCase().includes(searchQuery.toLowerCase())).map(section => <button type="button" className="os-window-nav-item" key={section.id} onClick={() => { searchDialog.current?.close(); actions.navigateSection(win.id, section.id, "content"); }}>{section.name}</button>)}</nav>
-        {!sections.some(section => section.name.toLowerCase().includes(searchQuery.toLowerCase())) ? <p>No destinations match.</p> : null}
-      </dialog>
       <div className="os-window-body">
         {/* THE ONE TRAIL ROW sits UNDER the section tabs, in the same place in
             every window (it is drawn after the nav below). The order is the
@@ -347,7 +344,7 @@ export function WindowFrame({
                focused-window guess does not. Keyed by window so one window's
                fault never carries into another's. */
             <WindowErrorBoundary key={win.id} app={manifest.id} section={current?.id ?? ""}>
-              <LiveReadVisibility.Provider value={!hidden}><WindowSearchContext.Provider value={searchHost}><Body
+              <LiveReadVisibility.Provider value={!hidden}><Body
                 sectionId={current?.id ?? ""}
                 reportSetupState={reportSetupState}
                 navigation={win.sectionNavigation}
@@ -357,7 +354,7 @@ export function WindowFrame({
                 askAbout={windowAsk.askAbout}
                 intent={win.intent}
                 consumeIntent={(intentId) => actions.consumeWindowIntent(win.id, intentId)}
-              /></WindowSearchContext.Provider></LiveReadVisibility.Provider>
+              /></LiveReadVisibility.Provider>
             </WindowErrorBoundary>
           )}
         </PageContent>
@@ -365,7 +362,7 @@ export function WindowFrame({
       </div>
       {menu ? <ContextMenu x={menu.x} y={menu.y} label={`${manifest.name} window actions`} onClose={() => setMenu(null)} entries={[
         ...(ownDesk && ownDesk.windows.length > 1 ? [{ id: "swap", label: "Swap sides", onSelect: () => actions.swapSides(ownDesk.id) }] : []),
-        ...state.shell.desks.filter(d => d.id !== ownDesk?.id).map((d) => ({ id: `move:${d.id}`, label: `Move to Desk ${state.shell.desks.indexOf(d) + 1}`, disabled: d.windows.length >= 2 || d.windows.some(id => !!state.shell.windows[id]?.expandedReturn), onSelect: () => { actions.throwToDesk(win.id, d.id); } })),
+        ...state.shell.desks.filter(d => d.id !== ownDesk?.id).map((d) => ({ id: `move:${d.id}`, label: `Move to Desk ${state.shell.desks.indexOf(d) + 1}`, disabled: !deskHasVacancy(d, state.shell), onSelect: () => { actions.throwToDesk(win.id, d.id); } })),
         { id: "new-desk", label: "Move to a new desktop", onSelect: () => { actions.throwToDesk(win.id, "new"); } },
         ...(logs ? [{ id: "logs", label: "Logs", onSelect: () => actions.navigateSection(win.id, logs.id) }] : []),
       ]} /> : null}

@@ -9,7 +9,7 @@ import { SharedCredentialsProvider } from "../modules/connections/useSourceCrede
 import { SharedSourceConnectionsProvider } from "../modules/connections/connections";
 import { IdentityOpenDispatcher } from "../apps/identity/IdentityOpenDispatcher";
 import { SharedPackagesProvider } from "../apps/deployables/packages/usePackages";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import type { ChromeLayout } from "../app/layout";
 import { useAskReadiness } from "../ask/useAskReadiness";
@@ -42,10 +42,11 @@ import type { ProfileAccess } from "../modules/profile/access";
 import { useResolvedAccess } from "../modules/profile/useResolvedAccess";
 import { useRoleLadder } from "../modules/profile/useRoleLadder";
 import { useEffectiveAccess } from "../modules/profile/useEffectiveAccess";
-import type { PlacementTokens } from "../system/placement";
+import { DEFAULT_PLACEMENT, type PlacementTokens } from "../system/placement";
 import { activeDesk } from "../system/desks";
 import { GraphDesktopStore } from "../system/graphStore";
 import { LocalDesktopStore, type DesktopStore } from "../system/store";
+import { desktopScale, setOsScale } from "../system/scale";
 import { SessionProvider, useSession } from "./access";
 import { CaptureContextInstaller } from "./CaptureContext";
 import { CoreGate } from "./CoreGate";
@@ -98,15 +99,26 @@ export function Shell({
     [authSource],
   );
 
-  const [viewport, setViewport] = useState(() => ({
-    w: window.innerWidth,
-    h: window.innerHeight - (isRoleTestTab() ? 64 : 0),
-  }));
+  const [screen, setScreen] = useState(() => ({ w: window.innerWidth, h: window.innerHeight }));
   useEffect(() => {
-    const onResize = () => setViewport({ w: window.innerWidth, h: window.innerHeight - (isRoleTestTab() ? 64 : 0) });
+    const onResize = () => setScreen({ w: window.innerWidth, h: window.innerHeight });
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
+  // THE WHOLE DESKTOP SCALES WITH THE SCREEN (system/scale.ts): the page is
+  // zoomed by `scale` and the desk lays out in screen / scale CSS pixels, so
+  // placement, the icon grid and the dock all grow together. The phone has no
+  // desk and is never 1440 wide; it stays at x1. The role-test banner is 64
+  // CSS pixels, zoomed like everything else.
+  const scale = layout === "phone" ? 1 : desktopScale(screen.w);
+  const viewport = useMemo(
+    () => ({ w: screen.w / scale, h: screen.h / scale - (isRoleTestTab() ? 64 : 0) }),
+    [screen, scale],
+  );
+  useLayoutEffect(() => {
+    setOsScale(scale);
+    return () => setOsScale(1);
+  }, [scale]);
 
   const grid = useMemo(() => gridForViewport(viewport.w, viewport.h), [viewport]);
 
@@ -400,8 +412,9 @@ function DesktopChrome({
   const [themesOpen, setThemesOpen] = useState(false);
 
   const [storageWarningHeight, setStorageWarningHeight] = useState(0);
+  // The storage warning sits just above the dock, so windows stop above it too.
   const placement = useMemo<PlacementTokens>(
-    () => ({ margin: 28, gutter: 16, dockReserve: 118 + storageWarningHeight, maxSoloWidth: 1280 }),
+    () => ({ ...DEFAULT_PLACEMENT, dockReserve: DEFAULT_PLACEMENT.dockReserve + storageWarningHeight }),
     [storageWarningHeight],
   );
 

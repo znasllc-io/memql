@@ -114,12 +114,24 @@ new verification of the original hosted email. No competing claim can replace a
 reserved owner. The setup table is private authentication state, never graph data
 or client-visible session authority.
 
-- **Desks** hold at most two auto-placed windows (solo centered, two-up
-  split, swap/throw by drag); a third app spills onto a new desk. Windows
-  minimize to the dock, full-screen, close; apps navigate sections inside
-  their one window.
-- **Desktop items**: files are Library artifact shortcuts with the
-  provenance dot (green = reachable, amber = not). Every icon behaves like
+- **Desks** hold at most two auto-placed windows (solo centered, borderless
+  or resting on one half, two-up split of the borderless area,
+  swap/throw/snap by drag);
+  a third app spills onto a new desk. Windows minimize to the dock,
+  full-screen, close; apps navigate sections inside their one window. The
+  rules are in DESIGN.md, "Windows on a desk".
+- **Desktop items**: files are Library artifact shortcuts, with no dot,
+  drawn with the Library tile's glyphs at the one size both surfaces share
+  (the "ONE SIZE" block in `styles/index.css`). A file that cannot open yet
+  (still uploading, or made on a computer that is offline) is drawn dim and
+  still selects, moves and files (dropped on a folder while uploading, it
+  goes in once the upload lands). Opening it does nothing and is not
+  remembered, so nothing ever pops open later: an open that ran after the
+  click would be refused by Safari's pop-up blocker. One line under the name
+  says the rest: "Upload failed -- retry", "Computer offline", or "Ready" for
+  about three seconds after an upload lands, when it can be opened
+  (`items/deskFileState.ts`).
+  Every icon behaves like
   a desktop icon (epic memql#4842): single click SELECTS, double-click or
   Enter OPENS -- a file hands off to VS Code, a folder opens the Files app
   scoped to it under the Desktop place. A desk folder is a SHORTCUT to a
@@ -128,8 +140,12 @@ or client-visible session authority.
   and never archives. The under-icon folder popover the foundation shipped
   is gone -- the Files window is the one folder surface. Widgets are
   desk-resident cards; Ask ships first.
-- **Ask** is chrome, not a module: the dock orb, the desk widget and every
-  title bar open the same streaming surface. It takes dictation (#4747):
+- **Ask** is chrome, not a module: the dock orb and the desk widget open the
+  same streaming surface. A window's title bar carries neither Ask nor a
+  search button (José, Nov 19 2026): search lives in each app's page, on its
+  `Refine` control. The dock's Ask opens with the focused window's context
+  (what its app noted through `askContext`, e.g. a selected Bin item, plus the
+  visible page's declared data); the phone's orb does the same for the open app. It takes dictation (#4747):
   hold the mic to talk, tap it to keep listening. Each turn uses the same durable
   work engine as Nexus. Its goals remain visible in Nexus; message menus offer
   copying and activity inspection. Explicit Stop cancels the durable goal; closing a viewer
@@ -1385,7 +1401,7 @@ affordance is present, inert, and says where the feature went.
 ## Files, the fifth app (memql#4721)
 
 `src/apps/files/` uses the shared local tabs: **Library, Desktop, Materializer,
-Bin**. Library includes every live file, including files filed in folders or
+Shared with me, Bin**. Library includes every live file, including files filed in folders or
 shown by the other tabs. Folders open in the same workspace; Back and breadcrumbs
 preserve the current location. A file opens a full-page detail view with labels,
 clients, compact actions and a plain version list. Neither list uses provenance
@@ -1396,7 +1412,9 @@ a matching Materializer composition and recorded generation sources take
 precedence over machine upload attribution. Version entries without recorded
 upload attribution say "Saved in MemQL" rather than inferring a browser upload.
 Labels follow their description and input in details; file list rows do not show
-label chips. Label filters still work. Open remains a text action; desktop,
+label chips. The browse filters by label, source and client from the search
+panel's kind menu, as groups under the kinds of file (Jesús, Nov 20 2026; closing
+the panel clears them). Open remains a text action; desktop,
 download and Delete use named icons. Delete moves the file to the Bin, where it
 can be restored until purged.
 
@@ -1407,9 +1425,11 @@ fallback uses the same response metadata. An HTML app fallback is never saved
 as the requested file. Ask's saved-file links and artifact actions use this same
 authenticated download path without navigating away or opening an empty tab.
 
-**Add to this folder** offers Upload files, New Markdown file, and New folder.
-New Markdown file opens Make a file on Name with Markdown, the current folder,
-and a way back to Files. Searching, Bin, Materializer and the Library root name
+**Add to this folder** offers Upload files, New folder and New file, with no
+heading. New file is not an action: hovering it (or Right arrow / Enter) opens a
+side menu of the kinds of file it can make, the kit's `Submenu`; today that is
+Markdown file. Markdown file opens Make a file on Name with Markdown, the
+current folder, and a way back to Files. Searching, Bin, Materializer and the Library root name
 no destination folder. The Markdown item is absent when Materializer cannot be
 opened.
 
@@ -1424,6 +1444,16 @@ Backups use a plus action, a full-page form, a schedule, and a hidden-file switc
   choices use `libraryBrowseFacets`, which folds every authorized source page
   without sending the artifact population to the browser. Backing file metadata
   is read for the selected inspector, not for every list row.
+
+- **THE SEARCH PANEL'S OWN QUESTIONS READ THE WHOLE PLACE** (Nov 2026). The
+  Head's search button opens a hidden panel (DESIGN.md, after rule 3). Its
+  search is the server's `search`; its kind of file (one extension and MIME
+  table, `filters.ts` `fileKindOf`), Added window and Name, Size and Kind
+  orders are not server filters, so while one is set `useLibrary.ts` reads
+  every page of the place before the list answers, and a ten-row page is
+  never sorted or called empty on its own. Size reads the owner's file rows
+  (`libraryFilesForOwner`) only while it is chosen. Tests:
+  `test/files/places.test.tsx`, `test/files/filters.test.ts`.
 
 - **RECURSIVE ACTIONS REQUIRE COMPLETE MEMBERSHIP.** Folder archive previews
   read every page of the selected subtree, including archived files. Execution
@@ -1461,6 +1491,22 @@ Backups use a plus action, a full-page form, a schedule, and a hidden-file switc
   repo-walking gate while its tests stayed green. `uploadResume.ts`'s own
   key separator was the second one to be found this way and is now written
   the same, as the escape for U+0000.
+
+- **SHARING A FILE IS ASKED AT THE FOOT OF THE RAIL** (Nov 2026). One click
+  on a file you own and still have, outside the Bin, shows "Share with" and the
+  engine's share directory (`libraryShareDirectory`, read once); choosing a
+  person asks for 1, 7, 10 or 30 days, or shows Renew and Stop sharing for
+  someone who already has it. The panel is absent for an archived file,
+  somebody else's file, a file shared with you, and without
+  `execute app:files/share` (rule 12). A file's active shares are a live
+  collection on `v1:library:share`, owned by the sharer, so a share, a renewal
+  and a stop arrive as events; Renew is `libraryShareFile` again with the days
+  the share was given. **Shared with me** lists the caller's
+  `v1:library:shareNotice` rows (owned by the recipient, so a new share appears
+  while they look) and never reads their own Library. A shared file offers
+  exactly Download (the same content route and download path) and Save to my
+  Library (`librarySaveSharedCopy`); it cannot be dragged to the Bin. Reads:
+  `src/apps/files/useSharing.ts`; tests: `test/files/sharing.test.tsx`.
 
 - **FILE ACTIONS STAY IN THE FOOTER.** File details and version history scroll
   above the shared `ActionBar`. The current state sits left; Delete (or Restore
@@ -2047,8 +2093,8 @@ archived and Offer every record type. File creation does not set goal budgets;
 the engine enforces the goal's accepted ceilings.
 
 A composition has one record and its output has one file. Materialized answers
-what was made and how; Files answers where the file is. Files' New Markdown file
-sends its current folder and return address. Open in Materializer opens the
+what was made and how; Files answers where the file is. Files' New file > Markdown
+file sends its current folder and return address. Open in Materializer opens the
 composition's page through `MATERIALIZER_MADE_SECTION`. A failed composition
 without an output has no Files placeholder. This app never edits a file tree;
 Files never edits a composition.

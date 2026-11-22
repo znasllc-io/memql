@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { act } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -26,15 +26,15 @@ beforeEach(() => {
 });
 
 async function rightClickRow(name: RegExp) {
-  const row = (await screen.findByRole("button", { name })).closest(".os-files-line");
-  if (row === null) throw new Error("the file row is not inside a drag/menu wrapper");
+  const row = (await screen.findByRole("button", { name })).closest(".os-files-tile-wrap");
+  if (row === null) throw new Error("the file tile is not inside its drag/menu wrapper");
   await act(async () => {
     fireEvent.contextMenu(row);
   });
 }
 
 describe("archiving from a file row", () => {
-  it("offers Move to Bin, asks first, and runs archiveArtifact", async () => {
+  it("offers Delete, asks first, and runs archiveArtifact", async () => {
     const connection = fakeConnection({
       artifacts: [artifactRow({ id: "a-1", title: "cut-03.mov" })],
     });
@@ -44,13 +44,13 @@ describe("archiving from a file row", () => {
     await rightClickRow(/cut-03\.mov/);
     // The action is named for what it DOES. Nothing here deletes, so nothing
     // here is called Delete.
-    await click(screen.getByRole("menuitem", { name: "Move to Bin" }));
+    await click(screen.getByRole("menuitem", { name: "Delete" }));
     expect(connection.callsNamed("archiveArtifact")).toHaveLength(0);
 
-    expect(screen.getByText('Move "cut-03.mov" to the Bin?')).toBeTruthy();
+    expect(screen.getByText('Delete "cut-03.mov"?')).toBeTruthy();
     // The action KEEPS ITS NAME through the flow.
     await readTheBar();
-    await click(screen.getByRole("button", { name: "Move to Bin" }));
+    await click(within(document.querySelector(".os-files-confirm") as HTMLElement).getByRole("button", { name: "Delete" }));
     expect(connection.callsNamed("archiveArtifact")).toHaveLength(1);
     expect(connection.callsNamed("archiveArtifact")[0]).toContain('artifactId: "a-1"');
   });
@@ -63,7 +63,7 @@ describe("archiving from a file row", () => {
     await renderFiles({ settings: { confirmBeforeArchive: false } });
 
     await rightClickRow(/cut-03\.mov/);
-    await click(screen.getByRole("menuitem", { name: "Move to Bin" }));
+    await click(screen.getByRole("menuitem", { name: "Delete" }));
     expect(connection.callsNamed("archiveArtifact")).toHaveLength(1);
   });
 
@@ -76,9 +76,9 @@ describe("archiving from a file row", () => {
     await renderFiles({ settings: { confirmBeforeArchive: false } });
 
     await rightClickRow(/cut-03\.mov/);
-    await click(screen.getByRole("menuitem", { name: "Move to Bin" }));
+    await click(screen.getByRole("menuitem", { name: "Delete" }));
 
-    expect(screen.getByText("The archive was refused.")).toBeTruthy();
+    expect(screen.getByText("The file was not deleted.")).toBeTruthy();
     // The server's own sentence, verbatim.
     expect(screen.getByText(/that row is not yours/)).toBeTruthy();
     expect(screen.getByRole("button", { name: /cut-03\.mov/ })).toBeTruthy();
@@ -107,7 +107,7 @@ describe("archiving from a file row", () => {
 });
 
 // The question opens where the menu item that asked it was (memql#6033), outside
-// any bar: the second click of a double-click on "Move to Bin" used to answer it.
+// any bar: the second click of a double-click on "Delete" used to answer it.
 describe("archiving from a file row, one double-click later", () => {
   useFakeDate();
 
@@ -118,20 +118,20 @@ describe("archiving from a file row, one double-click later", () => {
     h.connection = connection;
     await renderFiles({ settings: { confirmBeforeArchive: true } });
     await rightClickRow(/cut-03\.mov/);
-    await click(screen.getByRole("menuitem", { name: "Move to Bin" }));
-    expect(screen.getByText('Move "cut-03.mov" to the Bin?')).toBeTruthy();
+    await click(screen.getByRole("menuitem", { name: "Delete" }));
+    expect(screen.getByText('Delete "cut-03.mov"?')).toBeTruthy();
     return connection;
   }
 
   it("does not move the file on the second click of the click that asked, and does once it is read", async () => {
     const connection = await ask();
     betweenTheClicks();
-    await click(screen.getByRole("button", { name: "Move to Bin" }));
+    await click(within(document.querySelector(".os-files-confirm") as HTMLElement).getByRole("button", { name: "Delete" }));
     expect(connection.callsNamed("archiveArtifact")).toHaveLength(0);
-    expect(screen.getByText('Move "cut-03.mov" to the Bin?')).toBeTruthy();
+    expect(screen.getByText('Delete "cut-03.mov"?')).toBeTruthy();
 
     await readTheBar();
-    await click(screen.getByRole("button", { name: "Move to Bin" }));
+    await click(within(document.querySelector(".os-files-confirm") as HTMLElement).getByRole("button", { name: "Delete" }));
     expect(connection.callsNamed("archiveArtifact")).toHaveLength(1);
   });
 
@@ -139,10 +139,10 @@ describe("archiving from a file row, one double-click later", () => {
     const connection = await ask();
     betweenTheClicks();
     await click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.getByText('Move "cut-03.mov" to the Bin?')).toBeTruthy();
+    expect(screen.getByText('Delete "cut-03.mov"?')).toBeTruthy();
     await readTheBar();
     await click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByText('Move "cut-03.mov" to the Bin?')).toBeNull();
+    expect(screen.queryByText('Delete "cut-03.mov"?')).toBeNull();
     expect(connection.callsNamed("archiveArtifact")).toHaveLength(0);
   });
 
@@ -155,19 +155,19 @@ describe("archiving from a file row, one double-click later", () => {
     h.connection = connection;
     await renderFiles({ settings: { confirmBeforeArchive: true } });
     await rightClickRow(/cut-03\.mov/);
-    await click(screen.getByRole("menuitem", { name: "Move to Bin" }));
-    expect(screen.getByText('Move "cut-03.mov" to the Bin?')).toBeTruthy();
+    await click(screen.getByRole("menuitem", { name: "Delete" }));
+    expect(screen.getByText('Delete "cut-03.mov"?')).toBeTruthy();
     await readTheBar();
 
     await rightClickRow(/cut-04\.mov/);
-    await click(screen.getByRole("menuitem", { name: "Move to Bin" }));
-    expect(screen.getByText('Move "cut-04.mov" to the Bin?')).toBeTruthy();
+    await click(screen.getByRole("menuitem", { name: "Delete" }));
+    expect(screen.getByText('Delete "cut-04.mov"?')).toBeTruthy();
     betweenTheClicks();
-    await click(screen.getByRole("button", { name: "Move to Bin" }));
+    await click(within(document.querySelector(".os-files-confirm") as HTMLElement).getByRole("button", { name: "Delete" }));
     expect(connection.callsNamed("archiveArtifact")).toHaveLength(0);
 
     await readTheBar();
-    await click(screen.getByRole("button", { name: "Move to Bin" }));
+    await click(within(document.querySelector(".os-files-confirm") as HTMLElement).getByRole("button", { name: "Delete" }));
     expect(connection.callsNamed("archiveArtifact")).toHaveLength(1);
     expect(connection.callsNamed("archiveArtifact")[0]).toContain('artifactId: "a-2"');
   });

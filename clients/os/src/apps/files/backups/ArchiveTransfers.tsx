@@ -14,7 +14,7 @@ import { LoadMore } from "../../../kit/LoadMore";
 import { flatten } from "../../../kit/rows";
 import { useDebouncedValue } from "../../../logs/useDebouncedValue";
 
-const actionLabel: Record<TransferAction, string> = { pause: "Pause", resume: "Resume", cancel: "Cancel transfer", trash: "Move to Bin", restore: "Restore", purge: "Purge" };
+const actionLabel: Record<TransferAction, string> = { pause: "Pause", resume: "Resume", cancel: "Cancel transfer", trash: "Delete", restore: "Restore", purge: "Purge" };
 export function ArchiveTransfers({ machines, refresh, onDownload }: { machines: readonly MachineRow[]; refresh: number; onDownload: (source: BackupTransfer) => void }) {
   const connection = useOsConnection();
   const visible = useContext(LiveReadVisibility);
@@ -65,7 +65,7 @@ export function ArchiveTransfers({ machines, refresh, onDownload }: { machines: 
       {job.failure && <Notice tone="warn" sentence="Progress is kept." detail={job.failure} />}
       {confirm.startsWith(`${job.id}:`) && <InPlaceAsk>
         <Caption>{confirm.endsWith(":purge") ? "Permanently remove this archive? It cannot be recovered afterwards." : job.kind === "sync_file" ? "Pause this folder sync and cancel this unfinished file? Resume the folder when you are ready to try again." : "Cancel this transfer and remove its unfinished copy?"}</Caption>
-        <Button onClick={() => setConfirm("")}>Keep it</Button><Button tone="danger" busy={busy === job.id} onClick={() => void act(job, confirm.endsWith(":purge") ? "purge" : "cancel")}>{confirm.endsWith(":purge") ? "Permanently purge" : "Cancel transfer"}</Button>
+        <Button onClick={() => setConfirm("")}>Keep it</Button><Button tone="danger" busy={busy === job.id} onClick={() => act(job, confirm.endsWith(":purge") ? "purge" : "cancel")}>{confirm.endsWith(":purge") ? "Permanently purge" : "Cancel transfer"}</Button>
       </InPlaceAsk>}
     </article>)}
     </RecordList>
@@ -93,5 +93,5 @@ export function DownloadSetup({ source, machines, onCancel, onStarted }: { sourc
       <Field label="Full destination file path"><Input id={`${ids}-path`} label="Full destination file path" value={path} onChange={setPath} placeholder={`/Users/you/Downloads/${source.name}`} /></Field>
       <Caption>The destination folder must already exist and allow downloads on that machine. Existing files are never overwritten. Interrupted downloads resume from verified progress.</Caption>
     </> }]} status={{ word: busy ? "Starting download" : "Choose where to save", tone: busy ? "busy" : undefined }}
-    acts={busy ? [] : [{ label: "Cancel", onAct: onCancel }, ...(valid ? [{ label: "Download", onAct: () => void start(), tone: "primary" as const }] : [])]} notices={error ? <Notice tone="error" sentence="The download could not start." detail={error} /> : undefined} />;
+    acts={busy ? [] : [{ label: "Cancel", onAct: onCancel }, ...(valid ? [{ label: "Download", onAct: () => start(), tone: "primary" as const }] : [])]} notices={error ? <Notice tone="error" sentence="The download could not start." detail={error} /> : undefined} />;
 }

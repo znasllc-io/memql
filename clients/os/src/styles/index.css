@@ -218,7 +218,8 @@ button:not(:disabled):active {
   position: absolute;
   inset: 0;
   display: flex;
-  transition: transform var(--os-duration-med) var(--os-ease);
+  /* One --os-duration-med per desk crossed (Desktop's useDeskSlide): a constant speed. */
+  transition: transform calc(var(--os-duration-med) * var(--os-slide-travel, 1)) var(--os-ease);
 }
 
 .os-plate {
@@ -231,10 +232,10 @@ button:not(:disabled):active {
 
 .os-desk-numeral {
   position: absolute;
-  right: 3vw;
-  bottom: calc(var(--os-dock-h) + 4vh);
+  right: calc(3vw / var(--os-scale, 1));
+  bottom: calc(var(--os-dock-h) + calc(4vh / var(--os-scale, 1)));
   font-family: var(--os-font-display);
-  font-size: clamp(200px, 36vh, 440px);
+  font-size: clamp(200px, calc(36vh / var(--os-scale, 1)), 440px);
   line-height: 0.78;
   color: var(--os-desk-numeral);
   pointer-events: none;
@@ -283,28 +284,11 @@ button:not(:disabled):active {
   background: var(--os-accent-soft);
 }
 
-.os-file-glyph {
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: 52px;
-  height: 52px;
-  border-radius: var(--os-radius-sm);
-  background: var(--os-plate);
-  border: 1px solid var(--os-line);
-  box-shadow: var(--os-shadow-item);
-  color: var(--os-muted);
-}
-.os-file-glyph[data-uploading] {
-  opacity: 0.55;
-}
-.os-file-glyph .os-dot {
-  position: absolute;
-  right: -3px;
-  bottom: -3px;
-  border: 2px solid var(--os-ground);
-  width: 11px;
-  height: 11px;
+/* No dot on a desk file (Nov 19 item 10): a file that cannot open yet --
+ * uploading, or its computer offline -- is a dimmer grey, glyph and name. */
+.os-file[data-dim] .os-file-button {
+  opacity: 0.45;
+  filter: grayscale(1);
 }
 
 .os-file-title {
@@ -326,6 +310,23 @@ button:not(:disabled):active {
   cursor: pointer;
 }
 
+/* The one line where the retry line goes: "Ready" in the accent green,
+ * "Computer offline" quiet. One line, centred on the icon even when a little
+ * wider than it. */
+.os-file-line {
+  display: flex;
+  justify-content: center;
+  white-space: nowrap;
+  font-size: var(--os-text-xs);
+  color: var(--os-ink);
+}
+.os-file-line[data-line="ready"] {
+  color: var(--os-accent);
+}
+.os-file-line[data-line="offline"] {
+  color: var(--os-muted);
+}
+
 .os-file-noanswer {
   position: absolute;
   top: 100%;
@@ -342,9 +343,9 @@ button:not(:disabled):active {
   z-index: 30;
 }
 
-.os-folder[data-drop-target] .os-file-glyph {
-  border-color: var(--os-accent);
-  background: var(--os-accent-soft);
+.os-folder[data-drop-target] .os-files-glyph {
+  stroke: var(--os-accent);
+  fill: var(--os-accent-soft);
 }
 
 .os-folder-rename {
@@ -373,6 +374,13 @@ button:not(:disabled):active {
     width var(--os-duration-med) var(--os-ease),
     height var(--os-duration-med) var(--os-ease);
 }
+/* Windows ride a desk switch with the plates (Desktop's useDeskSlide): the
+   same distance, duration and easing, as a keyframe so nothing is
+   transformed at rest. Reduced motion makes the duration 0ms. */
+.os-window[data-slide="in"] { animation: os-window-slide-in calc(var(--os-duration-med) * var(--os-slide-travel, 1)) var(--os-ease); }
+.os-window[data-slide="out"] { animation: os-window-slide-out calc(var(--os-duration-med) * var(--os-slide-travel, 1)) var(--os-ease) forwards; }
+@keyframes os-window-slide-in { from { transform: translateX(var(--os-slide-dx, 0px)); } }
+@keyframes os-window-slide-out { to { transform: translateX(calc(-1 * var(--os-slide-dx, 0px))); } }
 .os-window[data-focused] {
   z-index: 20;
   box-shadow: var(--os-shadow-window);
@@ -385,6 +393,54 @@ button:not(:disabled):active {
 .os-window[data-dragging] {
   transition: none;
   z-index: 50;
+}
+/* Two windows split the borderless area edge to edge, and a lone window
+ * resting on a half sits the same way (Jesús, Nov 2026). */
+.os-window[data-split] {
+  border-radius: 0;
+}
+
+/* Window snapping: the edge a dragged window would take, and the picker on
+ * the other half. Under the dragged window, over every other; no motion but
+ * the picker's fade when it is dismissed. */
+.os-snap-zone {
+  position: absolute;
+  z-index: 40;
+  background: var(--os-accent-soft);
+  border: 2px solid var(--os-accent);
+  pointer-events: none;
+}
+.os-snap-picker {
+  position: absolute;
+  z-index: 40;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.45);
+}
+/* Dismissed: a short fade, then gone; the desk under it takes clicks at once.
+   Reduced motion sets the duration to 0ms (tokens.css). */
+.os-snap-picker[data-leaving] {
+  pointer-events: none;
+  animation: os-entry-leave var(--os-duration-fast) ease-in forwards;
+}
+.os-snap-pick {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  background: var(--os-glass-solid);
+  color: var(--os-ink);
+  cursor: pointer;
+}
+.os-snap-pick:hover,
+.os-snap-pick:focus-visible {
+  border-color: var(--os-accent);
 }
 
 .os-window-bar {
@@ -454,6 +510,30 @@ button:not(:disabled):active {
   background: var(--os-hover);
   color: var(--os-ink);
 }
+/* An icon whose act is running dims and takes no press (kit/oneAtATime). It
+ * keeps its focus, so it is not `disabled`. The dim is the whole signal: no
+ * `cursor: progress`, which the Mac draws as a spinning wheel by the pointer
+ * (Jesús, Nov 20 2026: "It doesn't really need to have a roller. If it grays
+ * out, I think that's enough"). */
+.os-icon-button[data-busy] {
+  opacity: 0.4;
+}
+/* An icon's name at once, above it (kit IconButton tip="above"). Fixed and
+ * drawn on the body, so no window or scroller clips it; the page's ink
+ * turned over, a small light label on a dark window and the reverse. */
+.os-tip {
+  position: fixed;
+  z-index: 96;
+  transform: translate(-50%, calc(-100% - 6px));
+  padding: 4px 8px;
+  border-radius: var(--os-radius-xs);
+  background: var(--os-ink);
+  color: var(--os-ground);
+  font: 500 var(--os-text-sm) / 1.2 var(--os-font);
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: var(--os-shadow-item);
+}
 /* Creation uses the same borderless, theme-aware treatment as other icons. */
 .os-icon-button.os-add-button,
 .os-button.os-add-button {
@@ -466,6 +546,10 @@ button:not(:disabled):active {
   opacity: 0.4;
   cursor: default;
 }
+/* The one outlined Add (Files' Head, DESIGN.md rule 1): the accent's outline
+ * and plus, and its soft wash on hover and while its menu is open. */
+.os-icon-button.os-add-button-outlined { color: var(--os-accent); box-shadow: inset 0 0 0 1px var(--os-accent); }
+.os-icon-button.os-add-button-outlined:is(:hover, :focus-visible, [aria-expanded="true"]):not(:disabled) { color: var(--os-accent); background: var(--os-accent-soft); }
 .os-window-close:hover {
   background: var(--os-error);
   color: var(--os-glass-solid);
@@ -524,32 +608,45 @@ button:not(:disabled):active {
   transform: translateX(-50%);
   display: flex;
   align-items: center;
-  gap: 10px;
   z-index: 30;
 }
 
+/* Each dot is a 22 x 28 target, so the mouse can find it; the 8px dot is drawn
+   inside and grows as the pointer comes near (--os-near, 0..1, set by
+   DeskPager). 22px leaves about 8.5px between two dots grown by a mouse
+   halfway between them, twice what 18px left (Jesús, Nov 2026). */
 .os-pager-dot {
-  width: 8px;
-  height: 8px;
+  --os-near: 0;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 28px;
   padding: 0;
   border: 0;
+  background: none;
+  cursor: pointer;
+}
+.os-pager-dot::before {
+  content: "";
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: var(--os-muted);
-  opacity: 0.45;
-  cursor: pointer;
+  opacity: calc(0.45 + 0.4 * var(--os-near));
+  transform: scale(calc(1 + 0.9 * var(--os-near)));
   transition:
-    transform var(--os-duration-fast) var(--os-ease),
+    transform 90ms linear,
     opacity var(--os-duration-fast) var(--os-ease);
 }
-.os-pager-dot[data-active] {
+.os-pager-dot[data-active]::before {
   background: var(--os-accent);
   opacity: 1;
 }
-.os-pager-dot[data-over] {
-  transform: scale(1.6);
+.os-pager-dot[data-over]::before {
+  transform: scale(1.9);
   opacity: 1;
 }
-.os-pager-dot[data-refuses] {
+.os-pager-dot[data-refuses]::before {
   opacity: 0.18;
 }
 
@@ -574,11 +671,15 @@ button:not(:disabled):active {
 .os-pager-add {
   border: 0;
 }
+.os-pager-add,
+.os-pager-new { margin-inline-start: 5px; }
 .os-pager-add:hover,
 .os-pager-add:focus-visible {
   background: var(--os-hover);
   color: var(--os-ink);
 }
+.os-pager-add[aria-disabled="true"] { opacity: 0.35; cursor: default; }
+.os-pager-add[aria-disabled="true"]:hover { background: none; color: var(--os-muted); }
 
 /* ---- dock ---- */
 .os-dock[hidden] { display: none; }
@@ -595,7 +696,7 @@ button:not(:disabled):active {
   border-radius: calc(var(--os-radius) + 4px);
   box-shadow: var(--os-shadow-float);
   z-index: 40;
-  max-width: calc(100vw - 24px);
+  max-width: calc(calc(100vw / var(--os-scale, 1)) - 24px);
 }
 
 .os-dock-strip {
@@ -659,6 +760,17 @@ button:not(:disabled):active {
   gap: 12px;
   padding-left: 2px;
 }
+/* The desk dots' place in the dock (Desktop.tsx draws them here), a thin line each side. */
+.os-dock-desks {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 12px;
+  border-left: 1px solid var(--os-line);
+  border-right: 1px solid var(--os-line);
+}
+.os-dock-desks:empty { display: none; }
+.os-dock-desks .os-pager { position: static; transform: none; }
 
 .os-clock {
   font-family: var(--os-font-mono);
@@ -817,6 +929,16 @@ button:not(:disabled):active {
   color: var(--os-muted);
   cursor: default;
 }
+/* An act that takes something away ("Remove sharing"), set off by a hairline
+   (ContextMenu's `separated` and `tone`). */
+.os-menu-item[data-tone="danger"]:not(:disabled) {
+  color: var(--os-error);
+}
+.os-menu-separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--os-line);
+}
 
 .os-menu-modes {
   display: flex;
@@ -850,8 +972,8 @@ button:not(:disabled):active {
 }
 
 .os-launcher-panel {
-  width: min(720px, 92vw);
-  max-height: min(560px, 86vh);
+  width: min(720px, calc(92vw / var(--os-scale, 1)));
+  max-height: min(560px, calc(86vh / var(--os-scale, 1)));
   padding: 22px 24px;
   border-radius: var(--os-radius);
   box-shadow: var(--os-shadow-window);
@@ -961,8 +1083,8 @@ button:not(:disabled):active {
 .os-ask-backdrop { pointer-events: none; }
 .os-ask-sheet {
   position: absolute; pointer-events: auto; left: 50%; bottom: calc(var(--os-dock-h) + 22px);
-  transform: translateX(-50%); width: min(880px, 94vw);
-  height: min(720px, calc(100dvh - var(--os-dock-h) - 84px));
+  transform: translateX(-50%); width: min(880px, calc(94vw / var(--os-scale, 1)));
+  height: min(720px, calc(calc(100dvh / var(--os-scale, 1)) - var(--os-dock-h) - 84px));
   border-radius: var(--os-radius); box-shadow: var(--os-shadow-window); padding: 0; overflow: hidden;
 }
 .os-ask-sheet[data-maximized] { left: 0; top: 0; bottom: var(--ask-dock-reserve); transform: none; width: 100%; height: auto; border-radius: 0; }
@@ -2141,6 +2263,30 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   gap: 8px;
   flex-wrap: wrap;
 }
+/* Files: one Head row, three areas (José, Nov 19 2026; Jesús picked Draft A):
+ * the picked file's acts beside the title behind a hairline, one search
+ * button on the right, and Add apart at the far right. */
+.os-files-main > .os-head > .os-head-actions { display: contents; }
+.os-files-picked-acts { display: inline-flex; align-items: center; gap: 8px; padding-left: 10px; border-left: 1px solid var(--os-line); }
+.os-files-search-toggle { margin-left: auto; }
+.os-files-search-toggle[aria-expanded="true"] { color: var(--os-ink); box-shadow: inset 0 0 0 1px var(--os-rail-hover); }
+.os-files-add { margin-left: 8px; }
+/* The hidden search panel opens under the Head and pushes the tiles down. */
+.os-files-search { display: grid; grid-template-rows: 1fr; border-block: 1px solid var(--os-line); animation: os-files-search-open var(--os-duration-fast) var(--os-ease); }
+.os-files-search-lines { min-height: 0; overflow: hidden; display: grid; gap: 8px; padding: 10px 2px; }
+.os-files-search .os-card-search-mode { flex-basis: 128px; }
+/* The kind menu's list (Jesús, Nov 20 2026, draft p17 Option C): Kind, Label,
+ * Source and Client headings in small capitals as drawn, and a width cap so a
+ * long free-text label ellipsizes instead of widening the list off screen.
+ * The list is portalled, so it is reached by its accessible name. Height is
+ * the kit's own cap: many labels or clients scroll inside the list. */
+.os-select-list[aria-label="Filter files"] { max-width: min(280px, calc(calc(100vw / var(--os-scale, 1)) - 16px)); }
+.os-select-list[aria-label="Filter files"] .os-select-group { text-transform: uppercase; letter-spacing: 0.06em; }
+.os-select-list[aria-label="Filter files"] .os-select-option-label { min-width: 0; }
+.os-files-search-order { display: flex; flex-wrap: wrap; gap: 8px; }
+.os-files-search-order > .os-select-wrap { flex: none; }
+@keyframes os-files-search-open { from { grid-template-rows: 0fr; opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .os-files-search { animation: none; } }
 
 /* Two-state sorting stays quiet, with the current order visible. */
 .os-sort {
@@ -2391,7 +2537,7 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   z-index: 95;
   margin: 0;
   padding: 4px;
-  max-height: min(320px, 60vh);
+  max-height: min(320px, calc(60vh / var(--os-scale, 1)));
   overflow-y: auto;
   /* A long list scrolled to its end must not hand the wheel to the surface
    * behind it, which on this desktop is somebody's window. */
@@ -2584,6 +2730,13 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   color: var(--os-error);
   border-color: var(--os-error);
   background: transparent;
+}
+/* The done word ("Saved ✓", kit/oneAtATime): two seconds in the accent, which
+ * a primary button already wears. */
+.os-button[data-state="done"]:not([data-tone="primary"]) {
+  color: var(--os-accent);
+  border-color: var(--os-accent);
+  background: color-mix(in srgb, var(--os-accent) 12%, var(--os-raised));
 }
 
 .os-check {
@@ -3889,7 +4042,7 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
 .os-map-canvas {
   display: block;
   width: 100%;
-  height: clamp(220px, 46vh, 560px);
+  height: clamp(220px, calc(46vh / var(--os-scale, 1)), 560px);
   border: 1px solid var(--os-line);
   border-radius: var(--os-radius-sm);
   background: var(--os-plate);
@@ -4350,6 +4503,8 @@ a.os-button {
    * box must be the positioning context -- without this it anchors to the
    * window frame and opens a window-offset away from the click. */
   position: relative;
+  /* The browse stacks its rail above the grid in a narrow window (below). */
+  container: os-files / inline-size;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -4357,46 +4512,270 @@ a.os-button {
   min-height: 0;
 }
 
-/* Kind choices share the straight selection edge at toolbar size. */
-.os-files-kinds {
-  display: inline-flex;
-  gap: 4px;
-}
-.os-files-kind {
-  display: inline-flex;
-  align-items: center;
-  height: var(--os-control-h);
-  padding: 0 12px;
-  border: 1px solid var(--os-line);
-  border-radius: var(--os-selection-radius);
-  background: none;
-  color: var(--os-muted);
-  font-size: var(--os-text-base);
-  cursor: pointer;
-}
-.os-files-kind[aria-checked="true"] {
-  background: var(--os-accent-soft);
-  border-color: var(--os-accent);
-  color: var(--os-ink);
-}
-.os-files-kind:focus-visible {
-  outline: 2px solid var(--os-accent);
-  outline-offset: 1px;
-}
-
-/* The three-zone body. WRAP, never crush: at half-window widths the
- * inspector takes the full width below the list, and the rail keeps its
- * readable minimum. min-height 0 / min-width 0 are load-bearing -- without
- * them the flex children refuse to shrink and the WINDOW grows a horizontal
- * rail. */
-.os-files-body {
+/* ---- the Places browse (Nov 2026): rail beside one scrolling column ----
+ * The rail is the place language (DESIGN.md rule 6): Library and its folder
+ * tree, then Desktop, Materializer and Bin, on the window's own plate -- no
+ * tinted panel, no counts. The main column is the Head over a grid of folder
+ * and file tiles. min-height / min-width 0 are load-bearing: without them the
+ * children refuse to shrink and the WINDOW grows a scrollbar instead. */
+.os-files-browse {
   flex: 1;
   min-height: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: stretch;
+  display: grid;
+  grid-template-columns: minmax(160px, 208px) minmax(0, 1fr);
 }
+.os-files-browse[hidden] { display: none; }
+.os-files-main {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+  padding-left: 20px;
+  /* The hairline between rail and grid lives here: the main column stretches
+   * to the row's full height, the sticky rail does not. */
+  border-left: 1px solid var(--os-line);
+}
+.os-files-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  position: sticky;
+  top: 0;
+  align-self: start;
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 2px 10px 12px 0;
+}
+.os-files-rail-list { list-style: none; margin: 0; padding: 0; }
+.os-files-rail-row {
+  display: flex;
+  align-items: center;
+  height: var(--os-control-h);
+  padding-left: calc(var(--depth, 0) * 14px);
+  border-radius: var(--os-selection-radius);
+}
+.os-files-rail-row:hover { background: var(--os-wash); }
+/* Selection: straight edge, accent fill and rule (rule 1). */
+.os-files-rail-row[data-current] {
+  background: var(--os-accent-soft);
+  box-shadow: inset 2px 0 0 var(--os-accent);
+}
+.os-files-rail-twist {
+  flex: none;
+  width: 18px;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--os-muted);
+  cursor: pointer;
+}
+.os-files-rail-place {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 0 2px;
+  border: 0;
+  background: none;
+  color: var(--os-ink);
+  font: inherit;
+  font-size: var(--os-text-base);
+  text-align: left;
+  cursor: pointer;
+}
+.os-files-rail-place svg { flex: none; color: var(--os-muted); }
+.os-files-rail-row[data-current] .os-files-rail-place svg { color: var(--os-ink); }
+.os-files-rail-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.os-files-rail-twist:focus-visible,
+.os-files-rail-place:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: -2px;
+}
+/* A picked file's icons take a line of their own, under Search and Add,
+ * wherever the Head cannot hold them beside the title -- below an 860px
+ * Files window -- and never push those off the edge. Without the title
+ * beside them, the hairline goes too. */
+@container os-files (max-width: 860px) {
+  .os-files-main > .os-head:has(.os-files-picked-acts) { flex-wrap: wrap; }
+  .os-files-picked-acts { order: 1; flex-basis: 100%; padding-left: 0; border-left: 0; }
+}
+@container os-files (max-width: 560px) {
+  .os-files-browse { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .os-files-rail { position: static; max-height: calc(40vh / var(--os-scale, 1)); border-right: 0; border-bottom: 1px solid var(--os-line); padding: 0 0 8px; }
+  .os-files-main { padding-left: 0; padding-top: 10px; border-left: 0; }
+  /* Sort, Search and Add keep one line together, wrapping below the title as
+   * a group rather than one control at a time (as Fleet's narrow heads do). */
+  .os-files-main .os-head { flex-wrap: wrap; }
+  .os-files-main .os-head-actions { flex-wrap: nowrap; }
+  /* Three tiles across a phone rather than two. */
+  .os-files .os-files-grid,
+  .os-files .os-files-files .os-livelist-rows { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
+}
+/* The rail and the main column are placed explicitly: the share view's
+ * column and the hidden tiles' column take the same cell. */
+.os-files-browse > .os-files-rail { grid-column: 1; grid-row: 1; }
+.os-files-browse > .os-files-main { grid-column: 2; grid-row: 1; }
+/* THE SHARING PLACE (Nov 19 2026): the caller's shares as record rows. The
+ * column names ride the record row's own grid, quiet and once, so "Shared
+ * with" and "Time left" stand over their columns; the Stop placeholder holds
+ * the actions column's width. On a narrow list the rows fold to two lines
+ * and the names would point at nothing, so they go. */
+.os-files-outgoing { display: grid; gap: 0; }
+.os-files-outgoing-columns .os-row.os-record-row { padding-block: 4px 0; }
+.os-files-outgoing-columns .os-row-name,
+.os-files-outgoing-columns .os-record-summary,
+.os-files-outgoing-columns .os-record-state { font-size: var(--os-text-sm); font-weight: 400; color: var(--os-muted); }
+.os-files-outgoing-columns .os-record-actions { padding-block: 0; }
+.os-files-outgoing-ghost { visibility: hidden; }
+/* "Shared by" on the Sharing page's Head, for someone who oversees others'
+ * shares: the words, then the drop-down, on the control line. */
+.os-files-sharedby { display: inline-flex; align-items: center; gap: 8px; color: var(--os-muted); font-size: var(--os-text-sm); white-space: nowrap; }
+@container os-record-list (max-width: 600px) { .os-files-outgoing-columns .os-record-entry { display: none; } }
+.os-files-outgoing-who,
+.os-files-outgoing-left { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; color: var(--os-muted); }
+/* THE SHARE VIEW (Nov 20 2026): in place of the tiles, on Fleet's setting
+ * rows. Its calendar opens under the Expires drop-down and floats over what
+ * follows, like the drop-down's own list. */
+.os-files-main[hidden] { display: none; }
+.os-files-share { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.os-files-share-body { display: flex; flex-direction: column; gap: 8px; min-width: 0; container: machine-details / inline-size; }
+.os-files-share-file { display: inline-flex; align-items: center; gap: 6px; }
+.os-files-share-expiry { position: relative; display: flex; align-items: center; gap: 12px; min-width: 0; }
+.os-files-share-expiry .os-select { min-width: 9rem; }
+/* One compact menu, as drawn (page 8, Draft B picked): the kit's select-wrap
+ * grows to fill a line by default, which stretched "7 days" across the view. */
+.os-files-share-expiry .os-select-wrap { flex: 0 0 auto; }
+.os-files-share-until { color: var(--os-muted); font-size: var(--os-text-sm); white-space: nowrap; }
+.os-files-share-calendar { position: absolute; top: calc(100% + 4px); left: 0; z-index: 40; padding: 10px; border: 1px solid var(--os-line); border-radius: var(--os-radius-xs); background: var(--os-glass-solid); box-shadow: var(--os-shadow-float); }
+.os-files-share-card .os-editable-card-open { cursor: default; }
+.os-files-share-card .os-editable-card-open > strong { display: inline-flex; align-items: center; gap: 6px; }
+
+/* THE KIT CALENDAR (kit/CalendarMonth): a month of days on the control line's
+ * text scale, the picked day in the accent, today ringed, days that cannot be
+ * picked greyed out. Straight selection edges, as every choice in the OS. */
+.os-calendar { display: grid; gap: 6px; width: max-content; }
+.os-calendar-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.os-calendar-title { font-size: var(--os-text-sm); font-weight: 500; }
+.os-calendar-grid { display: grid; gap: 2px; }
+.os-calendar-week { display: grid; grid-template-columns: repeat(7, 2rem); gap: 2px; }
+.os-calendar-weekday { display: grid; place-items: center; height: 1.5rem; color: var(--os-muted); font-size: var(--os-text-xs); }
+.os-calendar-day { width: 2rem; height: 2rem; border: 1px solid transparent; border-radius: var(--os-selection-radius); background: transparent; color: var(--os-ink); font: inherit; font-size: var(--os-text-sm); font-variant-numeric: tabular-nums; cursor: pointer; }
+.os-calendar-day[data-outside] { color: var(--os-muted); }
+.os-calendar-day:hover:not(:disabled) { background: var(--os-hover); }
+.os-calendar-day:focus-visible { outline: 2px solid var(--os-accent); outline-offset: -2px; }
+.os-calendar-day[data-today] { border-color: var(--os-line); }
+.os-calendar-day[data-picked] { background: var(--os-accent); border-color: var(--os-accent); color: var(--os-accent-fg); }
+.os-calendar-day:disabled { color: var(--os-muted); opacity: .4; cursor: default; }
+@container os-files (max-width: 560px) {
+  .os-files-browse > .os-files-main { grid-column: 1; grid-row: 2; }
+}
+
+/* Folder tiles, then the notices, uploads and file tiles below them. The
+ * window's page scrolls; the rail stays in view beside it (sticky, above). */
+.os-files-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* The grid: folders, then files, on one column template so the two read as
+ * one grid. Tiles are flat (rule 1): spacing and a hover wash, no boxes. */
+.os-files-grid,
+.os-files-files .os-livelist-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 4px 6px;
+}
+.os-files-files .os-livelist-row { border-radius: var(--os-selection-radius); }
+.os-files-tile-wrap { height: 100%; }
+.os-files-tile {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 12px 6px 10px;
+  border: 0;
+  border-radius: var(--os-selection-radius);
+  background: none;
+  color: var(--os-ink);
+  font: inherit;
+  text-align: center;
+  cursor: default;
+}
+.os-files-tile:hover { background: var(--os-wash); }
+/* A held finger opens the tile's menu (useLongPress), not Safari's callout. */
+.os-files-tile { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.os-files-tile[aria-pressed="true"] {
+  background: var(--os-accent-soft);
+  box-shadow: inset 0 -2px 0 var(--os-accent);
+}
+.os-files-tile:focus-visible { outline: 2px solid var(--os-accent); outline-offset: -2px; }
+.os-files-tile[data-archived] { opacity: 0.62; }
+/* Glyphs: one thin outline in the theme's quiet stroke, the way Fleet draws
+ * a machine; the type is written inside in the data face.
+ *
+ * ONE SIZE FOR LIBRARY TILES AND DESK ICONS (José, Nov 19 call; Jesús picked
+ * Draft B, Nov 20 2026): the desk draws these same glyphs (items/FileIcon,
+ * items/FolderIcon), so the box height, the page and the folder set below are
+ * the only place either surface's glyph size lives. About a sixth under the
+ * Library's earlier 62px box, 46x57 page and 58x47 folder; names keep their
+ * text sizes. */
+.os-files-tile-icon {
+  height: 52px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  color: var(--os-rail);
+}
+.os-files-glyph { display: block; fill: var(--os-plate); stroke: currentColor; stroke-width: 1.25; }
+.os-files-glyph-folder { width: 48px; height: 39px; fill: none; }
+.os-files-sheet { position: relative; display: block; width: 38px; height: 47px; }
+.os-files-sheet .os-files-glyph { width: 100%; height: 100%; }
+.os-files-sheet b {
+  position: absolute;
+  left: 5px;
+  bottom: 5px;
+  font: 500 9px/1 var(--os-font-mono);
+  letter-spacing: 0.03em;
+  color: var(--os-muted);
+}
+.os-files-tile-name {
+  max-width: 100%;
+  font-size: var(--os-text-sm);
+  line-height: 1.3;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
+}
+.os-files-rename.os-files-tile-rename {
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 4px 10px;
+}
+.os-files-rename.os-files-tile-rename input { width: 100%; flex: none; text-align: center; }
+.os-files-rename-acts { display: flex; gap: 10px; font-size: var(--os-text-sm); }
+.os-files-tile-meta {
+  margin-top: -3px;
+  font-family: var(--os-font-mono);
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+}
+/* Who shared a file with you: a name, so the text face, not the data face. */
+.os-files-tile-from { font-family: inherit; }
 
 .os-files-rename { display: flex; gap: 8px; padding: 12px 4px; }
 .os-files-rename input { flex: 1; min-width: 0; }
@@ -4424,10 +4803,40 @@ a.os-button {
   gap: 8px;
 }
 
+/* Kit Submenu (src/kit/Submenu.tsx): a row that opens the same .os-menu
+ * beside it. It sits level with its row, past the outer menu's 6px padding,
+ * and flips to the left when the right has no room (data-side). */
+.os-submenu {
+  position: relative;
+  display: grid;
+}
+.os-submenu-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.os-submenu-row[aria-expanded="true"] {
+  background: var(--os-raised);
+}
+.os-submenu-label { flex: 1; }
+.os-submenu-menu {
+  position: absolute;
+  top: -6px;
+  left: calc(100% + 6px);
+}
+.os-submenu-menu[data-side="left"] {
+  left: auto;
+  right: calc(100% + 6px);
+}
+.os-submenu-menu .os-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .os-files-list {
-  flex: 1 1 300px;
+  flex: none;
   min-width: 0;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -4712,21 +5121,6 @@ a.os-button {
  * The rule is drawn on each entry rather than once behind the list, so the
  * last entry can simply not draw one -- a single tall rule would hang past the
  * final node with nothing under it. */
-.os-files-versions {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-top: 10px;
-  border-top: 1px solid var(--os-line);
-}
-.os-files-versions-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.os-files-versions-head .os-caption {
-  margin-left: auto;
-}
 .os-files-versions-only {
   margin: 0;
   font-size: var(--os-text-sm);
@@ -4936,7 +5330,7 @@ a.os-button {
   bottom: calc(var(--os-dock-h) + 26px);
   transform: translateX(-50%);
   margin: 0;
-  max-width: min(520px, 80vw);
+  max-width: min(520px, calc(80vw / var(--os-scale, 1)));
   padding: 7px 12px;
   border-radius: 0;
   background: var(--os-glass-solid);
@@ -6334,7 +6728,7 @@ a.os-button {
 }
 
 .os-themes {
-  width: min(380px, 100vw);
+  width: min(380px, calc(100vw / var(--os-scale, 1)));
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -6518,7 +6912,7 @@ a.os-button {
   }
   .os-themes {
     width: 100%;
-    height: min(78vh, 620px);
+    height: min(calc(78vh / var(--os-scale, 1)), 620px);
     border-left: 0;
     border-top: 1px solid var(--os-line);
     border-radius: var(--os-radius) var(--os-radius) 0 0;
@@ -6581,7 +6975,7 @@ a.os-button {
   position: absolute;
   right: 0;
   bottom: calc(100% + 10px);
-  width: min(340px, calc(100vw - 32px));
+  width: min(340px, calc(calc(100vw / var(--os-scale, 1)) - 32px));
   z-index: 41;
   border-radius: var(--os-radius);
   box-shadow: var(--os-shadow-float);
@@ -6723,12 +7117,35 @@ a.os-button {
   gap: 6px;
 }
 
-/* ---- dragging a row out of Files (memql#4784) ---- */
-.os-files-line {
+/* ---- dragging a file tile out of Files (memql#4784) ---- */
+.os-files-tile-wrap {
   touch-action: none;
 }
-.os-files-line[data-dragging] {
+.os-files-tile-wrap[data-dragging] {
   opacity: 0.55;
+}
+/* Out of the window and onto the desk (Draft A, Jesús Nov 20 2026): a
+ * see-through copy of the tile rides the pointer, and a dashed spot on the desk
+ * marks the cell the icon will take. Neither catches the pointer, so the drop
+ * reads what is under them. */
+.os-desk-ghost {
+  pointer-events: none;
+}
+.os-desk-ghost .os-files-tile {
+  opacity: 0.72;
+  background: var(--os-plate);
+  border-radius: var(--os-radius-sm);
+  box-shadow: 0 10px 28px rgb(0 0 0 / 0.28);
+}
+.os-desk-landing {
+  position: absolute;
+  width: 84px;
+  height: 96px;
+  border: 1.5px dashed var(--os-accent);
+  border-radius: var(--os-radius-sm);
+  background: var(--os-accent-soft);
+  pointer-events: none;
+  z-index: 1;
 }
 
 /* ---- the folder's origin-link rollup (epic memql#4783) ---- *
@@ -8040,8 +8457,8 @@ a.os-button {
   margin-top: 18px;
 }
 .os-entry-layout {
-  height: 100vh;
-  height: 100dvh;
+  height: calc(100vh / var(--os-scale, 1));
+  height: calc(100dvh / var(--os-scale, 1));
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -8051,8 +8468,12 @@ a.os-button {
 .os-entry-preferences { flex: none; padding: 20px 20px 0; }
 .os-entry-layout > .os-wizard { flex: 1; min-height: 0; }
 .os-entry-pending { flex: 1; display: grid; place-items: center; animation: os-entry-arrive 160ms ease-out; }
-.os-entry-pending-content { display: grid; justify-items: center; gap: 16px; }
-.os-entry-pending-label { margin: 0; color: var(--os-muted); font-size: var(--os-text-sm); }
+.os-entry-pending-content { display: grid; justify-items: center; gap: calc(32px / var(--os-scale, 1)); }
+/* Loading lockup at 2x (Jesús, Nov 20 2026): mark 86px, text 24px; the vmin/vw caps keep it on a small phone.
+   Every length is divided by --os-scale: the shell zooms <html> while this is still on screen, and the
+   logo must not grow mid-load (test/kit/loadingLockupScale.test.ts). */
+.os-entry-pending-label { margin: 0; color: var(--os-muted); font-size: min(calc(1.5rem / var(--os-scale, 1)), calc(6.4vw / var(--os-scale, 1))); }
+.os-entry-pending-mark svg { width: min(calc(86px / var(--os-scale, 1)), calc(23vmin / var(--os-scale, 1))); height: min(calc(86px / var(--os-scale, 1)), calc(23vmin / var(--os-scale, 1))); }
 .os-entry-pending-mark {
   color: var(--os-muted);
   display: flex;
@@ -8064,7 +8485,49 @@ a.os-button {
 .os-entry-layout .os-signin-content,
 .os-entry-layout .os-core-gate-column { animation: os-entry-arrive 140ms ease-out; }
 @keyframes os-entry-arrive { from { opacity: 0; } to { opacity: 1; } }
+/* The first load's curtain (kit/BootCurtain.tsx): the mark is the loading bar. */
+@property --os-boot-r { syntax: "<length>"; inherits: false; initial-value: 3000px; }
+.os-boot-curtain {
+  position: fixed; inset: 0; z-index: 10001; display: grid; place-items: center;
+  background: var(--os-ground);
+  --os-boot-r: 3000px; --os-boot-soft: 160px;
+  -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 calc(var(--os-boot-r) - var(--os-boot-soft)), transparent var(--os-boot-r));
+  mask-image: radial-gradient(circle at 50% 50%, #000 calc(var(--os-boot-r) - var(--os-boot-soft)), transparent var(--os-boot-r));
+  animation: os-entry-arrive 160ms ease-out;
+  /* Starts on the built-in dark ground and eases into the person's theme when
+     it arrives with their desktop (~200ms in): a screen turning on, not a cut
+     (Jesús, Nov 20 2026). Only the curtain fades; a theme preview stays
+     instant. test/kit/loadingThemeFade.test.ts */
+  transition: background-color 500ms ease-out;
+}
+.os-boot-curtain[data-leaving] {
+  pointer-events: none; --os-boot-r: 0px; opacity: 0;
+  transition: --os-boot-r 650ms cubic-bezier(.6, 0, .4, 1), opacity 260ms ease-in 390ms;
+}
+.os-boot-curtain-content { display: grid; justify-items: center; gap: calc(28px / var(--os-scale, 1)); }
+.os-boot-mark { overflow: visible; width: min(calc(86px / var(--os-scale, 1)), calc(23vmin / var(--os-scale, 1))); height: min(calc(86px / var(--os-scale, 1)), calc(23vmin / var(--os-scale, 1))); } /* 2x of 43px, capped on small windows; same size on screen before and after the desktop zoom */
+.os-boot-mark line { stroke-width: .78; stroke-linecap: round; fill: none; }
+.os-boot-mark-base line { stroke: color-mix(in srgb, var(--os-ink) 16%, transparent); }
+.os-boot-mark-base circle { fill: color-mix(in srgb, var(--os-ink) 16%, transparent); }
+.os-boot-path { stroke: var(--os-accent); stroke-dasharray: 1; stroke-dashoffset: 1; }
+.os-boot-path[data-on] { stroke-dashoffset: 0; transition: stroke-dashoffset 120ms linear; }
+.os-boot-edge { stroke: var(--os-accent); opacity: 0; }
+.os-boot-edge[data-on] { opacity: 1; transition: opacity 200ms ease 120ms; }
+.os-boot-dot { fill: var(--os-accent); opacity: 0; transform-box: fill-box; transform-origin: center; transform: scale(.4); }
+.os-boot-dot[data-on] { opacity: 1; transform: none; transition: opacity 140ms ease 120ms, transform 200ms cubic-bezier(.3, 1.6, .5, 1) 120ms; }
+.os-boot-steps { position: relative; width: min(calc(560px / var(--os-scale, 1)), calc(92vw / var(--os-scale, 1))); height: 4.6em; font-size: min(calc(1.5rem / var(--os-scale, 1)), calc(6.4vw / var(--os-scale, 1))); } /* 2x of 12px text */
+.os-boot-step {
+  position: absolute; inset: 0 0 auto; margin: 0; text-align: center; white-space: nowrap;
+  color: var(--os-ink); transform-origin: 50% 0; animation: os-boot-step-in 400ms ease-out;
+  transition: transform 450ms ease, opacity 450ms ease, color 450ms ease;
+}
+.os-boot-step[data-depth="1"] { transform: translateY(1.4em) scale(.82); opacity: .85; color: var(--os-muted); }
+.os-boot-step[data-depth="2"] { transform: translateY(2.5em) scale(.68); opacity: .6; color: var(--os-muted); }
+.os-boot-step[data-depth="3"] { transform: translateY(3.35em) scale(.58); opacity: .4; color: var(--os-muted); }
+@keyframes os-boot-step-in { from { opacity: 0; transform: translateY(-.6em); } }
 @media (prefers-reduced-motion: reduce) {
+  .os-boot-curtain, .os-boot-step { animation: none; }
+  .os-boot-curtain, .os-boot-curtain *, .os-boot-curtain[data-leaving] { transition: none; }
   .os-entry-pending-mark { animation: none; opacity: 1; }
   .os-entry-pending, .os-entry-pending[data-leaving] { animation: none; }
   .os-entry-layout .os-signin-content,
@@ -10144,7 +10607,7 @@ a.os-button {
    * the taller clamp that left nearly half the canvas empty above and below
    * the road in a desktop window, which reads as a picture that failed to
    * load rather than as a road with room around it. */
-  height: clamp(380px, 58vh, 760px);
+  height: clamp(380px, calc(58vh / var(--os-scale, 1)), 760px);
   /* A GROUND RATHER THAN A PLATE. The map is a place, not a card: the darker
    * of the two surfaces reads as depth behind the road, and the beacon's glow
    * has something to sit against. */
@@ -11066,7 +11529,7 @@ a.os-button {
   gap: 12px;
   align-items: stretch;
   min-height: 0;
-  max-height: 60vh;
+  max-height: calc(60vh / var(--os-scale, 1));
 }
 
 .os-cluster-list {
@@ -12467,7 +12930,7 @@ button.os-cluster-mesh-peer:focus-visible {
   color: var(--os-ink);
   /* The entry header owns the theme control above this scrollable pane.
      Keep the column top-anchored so expanding a stop grows downward. */
-  padding: clamp(32px, 8vh, 110px) 24px 96px;
+  padding: clamp(32px, calc(8vh / var(--os-scale, 1)), 110px) 24px 96px;
 }
 
 .os-core-gate-column {
@@ -14084,8 +14547,8 @@ button.os-cluster-mesh-peer:focus-visible {
  * generalises. The plate is the window's own ground, so controls look exactly
  * as they do on a page; the floor is the raised plane beneath them. */
 .os-dialog {
-  width: min(560px, calc(100vw - 32px));
-  max-height: calc(100dvh - 48px);
+  width: min(560px, calc(calc(100vw / var(--os-scale, 1)) - 32px));
+  max-height: calc(calc(100dvh / var(--os-scale, 1)) - 48px);
   padding: 0;
   overflow: hidden;
   color: var(--os-ink);
@@ -14315,10 +14778,6 @@ button.os-cluster-mesh-peer:focus-visible {
 
 .os-window-control-group { display:flex; align-items:center; gap:2px; }
 .os-window-control-group + .os-window-control-group { border-left:1px solid var(--os-line); margin-left:6px; padding-left:6px; }
-.os-window-search { color:var(--os-ink); background:var(--os-glass-solid); border:1px solid var(--os-line); border-radius:12px; padding:18px; width:min(420px,calc(100vw - 32px)); }
-.os-window-search header { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
-.os-window-search nav { display:flex; flex-direction:column; margin-top:12px; }
-.os-window-search::backdrop { background:#0005; }
 @container os-window (max-width:430px) { .os-window-bar { flex-wrap:wrap; height:auto; min-height:40px; padding-block:4px; } .os-window-controls { margin-left:auto; } .os-window-app-selector { max-width:100px; } }
 
 .fleet-session-link { display:flex; justify-content:space-between; width:100%; gap:12px; border:0; border-bottom:1px solid var(--os-line); background:transparent; padding:12px 0; color:var(--os-ink); text-align:left; overflow-wrap:anywhere; }
@@ -14434,8 +14893,11 @@ button.os-cluster-mesh-peer:focus-visible {
  * heading still draws OUTSIDE a window, where there is no row.
  *
  * The 21px between Back and the first crumb (10 + 1 + 10) is the point of the
- * hairline: two targets that were one gesture apart are now visibly two. */
-.os-trail-row { flex: none; display: flex; align-items: center; min-width: 0; height: 34px; padding: 0 12px; border-bottom: 1px solid var(--os-line); }
+ * hairline: two targets that were one gesture apart are now visibly two.
+ *
+ * 40px, the window bar's own height (José, Nov 18 2026: at 34px the row
+ * read as too small under the tabs). */
+.os-trail-row { flex: none; display: flex; align-items: center; min-width: 0; height: 40px; padding: 0 12px; border-bottom: 1px solid var(--os-line); }
 .os-trail-back { appearance: none; flex: none; display: inline-flex; align-items: center; justify-content: center; width: var(--os-control-h); height: var(--os-control-h); padding: 0; border: 0; border-radius: var(--os-radius-xs); background: transparent; color: var(--os-muted); cursor: pointer; }
 .os-trail-back:hover:not(:disabled) { background: var(--os-hover); color: var(--os-ink); }
 .os-trail-back:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 1px; }
@@ -14500,6 +14962,27 @@ button.os-cluster-mesh-peer:focus-visible {
 .os-card-search-input .os-input { width: 100%; min-width: 0; box-sizing: border-box; padding-inline: 30px 36px; }
 .os-card-search-input .os-icon-button { position: absolute; inset-inline-end: 0; top: 50%; transform: translateY(-50%); }
 .os-card-search > .os-add-button { flex: none; }
+/* PICKS INSIDE THE BOX (kit CardCollectionSearch `picks`; Files' share view,
+ * Jesús and José on the Nov 20 call: picked people stand in the field like an
+ * email's "To:" line). With picks the wrapper becomes the field, so the chips
+ * and the typing share one box that grows a line when they do not fit; the
+ * search icon and the clear button stay on the first line, and the list joins
+ * the whole box (kit AnchoredPicker reads `data-picker-field`). */
+.os-card-search-input[data-picker-field] {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
+  min-height: var(--os-control-h); box-sizing: border-box; padding: 3px 36px 3px 30px;
+  background: var(--os-raised); border: 1px solid var(--os-line); border-radius: var(--os-radius-xs);
+}
+.os-card-search-input[data-picker-field]:focus-within { outline: 2px solid var(--os-accent); outline-offset: 1px; }
+.os-card-search-input[data-picker-field] > .os-input { flex: 1 1 8ch; min-width: 8ch; width: auto; height: calc(var(--os-control-h) - 8px); padding: 0; border: 0; background: transparent; }
+.os-card-search-input[data-picker-field] > .os-input:focus-visible { outline: none; }
+.os-card-search-input[data-picker-field] > svg,
+.os-card-search-input[data-picker-field] > .os-icon-button { top: calc(var(--os-control-h) / 2 - 1px); }
+.os-card-search-input[data-picker-field] > .os-chip { max-width: 100%; font-family: inherit; }
+.os-card-search-input[data-picker-field] > .os-chip > svg { flex: none; }
+.os-card-search-input[data-picker-field][data-picker-side] { border-color: var(--os-accent); outline: none; }
+.os-card-search-input[data-picker-field][data-picker-side="below"] { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.os-card-search-input[data-picker-field][data-picker-side="above"] { border-top-left-radius: 0; border-top-right-radius: 0; }
 .fleet-label-hint { margin: 0 0 4px; }
 .os-editable-card { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-rows: auto minmax(36px, auto); align-items: center; column-gap: 8px; height: 100%; min-height: 70px; box-sizing: border-box; padding: 6px 10px 4px 12px; border: 1px solid var(--os-line); border-radius: var(--os-selection-radius); background: var(--os-plate); }
 .os-editable-card:has(> .os-editable-card-meta) { grid-template-columns: minmax(74px, 1fr) minmax(0, auto) minmax(74px, 1fr); }
@@ -15270,7 +15753,7 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 .os-ask-discussion-actions > .os-caption { flex: 1 1 20ch; }
 .os-ask-discussion-actions > div { display: flex; flex-wrap: wrap; gap: 8px; }
 .os-ask-guidance-notice { margin: 0 18px 10px; font-size: var(--os-text-sm); color: var(--os-muted); }
-.os-ask-work-queue { display: grid; gap: 6px; margin: 0 18px 10px; max-height: 32vh; overflow-y: auto; }
+.os-ask-work-queue { display: grid; gap: 6px; margin: 0 18px 10px; max-height: calc(32vh / var(--os-scale, 1)); overflow-y: auto; }
 /* A card holds the control that opens its work and, when a message asked to
  * drop that work, the question that stops it: siblings, never one inside the
  * other. */
@@ -15329,10 +15812,12 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 .os-ask-question-input textarea { min-width: 0; flex: 1; resize: vertical; padding: 8px; border: 1px solid var(--os-line); border-radius: var(--os-radius-sm); background: var(--os-surface); color: var(--os-ink); font: inherit; }
 .os-ask-question-options button:focus-visible, .os-ask-question-input textarea:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 2px; }
 
-/* Files uses one content column, with folders and records in the same workspace. */
+/* Files scrolls with the window's page, folders and records in one column
+ * beside the rail. */
 .os-files > div:not([hidden]) { min-width: 0; }
-.os-files { height: auto; }
-.os-files-body { display: block; }
+/* At least the window's height, so the rail's hairline runs to the bottom
+ * edge of a short folder rather than stopping under its last tile. */
+.os-files { height: auto; min-height: 100%; }
 .os-files-list { display: block; overflow: visible; }
 .os-file-folders { margin: 0; padding: 0; list-style: none; border-bottom: 1px solid var(--os-line); }
 /* The body owns scrolling; the shared footer stays inside the app window. */
@@ -15343,13 +15828,27 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 .os-file-detail-footer[data-confirming] .os-actbar-state { flex-direction: column; align-items: flex-start; gap: 4px; }
 .os-file-detail-footer .os-actbar-detail { white-space: normal; }
 .os-file-detail-footer .os-button[aria-label] { min-width: var(--os-control-h); }
-.os-file-detail-notices { display: flex; flex-direction: column; gap: 8px; padding: 12px 20px; max-height: 28vh; overflow: auto; border-top: 1px solid var(--os-line); }
-.os-file-detail .os-files-labeledit { max-width: 34rem; }
+.os-file-detail-notices { display: flex; flex-direction: column; gap: 8px; padding: 12px 20px; max-height: calc(28vh / var(--os-scale, 1)); overflow: auto; border-top: 1px solid var(--os-line); }
+/* Fleet's Details layout (item 11, Nov 20): the sections are the kit's
+ * Details grid (kit/details.css); Labels and Client are one SHORT row each. */
+.os-file-detail .os-files-labeledit, .os-file-detail-short { max-width: 22rem; }
+.os-file-detail-short { display: flex; }
+/* A value with no copy icon starts where a copy row's text does, as on
+ * Fleet's Details (.fleet-machine-details); the kit's details.css lacks this. */
+.os-file-detail .os-details .os-facts dd:not(:has(> .os-copyvalue)) { padding-inline: 10px; }
+/* One version, one row on the facts' columns: the version and its chip where
+ * a fact's label stands, its story, size and digest where the value stands,
+ * and when, with its download, at the row's end. */
 .os-file-version-list { list-style: none; padding: 0; margin: 0; }
-.os-file-version-list .os-files-version { display: block; padding: 12px 0; border-bottom: 1px solid var(--os-line); }
+.os-file-version-list .os-files-version { grid-template-columns: 160px minmax(0, 1fr) auto; grid-template-areas: "line body meta"; column-gap: 24px; align-items: center; padding: 3px 0; }
 .os-file-version-list .os-files-version::before { content: none; }
-.os-file-version-list .os-files-version:last-child { border-bottom: 0; }
-.os-file-version-list .os-files-version-body { padding: 0; }
+.os-file-version-list .os-files-version-line { grid-area: line; }
+.os-file-version-list .os-files-version-body { grid-area: body; padding: 0 0 0 10px; }
+.os-file-version-list .os-files-version-meta { grid-area: meta; margin: 0; }
+.os-file-version-list .os-files-version-story > span + span::before { content: "\00b7\00a0"; }
+@container details (max-width: 480px) {
+  .os-file-version-list .os-files-version { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "line meta" "body body"; padding: 6px 0; }
+}
 .os-backup-editor { max-width: 720px; display: flex; flex-direction: column; gap: 16px; }
 .os-backup-schedule { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; }
 .os-backup-schedule .os-field { flex: 1; min-width: 120px; }
@@ -15402,7 +15901,7 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 @container (max-width:520px) { .nexus-now { flex-direction:column; gap:6px; } }
 
 .os-nexus-node-label { font-family:var(--os-font); font-size:13px; }
-.os-nexus-map[data-orientation="vertical"] .os-nexus-map-canvas { height:clamp(450px,65vh,700px); }
+.os-nexus-map[data-orientation="vertical"] .os-nexus-map-canvas { height:clamp(450px,calc(65vh / var(--os-scale, 1)),700px); }
 
 /* A human-readable journey owns the page; the dependency map is optional evidence. */
 .nexus-journey-progress { margin: 0 0 18px; color: var(--os-muted); }

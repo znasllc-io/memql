@@ -46,7 +46,7 @@ describe("what the Bin holds", () => {
   it("states the invariant on the page, not only in settings", async () => {
     h.connection = fakeConnection({ archived: [] });
     await renderBin();
-    expect(screen.getByText(/Nothing here has been deleted/)).toBeTruthy();
+    expect(screen.getByText(/Nothing here is gone for good/)).toBeTruthy();
   });
 
   it("says what an empty Bin means rather than only that it is empty", async () => {
@@ -173,7 +173,7 @@ describe("the detail panel", () => {
     // The state says what happened at the ORIGIN, and says the copy is fine.
     expect(within(panel).getByText(/No longer at that path on that machine/)).toBeTruthy();
     expect(
-      within(screen.getByLabelText("Archived item details")).queryByText("Uploaded from MacBook-Pro"),
+      within(screen.getByLabelText("Deleted item details")).queryByText("Uploaded from MacBook-Pro"),
     ).toBeNull();
   });
 
@@ -201,7 +201,7 @@ describe("the settings section", () => {
   it("offers the SAME confirm setting the Files app carries, not a copy", async () => {
     h.connection = fakeConnection({});
     await renderBin({ section: "settings", settings: { confirmBeforeArchive: false } });
-    const check = screen.getByRole("checkbox", { name: /Ask before archiving/ });
+    const check = screen.getByRole("checkbox", { name: /Ask before deleting/ });
     expect((check as HTMLInputElement).checked).toBe(false);
     expect(screen.getByText(/changing it here changes it there/)).toBeTruthy();
   });

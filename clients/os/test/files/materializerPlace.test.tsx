@@ -15,6 +15,7 @@ import {
   folderRow,
   registryWith,
   renderFiles,
+  openDetails,
 } from "./harness";
 import { COMPOSITION_CONCEPT } from "../../src/apps/files/concepts";
 import { Layers } from "lucide-react";
@@ -88,9 +89,10 @@ describe("the Materializer place", () => {
 
     await click(screen.getByRole("button", { name: /^Materializer/ }));
     const output = screen.getByRole("button", { name: /Q3 report\.pdf/ });
-    expect(within(output).getByText("Made in Materializer")).toBeTruthy();
+    // The tile shows the name; where it came from rides its tooltip.
+    expect(output.getAttribute("title")).toContain("Made in Materializer");
     expect(screen.queryByText(/uploaded\.txt/)).toBeNull();
-    await click(output);
+    await openDetails(/Q3 report\.pdf/);
     const detail = screen.getByRole("region", {name: "File details"});
     expect(within(detail).queryByText("Uploaded here")).toBeNull();
     expect(within(detail).getByText("Origin").nextElementSibling?.textContent).toBe("Made in Materializer");
@@ -274,7 +276,7 @@ describe("the handoff to the Materializer", () => {
     });
     await renderFiles({ registry: registryWith(MATERIALIZER_MANIFEST) });
 
-    await click(screen.getByRole("button", { name: /Q3 report\.pdf/ }));
+    await openDetails(/Q3 report\.pdf/);
     const inspector = screen.getByRole("region", { name: "File details" });
     expect(within(inspector).getByText("Made in")).toBeTruthy();
     expect(within(inspector).getByRole("button", { name: "Open in Materializer" })).toBeTruthy();
@@ -307,7 +309,7 @@ describe("the handoff to the Materializer", () => {
     ).toBeNull();
     fireEvent.keyDown(document, { key: "Escape" });
 
-    await click(screen.getByRole("button", { name: /Q3 report\.pdf/ }));
+    await openDetails(/Q3 report\.pdf/);
     const inspector = screen.getByRole("region", { name: "File details" });
     expect(within(inspector).queryByRole("button", { name: "Open in Materializer" })).toBeNull();
   });

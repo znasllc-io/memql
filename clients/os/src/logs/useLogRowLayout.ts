@@ -1,3 +1,4 @@
+import { osScale } from "../system/scale";
 import { useLayoutEffect, useRef, useState } from "react";
 
 import { ROW_HEIGHT, logLayout, rowHeightAt, type LogDensity, type LogLayout } from "./LogLine";
@@ -60,7 +61,7 @@ export function useLogRowLayout(density: LogDensity): LogRowLayout {
     if (el === null) return undefined;
     const read = (): void => {
       const rootPx = rootFontPx();
-      const layout = logLayout(el.getBoundingClientRect().width, density, rootPx);
+      const layout = logLayout(el.getBoundingClientRect().width / osScale(), density, rootPx);
       const rowHeight = rowHeightAt(layout, density, rootPx);
       if (held.current.layout === layout && held.current.rowHeight === rowHeight) return;
       held.current = { layout, rowHeight };

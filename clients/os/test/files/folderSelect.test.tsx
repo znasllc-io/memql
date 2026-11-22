@@ -240,7 +240,7 @@ describe("Files' Move to folder", () => {
     await renderFiles();
     fireEvent.contextMenu(screen.getByRole("button", { name: /brief\.pdf/ }));
     await click(screen.getByRole("menuitem", { name: "Move to folder" }));
-    return screen.getByLabelText("Move to folder");
+    return screen.getByLabelText("Move to folder", { selector: ":not(.os-icon-button)" });
   }
 
   it("still moves a row to the folder that was chosen", async () => {
@@ -285,7 +285,7 @@ describe("Files' Move to folder", () => {
     fireEvent.contextMenu(screen.getByRole("button", { name: /brief\.pdf/ }));
     await click(screen.getByRole("menuitem", { name: "Move to folder" }));
 
-    chooseOption(screen.getByLabelText("Move to folder"), "Library (top level)");
+    chooseOption(screen.getByLabelText("Move to folder", { selector: ":not(.os-icon-button)" }), "Library (top level)");
 
     expect(connection.callsNamed("moveArtifactToFolder")).toEqual([
       'mutation moveArtifactToFolder(artifactId: "a-1", folderId: "")',

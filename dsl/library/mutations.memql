@@ -1195,3 +1195,106 @@ mutation file recordPreparedLibraryImage {
  }
  }
 }
+
+// ---- file sharing (2026-11-18): the four writes behind the share builtins ----
+//
+// Every one is @serverOnly and every concept it writes is @serverWritten, so
+// these are reached only through integrations/library/sharestore, after
+// integrations/library/share.go has decided the act: the caller owns the file,
+// the recipient is in their directory, the lifetime is one of the four, the
+// share being ended is theirs. No write accepts an owner: each stamps it from
+// the actor it runs under -- the sharer for a share, the recipient (borrowed for
+// that one write) for a notice.
+
+/// Write a share: create it at a fresh id, or renew an ACTIVE one at its own id (a new expiry and
+/// days; the write read-merges, so a renewal keeps everything it does not name -- which is why an
+/// ended share is never reused, its revokedAt would ride along). Stamps the sharer from actor.userId -- and that
+/// scoping is not enough, which is why this is @serverOnly: the row WOULD be the caller's own, but
+/// the caller could then pick any lifetime and any person or group, and share a file that is not
+/// theirs. libraryShareFile holds those bounds, and this is reached only behind it. A renewal of a
+/// group share rewrites memberUserIds whole (a list is replaced, not merged).
+@serverOnly
+@actor
+mutation share putLibraryShare {
+  args {
+    shareId               string!
+    recipientUserId       string
+    recipientGroupId      string
+    memberUserIds         []string
+    recipientDisplayName  string!
+    artifactId            string!
+    title                 string
+    days                  int!  @minimum(1) @maximum(90)
+    expiresAt             datetime!
+  }
+  insert {
+    accept { recipientUserId, recipientGroupId, memberUserIds, recipientDisplayName, artifactId, title, days, expiresAt }
+    stamp {
+      id:           args.shareId
+      ownerUserId:  actor.userId
+    }
+  }
+}
+
+/// End a share: the sharer stopped sharing, or the file was archived. A soft end -- the row stays.
+/// @serverOnly because the concept is @serverWritten, so no client write reaches it at all; an
+/// actor.userId scope would admit only the sharer anyway, and libraryShareStop reads the share back
+/// as the caller's before calling this -- internal origin skips the write guard's owner check.
+@serverOnly
+mutation share endLibraryShare {
+  args {
+    shareId  string!
+  }
+  update {
+    stamp {
+      id:         args.shareId
+      revokedAt:  now
+    }
+  }
+}
+
+/// Write the recipient's notice beside its share, at noticeId: the share's own short id for one
+/// person, `<shareId>-<member>` for each member of a group share. Runs under the recipient's
+/// borrowed actor, which is what stamps them as its owner; a renewal rewrites its expiresAt the same
+/// way. actor.userId scoping cannot be the fix: the actor stamped IS the recipient, and a recipient
+/// who could write their own notice could make a file appear shared with them. Only
+/// libraryShareFile writes one, beside the share it reports.
+@serverOnly
+@actor
+mutation shareNotice putLibraryShareNotice {
+  args {
+    noticeId           string!
+    shareId            string!
+    artifactId         string!
+    sharerUserId       string!
+    sharerDisplayName  string!
+    title              string!
+    mimeType           string
+    format             enum("markdown", "document", "pdf", "spreadsheet", "image", "text", "conversation", "other")
+    size               int
+    expiresAt          datetime!
+  }
+  insert {
+    accept { shareId, artifactId, sharerUserId, sharerDisplayName, title, mimeType, format, size, expiresAt }
+    stamp {
+      id:           args.noticeId
+      ownerUserId:  actor.userId
+    }
+  }
+}
+
+/// End the recipient's notice when its share ends, so it leaves their list at once. Written by the
+/// SHARER's act under the recipient's borrowed actor, so actor.userId scoping would name the wrong
+/// person: the sharer is not the row's owner, and the recipient must not edit it.
+@serverOnly
+mutation shareNotice endLibraryShareNotice {
+  args {
+    noticeId  string!
+  }
+  update {
+    stamp {
+      id:       args.noticeId
+      endedAt:  now
+    }
+  }
+}

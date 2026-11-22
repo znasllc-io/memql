@@ -83,11 +83,13 @@ const PresenceContext = createContext<{ presence: MachinesValue["presence"]; ret
 
 /** Desktop provenance needs identity and liveness, never a machine's equipment,
  * installed apps, permissions or sharing detail. Its own small projection also
- * keeps the directory from silently retaining the full-fleet inventory. */
-export function useMachinePresence() {
+ * keeps the directory from silently retaining the full-fleet inventory.
+ * `enabled` false reads without demanding the feed (the desk asks only while a
+ * file made on a machine is on it). */
+export function useMachinePresence(enabled = true) {
   const value = useContext(PresenceContext);
   const visible = useContext(LiveReadVisibility);
-  useDemandedRead(visible ? value.retain : undefined);
+  useDemandedRead(enabled && visible ? value.retain : undefined);
   return value;
 }
 

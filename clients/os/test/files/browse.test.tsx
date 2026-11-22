@@ -11,7 +11,7 @@ vi.mock("../../src/live/connection", () => ({
 }));
 
 import { ARTIFACT_CONCEPT } from "../../src/apps/files/concepts";
-import { artifactRow, click, emit, fakeConnection, folderRow, renderFiles } from "./harness";
+import { artifactRow, click, emit, fakeConnection, folderRow, renderFiles, openDetails } from "./harness";
 import { betweenTheClicks, readTheBar, useFakeDate } from "../readTheBar";
 
 // The browse surface (epic #4722): live rows with the arrival cue in both
@@ -90,9 +90,9 @@ describe("the live list and its cue", () => {
     await renderFiles();
     expect(screen.getByText(/Nothing in your Library yet/)).toBeTruthy();
 
-    // The search lives behind the Refine affordance now (DESIGN.md rule 2):
+    // The search lives in the hidden panel the Head's search button opens:
     // collapsed over an empty library, one click away when asked for.
-    await click(screen.getByRole("button", { name: "Refine files" }));
+    await click(screen.getByRole("button", { name: "Search" }));
     const search = screen.getByPlaceholderText("Search") as HTMLInputElement;
     fireEvent.change(search, { target: { value: "nope" } });
     expect(screen.getByText(/Nothing matches/)).toBeTruthy();
@@ -146,16 +146,16 @@ describe("the folder rail", () => {
     h.connection = connection;
     await renderFiles();
     fireEvent.contextMenu(screen.getByRole("button", { name: /Open folder Client videos/ }));
-    await click(await screen.findByRole("menuitem", { name: "Archive" }));
-    expect(screen.getByText(/Archive "Client videos" and its 2 items\?/)).toBeTruthy();
+    await click(await screen.findByRole("menuitem", { name: "Delete" }));
+    expect(screen.getByText(/Delete "Client videos" and its 2 items\?/)).toBeTruthy();
     // The rail's place is named Bin now, but the ROW menu's own verb is
     // still Archive, so the
     // confirm's own action is reached inside its notice.
     const confirm = screen
-      .getByText(/Archive "Client videos" and its 2 items\?/)
+      .getByText(/Delete "Client videos" and its 2 items\?/)
       .closest(".os-notice") as HTMLElement;
     await readTheBar();
-    await click(within(confirm).getByRole("button", { name: "Archive" }));
+    await click(within(confirm).getByRole("button", { name: "Delete" }));
     // Contents first, then the folder -- the children-first walk, as real
     // rendered calls.
     expect(connection.callsNamed("archiveArtifact")).toEqual([
@@ -169,7 +169,7 @@ describe("the folder rail", () => {
 });
 
 // The folder's question opens where the menu item that asked it was (memql#6033):
-// outside any bar, so the second click of a double-click on "Archive" used to
+// outside any bar, so the second click of a double-click on "Delete" used to
 // answer it before it had been read.
 describe("a folder's archive, one double-click later", () => {
   useFakeDate();
@@ -185,21 +185,21 @@ describe("a folder's archive, one double-click later", () => {
     h.connection = connection;
     await renderFiles();
     fireEvent.contextMenu(screen.getByRole("button", { name: /Open folder Client videos/ }));
-    await click(await screen.findByRole("menuitem", { name: "Archive" }));
-    const confirm = screen.getByText(/Archive "Client videos" and its 2 items\?/).closest(".os-notice") as HTMLElement;
+    await click(await screen.findByRole("menuitem", { name: "Delete" }));
+    const confirm = screen.getByText(/Delete "Client videos" and its 2 items\?/).closest(".os-notice") as HTMLElement;
     return { connection, confirm };
   }
 
   it("does not archive on the second click of the click that asked, and does once it is read", async () => {
     const { connection, confirm } = await ask();
     betweenTheClicks();
-    await click(within(confirm).getByRole("button", { name: "Archive" }));
+    await click(within(confirm).getByRole("button", { name: "Delete" }));
     expect(connection.callsNamed("archiveLibraryFolder")).toEqual([]);
     expect(connection.callsNamed("archiveArtifact")).toEqual([]);
-    expect(screen.getByText(/Archive "Client videos" and its 2 items\?/)).toBeTruthy();
+    expect(screen.getByText(/Delete "Client videos" and its 2 items\?/)).toBeTruthy();
 
     await readTheBar();
-    await click(within(confirm).getByRole("button", { name: "Archive" }));
+    await click(within(confirm).getByRole("button", { name: "Delete" }));
     expect(connection.callsNamed("archiveLibraryFolder")).toHaveLength(1);
   });
 
@@ -207,10 +207,10 @@ describe("a folder's archive, one double-click later", () => {
     const { connection, confirm } = await ask();
     betweenTheClicks();
     await click(within(confirm).getByRole("button", { name: "Cancel" }));
-    expect(screen.getByText(/Archive "Client videos" and its 2 items\?/)).toBeTruthy();
+    expect(screen.getByText(/Delete "Client videos" and its 2 items\?/)).toBeTruthy();
     await readTheBar();
     await click(within(confirm).getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByText(/Archive "Client videos" and its 2 items\?/)).toBeNull();
+    expect(screen.queryByText(/Delete "Client videos" and its 2 items\?/)).toBeNull();
     expect(connection.callsNamed("archiveLibraryFolder")).toEqual([]);
   });
 
@@ -228,19 +228,19 @@ describe("a folder's archive, one double-click later", () => {
     h.connection = connection;
     await renderFiles();
     fireEvent.contextMenu(screen.getByRole("button", { name: /Open folder Client videos/ }));
-    await click(await screen.findByRole("menuitem", { name: "Archive" }));
-    expect(screen.getByText(/Archive "Client videos" and its 2 items\?/)).toBeTruthy();
+    await click(await screen.findByRole("menuitem", { name: "Delete" }));
+    expect(screen.getByText(/Delete "Client videos" and its 2 items\?/)).toBeTruthy();
     await readTheBar();
 
     fireEvent.contextMenu(screen.getByRole("button", { name: /Open folder Old reels/ }));
-    await click(await screen.findByRole("menuitem", { name: "Archive" }));
-    const confirm = screen.getByText(/Archive "Old reels" and its 2 items\?/).closest(".os-notice") as HTMLElement;
+    await click(await screen.findByRole("menuitem", { name: "Delete" }));
+    const confirm = screen.getByText(/Delete "Old reels" and its 2 items\?/).closest(".os-notice") as HTMLElement;
     betweenTheClicks();
-    await click(within(confirm).getByRole("button", { name: "Archive" }));
+    await click(within(confirm).getByRole("button", { name: "Delete" }));
     expect(connection.callsNamed("archiveLibraryFolder")).toEqual([]);
 
     await readTheBar();
-    await click(within(confirm).getByRole("button", { name: "Archive" }));
+    await click(within(confirm).getByRole("button", { name: "Delete" }));
     expect(connection.callsNamed("archiveLibraryFolder")).toEqual(['mutation archiveLibraryFolder(folderId: "f-old")']);
   });
 });
@@ -256,7 +256,7 @@ describe("the inspector", () => {
     });
     h.connection = connection;
     await renderFiles();
-    await click(screen.getByRole("button", { name: /brief\.pdf/ }));
+    await openDetails(/brief\.pdf/);
     const inspector = screen.getByRole("region", { name: "File details" });
     expect(within(inspector).getByText("Uploaded here")).toBeTruthy();
   });
@@ -268,7 +268,7 @@ describe("the inspector", () => {
     });
     h.connection = connection;
     await renderFiles({ settings: { confirmBeforeArchive: false } });
-    await click(screen.getByRole("button", { name: /brief\.pdf/ }));
+    await openDetails(/brief\.pdf/);
     const inspector = screen.getByRole("region", { name: "File details" });
     await click(within(inspector).getByRole("button", { name: "Delete" }));
     expect(
@@ -282,7 +282,7 @@ describe("the inspector", () => {
     });
     h.connection = connection;
     await renderFiles();
-    await click(screen.getByRole("button", { name: /brief\.pdf/ }));
+    await openDetails(/brief\.pdf/);
     const inspector = screen.getByRole("region", { name: "File details" });
     await click(within(inspector).getByRole("button", { name: "Delete" }));
     const footer = within(inspector).getByRole("group", { name: "What you can do with this" });

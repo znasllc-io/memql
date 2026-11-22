@@ -94,7 +94,8 @@ export function BinDetail({
   artifact: ArtifactRow | null;
   folderNameOf: (folderId: string) => string;
   presence: (workerId: string) => { name?: string; online: boolean } | null;
-  onRestore: () => void;
+  /** Returns the restore's promise, so Restore takes no second press until it settles. */
+  onRestore: () => Promise<unknown>;
   restoring: boolean;
   restoreError: string;
   onClose: () => void;
@@ -142,7 +143,9 @@ export function BinDetail({
     };
   }, [fileId, connection]);
 
-  const download = useCallback(async () => {
+  // Answers whether the file was handed over, so Download says "Downloaded"
+  // only when it was (kit/oneAtATime).
+  const download = useCallback(async (): Promise<boolean> => {
     setDownloadBusy(true);
     setDownloadError("");
     try {
@@ -150,7 +153,7 @@ export function BinDetail({
       const plan = planDownload({ workerAvailable: registration !== null, sizeBytes: facts.size });
       if (plan.path === "refused") {
         setDownloadError(OVER_LIMIT_SENTENCE);
-        return;
+        return false;
       }
       const fileName = facts.name || item.name;
       if (plan.path === "worker" && registration !== null) {
@@ -164,8 +167,10 @@ export function BinDetail({
       } else {
         await runBufferedDownload({ artifactId: item.id, fileName, bearer: () => authSource.bearer() });
       }
+      return true;
     } catch (err: unknown) {
       setDownloadError(describe(err));
+      return false;
     } finally {
       setDownloadBusy(false);
     }
@@ -177,7 +182,7 @@ export function BinDetail({
     facts.uploadedFromWorkerName || item.producedByWorkerName || machine?.name || "";
 
   return (
-    <aside className="os-bin-detail" aria-label="Archived item details">
+    <aside className="os-bin-detail" aria-label="Deleted item details">
       <header className="os-files-inspector-head">
         <span className="os-files-inspector-glyph">
           {item.kind === "folder" ? <FolderOpen size={18} aria-hidden /> : kindGlyph(item.contentKind, 18)}
@@ -229,7 +234,7 @@ export function BinDetail({
           <Fact
             label="Last changed"
             value={formatMoment(item.changedAt)}
-            title="An archive re-writes the row, so for most items in the Bin this is when it was archived."
+            title="Deleting re-writes the row, so for most items in the Bin this is when it was deleted."
           />
         ) : null}
         <Fact label="Id" value={item.id} mono />
@@ -275,11 +280,11 @@ export function BinDetail({
       ) : null}
 
       <div className="os-bin-actions">
-        <Button tone="primary" onClick={onRestore} busy={restoring} busyLabel="Restoring">
+        <Button tone="primary" onClick={onRestore} busy={restoring} busyLabel="Restoring…">
           <RotateCcw size={13} aria-hidden /> Restore
         </Button>
         {item.kind === "artifact" ? (
-          <Button onClick={() => void download()} busy={downloadBusy} busyLabel="Downloading">
+          <Button onClick={download} busy={downloadBusy} busyLabel="Downloading…" doneLabel="Downloaded">
             Download
           </Button>
         ) : null}
@@ -296,7 +301,7 @@ export function BinDetail({
       ) : null}
       {downloadError !== "" ? (
         <Notice tone="error" sentence="The download did not land." detail={downloadError}>
-          <Button onClick={() => void download()}>Try again</Button>
+          <Button onClick={download}>Try again</Button>
         </Notice>
       ) : null}
     </aside>

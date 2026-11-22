@@ -4,7 +4,7 @@ import { useLiveCollection, usePagedCollection, type PagedCollectionHandle } fro
 import { useDebouncedValue } from "../../logs/useDebouncedValue";
 import { useGraphRevision } from "../../live/useGraphRevision";
 import { ARTIFACT_CONCEPT, COMPOSITION_CONCEPT, FILE_CONCEPT, FOLDER_CONCEPT } from "./concepts";
-import { applyFilters, type DeskMembership, type FilesFilter } from "./filters";
+import { applyFilters, needsWholePlace, type DeskMembership, type FilesFilter } from "./filters";
 import { artifactFromRow, compositionFromRow } from "./rows";
 import { materializedByArtifactId } from "./fold";
 
@@ -43,24 +43,33 @@ export function useLibraryFeeds(filter: FilesFilter, desk: DeskMembership, enabl
   const sourceRefs = outputIds.flatMap(id => [id, `v1:library:file:${id}`]).sort();
   const args = libraryBrowseArgs(effectiveFilter, desk, sourceRefs);
   const argsKey = JSON.stringify(args);
-  const ready = enabled && (filter.place !== "materializer" || outputs.snapshot.state !== "seeding");
-  const artifacts = usePagedCollection<Row>(ready ? `files:browse:${filter.sortAscending}:${argsKey}` : null, connection => ({
+  // Shared with me lists other people's files from their notices, and Sharing
+  // the caller's own shares (useSharing.ts); the Library is read for neither.
+  const ready = enabled && filter.place !== "shared" && filter.place !== "sharing" && (filter.place !== "materializer" || outputs.snapshot.state !== "seeding");
+  // Newest first and Oldest first are the server's two page orders; Name,
+  // Size and Kind read newest first and sort the whole place (below).
+  const oldest = filter.sort === "oldest";
+  const artifacts = usePagedCollection<Row>(ready ? `files:browse:${oldest}:${argsKey}` : null, connection => ({
     concept: ARTIFACT_CONCEPT,
     comparePageRows: (a, b) => {
       const left = artifactFromRow(a), right = artifactFromRow(b);
       const order = left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
-      return filter.sortAscending ? order : -order;
+      return oldest ? order : -order;
     },
     seed: async (cursor, signal) => {
-      const result = await connection.query[filter.sortAscending ? "libraryArtifactsBrowseOldest" : "libraryArtifactsBrowse"](
+      const result = await connection.query[oldest ? "libraryArtifactsBrowseOldest" : "libraryArtifactsBrowse"](
         args, { signal, ...(cursor ? { cursor } : {}) },
       );
       return { rows: result.rows(), nextCursor: result.meta()?.cursor ?? "" };
     },
+    // MEMBERSHIP IS THE SERVER'S QUESTION ONLY. The collection is keyed by
+    // `args`, which carry no kind of file and no Added window, so the
+    // collection outlives a change to either; judging an arriving row by
+    // them would keep it out after the person widened the view again.
     inScope: row => {
       const artifact = artifactFromRow(row);
       const materialized = materializedByArtifactId(outputs.snapshot.rows.map(compositionFromRow), [artifact]);
-      return applyFilters([artifact], effectiveFilter, desk, materialized).length > 0;
+      return applyFilters([artifact], { ...effectiveFilter, type: "all", added: "any" }, desk, materialized).length > 0;
     },
     reread: async (id, signal) => (await getRowByConceptAndId(connection.query, ARTIFACT_CONCEPT, id, { signal }) as Row) ?? null,
   }));
@@ -77,7 +86,8 @@ export function useLibraryFeeds(filter: FilesFilter, desk: DeskMembership, enabl
   const fileKey = JSON.stringify(fileIds);
   // Backing bytes/origin metadata belongs to the selected Inspector. Only
   // Backups needs the complete file-state population for its folder health.
-  const files = useLiveCollection<Row>(backups ? "files:backup-files" : null, connection => ({
+  // ...and the Size sort, which reads each file's size off the same rows.
+  const files = useLiveCollection<Row>(backups || (ready && filter.sort === "size") ? "files:backup-files" : null, connection => ({
     concept: FILE_CONCEPT,
     seed: async (cursor, signal) => {
       const result = await connection.query.libraryFilesForOwner({}, { signal, ...(cursor ? { cursor } : {}) });
@@ -104,9 +114,22 @@ export function useLibraryFeeds(filter: FilesFilter, desk: DeskMembership, enabl
   }));
   const revision = useGraphRevision(FACET_INPUTS, ready, { externalRecovery: true, onPaneResume: () => facets.reseed({ ifIdle: true }) });
   useEffect(() => { if (revision) facets.reseed(); }, [revision, facets.reseed]);
+  // THE WHOLE PLACE, WHEN THE VIEW ASKS A QUESTION THE PAGES CANNOT ANSWER:
+  // a name, size or kind order, a kind of file or an Added window (filters.ts
+  // `needsWholePlace`). Without it the first ten rows would be sorted by name
+  // and a "Today" filter would call a page of older files "nothing matches".
+  // ponytail: one ten-row page at a time, so a Library of N files costs N/10
+  // reads; server-side sorts and filters in dsl/library/queries.memql are the
+  // upgrade if Libraries grow large.
+  const whole = needsWholePlace(filter);
+  const { hasMore, loadingMore, loadMoreError, enabled: pageable, progress, loadMore } = artifacts;
+  useEffect(() => {
+    if (whole && hasMore && !loadingMore && !loadMoreError && pageable) void loadMore();
+  }, [whole, hasMore, loadingMore, loadMoreError, pageable, progress, loadMore]);
   const index = facets.snapshot.rows[0];
   const counts = index ? new Map((index.folders as {folderId: string; count: number}[]).map(row => [row.folderId, row.count])) : null;
-  const labels = index ? [...new Set((index.labelGroups as string[][]).flat())].filter(Boolean).sort((a,b) => a.localeCompare(b)) : [];
+  // The labels in the place, for the kind menu's Label group.
+  const labels = index ? [...new Set((index.labelGroups as string[][]).flat())].filter(Boolean).sort((a, b) => a.localeCompare(b)) : [];
   return { artifacts, folders, files, compositions: filter.place === "materializer" ? outputs : visibleOutputs,
     counts, labels, facetsError: facets.snapshot.error, effectiveFilter };
 }

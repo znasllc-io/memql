@@ -1372,7 +1372,7 @@ func compileConceptComparisonIn(concepts memorynodes.Registry, op ComparisonOper
 			return compiledExpression{}, fmt.Errorf("concept comparison requires string values: %w", err)
 		}
 		if len(values) == 0 {
-			return compiledExpression{}, fmt.Errorf("concept list must include at least one value")
+			return emptyListMembership(op, ""), nil
 		}
 
 		placeholders := make([]string, 0, len(values))
@@ -1392,7 +1392,7 @@ func compileConceptComparisonIn(concepts memorynodes.Registry, op ComparisonOper
 			args = append(args, trimmed)
 		}
 		if len(placeholders) == 0 {
-			return compiledExpression{}, fmt.Errorf("concept list must include at least one value")
+			return emptyListMembership(op, ""), nil
 		}
 		operator := "IN"
 		if op == OpOut {
@@ -1428,7 +1428,7 @@ func compileIdComparison(op ComparisonOperator, value any, conceptContext string
 			return compiledExpression{}, fmt.Errorf("id comparison requires string collection: %w", err)
 		}
 		if len(values) == 0 {
-			return compiledExpression{}, fmt.Errorf("id list must include at least one value")
+			return emptyListMembership(op, ""), nil
 		}
 		fullIds := make([]string, 0, len(values))
 		for _, raw := range values {
@@ -1439,7 +1439,7 @@ func compileIdComparison(op ComparisonOperator, value any, conceptContext string
 			fullIds = append(fullIds, fullId)
 		}
 		if len(fullIds) == 0 {
-			return compiledExpression{}, fmt.Errorf("id list must include at least one value")
+			return emptyListMembership(op, ""), nil
 		}
 		if op == OpIn {
 			return compiledExpression{sql: "(id IN (?))", args: []any{bun.In(fullIds)}}, nil
@@ -1581,7 +1581,7 @@ func compileTypeComparison(op ComparisonOperator, value any) (compiledExpression
 			return compiledExpression{}, fmt.Errorf("type comparison requires string collection: %w", err)
 		}
 		if len(values) == 0 {
-			return compiledExpression{}, fmt.Errorf("type list must include at least one value")
+			return emptyListMembership(op, ""), nil
 		}
 		for i := range values {
 			values[i] = strings.ToLower(strings.TrimSpace(values[i]))
@@ -1624,7 +1624,7 @@ func compileCreatedByComparison(op ComparisonOperator, value any) (compiledExpre
 			return compiledExpression{}, fmt.Errorf("createdBy comparison requires string collection: %w", err)
 		}
 		if len(values) == 0 {
-			return compiledExpression{}, fmt.Errorf("createdBy list must include at least one value")
+			return emptyListMembership(op, `"createdBy"`), nil
 		}
 		for i := range values {
 			values[i] = strings.TrimSpace(values[i])
@@ -1684,7 +1684,7 @@ func compileProvenanceComparison(leaf string, op ComparisonOperator, value any) 
 			return compiledExpression{}, fmt.Errorf("provenance.%s comparison requires string collection: %w", leaf, err)
 		}
 		if len(values) == 0 {
-			return compiledExpression{}, fmt.Errorf("provenance.%s list must include at least one value", leaf)
+			return emptyListMembership(op, extract), nil
 		}
 		operator := "IN"
 		if op == OpOut {
@@ -1838,8 +1838,10 @@ func compileJSONValueComparison(textExpr, jsonbExpr string, op ComparisonOperato
 		if err != nil {
 			return compiledExpression{}, err
 		}
-		if len(members) == 0 && !hasUnset {
-			return compiledExpression{}, fmt.Errorf("collection literal cannot be empty")
+		if len(members) == 0 && !hasUnset && op == OpIn {
+			// An empty list admits nothing; the legacy not-in falls through
+			// to "the field is set" below (emptyListMembership).
+			return emptyListMembership(op, ""), nil
 		}
 		var membership compiledExpression
 		if len(members) > 0 {
@@ -1984,6 +1986,26 @@ func compileJSONValueComparison(textExpr, jsonbExpr string, op ComparisonOperato
 
 // compileUnsetSQL is the one spelling of "unset" (unset=true) and "set"
 // (unset=false). See compileJSONValueComparison.
+// emptyListMembership answers `v in []`: no row. SQL has no `IN ()`, and
+// these paths used to refuse the read instead, so a client holding an honestly
+// empty argument list (Files' Materializer place before anything was made)
+// got an error rather than an empty page. A written `in []` already lowers to
+// const(false) (expr_lower_test.go) and an empty `startsWith` list is FALSE
+// too; an argument list now answers the same way. The legacy `not in` keeps
+// its rule that an unset value is never a match: `nullable` names the
+// expression when the column can be NULL, "" when it never is.
+// Tests: executor_filter_empty_membership_test.go.
+func emptyListMembership(op ComparisonOperator, nullable string) compiledExpression {
+	switch {
+	case op == OpIn:
+		return compiledExpression{sql: "FALSE"}
+	case nullable == "":
+		return compiledExpression{sql: "TRUE"}
+	default:
+		return compiledExpression{sql: fmt.Sprintf("(%s IS NOT NULL)", nullable)}
+	}
+}
+
 func compileUnsetSQL(textExpr string, unset bool) compiledExpression {
 	op := "="
 	if !unset {
@@ -2441,9 +2463,8 @@ func nodeMatchesComparison(node memorynodes.MemoryNode, cmp *ComparisonExpressio
 				if err != nil {
 					return false, err
 				}
-				if len(values) == 0 {
-					return false, fmt.Errorf("id list must include at least one value")
-				}
+				// An empty list finds nothing: in is false, not-in true
+				// (emptyListMembership is the SQL half).
 				found := false
 				for _, value := range values {
 					if node.ID == strings.TrimSpace(value) {
@@ -2646,9 +2667,9 @@ func compareScalarValues(actual any, op ComparisonOperator, expected any) (bool,
 		if err != nil {
 			return false, err
 		}
-		if len(members) == 0 && !hasUnset {
-			return false, fmt.Errorf("collection literal cannot be empty")
-		}
+		// An empty list (no members, no unset) leaves member false below: in
+		// is false and the legacy not-in admits a set value, matching the
+		// SQL (emptyListMembership).
 		// Normalised whether or not this row needs it, so a list the SQL
 		// refuses (mixed member types) is refused here too.
 		var collection *normalizedCollection

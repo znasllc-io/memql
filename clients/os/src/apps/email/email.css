@@ -269,7 +269,7 @@
 .email-preview-frame {
   display: block;
   width: 100%;
-  height: min(72vh, 900px);
+  height: min(calc(72vh / var(--os-scale, 1)), 900px);
   min-height: 360px;
   border: 1px solid var(--os-line);
   border-radius: var(--os-radius-xs);

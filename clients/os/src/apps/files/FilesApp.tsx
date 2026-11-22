@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Concepts, newShortId, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { Concepts, newShortId, rowNumber, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useEdgeUploadProvider } from "../../items/useEdgeUploadProvider";
 import type { UploadProvider } from "../../items/upload";
@@ -111,7 +111,7 @@ export function FilesApp({
 
   const [filter, setFilter] = useState<FilesFilter>(() => ({
     ...DEFAULT_FILTER,
-    sortAscending: settings.defaultSort === "oldest",
+    sort: settings.defaultSort,
   }));
   const [selectedId, setSelectedId] = useState("");
   // ===========================================================================
@@ -182,7 +182,7 @@ export function FilesApp({
       const place = artifact.archived ? "bin" : "library";
       setFilter((f) => ({
         ...DEFAULT_FILTER,
-        sortAscending: f.sortAscending,
+        sort: f.sort,
         place,
         folderId: artifact.folderId,
       }));
@@ -243,7 +243,11 @@ export function FilesApp({
     // files that have been in the Library for weeks.
     filter.label,
     filter.search,
-    filter.sortAscending ? "asc" : "desc",
+    filter.type,
+    filter.added,
+    filter.sort,
+    // Size reads each file's bytes off the files feed, which lands after the list.
+    filter.sort === "size" ? `s:${files.snapshot.version}` : "",
     filter.place === "desktop" ? deskKey : "",
     // A COMPOSITION LANDING REVEALS ROWS THE BROWSER ALREADY HELD, exactly as
     // a desk shortcut does, so the reading changes without the filter
@@ -251,12 +255,17 @@ export function FilesApp({
     // cue for files that have been sitting in the Library for weeks.
     filter.place === "materializer" ? `m:${materialized.size}` : "",
   ].join("|");
+  const sizes = useMemo(
+    () => new Map(files.snapshot.rows.map((row) => [rowString(row, "id"), rowNumber(row, "size")])),
+    [files.snapshot],
+  );
   const list = useLiveView<Row, ArtifactRow>(artifacts.source, `files:list:${filterKey}`, (rows) =>
     applyFilters(
       rows.map(artifactFromRow).filter((r) => r.id !== ""),
       effectiveFilter,
       desk.membership,
       materialized,
+      (row) => (row.kind === "file" ? sizes.get(row.sourceConceptRef.split(":").pop() ?? "") : undefined),
     ),
   );
 
@@ -319,7 +328,7 @@ export function FilesApp({
     // moment "starts" is re-read.
     setFilter((f) => ({
       ...f,
-      sortAscending: next.defaultSort === "oldest",
+      sort: next.defaultSort,
     }));
   }
 
@@ -447,22 +456,22 @@ function FilesSettingsSection({
             ))}
           </div>
           <p className="os-caption">
-            Where a Files window starts. The sort control in the browse toolbar keeps steering the
+            Where a Files window starts. The Sort menu in the search panel keeps steering the
             window you are in.
           </p>
         </fieldset>
 
         <fieldset className="os-field-group">
-          <legend>Archiving</legend>
+          <legend>Deleting</legend>
           <Check
             checked={settings.confirmBeforeArchive}
             onChange={(confirmBeforeArchive) => update({ confirmBeforeArchive })}
           >
-            Ask before archiving
+            Ask before deleting
           </Check>
           <p className="os-caption">
-            The confirm names what is about to move -- for a folder, the live count of everything
-            inside it. Archiving never deletes: everything archived lives in the Bin -- the
+            The confirm names what is about to go -- for a folder, the live count of everything
+            inside it. A deleted file is never erased: it waits in the Bin -- the
             browse rail's third place, and the app in the dock -- where it can be put back.
           </p>
         </fieldset>

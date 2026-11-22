@@ -1,7 +1,8 @@
+import { osScale } from "../system/scale";
 import { Breadcrumbs, type Breadcrumb } from "./Breadcrumbs";
 import { usePageNavigation } from "./pageNavigation";
 import { IconButton } from "./IconButton";
-import { useWindowSearchTarget } from "./windowSearch";
+import { useOneAtATime } from "./oneAtATime";
 import {
   Children,
   Fragment,
@@ -56,6 +57,13 @@ export type ButtonTone = "quiet" | "primary" | "danger";
  * surface is FOR, `danger` is a thing that cannot be undone, `quiet` is
  * everything else. A surface with two primaries has not decided what it is
  * for.
+ *
+ * ONE PRESS AT A TIME (kit/oneAtATime): an `onClick` that returns a promise
+ * holds the button until it settles -- further presses are ignored, the button
+ * reads `busyLabel` ("Saving…") or just dims, and with a `doneLabel` it then
+ * reads that word with a tick ("Saved ✓") for two seconds before it is itself
+ * again. Resolve `false` (or reject) when the act did not happen, so the button
+ * never says it did.
  */
 export function Button({
   children,
@@ -65,40 +73,48 @@ export function Button({
   disabled = false,
   busy = false,
   busyLabel,
+  doneLabel,
   ariaLabel,
   ariaExpanded,
   title,
   className = "",
 }: {
   children: ReactNode;
-  onClick?: () => void;
+  onClick?: () => unknown;
   tone?: ButtonTone;
   type?: "button" | "submit";
   disabled?: boolean;
   busy?: boolean;
   busyLabel?: string;
+  /** Said with a tick for two seconds after the act's promise resolves. */
+  doneLabel?: string;
   ariaLabel?: string;
   ariaExpanded?: boolean;
   title?: string;
   className?: string;
 }) {
+  const guard = useOneAtATime();
+  const working = busy || guard.phase === "busy";
+  const done = guard.phase === "done" && doneLabel !== undefined;
   return (
     <button
       type={type}
       className={`os-button ${className}`.trim()}
       data-tone={tone}
+      data-state={done ? "done" : undefined}
       // A busy control is disabled for its duration. Writes in this shell are
       // non-idempotent from the person's side -- a second revoke is a second
       // audit row, a second mint is a second credential -- so a double click
-      // must not become two calls.
-      disabled={disabled || busy}
-      aria-busy={busy || undefined}
+      // must not become two calls. A done word takes no press either (the
+      // guard holds it), but is not dimmed: it is news, not a refusal.
+      disabled={disabled || working}
+      aria-busy={working || undefined}
       aria-label={ariaLabel}
       aria-expanded={ariaExpanded}
       title={title}
-      onClick={onClick}
+      onClick={onClick === undefined ? undefined : () => guard.press(onClick, doneLabel !== undefined)}
     >
-      {busy && busyLabel ? busyLabel : children}
+      {working && busyLabel ? busyLabel : done ? <>{doneLabel}<CheckGlyph size={14} aria-hidden /></> : children}
     </button>
   );
 }
@@ -351,6 +367,15 @@ export interface SelectOption {
    * "Manage routes" -- so it does not read as one more choice.
    */
   separated: boolean;
+  /**
+   * From `data-checked`: whether the check mark is drawn, when the caller
+   * says so rather than leaving it to `value`. For ONE menu holding several
+   * single choices side by side (Files' kind menu: one kind AND one label AND
+   * one source AND one client, Jesús's Nov 20 pick), where each group has its
+   * own current answer and `value` can name only one of them. Undefined means
+   * the usual rule: checked when it is `value`.
+   */
+  checked?: boolean;
 }
 
 /** Everything an `<option>` or `<optgroup>` element can hand the walk. */
@@ -361,6 +386,7 @@ interface OptionLikeProps {
   children?: ReactNode;
   "data-hint"?: string;
   "data-separated"?: boolean;
+  "data-checked"?: boolean;
 }
 
 /**
@@ -413,7 +439,8 @@ function walkOptions(node: ReactNode, group: string, into: SelectOption[]): void
     // HTML's own rule: an option with no `value` is worth its own text.
     const value = props.value === undefined ? label : String(props.value);
     const hint = typeof props["data-hint"] === "string" ? props["data-hint"].trim() : "";
-    into.push({ value, label, disabled: props.disabled === true, group, hint, separated: props["data-separated"] === true });
+    into.push({ value, label, disabled: props.disabled === true, group, hint, separated: props["data-separated"] === true,
+      ...(typeof props["data-checked"] === "boolean" ? { checked: props["data-checked"] } : {}) });
   }
 }
 
@@ -507,6 +534,7 @@ export function Select({
   tone = "field",
   icon,
   title,
+  display,
 }: {
   value: string;
   onChange: (next: string) => void;
@@ -531,6 +559,11 @@ export function Select({
   icon?: ReactNode;
   /** The trigger's tooltip: what the control chooses. */
   title?: string;
+  /**
+   * What the closed trigger reads, when the selected option's label alone
+   * would not say it (Files' kind menu adds how many other filters are on).
+   */
+  display?: string;
 }) {
   const options = selectOptionsFrom(children);
   const [open, setOpen] = useState(false);
@@ -772,7 +805,7 @@ export function Select({
   // WHICH value is unresolved, where a blank box says only that something is
   // wrong. An empty value with no empty option to name it reads as the em dash
   // every absent value in this shell reads as.
-  const display = selected !== undefined ? selected.label : value === "" ? "--" : value;
+  const shown = display ?? (selected !== undefined ? selected.label : value === "" ? "--" : value);
 
   const place =
     placement ??
@@ -813,7 +846,7 @@ export function Select({
         >
           {icon ? <span className="os-select-icon" aria-hidden>{icon}</span> : null}
           <span className="os-select-value" data-placeholder={selected === undefined || undefined}>
-            {display}
+            {shown}
           </span>
         </button>
         <ChevronDown size={12} className="os-select-chevron" aria-hidden />
@@ -827,7 +860,8 @@ export function Select({
               aria-label={label}
               className="os-select-list"
               data-above={place.above || undefined}
-              style={{ left: place.left, top: place.top, minWidth: place.minWidth }}
+              // Placed in screen pixels; drawn in the zoomed page's CSS pixels.
+              style={{ left: place.left / osScale(), top: place.top / osScale(), minWidth: place.minWidth / osScale() }}
               onContextMenu={(event) => event.preventDefault()}
             >
               {options.length === 0 ? (
@@ -851,7 +885,7 @@ export function Select({
                     key={`${index}:${option.value}`}
                     id={optionId(index)}
                     role="option"
-                    aria-selected={option.value === value}
+                    aria-selected={option.checked ?? option.value === value}
                     aria-disabled={option.disabled || undefined}
                     data-active={index === active || undefined}
                     className="os-select-option"
@@ -862,7 +896,7 @@ export function Select({
                     onClick={() => commit(index)}
                   >
                     <span className="os-select-check" aria-hidden>
-                      {option.value === value ? <CheckGlyph size={12} /> : null}
+                      {(option.checked ?? option.value === value) ? <CheckGlyph size={12} /> : null}
                     </span>
                     {option.hint === "" ? (
                       <span className="os-select-option-label">{option.label}</span>
@@ -949,7 +983,6 @@ export function Refine({
   // choice, which left every Select facet keyboard-only. The capture handler
   // on the root sees the event either way; the document listener defers to it.
   const pointerWithin = useRef<Event | null>(null);
-  const hosted = useWindowSearchTarget(rootRef, () => { returnFocus.current = document.activeElement as HTMLElement; setOpen(true); rootRef.current?.querySelector("input")?.focus(); });
 
   useEffect(() => {
     if (!open) return;
@@ -991,19 +1024,19 @@ export function Refine({
           </button>
         </span>
       ))}
-      {hosted && search ? <span className="os-chip os-chip-editable" data-tone="accent">{search}<button type="button" className="os-chip-remove" aria-label="Clear search" onClick={() => onSearch("")}><X size={10} aria-hidden /></button></span> : null}
-      {!hosted ? <button
+      <button
         type="button"
         className={iconOnly ? "os-refine-open os-refine-icon" : "os-refine-open"}
         title={label}
         aria-expanded={open}
         aria-label={label}
         data-active={search !== "" || undefined}
-        onClick={() => setOpen((v) => !v)}
+        // Escape hands focus back here, the control that opened the panel.
+        onClick={(event) => { returnFocus.current = event.currentTarget; setOpen((v) => !v); }}
       >
         <Search size={13} aria-hidden />
         {iconOnly ? null : <span className="os-refine-open-text">{search !== "" ? search : placeholder}</span>}
-      </button> : null}
+      </button>
       {open ? (
         <div className="os-refine-panel">
           <Input

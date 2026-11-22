@@ -321,7 +321,7 @@ func (e *MemQLEngine) evaluateFleetSetSharingExpression(ctx context.Context, arg
 			}
 		}
 		if len(newUsers)+len(newGroups) > 0 {
-			dir, err := e.shareDirectoryFor(ctx)
+			dir, err := e.shareDirectoryFor(ctx, false)
 			if err != nil {
 				return nil, fmt.Errorf("fleetSetSharing: read who you can share with: %w", err)
 			}

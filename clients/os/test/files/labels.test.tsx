@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // The connection seam, mocked at the MODULE as every other Files suite does,
@@ -11,11 +11,11 @@ vi.mock("../../src/live/connection", () => ({
 }));
 
 import { ARTIFACT_CONCEPT } from "../../src/apps/files/concepts";
-import { chooseOption, openSelect } from "../selectControl";
-import { artifactRow, click, emit, fakeConnection, renderFiles } from "./harness";
+import { artifactRow, click, emit, fakeConnection, renderFiles, openDetails } from "./harness";
 
-// Artifact labels in Files (epic memql#5009): the FACET behind Refine, and
-// the editor in the inspector.
+// Artifact labels in Files (epic memql#5009): the editor in the inspector.
+// The label FACET is a group in the search panel's kind menu (Jesús, Nov 20
+// 2026), tested in places.test.tsx.
 
 beforeEach(() => {
   h.connection = null;
@@ -25,16 +25,12 @@ const BRIEF = artifactRow({ id: "a-1", title: "brief.pdf", labels: ["client-acme
 const VIDEO = artifactRow({ id: "a-2", title: "demo.mp4", labels: ["urgent"] });
 const PLAIN = artifactRow({ id: "a-3", title: "notes.txt" });
 
-async function openRefine() {
-  await click(screen.getByRole("button", { name: "Refine files" }));
-}
-
 async function openInspector(title: string): Promise<HTMLElement> {
-  await click(screen.getByRole("button", { name: new RegExp(title) }));
+  await openDetails(title);
   return screen.getByRole("region", { name: "File details" });
 }
 
-describe("the label facet", () => {
+describe("labels on the browse", () => {
   it("keeps labels in details, without putting chips on file rows", async () => {
     h.connection = fakeConnection({ artifacts: [BRIEF, VIDEO, PLAIN] });
     await renderFiles();
@@ -43,104 +39,6 @@ describe("the label facet", () => {
     expect(within(item).queryByText("urgent")).toBeNull();
     const details = await openInspector("brief\\.pdf");
     expect(within(details).getByRole("button", { name: "Remove label client-acme" })).toBeTruthy();
-  });
-
-  it("shows NO standing label control while Refine is collapsed", async () => {
-    h.connection = fakeConnection({ artifacts: [BRIEF, VIDEO, PLAIN] });
-    await renderFiles();
-    await screen.findByRole("button", { name: /brief\.pdf/ });
-
-    // THE RULE-2 REGRESSION, pinned. A label rail beside the folder tree, or
-    // a select on the Head, is exactly the filter chrome rule 2 removes --
-    // and the rail is the app's PLACE language, which a label is not.
-    expect(screen.queryByLabelText("Label")).toBeNull();
-    expect(screen.queryByRole("combobox", { name: "Label" })).toBeNull();
-
-    // ...and no label rail beside the folder tree. The rail is REACHED first,
-    // so a rename of its own label cannot turn this into an assertion about a
-    // node that is not there (the positive control for the negative below).
-    const rail = screen.getByRole("navigation", { name: "File locations" });
-    expect(within(rail).getByText("Library")).toBeTruthy();
-    expect(within(rail).queryByText("client-acme")).toBeNull();
-    expect(within(rail).queryByText("urgent")).toBeNull();
-
-    // The one affordance IS there -- so the absence above is about the label
-    // control, not about a Head that failed to render.
-    expect(screen.getByRole("button", { name: "Refine files" })).toBeTruthy();
-  });
-
-  it("offers the labels the browse already holds, once Refine is asked", async () => {
-    h.connection = fakeConnection({ artifacts: [BRIEF, VIDEO, PLAIN] });
-    await renderFiles();
-    await screen.findByRole("button", { name: /brief\.pdf/ });
-
-    await openRefine();
-    // The kit's Select is a trigger plus a portalled listbox, so the options
-    // do not exist until it is opened (test/selectControl.ts).
-    const list = openSelect(screen.getByLabelText("Label"));
-    // Folded from the seeded population, de-duplicated and alphabetical --
-    // a client-side fold like every other facet here.
-    expect(
-      within(list)
-        .getAllByRole("option")
-        .map((o) => o.textContent),
-    ).toEqual(["Any label", "client-acme", "urgent"]);
-  });
-
-  it("is ABSENT when nothing carries a label -- a question with no answers", async () => {
-    h.connection = fakeConnection({ artifacts: [PLAIN] });
-    await renderFiles();
-    await screen.findByRole("button", { name: /notes\.txt/ });
-
-    await openRefine();
-    expect(screen.getByLabelText("Source")).toBeTruthy();
-    expect(screen.queryByLabelText("Label")).toBeNull();
-  });
-
-  it("narrows the list and shows a REMOVABLE chip beside Refine", async () => {
-    h.connection = fakeConnection({ artifacts: [BRIEF, VIDEO, PLAIN] });
-    await renderFiles();
-    await screen.findByRole("button", { name: /brief\.pdf/ });
-
-    await openRefine();
-    // Driven the way a person drives it: the facet is the kit's own listbox,
-    // so a `change` event fired at the trigger would reach nothing.
-    chooseOption(screen.getByLabelText("Label"), "client-acme");
-    await act(async () => {});
-
-    await waitFor(() => expect(screen.queryByRole("button", { name: /demo\.mp4/ })).toBeNull());
-    expect(screen.getByRole("button", { name: /brief\.pdf/ })).toBeTruthy();
-    expect(screen.queryByText(/notes\.txt/)).toBeNull();
-
-    // The chip is the active constraint, removable in place (rule 2). It
-    // stands beside the Refine control, and it is still there once the panel
-    // is shut -- the state of the question never hides.
-    const refine = document.querySelector(".os-refine") as HTMLElement;
-    const remove = within(refine).getByRole("button", { name: "Remove client-acme" });
-    await click(remove);
-    expect(await screen.findByRole("button", { name: /demo\.mp4/ })).toBeTruthy();
-  });
-
-  it("says the filter is why the list is empty, and offers the way out", async () => {
-    h.connection = fakeConnection({ artifacts: [BRIEF, VIDEO] });
-    await renderFiles();
-    await screen.findByRole("button", { name: /brief\.pdf/ });
-
-    await openRefine();
-    // Driven the way a person drives it: the facet is the kit's own listbox,
-    // so a `change` event fired at the trigger would reach nothing.
-    chooseOption(screen.getByLabelText("Label"), "client-acme");
-    await act(async () => {});
-    // Narrow to nothing: kind=Generated over a label only files carry.
-    await click(screen.getByRole("radio", { name: "Generated" }));
-
-    expect(await screen.findByText(/Nothing matches/)).toBeTruthy();
-    // An empty list that does not explain itself is the rule-4 failure in a
-    // different costume -- so the sentence comes with the act that undoes it.
-    const clear = screen.getByRole("button", { name: "Clear the search and filters" });
-    await click(clear);
-    expect(await screen.findByRole("button", { name: /brief\.pdf/ })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Clear the search and filters" })).toBeNull();
   });
 });
 
@@ -267,12 +165,17 @@ describe("the label editor in the inspector", () => {
     expect(within(inspector).queryByText("urgent")).toBeNull();
   });
 
-  it("says the free-text rule ONCE, in the editor and not on every chip", async () => {
+  // Item 11 (Jesús, Nov 20): Labels is one short row in Fleet's layout; the
+  // hint line above the field is dropped.
+  it("is one row, the field and Add, without a hint line", async () => {
     h.connection = fakeConnection({ artifacts: [BRIEF] });
     await renderFiles();
     const inspector = await openInspector("brief\\.pdf");
 
-    expect(within(inspector).getAllByText(/Use labels to find related files/)).toHaveLength(1);
+    expect(within(inspector).queryByText(/Use labels to find related files/)).toBeNull();
+    const section = within(inspector).getByRole("region", { name: "Labels" });
+    expect(within(section).getByLabelText("Add a label")).toBeTruthy();
+    expect(within(section).getByRole("button", { name: "Add" })).toBeTruthy();
   });
 
   it("keeps the input available without an empty label list", async () => {

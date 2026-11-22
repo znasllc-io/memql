@@ -58,3 +58,26 @@ func TestLibraryBrowseFacetsWalksEveryAuthorizedPageDB(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, memql.MaterializeRows(wire.OutputPayload()))
 }
+
+// Files sends an empty list when nothing can match: the Materializer place
+// before anything was made, and the Desktop place's folder list whenever it is
+// not searching. Each used to fail the read ("collection literal cannot be
+// empty"); an empty list now matches nothing (executor_filter.go
+// emptyListMembership), so the counts read answers with no rows instead.
+func TestLibraryBrowseFacetsAcceptsEmptyListsDB(t *testing.T) {
+	f := newRevisionDB(t)
+	for name, args := range map[string]map[string]any{
+		"materializer, nothing made":    {"archived": false, "sourceRefs": []any{}},
+		"desktop, files but no folders": {"archived": false, "ids": []any{"v1:library:artifact:none"}, "folderIds": []any{}},
+		"desktop, empty":                {"archived": false, "ids": []any{}, "folderIds": []any{}},
+	} {
+		result, err := f.first.handleBrowseFacets(f.ctx, args, 0)
+		require.NoError(t, err, name)
+		require.Len(t, result, 1, name)
+		var got struct {
+			Folders []any `json:"folders"`
+		}
+		require.NoError(t, json.Unmarshal(result[0].Payload, &got), name)
+		require.Empty(t, got.Folders, name)
+	}
+}

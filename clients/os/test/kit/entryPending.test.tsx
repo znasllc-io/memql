@@ -36,6 +36,13 @@ describe("entry loading transition", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("shows no theme switch and the 2x mark while it waits", () => {
+    const view = render(<EntryPending />);
+    expect(screen.queryByRole("group", { name: "Color theme" })).toBeNull();
+    expect(screen.queryByRole("radio", { name: "Dark" })).toBeNull();
+    expect(view.container.querySelector(".os-entry-pending-mark svg")?.getAttribute("width")).toBe("86");
+  });
+
   it("does not delay the destination under reduced motion", () => {
     const original = window.matchMedia;
     vi.stubGlobal("matchMedia", (query: string) => query === "(prefers-reduced-motion: reduce)"

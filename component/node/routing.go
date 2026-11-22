@@ -680,6 +680,24 @@ func defaultRoutingRules() []RoutingRule {
 		// would be surface nothing sends.
 		{Pattern: "graph.node.created.v1:library:folder", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:library:folder", TargetType: ""},
+		// File sharing (2026-11-18). A share and its recipient's notice are
+		// written on whichever replica took the sharer's call, and the
+		// recipient's "Shared with me" list -- and the sharer's own list of
+		// who has a file -- may be watching from a different one. The notice
+		// is the whole of the recipient's live arrival: without these rules
+		// a file shared with them appears only after a reload on another
+		// replica, and a stopped share stays listed there.
+		//
+		// BROADCAST WITH A CONSUMER TO CHECK, and it was checked: no
+		// automation in the tree triggers on v1:library:share or
+		// v1:library:shareNotice (endSharesOnArtifactArchive triggers on the
+		// ARTIFACT), so the multi-fire question does not arise. No delete
+		// rule: nothing hard-deletes either row -- a stop and an end are
+		// UPDATEs, and an expiry writes nothing.
+		{Pattern: "graph.node.created.v1:library:share", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:library:share", TargetType: ""},
+		{Pattern: "graph.node.created.v1:library:shareNotice", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:library:shareNotice", TargetType: ""},
 		// The watched-folder arrangement (epic memql#4783, the cockpit half
 		// memql#4841). These rows have TWO writers on DIFFERENT nodes and that
 		// is the whole reason the rules are here: a person creates, pauses and

@@ -41,7 +41,7 @@ export function StorageAllowance({ userId = "", editable = false }: { userId?: s
     {editing && <>
       <Field label="Storage allowance in GB"><Input id={`${ids}-limit`} label="Storage allowance in GB" value={gigabytes} onChange={setGigabytes} onEnter={() => void save()} /></Field>
       <Caption>From 0 to 5,000 GB. Lowering this keeps existing files and stops new reservations that exceed the allowance.</Caption>
-      <Button onClick={() => setEditing(false)}>Cancel</Button>{valid && <Button tone="primary" busy={busy} onClick={() => void save()}>Save allowance</Button>}
+      <Button onClick={() => setEditing(false)}>Cancel</Button>{valid && <Button tone="primary" busy={busy} onClick={() => save()}>Save allowance</Button>}
     </>}
     {error && <Notice tone="error" sentence="Storage could not be checked." detail={error} next={usage ? "The displayed allowance is from the last successful check." : undefined} />}
     {saveError && <Notice tone="error" sentence="The allowance was not changed." detail={saveError} />}

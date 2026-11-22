@@ -4,7 +4,7 @@
   inset-inline: max(12px, env(safe-area-inset-left));
   bottom: calc(var(--os-dock-h) + 20px + env(safe-area-inset-bottom));
   width: fit-content;
-  max-width: min(40rem, calc(100vw - 24px));
+  max-width: min(40rem, calc(calc(100vw / var(--os-scale, 1)) - 24px));
   margin-inline: auto;
   display: flex;
   align-items: center;
