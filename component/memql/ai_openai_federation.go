@@ -233,7 +233,8 @@ const (
 )
 
 // exchange posts one identity token and returns the bearer it is exchanged
-// for. A zero expiry means OpenAI named none. A 4xx is returned as
+// for. A zero expiry means OpenAI named none. A status that refuses the token
+// (signInStatusRefuses: a 4xx other than 408, 425 and 429) is returned as
 // *vendorExchangeRefused, which is what tells the sign-in the vendor answered
 // and refused rather than never answering.
 func (x *openaiExchanger) exchange(ctx context.Context, subject string) (string, time.Time, error) {
@@ -276,7 +277,7 @@ func (x *openaiExchanger) exchange(ctx context.Context, subject string) (string,
 		// never in an error body -- it is something we sent, not something the
 		// vendor echoes -- and is never logged from here either.
 		note := truncateForLog(string(raw), maxFederationBodyNote)
-		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+		if signInStatusRefuses(resp.StatusCode) {
 			return "", time.Time{}, &vendorExchangeRefused{Status: resp.StatusCode, Body: note}
 		}
 		return "", time.Time{}, fmt.Errorf("openai token exchange faulted (status %d): %s", resp.StatusCode, note)
@@ -308,7 +309,21 @@ func (x *openaiExchanger) exchange(ctx context.Context, subject string) (string,
 // a middleware rather than option.WithAPIKey: a bearer expires within the hour
 // and a header fixed at construction would serve a stale one for the rest of
 // the process's life.
+//
+// A 401 DOES NOT DROP THE BEARER, unlike Anthropic's middleware. OpenAI answers
+// 401 for more than a bearer it no longer accepts: a service account without
+// one endpoint's permission gets a 401 there and is served everywhere else
+// (its error-code reference lists "Invalid Authentication" for exactly that).
+// The bearer is the whole process's, so dropping it on any 401 let one such
+// request sign every OpenAI consumer on the node out. It is kept until it
+// expires, at most an hour, which is what this did before the shared sign-in.
+// TestOpenAIKeepsItsBearerThroughA401.
+//
+// A SERVED CALL IS PROOF. The source is told when the vendor serves a request
+// made with its bearer: that is the only proof a bearer bought by a renewal
+// ever gets, and what `memql provider-auth check` reports as verified.
 func openaiBearerMiddleware(src BearerSource) option.Middleware {
+	prover, _ := src.(interface{ NoteServed(bearer string) })
 	return func(req *http.Request, next option.MiddlewareNext) (*http.Response, error) {
 		token, _, err := src.Bearer(req.Context())
 		if err != nil {
@@ -316,13 +331,8 @@ func openaiBearerMiddleware(src BearerSource) option.Middleware {
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
 		resp, err := next(req)
-		if err == nil && resp != nil && resp.StatusCode == http.StatusUnauthorized {
-			// The vendor no longer accepts this bearer. A source that can drop
-			// it does, so the next call signs in again instead of sending a
-			// dead bearer until it expires on the clock.
-			if dropper, ok := src.(interface{ Invalidate(bearer string) }); ok {
-				dropper.Invalidate(token)
-			}
+		if prover != nil && err == nil && resp != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			prover.NoteServed(token)
 		}
 		return resp, err
 	}
@@ -404,7 +414,17 @@ func openaiCredential(cfg ProviderConfig, httpClient *http.Client) ([]option.Req
 //
 // It exists for the ONE consumer that cannot take an SDK client: the Realtime
 // transcription WebSocket, which dials with an Authorization header of its own
-// (app/integrations_stt.go wires it). `provider-auth check` uses it too.
+// (app/integrations_stt.go wires it).
+//
+// THE SOURCE FOLLOWS A RELOAD. The transcription path takes it once, when the
+// node is wired, and keeps it for the life of the process. It used to be the
+// sign-in object of that moment, so after an operator corrected an id and
+// pressed Apply every other OpenAI consumer moved to a sign-in under the new
+// ids and transcription stayed on the old one until the node restarted: a
+// second sign-in in the process (the one hole in "one sign-in per vendor"),
+// under ids somebody had just replaced. The source now asks the registry for
+// the current sign-in each time a bearer is wanted, and says so when OpenAI is
+// no longer set up. TestTheTranscriptionBearerFollowsAnApply.
 //
 // It resolves from a registered OpenAI provider's auth map rather than reading
 // the environment, so it goes through the same three-tier resolution
@@ -414,6 +434,30 @@ func openaiCredential(cfg ProviderConfig, httpClient *http.Client) ([]option.Req
 // consumer on the same node, which is the kind of split that presents as
 // "transcription is broken" long after the change that caused it.
 func (e *MemQLEngine) OpenAIBearer() (BearerSource, bool) {
+	if _, ok := e.openaiSignIn(); !ok {
+		return nil, false
+	}
+	return openaiEngineBearer{engine: e}, true
+}
+
+// openaiEngineBearer is the bearer source OpenAIBearer hands out: the engine's
+// CURRENT OpenAI sign-in, looked up on every call.
+type openaiEngineBearer struct {
+	engine *MemQLEngine
+}
+
+func (b openaiEngineBearer) Bearer(ctx context.Context) (string, time.Time, error) {
+	signIn, ok := b.engine.openaiSignIn()
+	if !ok {
+		return "", time.Time{}, fmt.Errorf("OpenAI is not set up on this node: its federation ids are not set, " +
+			"or were removed since this consumer started. Runbook: docs/public/operate/auth/openai-federation.md")
+	}
+	return signIn.Bearer(ctx)
+}
+
+// openaiSignIn returns the process's sign-in for the cluster's OpenAI account,
+// from the ids the registry's OpenAI records carry now.
+func (e *MemQLEngine) openaiSignIn() (*vendorSignIn, bool) {
 	if e == nil || e.providers == nil {
 		return nil, false
 	}

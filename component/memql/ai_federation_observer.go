@@ -211,10 +211,12 @@ func observeFederationExchange(base http.RoundTripper, req *http.Request) (*http
 			rec.ExpiresIn = time.Duration(*parsed.ExpiresIn) * time.Second
 			rec.ExpiresAt = started.Add(rec.ExpiresIn)
 		}
-	case resp.StatusCode >= 400 && resp.StatusCode < 500:
-		// DENIED: Anthropic understood the assertion and refused it. This is a
+	case signInStatusRefuses(resp.StatusCode):
+		// DENIED: the vendor understood the assertion and refused it. This is a
 		// configuration answer -- the rule, the subject prefix, the audience,
-		// the workspace -- and its reason is in the body.
+		// the workspace -- and its reason is in the body. 408, 425 and 429 are
+		// NOT this (signInStatusRefuses): they fall to the fault arm below, so
+		// a rate limit does not tick the counter an operator alerts on.
 		rec.Outcome = metrics.FederationExchangeDenied
 		rec.Detail = truncateForLog(string(body), maxFederationBodyNote)
 		slog.Warn("federation: token exchange DENIED -- the cluster is running on a credential the vendor will not renew",

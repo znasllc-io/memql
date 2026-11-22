@@ -29,8 +29,39 @@ import (
 // A PERSON MAY ASK FOR ONE MORE TRY. A refused sign-in is never retried on a
 // timer (ai_vendor_signin.go). Verify and Apply are a person asking, usually
 // right after fixing the vendor's side, so each lets a refused identity token
-// be presented once more. Apply reaches every node through the
-// providers.reload broadcast, which is what carries that to the peers.
+// be presented once more: Verify on the node that answers it, Apply on every
+// node, through the providers.reload broadcast.
+//
+// WHAT THE ENGINE TRIES AGAIN BY ITSELF: THE NEXT IDENTITY TOKEN. Two outcomes
+// leave a node without the vendor only until the pod's identity token is
+// replaced: the engine is WAITING (the token on disk was already presented),
+// or the vendor refused a token that MAY ONLY HAVE BEEN USED ALREADY (a
+// container that restarted inside its pod; equally a new pod's first token,
+// which cannot be told apart). Neither can be settled with the token on disk
+// and both are settled by the next one. So the engine presents that token
+// when it arrives, with nobody asking: a node with no traffic would otherwise
+// stay "not verified" for as long as it stayed idle, and a misconfigured rule
+// on a new pod would never be reported as refused.
+//
+//   - It waits until the token on disk says its replacement is due (kubelet
+//     replaces a projected token at 80 percent of its life), and a little
+//     more.
+//   - kubelet keeps its own schedule and can be a minute or two late, so the
+//     engine looks at the file before it does anything: with the old token
+//     still there it presents nothing and looks again shortly, a bounded
+//     number of times (vendorSignInFollowUpTries).
+//   - What it presents is a NEW token. This is never a retry of a refused one,
+//     and never a second presentation of an accepted one.
+//   - A reload starts a pass of its own and supersedes the wait an earlier pass
+//     left behind (vendorSignInGeneration), so two waits never both sign in.
+//
+// EVERY VENDOR GETS A RECORD, usable or not. Only the engine can say what a
+// vendor's ids resolve to: they may be in the environment or in the cluster's
+// storage, and the check command sees only the first. So the engine records a
+// vendor nobody set up (notConfigured), a vendor whose ids it refuses itself
+// (misconfigured: a partial set, an identity token it cannot use), and, on a
+// node type that calls no models, that it signs in to nothing (notUsed). The
+// check can then tell each of those from "the engine has not said yet".
 //
 // Regression tests: ai_vendor_signin_boot_test.go, including the cross-node
 // hop (TestAReloadBroadcastAllowsOneMoreTryOnThePeer). Never run against a
@@ -38,6 +69,34 @@ import (
 
 // vendorSignInAtStartTimeout bounds one vendor's sign-in and model list.
 const vendorSignInAtStartTimeout = 45 * time.Second
+
+// vendorSignInFollowUpGrace is how long after the next identity token is due
+// the engine waits before presenting it: kubelet replaces the file on its own
+// schedule, at or a little after 80 percent of the token's life.
+const vendorSignInFollowUpGrace = 30 * time.Second
+
+// vendorSignInFollowUpLimit bounds the wait for the next token. A token that
+// says it is due later than this is not waited for.
+const vendorSignInFollowUpLimit = 70 * time.Minute
+
+// vendorSignInFollowUpTries bounds how many times the engine looks for the
+// next token: once when it is due, then again every vendorSignInFollowUpGrace
+// while kubelet has not replaced the file. About five minutes in all.
+const vendorSignInFollowUpTries = 10
+
+// vendorSignInFollowUpWait is how the engine waits for the next identity
+// token. A variable so a test can make the wait instant; it returns false when
+// ctx ended first.
+var vendorSignInFollowUpWait = func(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
 
 // allowVendorRetry lets every sign-in this process holds present a REFUSED
 // identity token once more. It never allows an accepted token to be presented
@@ -119,25 +178,98 @@ func (e *MemQLEngine) DisableVendorSignInAtStart() {
 
 // SignInToConfiguredVendors signs in to every vendor whose cluster account is
 // set up on this node, in the background, and records the result where
-// `memql provider-auth check` and Settings read it. It returns at once, and
-// does nothing on a node that called DisableVendorSignInAtStart.
+// `memql provider-auth check` reads it. It returns at once. A node that called
+// DisableVendorSignInAtStart signs in to nothing and records that.
 func (e *MemQLEngine) SignInToConfiguredVendors(ctx context.Context) {
-	if e == nil || e.vendorSignInAtStartOff.Load() {
+	if e == nil {
 		return
 	}
+	if e.vendorSignInAtStartOff.Load() {
+		for _, vendor := range signInVendors {
+			recordVendorWithoutSignIn(vendor, signInOutcomeNotUsed,
+				"this node type calls no models and does not sign in to a vendor")
+		}
+		return
+	}
+	// A reload supersedes the follow-up an earlier pass left waiting.
+	generation := e.vendorSignInGeneration.Add(1)
 	e.vendorSignInWG.Add(1)
 	go func() {
 		defer e.vendorSignInWG.Done()
 		e.signInToConfiguredVendors(ctx)
+		e.followUpVendorSignIns(ctx, generation)
 	}()
 }
 
-// signInToConfiguredVendors is SignInToConfiguredVendors, waited for.
+// signInVendors are the vendors this engine can hold a cluster account at.
+var signInVendors = []string{metrics.FederationVendorAnthropic, metrics.FederationVendorOpenAI}
+
+// followUpVendorSignIns presents the next identity token when a vendor's record
+// says that token will settle it (see the file note). It ends when no vendor is
+// waiting for a token, when a later pass has superseded this one, or after
+// vendorSignInFollowUpTries looks.
+func (e *MemQLEngine) followUpVendorSignIns(ctx context.Context, generation uint64) {
+	for try := 0; try < vendorSignInFollowUpTries; try++ {
+		var (
+			pending []*vendorSignIn
+			wait    time.Duration
+		)
+		for _, vendor := range signInVendors {
+			signIn, _, ok := e.clusterVendorAccount(vendor)
+			if !ok {
+				continue
+			}
+			rec, recorded := signIn.Record()
+			if !recorded || !nextTokenSettles(rec) || rec.NextTokenDue.IsZero() {
+				continue
+			}
+			due := time.Until(rec.NextTokenDue) + vendorSignInFollowUpGrace
+			if due < vendorSignInFollowUpGrace {
+				due = vendorSignInFollowUpGrace
+			}
+			if due > vendorSignInFollowUpLimit {
+				continue
+			}
+			pending = append(pending, signIn)
+			if wait == 0 || due < wait {
+				wait = due
+			}
+		}
+		if len(pending) == 0 {
+			return
+		}
+		if !vendorSignInFollowUpWait(ctx, wait) || e.vendorSignInGeneration.Load() != generation {
+			return
+		}
+		arrived := false
+		for _, signIn := range pending {
+			if signIn.newTokenOnDisk() {
+				arrived = true
+			}
+		}
+		if !arrived {
+			// kubelet has not replaced the file yet. There is nothing to
+			// present, so no pass is spent on it; look again shortly.
+			continue
+		}
+		e.signInToConfiguredVendors(ctx)
+	}
+}
+
+// nextTokenSettles reports whether a record leaves the vendor unusable only
+// until the pod's identity token is replaced.
+func nextTokenSettles(rec vendorSignInRecord) bool {
+	return rec.Outcome == signInOutcomeWaiting || (rec.Outcome == signInOutcomeDenied && rec.MayBeReplay)
+}
+
+// signInToConfiguredVendors is one pass over the vendors, waited for.
 func (e *MemQLEngine) signInToConfiguredVendors(ctx context.Context) {
 	logger := e.safeLogger()
-	for _, vendor := range []string{metrics.FederationVendorAnthropic, metrics.FederationVendorOpenAI} {
+	for _, vendor := range signInVendors {
 		signIn, entry, ok := e.clusterVendorAccount(vendor)
 		if !ok {
+			outcome, detail := e.vendorWithoutAccount(vendor)
+			recordVendorWithoutSignIn(vendor, outcome, detail)
 			continue
 		}
 		// ONE CALL DOES BOTH. Listing models goes through the provider's own
@@ -150,7 +282,10 @@ func (e *MemQLEngine) signInToConfiguredVendors(ctx context.Context) {
 		if err != nil {
 			// A refused sign-in is logged where it happened, with the vendor's
 			// own reason (ai_federation_observer.go), and is in the record.
+			// An accepted sign-in whose bearer the API then refused is recorded
+			// here: without it the record would still say "accepted".
 			// This line says which node is now without the vendor.
+			signIn.NoteModelList(0, err)
 			if logger != nil {
 				outcome := "not attempted"
 				if rec, ok := signIn.Record(); ok {
@@ -162,10 +297,46 @@ func (e *MemQLEngine) signInToConfiguredVendors(ctx context.Context) {
 			}
 			continue
 		}
-		signIn.NoteModelsListed(listed)
+		signIn.NoteModelList(listed, nil)
 		if logger != nil {
 			logger.Info("vendor sign-in: signed in and the vendor listed its models",
 				"component", ComponentName, "vendor", vendor, "models", listed)
 		}
 	}
 }
+
+// vendorWithoutAccount says why this node holds no usable cluster account at a
+// vendor: nobody set it up, or ids are set and the engine itself refuses them.
+//
+// The difference is read from the RESOLVED auth of the vendor's own provider
+// records, which is the only place both the environment and the cluster's
+// storage have been consulted. The reason for a refusal is the constructor's
+// own (which values are set, which are missing, or what is wrong with the
+// identity token); it names values by their environment names and carries no
+// credential.
+func (e *MemQLEngine) vendorWithoutAccount(vendor string) (outcome, detail string) {
+	for _, name := range e.providers.Names() {
+		entry, ok := e.providers.Entry(name)
+		if !ok || entry == nil || entry.Err() == nil {
+			continue
+		}
+		idSet := false
+		switch vendor {
+		case metrics.FederationVendorAnthropic:
+			idSet = anthropicProviderTypes[strings.ToLower(entry.Config.Type)] &&
+				anthropicFederationFrom(entry.Config.Auth).anyIdSet()
+		case metrics.FederationVendorOpenAI:
+			idSet = isOpenAIProviderType(entry.Config.Type) &&
+				openaiFederationFrom(entry.Config.Auth).anyIdSet()
+		}
+		if idSet {
+			return signInOutcomeMisconfigured, truncateForLog(entry.Err().Error(), maxMisconfiguredNote)
+		}
+	}
+	return signInOutcomeNotConfigured, "no federation ids are set for this vendor on this node"
+}
+
+// maxMisconfiguredNote bounds the engine's own reason on a record. Longer than
+// a vendor's error body is allowed: the half-configured refusal names every
+// value by its environment name, and cutting it would cut the missing ones.
+const maxMisconfiguredNote = 1024

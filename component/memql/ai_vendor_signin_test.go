@@ -41,6 +41,14 @@ type signInHarness struct {
 	allowReplay bool            // the OpenAI shape: a repeated jti is accepted
 	lifetime    time.Duration   // 0 means the vendor names no expiry
 	presented   []string
+
+	// hang, when set, makes every exchange block until it is closed: a vendor
+	// that has accepted the connection and says nothing.
+	hang chan struct{}
+	// takes is how long an exchange lasts on the harness clock.
+	takes time.Duration
+	// inFlight counts exchanges that have started and not yet returned.
+	inFlight int
 }
 
 var signInEpoch = time.Date(2026, 11, 22, 10, 0, 0, 0, time.UTC)
@@ -135,11 +143,27 @@ func (h *signInHarness) exchangeCount() int {
 }
 
 // exchange is the vendor. Every call is one presentation of an identity token.
-func (h *signInHarness) exchange(_ context.Context, identityToken string) (string, time.Time, error) {
+func (h *signInHarness) exchange(ctx context.Context, identityToken string) (string, time.Time, error) {
+	h.mu.Lock()
+	h.exchanges++
+	h.inFlight++
+	h.presented = append(h.presented, identityToken)
+	hang := h.hang
+	h.mu.Unlock()
+	if hang != nil {
+		select {
+		case <-hang:
+		case <-ctx.Done():
+		}
+	}
+
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.exchanges++
-	h.presented = append(h.presented, identityToken)
+	h.inFlight--
+	h.now = h.now.Add(h.takes)
+	if hang != nil && ctx.Err() != nil {
+		return "", time.Time{}, ctx.Err()
+	}
 	if h.faulting {
 		return "", time.Time{}, errors.New("dial tcp: connection refused")
 	}
@@ -244,8 +268,15 @@ func TestSignInUsesTheRotatedTokenNearExpiry(t *testing.T) {
 	h.advance(time.Hour - 100*time.Second)
 	h.writeToken("jti-2")
 
+	// The call that finds the bearer near its end starts the renewal and is
+	// answered with the bearer in hand, which still works. The renewal runs
+	// behind it (TestACallerWithAValidBearerDoesNotWaitForARefresh).
+	if got := mustBearer(t, s); got != "bearer-1" {
+		t.Fatalf("with 100s left the caller got %q, want the bearer still in hand", got)
+	}
+	settle(t, s)
 	if got := mustBearer(t, s); got != "bearer-2" {
-		t.Fatalf("with 100s left and a new identity token, bearer = %q, want bearer-2", got)
+		t.Fatalf("after the renewal with the new identity token, bearer = %q, want bearer-2", got)
 	}
 	if got := h.exchangeCount(); got != 2 {
 		t.Fatalf("sign-ins = %d, want 2", got)
@@ -368,6 +399,10 @@ func TestSignInKeepsTheLastGoodBearerThroughARefusal(t *testing.T) {
 	if got := mustBearer(t, s); got != "bearer-1" {
 		t.Fatalf("through a refusal, bearer = %q, want the last good bearer-1", got)
 	}
+	settle(t, s)
+	if got := mustBearer(t, s); got != "bearer-1" {
+		t.Fatalf("after the refusal, bearer = %q, want the last good bearer-1", got)
+	}
 	rec, _ := s.Record()
 	if rec.Outcome != "denied" || rec.Status != 401 || rec.Detail != "match_subject_prefix" {
 		t.Fatalf("record = %+v, want denied / 401 / the vendor's reason", rec)
@@ -434,6 +469,8 @@ func TestSignInReadFailurePresentsNothing(t *testing.T) {
 		t.Fatalf("with the file unreadable, bearer = %q, want bearer-1", got)
 	}
 	h.writeToken("jti-2")
+	mustBearer(t, s)
+	settle(t, s)
 	if got := mustBearer(t, s); got != "bearer-2" {
 		t.Fatalf("once the file is back, bearer = %q, want bearer-2", got)
 	}
@@ -662,4 +699,361 @@ func TestIdentityTokenTimesIgnoreANumberNoClockCouldHold(t *testing.T) {
 	if iat.Unix() != 1700000000 || exp.Unix() != 1700000600 {
 		t.Errorf("fractional iat read as %d and exp as %d, want 1700000000 and 1700000600", iat.Unix(), exp.Unix())
 	}
+}
+
+// ---------------------------------------------------------------------------
+// A sign-in that hangs, and callers that should not pay for it
+// ---------------------------------------------------------------------------
+
+// waitUntilSignIn polls until cond holds. The sign-in runs its exchange on a goroutine
+// of its own, so a test that asserts on it has to wait for it to get there.
+func waitUntilSignIn(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("waited 5s for %s", what)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+func (h *signInHarness) flying() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.inFlight
+}
+
+// settle waits until no exchange is in flight for s.
+func settle(t *testing.T, s *vendorSignIn) {
+	t.Helper()
+	waitUntilSignIn(t, "the sign-in to finish", func() bool { return !s.signingIn() })
+}
+
+// A vendor that hangs is ONE attempt, however many callers are waiting. The
+// lock used to be held across the exchange and the back-off measured from the
+// attempt's start, so each waiter in turn made a 20 second attempt of its own:
+// five callers were five sign-ins and 100 seconds.
+func TestAHungSignInIsOneAttemptForEveryWaiter(t *testing.T) {
+	h := newSignInHarness(t)
+	h.writeToken("jti-1")
+	h.hang = make(chan struct{})
+	s := h.signIn(true)
+
+	const callers = 5
+	results := make(chan error, callers)
+	for i := 0; i < callers; i++ {
+		go func() {
+			_, _, err := s.Bearer(context.Background())
+			results <- err
+		}()
+	}
+	waitUntilSignIn(t, "the exchange to start", func() bool { return h.flying() == 1 })
+	// Give the other callers time to arrive and find it in flight.
+	time.Sleep(50 * time.Millisecond)
+	if got := h.exchangeCount(); got != 1 {
+		t.Fatalf("%d exchanges are in flight for one hung vendor, want 1", got)
+	}
+
+	close(h.hang)
+	for i := 0; i < callers; i++ {
+		if err := <-results; err != nil {
+			t.Fatalf("a waiter did not get the bearer the one sign-in bought: %v", err)
+		}
+	}
+	if got := h.exchangeCount(); got != 1 {
+		t.Fatalf("the callers made %d sign-ins, want 1", got)
+	}
+}
+
+// A waiter whose own context ends stops waiting. It does not stop the sign-in,
+// which serves everybody else.
+func TestAWaiterLeavesWhenItsContextEnds(t *testing.T) {
+	h := newSignInHarness(t)
+	h.writeToken("jti-1")
+	h.hang = make(chan struct{})
+	s := h.signIn(true)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	left := make(chan error, 1)
+	go func() {
+		_, _, err := s.Bearer(ctx)
+		left <- err
+	}()
+	waitUntilSignIn(t, "the exchange to start", func() bool { return h.flying() == 1 })
+	cancel()
+	select {
+	case err := <-left:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("the cancelled waiter returned %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("a caller whose context ended kept waiting for the sign-in")
+	}
+
+	close(h.hang)
+	settle(t, s)
+	if got := mustBearer(t, s); got != "bearer-1" {
+		t.Fatalf("the sign-in the cancelled caller started was thrown away: got %q", got)
+	}
+	if got := h.exchangeCount(); got != 1 {
+		t.Fatalf("exchanges = %d, want 1", got)
+	}
+}
+
+// A caller that already holds a working bearer never waits on its renewal.
+func TestACallerWithAValidBearerDoesNotWaitForARefresh(t *testing.T) {
+	h := newSignInHarness(t)
+	h.writeToken("jti-1")
+	s := h.signIn(true)
+	if got := mustBearer(t, s); got != "bearer-1" {
+		t.Fatalf("first bearer = %q", got)
+	}
+
+	// Inside the renewal window, with a new token on disk and a vendor that
+	// hangs: the bearer in hand has 110 seconds left.
+	h.advance(time.Hour - 110*time.Second)
+	h.writeToken("jti-2")
+	h.hang = make(chan struct{})
+
+	type answer struct {
+		bearer string
+		err    error
+	}
+	got := make(chan answer, 1)
+	go func() {
+		bearer, _, err := s.Bearer(context.Background())
+		got <- answer{bearer, err}
+	}()
+	select {
+	case a := <-got:
+		if a.err != nil || a.bearer != "bearer-1" {
+			t.Fatalf("got (%q, %v), want the bearer still in hand", a.bearer, a.err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("a caller holding a valid bearer waited for its renewal")
+	}
+	waitUntilSignIn(t, "the renewal to start", func() bool { return h.flying() == 1 })
+
+	close(h.hang)
+	settle(t, s)
+	if got := mustBearer(t, s); got != "bearer-2" {
+		t.Fatalf("after the renewal the bearer is %q, want the new one", got)
+	}
+	if got := h.exchangeCount(); got != 2 {
+		t.Fatalf("exchanges = %d, want 2", got)
+	}
+}
+
+// The pause after a sign-in that got no answer is counted from when it ENDED.
+// Counted from its start, an attempt that took longer than the pause left no
+// pause at all.
+func TestBackOffIsMeasuredFromTheAttemptsEnd(t *testing.T) {
+	h := newSignInHarness(t)
+	h.writeToken("jti-1")
+	h.faulting = true
+	h.takes = 20 * time.Second
+	s := h.signIn(true)
+
+	if _, _, err := s.Bearer(context.Background()); err == nil {
+		t.Fatal("a vendor that does not answer returned a bearer")
+	}
+	// The clock is now 20 seconds on. A caller arriving straight away must not
+	// start another attempt.
+	if _, _, err := s.Bearer(context.Background()); err == nil {
+		t.Fatal("the second call returned a bearer")
+	}
+	if got := h.exchangeCount(); got != 1 {
+		t.Fatalf("a second sign-in started %s after the first ended, want none inside %s (exchanges = %d)",
+			time.Duration(0), vendorSignInRetryBackoff, got)
+	}
+	h.advance(vendorSignInRetryBackoff + time.Second)
+	_, _, _ = s.Bearer(context.Background())
+	if got := h.exchangeCount(); got != 2 {
+		t.Fatalf("after the pause exchanges = %d, want 2", got)
+	}
+}
+
+// "This may only be a replay" is something only a vendor with a replay rule
+// can mean. OpenAI has none, so a refusal there is a refusal.
+func TestOnlyAReplayProtectedVendorCallsARefusalAPossibleReplay(t *testing.T) {
+	for name, replayProtected := range map[string]bool{"replay rule": true, "no replay rule": false} {
+		t.Run(name, func(t *testing.T) {
+			h := newSignInHarness(t)
+			// Issued a minute before the process started, as every new pod's
+			// first token is: kubelet mints it before the container starts.
+			h.writeTokenIssued("jti-old", signInEpoch.Add(-time.Minute), signInEpoch.Add(9*time.Minute))
+			h.refused["jti-old"] = true
+			s := h.signIn(replayProtected)
+			if _, _, err := s.Bearer(context.Background()); err == nil {
+				t.Fatal("a refused sign-in returned a bearer")
+			}
+			rec, ok := s.Record()
+			if !ok || rec.Outcome != signInOutcomeDenied {
+				t.Fatalf("record = %+v, want denied", rec)
+			}
+			if rec.MayBeReplay != replayProtected {
+				t.Fatalf("MayBeReplay = %v, want %v", rec.MayBeReplay, replayProtected)
+			}
+		})
+	}
+}
+
+// What the record says after the sign-in: whether the vendor's API took the
+// bearer. An accepted sign-in is not yet a usable vendor.
+func TestTheRecordSaysWhetherTheBearerWasProven(t *testing.T) {
+	h := newSignInHarness(t)
+	h.writeToken("jti-1")
+	s := h.signIn(true)
+	bearer := mustBearer(t, s)
+
+	rec, _ := s.Record()
+	if rec.Proof != "" {
+		t.Fatalf("a bearer nothing has used is recorded as %q", rec.Proof)
+	}
+
+	s.NoteModelList(0, &vendorExchangeRefused{Status: 403, Body: "permission_error"})
+	if rec, _ = s.Record(); rec.Proof != signInProofRefused || rec.ProofStatus != 403 {
+		t.Fatalf("after a refused model list the record is %+v", rec)
+	}
+
+	s.NoteModelList(7, nil)
+	if rec, _ = s.Record(); rec.Proof != signInProofOK || rec.ModelsListed != 7 {
+		t.Fatalf("after a model list the record is %+v", rec)
+	}
+
+	// A served call proves a bearer as well as a model list does.
+	h.advance(time.Hour)
+	h.writeToken("jti-2")
+	next := mustBearer(t, s)
+	if rec, _ = s.Record(); rec.Proof != "" {
+		t.Fatalf("a new bearer inherited the proof of the last one: %+v", rec)
+	}
+	s.NoteServed(bearer) // the OLD bearer says nothing about the new one
+	if rec, _ = s.Record(); rec.Proof != "" {
+		t.Fatalf("a call served on an earlier bearer proved the new one: %+v", rec)
+	}
+	s.NoteServed(next)
+	if rec, _ = s.Record(); rec.Proof != signInProofOK {
+		t.Fatalf("a served call did not prove the bearer: %+v", rec)
+	}
+}
+
+// Every node renews its bearer about once an hour, and the call that starts a
+// renewal is served with the bearer already in hand. If the renewal cleared the
+// proof, a node with little traffic would read as "not verified" from each
+// renewal until its next call, for a vendor that had been working all along.
+func TestARenewalWhileTheBearerStillWorksKeepsTheProof(t *testing.T) {
+	h := newSignInHarness(t)
+	h.writeToken("jti-1")
+	s := h.signIn(true)
+	first := mustBearer(t, s)
+	s.NoteModelList(4, nil)
+	provenAt := h.clock()
+
+	h.advance(59 * time.Minute) // inside the renewal window; the bearer still works
+	h.writeToken("jti-2")
+	if got := mustBearer(t, s); got != first {
+		t.Fatalf("the caller was handed %q, want the bearer in hand %q", got, first)
+	}
+	settle(t, s)
+	rec, _ := s.Record()
+	if rec.Proof != signInProofOK || rec.ModelsListed != 4 || !rec.ProofAt.Equal(provenAt) {
+		t.Fatalf("after a renewal the record is %+v, want the proof kept as it was", rec)
+	}
+
+	// The first call served with the new bearer is its own proof.
+	next := mustBearer(t, s)
+	if next == first {
+		t.Fatal("the renewal bought no new bearer")
+	}
+	h.advance(time.Minute)
+	s.NoteServed(next)
+	if rec, _ = s.Record(); !rec.ProofAt.Equal(h.clock()) {
+		t.Fatalf("a call served with the new bearer did not renew the proof: %+v", rec)
+	}
+}
+
+// A reload lists the vendor's models again with the bearer in hand. When that
+// list fails, for a timeout or a refusal, the record says so. The next call the
+// vendor serves with the same bearer is newer evidence and must be allowed to
+// say so too: the record would otherwise read "no answer" on a node that is
+// serving calls.
+func TestAServedCallOvertakesAFailedModelList(t *testing.T) {
+	h := newSignInHarness(t)
+	h.writeToken("jti-1")
+	s := h.signIn(true)
+	bearer := mustBearer(t, s)
+	s.NoteServed(bearer)
+	if rec, _ := s.Record(); rec.Proof != signInProofOK {
+		t.Fatalf("a served call did not prove the bearer: %+v", rec)
+	}
+
+	s.NoteModelList(0, errors.New("context deadline exceeded"))
+	if rec, _ := s.Record(); rec.Proof != signInProofError {
+		t.Fatalf("a failed model list is not on the record: %+v", rec)
+	}
+
+	h.advance(time.Minute)
+	s.NoteServed(bearer)
+	rec, _ := s.Record()
+	if rec.Proof != signInProofOK || !rec.ProofAt.Equal(h.clock()) {
+		t.Fatalf("after the vendor served a call the record still reads %+v", rec)
+	}
+}
+
+// The engine asks whether kubelet has replaced the identity token before it
+// spends a sign-in pass on it.
+func TestASignInKnowsWhenANewTokenIsOnDisk(t *testing.T) {
+	h := newSignInHarness(t)
+	h.writeToken("jti-1")
+	s := h.signIn(true)
+	if !s.newTokenOnDisk() {
+		t.Fatal("a token that was never presented is not seen as new")
+	}
+	mustBearer(t, s)
+	if s.newTokenOnDisk() {
+		t.Fatal("the token just presented is seen as new")
+	}
+	h.writeToken("jti-2")
+	if !s.newTokenOnDisk() {
+		t.Fatal("a replaced token is not seen as new")
+	}
+}
+
+// A bearer the vendor stopped accepting is on the record, not only gone.
+func TestADroppedBearerIsOnTheRecord(t *testing.T) {
+	h := newSignInHarness(t)
+	h.writeToken("jti-1")
+	s := h.signIn(true)
+	bearer := mustBearer(t, s)
+	s.NoteModelList(3, nil)
+
+	h.advance(10 * time.Minute)
+	s.Invalidate(bearer)
+	rec, _ := s.Record()
+	if rec.BearerDroppedAt.IsZero() {
+		t.Fatalf("the record still reads as a working sign-in: %+v", rec)
+	}
+	onDisk, found, err := readVendorSignInStatus(metrics.FederationVendorAnthropic)
+	if err != nil || !found || onDisk.BearerDroppedAt.IsZero() {
+		t.Fatalf("the status file does not say the bearer was dropped: %+v found=%v err=%v", onDisk, found, err)
+	}
+}
+
+// advanceClock moves a sign-in's clock forward. For a test of a sign-in the
+// process built, which reads the wall clock and cannot be handed another.
+func (s *vendorSignIn) advanceClock(d time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	base := s.now
+	s.now = func() time.Time { return base().Add(d) }
+}
+
+// signingIn reports whether an exchange is in progress. Test scaffolding: a
+// test that has just caused one waits on it before asserting.
+func (s *vendorSignIn) signingIn() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.flight != nil
 }

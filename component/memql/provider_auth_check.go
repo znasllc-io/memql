@@ -78,7 +78,9 @@ type ProviderAuthReport struct {
 	TokenSubject  string
 	TokenAudience []string
 
-	// The observed exchange. Zero on the api-key path (there is none).
+	// ExchangeOutcome is the outcome on the engine's record: ok, denied, error
+	// or waiting for a sign-in, and misconfigured, notConfigured or notUsed for
+	// a vendor the engine holds no sign-in for. Empty with nothing recorded.
 	ExchangeOutcome string
 	TokenExpiresAt  time.Time
 	TokenExpiresIn  time.Duration
@@ -88,8 +90,9 @@ type ProviderAuthReport struct {
 	// is not merely well-formed but accepted.
 	ModelsListed int
 
-	// Recorded says the engine in this pod has recorded a sign-in for the
-	// vendor. False means everything below describes configuration only.
+	// Recorded says the engine in this pod has recorded something about the
+	// vendor. False means everything in the report describes this process's own
+	// environment only.
 	Recorded bool
 	// SignInAt is when the recorded sign-in was attempted.
 	SignInAt time.Time
@@ -102,14 +105,46 @@ type ProviderAuthReport struct {
 	MayBeReplay bool
 	// NextTokenDue is when the identity token is expected to be replaced.
 	NextTokenDue time.Time
+
+	// Proof is whether the vendor's API has taken a bearer of the recorded
+	// sign-in: "ok", "refused", "error", or empty while nothing has used one.
+	// An accepted sign-in is a bearer; Proof is what makes it a vendor this
+	// node can use. ProofAt is when it was last shown, ProofStatus and
+	// ProofDetail the API's own answer when it did not take the bearer.
+	Proof       string
+	ProofAt     time.Time
+	ProofStatus int
+	ProofDetail string
+	// BearerDroppedAt is when the vendor's API answered 401 for the bearer of
+	// the recorded sign-in and the engine dropped it. Zero while it is in use.
+	BearerDroppedAt time.Time
 }
 
+// The values ProviderAuthReport.ExchangeOutcome and Proof carry, exported for
+// the command that prints the report, so a renamed value cannot half-land.
+const (
+	SignInOutcomeOK            = signInOutcomeOK
+	SignInOutcomeMisconfigured = signInOutcomeMisconfigured
+	SignInOutcomeNotConfigured = signInOutcomeNotConfigured
+	SignInOutcomeNotUsed       = signInOutcomeNotUsed
+
+	SignInProofOK      = signInProofOK
+	SignInProofRefused = signInProofRefused
+	SignInProofError   = signInProofError
+)
+
 // ErrSignInNotVerified is returned when the check cannot say whether the
-// vendor accepts this pod's credential: the engine has recorded no sign-in
-// yet, is waiting for the next identity token, was refused in a way a restart
-// alone explains, or got no answer. None of those is the vendor refusing the
-// configuration, and the installer must not read them as one.
+// vendor accepts this pod's credential: the engine has recorded nothing yet, is
+// waiting for the next identity token, was refused in a way a restart alone
+// explains, got no answer, or holds an accepted sign-in nothing has used. None
+// of those is the vendor refusing the configuration, and the installer must not
+// read them as one.
 var ErrSignInNotVerified = errors.New("the engine's sign-in is not verified yet")
+
+// ErrVendorNotSetUp is returned when the engine in this pod holds no account at
+// the vendor and says why: nobody set the vendor up, or this node type signs in
+// to none. It is an answer, not a fault, and it is NOT "verified".
+var ErrVendorNotSetUp = errors.New("the vendor is not set up on this node")
 
 // providerAuthCheckPoll is how often the check looks for the engine's record
 // while it waits.
@@ -137,22 +172,41 @@ func isOpenAIProviderType(providerType string) bool {
 }
 
 // CheckProviderAuth reports how this pod authenticates to a vendor: the
-// configuration it can see, and the sign-in the engine in this pod recorded.
-// It contacts no vendor.
+// configuration it can see, and what the engine in this pod recorded. It
+// contacts no vendor.
 //
 // providerName selects one DSL provider entry by name; empty picks the first
 // Anthropic entry in name order (deterministic, so two runs on two pods
 // compare).
 //
-// It WAITS, until ctx ends, for the engine's record when federation is
-// configured in this environment and nothing is recorded yet: the installer
-// runs this straight after a rollout, and the engine signs in a moment after
-// it starts. With no ids in the environment and no record it does not wait:
-// that is a vendor nobody set up, and the report says so.
+// THE ENGINE'S RECORD IS THE ANSWER, AND ONLY THE RECORD. This process sees the
+// ids in its environment; the engine also resolves ids applied through
+// Settings, which live in the cluster's storage. So this command cannot tell by
+// itself whether a vendor is set up, and it used to try: with no ids in its
+// environment and nothing recorded it answered "unavailable" and exited 0,
+// which the installer read as "federation verified" for a vendor with no ids at
+// all. The engine now records every vendor a moment after it starts, usable or
+// not (ai_vendor_signin_boot.go), and each answer here is one of its records:
 //
-// The error is nil when the recorded sign-in was accepted, wraps
-// ErrSignInNotVerified when the check cannot say, and is a plain error when
-// the vendor refused.
+//	nil                    the vendor accepted the sign-in AND its API has taken
+//	                       a bearer of it (a model list, or a served call)
+//	a plain error          refused: by the vendor, by its API, or by the engine
+//	                       itself (ids it will not use)
+//	ErrVendorNotSetUp      nobody set the vendor up, or this node type signs in
+//	                       to none
+//	ErrSignInNotVerified   cannot say yet: nothing recorded, waiting for the
+//	                       next identity token, a refusal a restart alone
+//	                       explains, no answer, or an accepted sign-in nothing
+//	                       has used
+//
+// IT WAITS, until ctx ends, while the engine has said nothing yet and while an
+// accepted sign-in has no proof yet: the installer runs this straight after a
+// rollout, the engine signs in a moment after it starts, and its sign-in and
+// its model list are one call a moment apart.
+//
+// ONE THING IT STATES BY ITSELF: a partial set of ids in its own environment,
+// when nothing is recorded. That is a refusal it can see without the engine,
+// and waiting out the timeout to say it would help nobody.
 func CheckProviderAuth(ctx context.Context, logger *slog.Logger, providerName string) (ProviderAuthReport, error) {
 	registry := newProviderRegistry()
 	if _, err := LoadUnifiedProviders(logger, registry); err != nil {
@@ -177,17 +231,17 @@ func CheckProviderAuth(ctx context.Context, logger *slog.Logger, providerName st
 	}
 
 	// What THIS process can see: the ids in the environment, and the identity
-	// token on disk. A half-configured set is refused here in the
-	// constructor's own words, exactly as boot refuses it.
-	var path credentialPath
+	// token on disk. They fill the report until the engine's record replaces
+	// them. envErr is the constructor's own refusal of what the environment
+	// holds (a partial set, a token it cannot use).
+	var (
+		path   credentialPath
+		envErr error
+	)
 	if vendor == metrics.FederationVendorOpenAI {
 		fed := openaiFederationFrom(entry.Config.Auth)
-		_, _, p, cerr := openaiCredential(entry.Config, guardedHTTPClient(nil))
-		if cerr != nil {
-			return report, cerr
-		}
-		path = p
-		if path == credentialPathFederation {
+		_, _, path, envErr = openaiCredential(entry.Config, guardedHTTPClient(nil))
+		if envErr == nil && path == credentialPathFederation {
 			report.IdentityProviderID = fed.IdentityProviderID
 			report.ServiceAccountID = fed.ServiceAccountID
 			report.IdentityTokenFile = fed.TokenFile
@@ -198,12 +252,8 @@ func CheckProviderAuth(ctx context.Context, logger *slog.Logger, providerName st
 		}
 	} else {
 		fed := anthropicFederationFrom(entry.Config.Auth)
-		_, p, cerr := anthropicCredential(entry.Config, guardedHTTPClient(nil))
-		if cerr != nil {
-			return report, cerr
-		}
-		path = p
-		if path == credentialPathFederation {
+		_, path, envErr = anthropicCredential(entry.Config, guardedHTTPClient(nil))
+		if envErr == nil && path == credentialPathFederation {
 			report.FederationRuleID = fed.RuleID
 			report.OrganizationID = fed.OrganizationID
 			report.ServiceAccountID = fed.ServiceAccountID
@@ -217,60 +267,100 @@ func CheckProviderAuth(ctx context.Context, logger *slog.Logger, providerName st
 	}
 	report.CredentialPath = string(path)
 
-	// What the ENGINE recorded. Waited for only when this environment says
-	// federation is configured.
-	rec, recorded, err := waitForSignInRecord(ctx, vendor, path == credentialPathFederation)
+	if envErr != nil {
+		// Stated at once only when the engine has said nothing. With a record,
+		// the record decides: the engine may hold the missing value in storage.
+		if _, recorded, rerr := readVendorSignInStatus(vendor); rerr == nil && !recorded {
+			return report, envErr
+		}
+	}
+
+	rec, recorded, err := waitForSettledRecord(ctx, vendor)
 	if err != nil {
 		return report, fmt.Errorf("read the engine's sign-in record: %w", err)
 	}
 	if !recorded {
-		if path == credentialPathUnavailable {
-			// UNAVAILABLE IS AN ANSWER, NOT A FAILURE. No ids here and no
-			// record: nobody set this vendor up on this node, and the command's
-			// job is to say so plainly rather than to error out on a provider
-			// that is behaving exactly as designed.
-			return report, nil
-		}
-		return report, fmt.Errorf("%w: the engine in this pod has recorded no %s sign-in. It signs in once at "+
-			"start; if the node has only just started, run the check again", ErrSignInNotVerified, vendor)
+		return report, fmt.Errorf("%w: the engine in this pod has recorded nothing about %s. It records every "+
+			"vendor a moment after it starts; if the node has only just started, run the check again",
+			ErrSignInNotVerified, vendor)
 	}
 
 	applySignInRecord(&report, rec)
+	return report, signInVerdict(rec)
+}
+
+// signInVerdict turns the engine's record into the check's answer (the table on
+// CheckProviderAuth).
+func signInVerdict(rec vendorSignInRecord) error {
 	switch rec.Outcome {
 	case signInOutcomeOK:
-		return report, nil
+		switch {
+		case rec.Proof == signInProofRefused:
+			return fmt.Errorf("the vendor accepted the sign-in, and its API then refused the bearer (status %d): %s",
+				rec.ProofStatus, rec.ProofDetail)
+		case !rec.BearerDroppedAt.IsZero():
+			return fmt.Errorf("%w: the vendor accepted the sign-in, and its API later answered 401 for the bearer "+
+				"(at %s), so the engine dropped it. The engine signs in again with the next identity token",
+				ErrSignInNotVerified, rec.BearerDroppedAt.UTC().Format(time.RFC3339))
+		case rec.Proof == signInProofOK:
+			return nil
+		case rec.Proof == signInProofError:
+			return fmt.Errorf("%w: the vendor accepted the sign-in, and its API gave no answer when the engine "+
+				"listed its models with the bearer: %s", ErrSignInNotVerified, rec.ProofDetail)
+		default:
+			return fmt.Errorf("%w: the vendor accepted the sign-in and nothing has used the bearer yet. The next "+
+				"model call on this node, or Verify in Settings > Vendors, shows whether the vendor's API takes it",
+				ErrSignInNotVerified)
+		}
 	case signInOutcomeWaiting:
-		return report, fmt.Errorf("%w: the engine is waiting for the next identity token%s. The one on disk has "+
+		return fmt.Errorf("%w: the engine is waiting for the next identity token%s. The one on disk has "+
 			"already been presented, and the vendor accepts a token once",
 			ErrSignInNotVerified, dueClause(rec.NextTokenDue))
 	case signInOutcomeDenied:
 		if rec.MayBeReplay {
-			return report, fmt.Errorf("%w: the vendor refused the sign-in (status %d: %s), but the identity token "+
+			return fmt.Errorf("%w: the vendor refused the sign-in (status %d: %s), but the identity token "+
 				"was issued before this engine process started, so it may only have been used already by the "+
-				"process this one replaced. The engine signs in again with the next token%s",
+				"process this one replaced. The engine presents the next token when it arrives%s",
 				ErrSignInNotVerified, rec.Status, rec.Detail, dueClause(rec.NextTokenDue))
 		}
-		return report, fmt.Errorf("the vendor refused the engine's sign-in (status %d): %s", rec.Status, rec.Detail)
-	default:
-		return report, fmt.Errorf("%w: the engine's last sign-in got no answer from the vendor: %s",
+		return fmt.Errorf("the vendor refused the engine's sign-in (status %d): %s", rec.Status, rec.Detail)
+	case signInOutcomeMisconfigured:
+		return fmt.Errorf("the engine refuses this vendor's configuration before any vendor is asked: %s", rec.Detail)
+	case signInOutcomeNotConfigured, signInOutcomeNotUsed:
+		return fmt.Errorf("%w: %s", ErrVendorNotSetUp, rec.Detail)
+	case signInOutcomeError:
+		return fmt.Errorf("%w: the engine's last sign-in got no answer from the vendor: %s",
 			ErrSignInNotVerified, rec.Detail)
+	default:
+		return fmt.Errorf("%w: the engine recorded an outcome this command does not know (%q)",
+			ErrSignInNotVerified, rec.Outcome)
 	}
 }
 
-// waitForSignInRecord reads the engine's record for a vendor. With wait set it
-// polls until one exists or ctx ends; without, it reads once.
-func waitForSignInRecord(ctx context.Context, vendor string, wait bool) (vendorSignInRecord, bool, error) {
+// waitForSettledRecord reads the engine's record for a vendor, polling until it
+// says something the check can report or ctx ends. Two states are waited out:
+// nothing recorded yet, and an accepted sign-in the vendor's API has not been
+// asked about yet. When ctx ends it returns whatever is there.
+func waitForSettledRecord(ctx context.Context, vendor string) (vendorSignInRecord, bool, error) {
 	for {
 		rec, ok, err := readVendorSignInStatus(vendor)
-		if err != nil || ok || !wait {
+		if err != nil {
 			return rec, ok, err
+		}
+		if ok && !proofPending(rec) {
+			return rec, true, nil
 		}
 		select {
 		case <-ctx.Done():
-			return vendorSignInRecord{}, false, nil
+			return rec, ok, nil
 		case <-time.After(providerAuthCheckPoll):
 		}
 	}
+}
+
+// proofPending reports an accepted sign-in whose bearer nothing has used yet.
+func proofPending(rec vendorSignInRecord) bool {
+	return rec.Outcome == signInOutcomeOK && rec.Proof == "" && rec.BearerDroppedAt.IsZero()
 }
 
 // applySignInRecord fills the report from the engine's record. The ids and
@@ -278,12 +368,20 @@ func waitForSignInRecord(ctx context.Context, vendor string, wait bool) (vendorS
 func applySignInRecord(report *ProviderAuthReport, rec vendorSignInRecord) {
 	report.Recorded = true
 	report.CredentialPath = string(credentialPathFederation)
+	if rec.Outcome == signInOutcomeNotConfigured || rec.Outcome == signInOutcomeNotUsed {
+		report.CredentialPath = string(credentialPathUnavailable)
+	}
 	report.ExchangeOutcome = rec.Outcome
 	report.SignInAt = rec.At
 	report.Detail = rec.Detail
 	report.MayBeReplay = rec.MayBeReplay
 	report.NextTokenDue = rec.NextTokenDue
 	report.ModelsListed = rec.ModelsListed
+	report.Proof = rec.Proof
+	report.ProofAt = rec.ProofAt
+	report.ProofStatus = rec.ProofStatus
+	report.ProofDetail = rec.ProofDetail
+	report.BearerDroppedAt = rec.BearerDroppedAt
 	if !rec.ExpiresAt.IsZero() {
 		report.TokenExpiresAt = rec.ExpiresAt
 		report.TokenExpiresIn = time.Until(rec.ExpiresAt)

@@ -36,6 +36,9 @@ type MemQLEngine struct {
 	// vendorSignInAtStartOff is set by a node type that calls no models
 	// (DisableVendorSignInAtStart). The zero value signs in.
 	vendorSignInAtStartOff atomic.Bool
+	// vendorSignInGeneration counts sign-in passes, so a follow-up left waiting
+	// by one pass stands down when a later pass (a reload) has replaced it.
+	vendorSignInGeneration atomic.Uint64
 
 	beforeWriteMu      sync.RWMutex
 	beforeWriteHooks   map[string][]BeforeWriteHook

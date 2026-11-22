@@ -9,12 +9,16 @@ import (
 	"io/fs"
 	"log/slog"
 	"math"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/openai/openai-go/v3"
 
 	"github.com/znasllc-io/memql/core/num"
 )
@@ -24,7 +28,7 @@ import (
 // decisions A1, A2, A4 and A5).
 //
 // THE INVARIANT: a process presents an identity token to a vendor at most once,
-// however many clients it holds.
+// however many clients it holds and however many callers arrive together.
 //
 // WHY IT EXISTS. The cluster's account at a vendor is workload identity
 // federation: the pod's projected Kubernetes token is exchanged for a
@@ -38,18 +42,30 @@ import (
 // vendorSignIn processVendorSignIn returns, so the number of clients no longer
 // decides the number of sign-ins.
 //
-// WHAT IT WILL NOT DO, and each refusal is deliberate:
+// ONE EXCHANGE AT A TIME, AS A FLIGHT. The lock is never held across the
+// exchange. The first caller that needs a sign-in starts it on a goroutine of
+// its own; callers with a bearer that still works are served at once while it
+// runs, callers with none wait for it and leave when their own context ends,
+// and the pause before another attempt is counted from when the attempt ENDED.
+// A vendor that hangs therefore costs one attempt, not one per waiting caller.
 //
-//   - Present an ACCEPTED token again to a replay-protected vendor. It cannot
-//     succeed, and every attempt is a refusal in the vendor's console. The
-//     engine waits for kubelet to rotate the file and says so.
-//   - Retry a REFUSED token on its own. A refusal is a configuration answer
-//     (the rule, the subject, the audience) that only a person changes. One
-//     exception: AllowRetry, which Verify and Apply call, lets a refused token
-//     be presented once more, because the operator may have just fixed the
+// THREE ANSWERS A SIGN-IN CAN GET, and what each allows:
+//
+//   - ACCEPTED. The token is never presented again to a replay-protected
+//     vendor: it cannot succeed, and every attempt is a refusal in the vendor's
+//     console. The engine waits for kubelet to rotate the file and says so.
+//   - REFUSED (a 4xx other than 408, 425 and 429; signInStatusRefuses). A
+//     configuration answer -- the rule, the subject, the audience -- that only
+//     a person changes, so it is never retried on a timer. One exception:
+//     AllowRetry, which Verify and Apply call, lets a refused token be
+//     presented once more, because the operator may have just fixed the
 //     vendor's side and should not wait out a rotation to find out.
-//   - Drop a bearer that still works because a newer sign-in failed. The last
-//     good bearer is handed out until it expires.
+//   - NO ANSWER (a transport fault, a 5xx, or 408/425/429: "come back
+//     later"). The vendor did not judge the token, so it is presented again,
+//     no more often than vendorSignInRetryBackoff.
+//
+// In every case the last good bearer keeps being handed out until it expires:
+// a newer sign-in that failed is not a reason to drop one that works.
 //
 // WHAT SURVIVES WHAT. The sign-in is per PROCESS. It survives a provider
 // reload while the federation ids are unchanged (processVendorSignIn returns
@@ -57,12 +73,16 @@ import (
 // restart, and a restarted container reads the same token file: on a
 // replay-protected vendor its first sign-in is then refused until the token
 // rotates. That refusal is recorded with MayBeReplay, so it does not read as a
-// broken configuration (A4).
+// broken configuration (A4), and the engine presents the next token when it
+// arrives (ai_vendor_signin_boot.go).
 //
 // THE RECORD is what `memql provider-auth check` reports instead of signing
 // in itself (A5): two signers in one pod cannot both succeed under a replay
 // rule. It is written to a small file in the pod's temporary directory and
-// carries no credential: not the bearer, not the identity token.
+// carries no credential: not the bearer, not the identity token. It says two
+// things about an accepted sign-in, because they are two answers: that the
+// vendor accepted the identity token (Outcome), and whether the vendor's API
+// then took the bearer (Proof). Only both make a vendor this node can use.
 //
 // Regression tests: ai_vendor_signin_test.go. Never run against a vendor;
 // the design record's A9 is that run.
@@ -98,6 +118,16 @@ const (
 	signInOutcomeDenied  = "denied"
 	signInOutcomeError   = "error"
 	signInOutcomeWaiting = "waiting"
+	// signInOutcomeNotConfigured: the engine found no federation ids for this
+	// vendor, in the environment or in the cluster's storage. Nobody set it up.
+	signInOutcomeNotConfigured = "notConfigured"
+	// signInOutcomeNotUsed: this node type calls no models and signs in to no
+	// vendor, whatever is configured.
+	signInOutcomeNotUsed = "notUsed"
+	// signInOutcomeMisconfigured: ids are set and the engine itself refuses
+	// them before any vendor is asked: a partial set, or an identity token it
+	// cannot use. Detail carries the engine's own reason.
+	signInOutcomeMisconfigured = "misconfigured"
 )
 
 // vendorSignInConfig is everything one vendor's sign-in is built from.
@@ -114,8 +144,9 @@ type vendorSignInConfig struct {
 	// Ids are the vendor's ids, for the record. Never a credential.
 	Ids map[string]string
 	// Exchange presents one identity token and returns the bearer. A zero
-	// expiresAt means the vendor named no lifetime. A vendor's 4xx is returned
-	// as *vendorExchangeRefused; anything else means no answer.
+	// expiresAt means the vendor named no lifetime. A status that refuses the
+	// token (signInStatusRefuses) is returned as *vendorExchangeRefused;
+	// anything else means no answer.
 	Exchange func(ctx context.Context, identityToken string) (bearer string, expiresAt time.Time, err error)
 }
 
@@ -129,6 +160,30 @@ type vendorExchangeRefused struct {
 
 func (e *vendorExchangeRefused) Error() string {
 	return fmt.Sprintf("the vendor refused the sign-in (status %d): %s", e.Status, e.Body)
+}
+
+// signInStatusRefuses reports whether a sign-in's HTTP status is the vendor
+// REFUSING the identity token: an answer about the configuration, which only a
+// person changes and the engine therefore never retries by itself.
+//
+// NOT EVERY 4xx IS THAT. 408, 425 and 429 ask the engine to come back: the
+// vendor did not judge the token, and by its own account did not consume it.
+// Read as refusals they left a node without the vendor until its identity
+// token was replaced (most of an hour), for one rate-limited request, and
+// ticked the denial counter operators are told to alert on. They are "no
+// answer", retried on the sign-in's back-off like a transport fault.
+//
+// One function, three callers that must agree: both vendors' exchanges and the
+// exchange observer (ai_federation_observer.go).
+func signInStatusRefuses(status int) bool {
+	if status < 400 || status >= 500 {
+		return false
+	}
+	switch status {
+	case http.StatusRequestTimeout, http.StatusTooEarly, http.StatusTooManyRequests:
+		return false
+	}
+	return true
 }
 
 // vendorSignInWaiting is returned when the only identity token on disk has
@@ -153,6 +208,19 @@ func (e *vendorSignInWaiting) Error() string {
 		e.Vendor, e.UsedAt.UTC().Format(time.RFC3339), due)
 }
 
+// The proof a record carries for an accepted sign-in: whether the vendor's API
+// has taken the bearer. An accepted sign-in is a bearer; it is not yet a
+// vendor this node can use.
+const (
+	// signInProofOK: the vendor listed its models with the bearer, or served a
+	// call with it.
+	signInProofOK = "ok"
+	// signInProofRefused: the vendor's API answered the bearer with 401 or 403.
+	signInProofRefused = "refused"
+	// signInProofError: the first API call with the bearer got no answer.
+	signInProofError = "error"
+)
+
 // vendorSignInRecord is the last thing that happened to a vendor's sign-in in
 // this process. Every field is safe to show an operator.
 type vendorSignInRecord struct {
@@ -165,8 +233,12 @@ type vendorSignInRecord struct {
 	ExpiresAt time.Time `json:"expiresAt,omitempty"`
 	// Detail is the vendor's reason on a refusal, or the fault on an error.
 	Detail string `json:"detail,omitempty"`
-	// MayBeReplay marks a refusal of a token issued before this process
-	// started: an earlier process in this pod may already have used it.
+	// MayBeReplay marks a refusal, by a vendor that accepts a token once, of a
+	// token issued before this process started: an earlier process in this pod
+	// may already have used it. It is also true of every NEW pod's first
+	// token, which kubelet mints before the container starts, so it says only
+	// that the next token will settle the question (the engine tries again
+	// when that token is due).
 	MayBeReplay bool `json:"mayBeReplay,omitempty"`
 	// NextTokenDue is when the identity token is expected to be replaced.
 	NextTokenDue  time.Time         `json:"nextTokenDue,omitempty"`
@@ -174,10 +246,28 @@ type vendorSignInRecord struct {
 	Ids           map[string]string `json:"ids,omitempty"`
 	TokenSubject  string            `json:"tokenSubject,omitempty"`
 	TokenAudience []string          `json:"tokenAudience,omitempty"`
-	// ModelsListed is how many models the vendor listed with the new bearer,
-	// the proof that it is accepted for API calls and not only well-formed.
+	// Proof says whether the vendor's API has taken a bearer of this sign-in:
+	// "" while nothing has used one, then one of the signInProof values.
+	// ProofStatus and ProofDetail are the API's answer when it did not, and
+	// ProofAt is when it was last shown. A renewal made while the last bearer
+	// still worked keeps the proof (see fly); ProofAt says how old it is.
+	Proof       string    `json:"proof,omitempty"`
+	ProofStatus int       `json:"proofStatus,omitempty"`
+	ProofDetail string    `json:"proofDetail,omitempty"`
+	ProofAt     time.Time `json:"proofAt,omitempty"`
+	// ModelsListed is how many models the vendor listed with the bearer, when
+	// a model list is what proved it.
 	ModelsListed int `json:"modelsListed,omitempty"`
-	Pid          int `json:"pid"`
+	// BearerDroppedAt is when the vendor's API answered the bearer of this
+	// sign-in with 401 and the engine dropped it. Zero while it is in use.
+	BearerDroppedAt time.Time `json:"bearerDroppedAt,omitempty"`
+	Pid             int       `json:"pid"`
+}
+
+// signInFlight is one exchange in progress. done closes once the vendor has
+// answered, or the attempt gave up, and the result is on the sign-in.
+type signInFlight struct {
+	done chan struct{}
 }
 
 // vendorSignIn is one vendor's sign-in for this process.
@@ -188,11 +278,15 @@ type vendorSignIn struct {
 	// refused token may have been used before it (MayBeReplay).
 	started time.Time
 
+	// mu guards everything below. It is NEVER held across an exchange: the
+	// exchange runs as a flight, and callers wait on the flight, not the lock.
 	mu        sync.Mutex
 	bearer    string
 	expiresAt time.Time
 
 	// The last identity token presented, by hash, and how the vendor answered.
+	// presentedAt is when the attempt ENDED: the pause before the same token
+	// may be presented again is counted from the answer, or from giving up.
 	hasPresented     bool
 	presented        [sha256.Size]byte
 	presentedOutcome string
@@ -201,9 +295,14 @@ type vendorSignIn struct {
 	retryAllowed bool
 	// lastErr is what a caller gets while nothing may be presented.
 	lastErr error
+	// flight is the exchange in progress, nil when there is none.
+	flight *signInFlight
 
 	hasRecord bool
 	record    vendorSignInRecord
+	// bearerProven says the vendor's API has taken the bearer IN HAND. The
+	// record's Proof can be older than that: a renewal keeps it (see fly).
+	bearerProven bool
 }
 
 func newVendorSignIn(cfg vendorSignInConfig, now func() time.Time, started time.Time) *vendorSignIn {
@@ -216,44 +315,85 @@ func newVendorSignIn(cfg vendorSignInConfig, now func() time.Time, started time.
 // Bearer returns a bearer the vendor will accept now, signing in when one is
 // due and a token may be presented.
 //
-// THE LOCK IS HELD ACROSS THE EXCHANGE, ON PURPOSE. Many callers arrive
-// together when a bearer nears expiry; releasing the lock would let each
-// present the same token, which is the failure this type exists to prevent.
-// The first caller pays and the rest wake to the result.
+// ONE EXCHANGE AT A TIME, AND NOBODY WAITS WHO DOES NOT HAVE TO. Many callers
+// arrive together when a bearer nears expiry or a process starts. Exactly one
+// exchange is made for them (a second would present the same identity token,
+// which is the failure this type exists to prevent), and:
+//
+//   - a caller with a bearer that still works gets it at once, while the
+//     renewal goes on behind it;
+//   - a caller with none waits for the exchange, and stops waiting when its
+//     own context ends. The exchange itself is not stopped: it serves every
+//     other caller, and abandoning it can leave a token the vendor accepted
+//     and the engine has no bearer for.
+//
+// This used to hold the lock across the exchange. A vendor that hung then made
+// every caller wait in turn and make an attempt of its own, context or not,
+// including callers that already held a working bearer.
 func (s *vendorSignIn) Bearer(ctx context.Context) (string, time.Time, error) {
+	for {
+		bearer, expiresAt, wait, err := s.bearerOrFlight(ctx)
+		if wait == nil {
+			return bearer, expiresAt, err
+		}
+		select {
+		case <-wait:
+			// The exchange ended. Ask again: there is a bearer now, or there is
+			// the reason there is not.
+		case <-ctx.Done():
+			return "", time.Time{}, ctx.Err()
+		}
+	}
+}
+
+// bearerOrFlight answers from what is in hand. When the caller has to wait for
+// an exchange it returns that exchange's done channel, starting the exchange
+// if none is running.
+func (s *vendorSignIn) bearerOrFlight(ctx context.Context) (string, time.Time, <-chan struct{}, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	now := s.now()
 	if s.bearer != "" && s.expiresAt.Sub(now) > vendorSignInRefreshWindow {
-		return s.bearer, s.expiresAt, nil
+		return s.bearer, s.expiresAt, nil, nil
 	}
+	valid := s.bearerValid(now)
 
-	// Re-read on every sign-in: kubelet rewrites a projected token in place,
-	// and a copy taken earlier stops being valid on a schedule nothing here
-	// controls. A failed read presents nothing and marks nothing as presented.
-	token, err := readFileTrimmed(s.cfg.TokenFile)
-	if err != nil {
-		if s.bearerValid(now) {
-			return s.bearer, s.expiresAt, nil
-		}
-		return "", time.Time{}, fmt.Errorf("cannot read the identity token at %s: %w", s.cfg.TokenFile, err)
-	}
-	hash := sha256.Sum256([]byte(token))
-
-	if s.hasPresented && hash == s.presented {
-		if hold, heldErr := s.holdSameToken(token, now); hold {
-			if s.bearerValid(now) {
-				return s.bearer, s.expiresAt, nil
+	if s.flight == nil {
+		// Re-read on every sign-in: kubelet rewrites a projected token in
+		// place, and a copy taken earlier stops being valid on a schedule
+		// nothing here controls. A failed read presents nothing and marks
+		// nothing as presented.
+		token, err := readFileTrimmed(s.cfg.TokenFile)
+		if err != nil {
+			if valid {
+				return s.bearer, s.expiresAt, nil, nil
 			}
-			return "", time.Time{}, heldErr
+			return "", time.Time{}, nil, fmt.Errorf("cannot read the identity token at %s: %w", s.cfg.TokenFile, err)
 		}
+		hash := sha256.Sum256([]byte(token))
+		if s.hasPresented && hash == s.presented {
+			if hold, heldErr := s.holdSameToken(token, now); hold {
+				if valid {
+					return s.bearer, s.expiresAt, nil, nil
+				}
+				return "", time.Time{}, nil, heldErr
+			}
+		}
+		s.flight = &signInFlight{done: make(chan struct{})}
+		// The exchange keeps the caller's values (a client's request says
+		// which address its vendor is reached at) and not its cancellation.
+		go s.fly(context.WithoutCancel(ctx), s.flight, token, hash)
 	}
-	return s.present(ctx, token, hash)
+	if valid {
+		return s.bearer, s.expiresAt, nil, nil
+	}
+	return "", time.Time{}, s.flight.done, nil
 }
 
 // holdSameToken decides whether the token on disk, which is the one last
 // presented, must NOT be presented again right now. hold is false when it may.
+// The caller holds s.mu.
 func (s *vendorSignIn) holdSameToken(token string, now time.Time) (hold bool, err error) {
 	switch s.presentedOutcome {
 	case signInOutcomeOK:
@@ -305,28 +445,54 @@ func (s *vendorSignIn) lastErrOr(fallback string) error {
 	return fmt.Errorf("%s sign-in: %s", s.cfg.Vendor, fallback)
 }
 
-// present makes one sign-in with the token and records what the vendor said.
-// The caller holds s.mu.
-func (s *vendorSignIn) present(ctx context.Context, token string, hash [sha256.Size]byte) (string, time.Time, error) {
-	started := s.now()
-	exchangeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), vendorSignInExchangeTimeout)
+// fly makes one sign-in with the token and records what the vendor said. It
+// runs on a goroutine of its own and holds s.mu only to record.
+func (s *vendorSignIn) fly(ctx context.Context, flight *signInFlight, token string, hash [sha256.Size]byte) {
+	// Closed last, after the result is on the sign-in and the lock is released.
+	defer close(flight.done)
+
+	exchangeCtx, cancel := context.WithTimeout(ctx, vendorSignInExchangeTimeout)
 	bearer, expiresAt, err := s.cfg.Exchange(exchangeCtx, token)
 	cancel()
 
-	s.hasPresented, s.presented, s.presentedAt, s.retryAllowed = true, hash, started, false
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.flight = nil
+	// The clock is read after the exchange: it may have spent seconds failing,
+	// and the pause before another attempt starts from here.
+	answered := s.now()
+	s.hasPresented, s.presented, s.presentedAt, s.retryAllowed = true, hash, answered, false
 
 	var refused *vendorExchangeRefused
 	switch {
 	case err == nil:
 		if expiresAt.IsZero() {
-			expiresAt = started.Add(vendorSignInUnknownLifetime)
+			expiresAt = answered.Add(vendorSignInUnknownLifetime)
 		}
-		s.bearer, s.expiresAt = bearer, expiresAt
+		rec := vendorSignInRecord{Outcome: signInOutcomeOK, At: answered, ExpiresAt: expiresAt}
+		// A RENEWAL WHILE THE LAST BEARER STILL WORKS KEEPS ITS PROOF. Every
+		// node renews about once an hour, and the call that starts a renewal is
+		// served with the bearer already in hand, so nothing uses the new one
+		// until the next call. Cleared here, the proof would make a node with
+		// little traffic read as "not verified" from each renewal to its next
+		// call. The new bearer comes from the same ids and the same service
+		// account as the one the API took minutes ago, so the record keeps
+		// saying so, with the time it was last shown (ProofAt). A sign-in after
+		// the bearer expired or was dropped starts unproven: the call that
+		// waited for it is about to prove it either way.
+		if s.hasRecord && s.record.Outcome == signInOutcomeOK && s.record.BearerDroppedAt.IsZero() && s.bearerValid(answered) {
+			rec.Proof, rec.ProofStatus, rec.ProofDetail = s.record.Proof, s.record.ProofStatus, s.record.ProofDetail
+			rec.ProofAt, rec.ModelsListed = s.record.ProofAt, s.record.ModelsListed
+		}
+		s.bearer, s.expiresAt, s.bearerProven = bearer, expiresAt, false
 		s.presentedOutcome, s.lastErr = signInOutcomeOK, nil
-		s.setRecord(vendorSignInRecord{Outcome: signInOutcomeOK, At: started, ExpiresAt: expiresAt}, token)
-		return bearer, expiresAt, nil
+		s.setRecord(rec, token)
 
 	case errors.As(err, &refused):
+		// THE LAST GOOD BEARER KEEPS WORKING. A refusal is an answer that
+		// arrives while a valid bearer may still be in hand, and dropping it
+		// would turn a misconfiguration an operator has time to fix into an
+		// immediate outage. Bearer hands it out for as long as it is valid.
 		s.presentedOutcome = signInOutcomeDenied
 		// The runbook is named because a refusal is a configuration answer, and
 		// this error is what a failed model call carries to whoever reads it.
@@ -334,13 +500,17 @@ func (s *vendorSignIn) present(ctx context.Context, token string, hash [sha256.S
 		rec := vendorSignInRecord{
 			Outcome: signInOutcomeDenied,
 			Status:  refused.Status,
-			At:      started,
+			At:      answered,
 			Detail:  refused.Body,
 		}
-		// A token issued before this process started may already have been
-		// used by the process this one replaced. Say so, and say when the
-		// next token is due, so a restart does not read as a broken rule.
-		if identityTokenIssuedBefore(token, s.started) {
+		// ONLY A VENDOR WITH A REPLAY RULE CAN MEAN THIS. A token issued before
+		// this process started may already have been used by the process this
+		// one replaced, so the refusal may say nothing about the configuration.
+		// It is equally true of a new pod's first token, so the mark claims no
+		// more than "the next token settles it", and the engine presents that
+		// token when it is due (ai_vendor_signin_boot.go). A vendor that
+		// accepts a token any number of times refused for a reason of its own.
+		if s.cfg.ReplayProtected && identityTokenIssuedBefore(token, s.started) {
 			rec.MayBeReplay = true
 			rec.NextTokenDue = nextIdentityTokenDue(token)
 		}
@@ -351,37 +521,63 @@ func (s *vendorSignIn) present(ctx context.Context, token string, hash [sha256.S
 		s.lastErr = fmt.Errorf("%s sign-in did not complete: %w", s.cfg.Vendor, err)
 		s.setRecord(vendorSignInRecord{
 			Outcome: signInOutcomeError,
-			At:      started,
+			At:      answered,
 			Detail:  truncateForLog(err.Error(), maxFederationBodyNote),
 		}, token)
 	}
-
-	// THE LAST GOOD BEARER KEEPS WORKING. A refusal is an answer that arrives
-	// while a valid bearer may still be in hand, and dropping it would turn a
-	// misconfiguration an operator has time to fix into an immediate outage.
-	// The clock is read again: the exchange may have spent seconds failing.
-	if s.bearerValid(s.now()) {
-		return s.bearer, s.expiresAt, nil
-	}
-	return "", time.Time{}, s.lastErr
 }
 
 func (s *vendorSignIn) bearerValid(now time.Time) bool {
 	return s.bearer != "" && s.expiresAt.After(now)
 }
 
-// Invalidate drops a bearer the vendor answered an API call with 401 for. The
-// next Bearer signs in if a token may be presented.
+// waitIdle returns once no exchange is in progress.
+func (s *vendorSignIn) waitIdle() {
+	for {
+		s.mu.Lock()
+		flight := s.flight
+		s.mu.Unlock()
+		if flight == nil {
+			return
+		}
+		<-flight.done
+	}
+}
+
+// Invalidate drops a bearer the vendor answered an API call with 401 for, and
+// says so on the record. The next Bearer signs in if a token may be presented.
 //
 // It names the bearer that failed, and drops the one in hand only if it is that
 // one: a call that started with the previous bearer must not throw away the
 // one a newer sign-in has just bought.
 func (s *vendorSignIn) Invalidate(bearer string) {
 	s.mu.Lock()
-	if bearer != "" && s.bearer == bearer {
-		s.bearer, s.expiresAt = "", time.Time{}
+	defer s.mu.Unlock()
+	if bearer == "" || s.bearer != bearer {
+		return
 	}
-	s.mu.Unlock()
+	s.bearer, s.expiresAt, s.bearerProven = "", time.Time{}, false
+	// The record still said "accepted", which is what the check command reads
+	// as a working vendor. It was accepted; it is not working.
+	if s.hasRecord && s.record.Outcome == signInOutcomeOK && s.record.BearerDroppedAt.IsZero() {
+		s.record.BearerDroppedAt = s.now()
+		writeVendorSignInStatus(s.record)
+	}
+}
+
+// newTokenOnDisk reports whether the identity token on disk is one this sign-in
+// has not presented. It presents nothing. The engine asks it before spending a
+// sign-in pass on a token kubelet may not have replaced yet
+// (ai_vendor_signin_boot.go). False when the file cannot be read.
+func (s *vendorSignIn) newTokenOnDisk() bool {
+	token, err := readFileTrimmed(s.cfg.TokenFile)
+	if err != nil {
+		return false
+	}
+	hash := sha256.Sum256([]byte(token))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return !s.hasPresented || hash != s.presented
 }
 
 // AllowRetry lets a REFUSED identity token be presented once more. Verify and
@@ -395,16 +591,74 @@ func (s *vendorSignIn) AllowRetry() {
 	s.mu.Unlock()
 }
 
-// NoteModelsListed records how many models the vendor listed with the bearer
-// of an accepted sign-in.
-func (s *vendorSignIn) NoteModelsListed(n int) {
+// NoteModelList records what the vendor's API answered when it was asked for
+// its models with the bearer of an accepted sign-in: n models, or err.
+//
+// A refused sign-in is one answer and a refused API call is another, and the
+// second used to be logged and left off the record, so an accepted sign-in
+// whose bearer the API would not take still read as a working vendor.
+func (s *vendorSignIn) NoteModelList(n int, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.hasRecord || s.record.Outcome != signInOutcomeOK {
 		return
 	}
-	s.record.ModelsListed = n
+	s.record.ProofAt = s.now()
+	switch status, detail := apiAnswerOf(err); {
+	case err == nil:
+		s.record.Proof, s.record.ProofStatus, s.record.ProofDetail = signInProofOK, 0, ""
+		s.record.ModelsListed = n
+		s.bearerProven = true
+	case status == http.StatusUnauthorized || status == http.StatusForbidden:
+		s.record.Proof, s.record.ProofStatus, s.record.ProofDetail = signInProofRefused, status, detail
+		// The next call the vendor serves with this bearer is newer evidence
+		// than this list, and NoteServed must be free to record it.
+		s.bearerProven = false
+	default:
+		s.record.Proof, s.record.ProofStatus, s.record.ProofDetail = signInProofError, status, detail
+		s.bearerProven = false
+	}
 	writeVendorSignInStatus(s.record)
+}
+
+// NoteServed records that the vendor's API served a call made with bearer. A
+// served call proves a bearer as well as a model list does, and it is the only
+// proof a bearer gets when it was bought by a renewal rather than at start.
+//
+// Called on every served call, so it does nothing unless bearer is the one in
+// hand and that bearer is not proven yet: one write of the status file per
+// bearer, about once an hour.
+func (s *vendorSignIn) NoteServed(bearer string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if bearer == "" || s.bearer != bearer || s.bearerProven || !s.hasRecord || s.record.Outcome != signInOutcomeOK {
+		return
+	}
+	s.bearerProven = true
+	s.record.Proof, s.record.ProofStatus, s.record.ProofDetail = signInProofOK, 0, ""
+	s.record.ProofAt = s.now()
+	writeVendorSignInStatus(s.record)
+}
+
+// apiAnswerOf reads the status and the reason out of an error from either
+// vendor's API, or from the sign-in itself. Zero and the error's own text when
+// it carries no status.
+func apiAnswerOf(err error) (status int, detail string) {
+	if err == nil {
+		return 0, ""
+	}
+	var fromAnthropic *anthropic.Error
+	var fromOpenAI *openai.Error
+	var refused *vendorExchangeRefused
+	switch {
+	case errors.As(err, &fromAnthropic):
+		status = fromAnthropic.StatusCode
+	case errors.As(err, &fromOpenAI):
+		status = fromOpenAI.StatusCode
+	case errors.As(err, &refused):
+		status = refused.Status
+	}
+	return status, truncateForLog(err.Error(), maxFederationBodyNote)
 }
 
 // Record returns the last thing that happened, or false before any attempt.
@@ -438,8 +692,11 @@ func (s *vendorSignIn) adoptAccepted(hash [sha256.Size]byte, at time.Time) {
 }
 
 // acceptedPresentation reports the token this sign-in presented and the vendor
-// accepted, if that is how its last presentation went.
+// accepted, if that is how its last presentation went. It waits for an
+// exchange in progress first: a token the vendor is accepting at this moment
+// is one the next sign-in must not present.
 func (s *vendorSignIn) acceptedPresentation() ([sha256.Size]byte, time.Time, bool) {
+	s.waitIdle()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.hasPresented || s.presentedOutcome != signInOutcomeOK {
@@ -610,6 +867,20 @@ func writeVendorSignInStatus(rec vendorSignInRecord) {
 				"path", path, "err", err)
 		})
 	}
+}
+
+// recordVendorWithoutSignIn writes the record of a vendor this engine holds no
+// sign-in for: nobody set it up, or this node type signs in to none. It
+// replaces whatever an earlier configuration left in the file, so a vendor
+// whose ids were removed no longer reads as its last accepted sign-in.
+func recordVendorWithoutSignIn(vendor, outcome, detail string) {
+	writeVendorSignInStatus(vendorSignInRecord{
+		Vendor:  vendor,
+		Outcome: outcome,
+		At:      time.Now(),
+		Detail:  detail,
+		Pid:     os.Getpid(),
+	})
 }
 
 // readVendorSignInStatus reads a vendor's record back. ok is false when no

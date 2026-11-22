@@ -297,7 +297,7 @@ func anthropicSignInFor(cfg ProviderConfig) (*vendorSignIn, error) {
 			})
 			if err != nil {
 				var refused *config.FederationExchangeError
-				if errors.As(err, &refused) && refused.StatusCode >= 400 && refused.StatusCode < 500 {
+				if errors.As(err, &refused) && signInStatusRefuses(refused.StatusCode) {
 					return "", time.Time{}, &vendorExchangeRefused{
 						Status: refused.StatusCode,
 						Body:   truncateForLog(config.RedactOAuthErrorBody(refused.Body), maxFederationBodyNote),
@@ -373,12 +373,20 @@ func anthropicBearerMiddleware(signIn *vendorSignIn) option.Middleware {
 		}
 
 		resp, err := next(req)
-		if err == nil && resp != nil && resp.StatusCode == http.StatusUnauthorized {
+		switch {
+		case err != nil || resp == nil:
+		case resp.StatusCode == http.StatusUnauthorized:
 			// The vendor no longer accepts this bearer. It is dropped, and the
 			// next call signs in if there is an identity token that may be
 			// presented. The 401 goes back to the caller as it is: retrying
 			// here would need a second sign-in with a token already used.
+			//
+			// Anthropic's 401 means the credential (a missing permission is its
+			// 403), which is why this drops and OpenAI's middleware does not.
 			signIn.Invalidate(bearer)
+		case resp.StatusCode >= 200 && resp.StatusCode < 300:
+			// A served call proves the bearer (vendorSignIn.NoteServed).
+			signIn.NoteServed(bearer)
 		}
 		return resp, err
 	}
@@ -414,8 +422,10 @@ func newAnthropicClient(cfg ProviderConfig, httpClient *http.Client) (anthropic.
 	return anthropic.NewClient(opts...), path, nil
 }
 
-// preflightIdentityToken refuses boot when the projected token is not a token
-// this cluster could federate with.
+// preflightIdentityToken refuses a provider when the projected token is not a
+// token this cluster could federate with. The node still starts; the vendor's
+// providers register as unavailable with this function's reason, which the
+// engine also records for `memql provider-auth check` (misconfigured).
 //
 // It runs at CONSTRUCTION, not at first call, for the same reason a missing
 // API key does: a credential problem that waits for the first LLM request

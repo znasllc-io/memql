@@ -66,7 +66,9 @@ func (a *App) selectSTTProvider() {
 //
 // The returned function is called PER DIAL and per request, never captured:
 // a bearer expires within the hour and a reconnect after that must not present
-// the token the first connection opened with.
+// the token the first connection opened with. The source behind it follows a
+// provider reload too (memql.OpenAIBearer): after an Apply with new ids it
+// hands out a bearer of the new sign-in, not of the one this node started with.
 func (a *App) openAIBearerForSTT() (func(ctx context.Context) (string, error), bool) {
 	if a.engine == nil {
 		return nil, false
