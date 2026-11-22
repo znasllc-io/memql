@@ -632,13 +632,19 @@ func nonNil(v []string) []string {
 	return v
 }
 
-// callsPaidBy reads the calls the router recorded as paid by one key since a
+// callsPaidBy reads EVERY call the router recorded as paid by one key since a
 // moment, as the cluster acting. It lives here, beside asCluster, because the
 // read is server-only and the file that renders a server-only call is the file
 // that stamps it (test/dslconformance's stamping gate reads one file at a time).
+//
+// Every page, because the activity is a sum: a busy key pays for more calls in
+// a month than one read returns, and the first page added up would be an
+// undercount shown as the total. Past maxListPages (100,000 calls at the
+// default page) the read fails instead, and the activity says it did not
+// complete: a wrong total is worse than none.
 func (s *Store) callsPaidBy(ctx context.Context, keyId string, since time.Time) ([]map[string]any, error) {
 	call, err := langparser.RenderCall("routerCallsPaidByKey", map[string]any{
 		"keyId": keyId, "since": since.UTC().Format(time.RFC3339),
 	})
-	return s.read(ctx, "the calls an API key paid for", call, err)
+	return s.readAll(ctx, "the calls an API key paid for", call, err)
 }
