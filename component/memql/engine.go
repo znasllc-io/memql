@@ -30,6 +30,16 @@ type MemQLEngine struct {
 	// Sign in action (fleet_app_signin.go). Nil on a node with no route to one.
 	appSignInRelay AppSignInRelay
 
+	// vendorSignInWG counts the background sign-ins SignInToConfiguredVendors
+	// has started, so a test can wait for one (ai_vendor_signin_boot.go).
+	vendorSignInWG sync.WaitGroup
+	// vendorSignInAtStartOff is set by a node type that calls no models
+	// (DisableVendorSignInAtStart). The zero value signs in.
+	vendorSignInAtStartOff atomic.Bool
+	// vendorSignInGeneration counts sign-in passes, so a follow-up left waiting
+	// by one pass stands down when a later pass (a reload) has replaced it.
+	vendorSignInGeneration atomic.Uint64
+
 	beforeWriteMu      sync.RWMutex
 	beforeWriteHooks   map[string][]BeforeWriteHook
 	beforeWriteSources map[string]map[string][]BeforeWriteHook
@@ -2130,6 +2140,14 @@ func (e *MemQLEngine) run(ctx context.Context, markStarted func()) error {
 	// providers.reload.<requestId>; this subscriber re-resolves on receipt.
 	// Scoped to the engine lifecycle context, like its siblings above.
 	e.StartProvidersReloadSubscriber(ctx)
+
+	// Design 2026-11-21 (A5): this process is the one that signs in to a
+	// vendor, so it is the one that records its sign-ins where
+	// `memql provider-auth check` reads them, and it signs in now, once, so
+	// there is a record before anybody asks. A node with no vendor set up
+	// sends nothing. See ai_vendor_signin_boot.go.
+	enableVendorSignInStatusFile()
+	e.SignInToConfiguredVendors(ctx)
 
 	// epic memql#5118 (D5): wire this node's readiness rows to the events that
 	// change them. Before it, the rows were rewritten at boot and on three

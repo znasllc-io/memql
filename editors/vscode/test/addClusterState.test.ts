@@ -155,8 +155,9 @@ test("an install needs everything up front; a repair needs what it can get wrong
 //
 // The field is gone. Both cloud vendors are reached by workload identity
 // federation and there is no vendor key to name a vendor FOR -- and this wizard
-// installs a local cluster, which cannot federate at all because a k3d
-// cluster's OIDC issuer is not publicly reachable.
+// installs a local cluster and sets no vendor up on it: a k3d cluster's OIDC
+// issuer is not publicly reachable, so a vendor is given its keys by hand,
+// after install.
 //
 // What still holds the general shape of the second wall is
 // `addClusterCollect.test.ts`, whose "no validation message ever quotes the

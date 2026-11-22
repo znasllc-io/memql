@@ -174,9 +174,14 @@ function section() {
 # STEP 1 -- TEAR DOWN (clean slate only, purge)
 #=============================================================================
 
+# The purge takes the stale kubeconfig context with it. It does NOT take the
+# cluster's token signing key: the cluster is recreated a moment later, and the
+# key is what makes it the same issuer, so that the public keys given to a
+# vendor stay good across a refresh (down.sh, remove_signing_key). Only an
+# operator's own `make down PURGE=1` deletes the key.
 function nuke() {
     section "bringup ${STEP_NUKE}: tearing down cluster '${CLUSTER_NAME}' (clean slate, purge)"
-    bash "${SCRIPT_DIR}/down.sh" --cluster="${CLUSTER_NAME}" --purge >&2
+    bash "${SCRIPT_DIR}/down.sh" --cluster="${CLUSTER_NAME}" --purge --keep-signing-key >&2
 }
 
 #=============================================================================

@@ -150,6 +150,11 @@ func (e *MemQLEngine) evaluateProviderVerifyExpression(ctx context.Context, args
 		return singleVirtualRow(ProviderVerifyConcept, entry.Config.Name, result)
 	}
 
+	// Verify is a person asking. A sign-in the vendor refused may be tried once
+	// more because of it (design 2026-11-21, A2); an accepted identity token is
+	// never presented again.
+	allowVendorRetry()
+
 	models, err := verifyProviderCredential(ctx, entry)
 	if err != nil {
 		result["reason"] = err.Error()

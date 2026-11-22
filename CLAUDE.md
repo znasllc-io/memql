@@ -83,7 +83,7 @@ make scale N=2               # 2 replicas per Deployment (NAMESPACE= overrides `
 make status                  # mesh litmus: unique MEMQL_NODE_ID per pod + one shared identity keyset
 make secrets                 # re-seed secrets (idempotent; use after a cluster recreate)
 make up-refresh              # clean slate: nuke + repave (fresh DB), then bring up
-make down                    # tear down, local calls media server first (PURGE=1 also removes the kubeconfig context)
+make down                    # tear down, local calls media server first (PURGE=1 also removes the kubeconfig context and the local signing key)
 
 # Tests -- see Testing below. A bare `go test ./...` does NOT reach the engine.
 make install-deps            # first, from the same shell: PyYAML for its python3
@@ -756,7 +756,9 @@ is why it is refused at load when it names a policy.
 **Both vendor credentials are workload identity federation, everywhere, and
 there is no manually entered API key left in the product** (epics memql#4333,
 memql#5088): the engine presents the pod's projected Kubernetes token and
-exchanges it for a short-lived bearer; a partial config REFUSES BOOT.
+exchanges it for a short-lived bearer; a partial set of ids REFUSES THAT VENDOR,
+naming both halves (the token file's path, which every Deployment sets, does not
+count on its own).
 `TestNoVendorApiKeyEntryPoint` (`vendor_api_key_gate_test.go`) fails the build
 if any retired key env var or the retired key-setting builtin reappears in a
 tracked source file. **Read that file rather than restating its list here --
@@ -765,10 +767,23 @@ legitimate for the router's BYOK path and the Shopify connector.
 [anthropic-federation.md](docs/public/operate/auth/anthropic-federation.md) ·
 [openai-federation.md](docs/public/operate/auth/openai-federation.md).
 
-**A LOCAL cluster reaches neither**: a k3d cluster's OIDC issuer is not
-publicly reachable, so nothing it mints can be verified. The install wizard
-collects no AI credential, `providerFederation` skips satisfied, and a
-developer reaches models through a signed-in fleet machine or a local model.
+**A LOCAL cluster federates by pasted keys** (design record
+[2026-11-21](docs/superpowers/specs/2026-11-21-vendor-accounts-and-api-keys-design.md)).
+A vendor cannot fetch a k3d cluster's keys, but both accept them pasted in:
+`make federation-keys` prints them, Settings > Vendors takes the ids, and
+`make up` keeps the cluster's signing key across recreation
+(`~/.memql/k3d/<cluster>/service-account.key`, a secret). The install wizard
+still collects no AI credential and `providerFederation` skips satisfied.
+
+**Each engine process signs in to a vendor ONCE per identity token**
+(`component/memql/ai_vendor_signin.go`). Anthropic accepts a token once, so a
+second signer in a pod is refused: `memql provider-auth check` reports the
+engine's record and never signs in, and a new client of a vendor takes its
+bearer from `processVendorSignIn`, never from a credential of its own. The
+engine records EVERY vendor, usable or not, and the check answers from that
+record alone: 0 only when the sign-in was accepted AND the vendor's API took
+the bearer, 1 refused, 3 not set up on that node, 4 cannot say yet. Never run
+against a vendor yet; the runbooks say what to record.
 
 ### AI Endpoints (gRPC on `MemqlService.Stream`)
 

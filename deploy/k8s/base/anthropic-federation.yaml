@@ -17,10 +17,11 @@
 #
 #   VALUE (the ConfigMap below): the four ids that identify objects in one
 #   Anthropic organization. The cloud overlay patches in the real ones; the
-#   local overlay leaves them empty, which is the only correct answer there --
-#   k3d's OIDC issuer is private, so a local cluster cannot federate with
-#   either vendor and reaches cloud models through a fleet machine or a local
-#   model instead (epic memql#5088, decision D6).
+#   local overlay leaves them empty, because a local cluster's ids are not
+#   known to a manifest: k3d's OIDC issuer is private, so a local cluster gives
+#   the vendor its public keys by hand (make federation-keys) and its ids are
+#   entered in Settings > Vendors. Until then it reaches cloud models through a
+#   fleet machine or a local model.
 #
 # The engine reads all four or none: a PARTIAL configuration refuses boot, and
 # since memql#5088 there is nothing to fall back TO -- the vendor key arm is

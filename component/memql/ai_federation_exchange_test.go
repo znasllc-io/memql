@@ -3,6 +3,7 @@ package memql
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/option"
 
 	"github.com/znasllc-io/memql/component/metrics"
 )
@@ -33,11 +35,34 @@ type fakeAnthropic struct {
 	// tokenStatus / tokenBody let a test make the exchange fail.
 	tokenStatus int
 	tokenBody   string
+
+	// refuseRepeats makes the token endpoint behave as Anthropic documents: an
+	// identity token is accepted once and a second presentation is a 401.
+	refuseRepeats bool
+	seen          map[string]bool
+
+	// messageStatusOnce answers the next Messages call with this status.
+	messageStatusOnce int
+}
+
+// isolateLLMGuard gives a test a loop guard of its own, with the production
+// limits. The tests against a fake vendor all send the same small request, and
+// the process-wide guard counts identical requests across tests: enough of
+// them in one run trips its loop breaker in whichever test happens to come
+// last, which then sees a 429 no vendor sent. A client captures the guard when
+// it is built, so this runs before the test builds one.
+func isolateLLMGuard(t *testing.T) {
+	t.Helper()
+	prevGuard := sharedLLMGuard
+	sharedLLMGuard = newLLMGuardFromEnv()
+	t.Cleanup(func() { sharedLLMGuard = prevGuard })
 }
 
 func newFakeAnthropic(t *testing.T) *fakeAnthropic {
 	t.Helper()
-	f := &fakeAnthropic{tokenStatus: http.StatusOK}
+	isolateVendorSignIns(t)
+	isolateLLMGuard(t)
+	f := &fakeAnthropic{tokenStatus: http.StatusOK, seen: map[string]bool{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/oauth/token", func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
@@ -46,6 +71,12 @@ func newFakeAnthropic(t *testing.T) *fakeAnthropic {
 		f.exchangeRequests = append(f.exchangeRequests, body)
 		f.exchangeHeaders = append(f.exchangeHeaders, r.Header.Clone())
 		status, custom := f.tokenStatus, f.tokenBody
+		if assertion, _ := body["assertion"].(string); f.refuseRepeats && status == http.StatusOK {
+			if f.seen[assertion] {
+				status, custom = http.StatusUnauthorized, `{"error":{"type":"authentication_error","message":"jti_reused"}}`
+			}
+			f.seen[assertion] = true
+		}
 		f.mu.Unlock()
 
 		w.Header().Set("Content-Type", "application/json")
@@ -62,8 +93,15 @@ func newFakeAnthropic(t *testing.T) *fakeAnthropic {
 	mux.HandleFunc("/v1/messages", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		f.messageHeaders = append(f.messageHeaders, r.Header.Clone())
+		once := f.messageStatusOnce
+		f.messageStatusOnce = 0
 		f.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
+		if once != 0 {
+			w.WriteHeader(once)
+			_, _ = w.Write([]byte(`{"type":"error","error":{"type":"authentication_error","message":"invalid bearer"}}`))
+			return
+		}
 		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-test",` +
 			`"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn",` +
 			`"usage":{"input_tokens":1,"output_tokens":1}}`))
@@ -113,6 +151,209 @@ func callMessages(ctx context.Context, p *anthropicProvider) error {
 		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("hi"))},
 	})
 	return err
+}
+
+// TestAnthropicClientsShareOneSignIn is the regression test for the failure the
+// shared sign-in exists to remove (design 2026-11-21, A1): one identity token
+// was presented once per provider record, and a vendor that accepts a token
+// once refused all but the first.
+func TestAnthropicClientsShareOneSignIn(t *testing.T) {
+	f := newFakeAnthropic(t)
+	f.refuseRepeats = true
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
+	t.Setenv("ANTHROPIC_BASE_URL", f.srv.URL)
+
+	// One pod, one token file, four records: two chat and two streaming, which
+	// is the shape of the shipped Claude catalog.
+	auth := federatedAuth(validIdentityToken(t))
+	var clients []*anthropic.Client
+	for _, name := range []string{"claudeA", "claudeB"} {
+		p, err := newAnthropicProvider(ProviderConfig{Name: name, Model: "claude-test", Auth: auth})
+		if err != nil {
+			t.Fatalf("newAnthropicProvider(%s): %v", name, err)
+		}
+		clients = append(clients, &p.(*anthropicProvider).client)
+	}
+	for _, name := range []string{"streamA", "streamB"} {
+		p, err := newAnthropicStreamProvider(ProviderConfig{Name: name, Model: "claude-test", Auth: auth})
+		if err != nil {
+			t.Fatalf("newAnthropicStreamProvider(%s): %v", name, err)
+		}
+		clients = append(clients, &p.(*anthropicStreamProvider).client)
+	}
+
+	for i, client := range clients {
+		_, err := client.Messages.New(context.Background(), anthropic.MessageNewParams{
+			Model:     anthropic.Model("claude-test"),
+			MaxTokens: 16,
+			Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("hi"))},
+		})
+		if err != nil {
+			t.Fatalf("client %d: Messages.New: %v", i, err)
+		}
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.exchangeRequests) != 1 {
+		t.Fatalf("four clients made %d sign-ins with one identity token, want 1", len(f.exchangeRequests))
+	}
+	if len(f.messageHeaders) != 4 {
+		t.Fatalf("message calls = %d, want 4", len(f.messageHeaders))
+	}
+	for i, h := range f.messageHeaders {
+		if got := h.Get("Authorization"); got != "Bearer sk-ant-oat01-fake" {
+			t.Fatalf("call %d: Authorization = %q, want the one federated bearer", i, got)
+		}
+		if got := h.Get("anthropic-beta"); !strings.Contains(got, "oauth-2025-04-20") {
+			t.Fatalf("call %d: anthropic-beta = %q, want it to carry oauth-2025-04-20", i, got)
+		}
+		if got := h.Get("x-api-key"); got != "" {
+			t.Fatalf("call %d carried x-api-key %q", i, got)
+		}
+	}
+}
+
+// A sign-in is made through a client, whose middleware names the address the
+// vendor is reached at. Asked for directly, with no address, it is REFUSED
+// rather than sent to the SDK's default: an identity token must never go to a
+// host other than the one the client's requests go to.
+func TestAnthropicSignInWithNoClientAddressIsRefused(t *testing.T) {
+	f := newFakeAnthropic(t)
+	t.Setenv("ANTHROPIC_BASE_URL", f.srv.URL)
+	signIn, err := anthropicSignInFor(ProviderConfig{
+		Name: "claudeTest", Model: "claude-test", Auth: federatedAuth(validIdentityToken(t)),
+	})
+	if err != nil || signIn == nil {
+		t.Fatalf("anthropicSignInFor: %v", err)
+	}
+
+	_, _, err = signIn.Bearer(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "no vendor address") {
+		t.Fatalf("a sign-in asked for with no client address: err = %v, want a refusal naming the missing address", err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.exchangeRequests) != 0 {
+		t.Fatalf("%d sign-ins reached the vendor with no client address", len(f.exchangeRequests))
+	}
+}
+
+// A 401 on an API call means the bearer is dead. The engine drops it, and does
+// not present the identity token it has already used a second time.
+func TestAnthropicApi401InvalidatesWithoutASecondExchange(t *testing.T) {
+	f := newFakeAnthropic(t)
+	f.refuseRepeats = true
+	p := federatedProviderAgainst(t, f)
+
+	if err := callMessages(context.Background(), p); err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	f.mu.Lock()
+	f.messageStatusOnce = http.StatusUnauthorized
+	f.mu.Unlock()
+	if err := callMessages(context.Background(), p); err == nil {
+		t.Fatal("a 401 from the vendor reached the caller as success")
+	}
+	if err := callMessages(context.Background(), p); err == nil {
+		t.Fatal("a call was made with a bearer the vendor had just refused")
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.exchangeRequests) != 1 {
+		t.Fatalf("the used identity token was presented %d times, want 1", len(f.exchangeRequests))
+	}
+	sent := 0
+	for _, h := range f.messageHeaders {
+		if h.Get("Authorization") != "" {
+			sent++
+		}
+	}
+	if sent != 2 {
+		t.Fatalf("%d Messages calls reached the vendor, want 2: the third had no bearer to send", sent)
+	}
+}
+
+// callMessagesOnce is callMessages with no SDK retries: a sign-in that fails
+// must reach the test as one failure, not as three with a pause between them.
+func callMessagesOnce(p *anthropicProvider) error {
+	_, err := p.client.Messages.New(context.Background(), anthropic.MessageNewParams{
+		Model:     anthropic.Model("claude-test"),
+		MaxTokens: 16,
+		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("hi"))},
+	}, option.WithMaxRetries(0))
+	return err
+}
+
+// A served call proves a bearer as well as a model list does, and it is the
+// only proof a bearer gets when a renewal bought it, long after the start.
+func TestAServedClaudeCallProvesTheBearer(t *testing.T) {
+	f := newFakeAnthropic(t)
+	p := federatedProviderAgainst(t, f)
+
+	if err := callMessagesOnce(p); err != nil {
+		t.Fatalf("the call: %v", err)
+	}
+	signIn, ok := currentVendorSignIn(metrics.FederationVendorAnthropic)
+	if !ok {
+		t.Fatal("constructing a federated provider registered no Anthropic sign-in")
+	}
+	rec, ok := signIn.Record()
+	if !ok || rec.Outcome != signInOutcomeOK {
+		t.Fatalf("record = %+v (found %v), want an accepted sign-in", rec, ok)
+	}
+	if rec.Proof != signInProofOK {
+		t.Fatalf("proof = %q after the vendor served a call with the bearer, want %q: the check command "+
+			"would go on saying this vendor is not verified", rec.Proof, signInProofOK)
+	}
+}
+
+// 408, 425 and 429 are 4xx statuses and are not refusals: the vendor asked to
+// be asked again. Recorded as a refusal, one rate-limited sign-in left the node
+// without Claude until its identity token was replaced, because a refusal is
+// never retried without a person.
+func TestAClaudeSignInToldToComeBackIsTriedAgain(t *testing.T) {
+	for _, status := range []int{http.StatusTooManyRequests, http.StatusRequestTimeout, http.StatusTooEarly} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			f := newFakeAnthropic(t)
+			f.refuseRepeats = true
+			f.tokenStatus = status
+			f.tokenBody = `{"type":"error","error":{"type":"rate_limit_error","message":"rate limited"}}`
+			p := federatedProviderAgainst(t, f)
+
+			deniedBefore := metrics.AIFederationExchangesValue(metrics.FederationVendorAnthropic, metrics.FederationExchangeDenied)
+			if err := callMessagesOnce(p); err == nil {
+				t.Fatal("a sign-in the vendor did not serve produced a served call")
+			}
+			signIn, ok := currentVendorSignIn(metrics.FederationVendorAnthropic)
+			if !ok {
+				t.Fatal("no Anthropic sign-in")
+			}
+			rec, _ := signIn.Record()
+			if rec.Outcome != signInOutcomeError {
+				t.Fatalf("outcome = %q, want %q: status %d asks the engine to come back, it says nothing "+
+					"about the configuration", rec.Outcome, signInOutcomeError, status)
+			}
+			if got := metrics.AIFederationExchangesValue(metrics.FederationVendorAnthropic, metrics.FederationExchangeDenied); got != deniedBefore {
+				t.Fatalf("the denial counter moved %v -> %v on status %d: operators alert on that counter, "+
+					"and a rate limit is not a denial", deniedBefore, got, status)
+			}
+
+			// The vendor recovers. The same identity token is presented again once
+			// the pause has passed, with nobody asking: the vendor never accepted
+			// it, so its accept-once rule has nothing to refuse.
+			f.setTokenStatus(http.StatusOK)
+			signIn.advanceClock(vendorSignInRetryBackoff + time.Second)
+			if err := callMessagesOnce(p); err != nil {
+				t.Fatalf("after the pause: %v -- the sign-in was never tried again", err)
+			}
+			if got := f.exchangeCount(); got != 2 {
+				t.Fatalf("sign-ins = %d, want 2", got)
+			}
+		})
+	}
 }
 
 func TestFederationExchangeHappyPath(t *testing.T) {
@@ -281,16 +522,18 @@ func TestFederationExchangeSpendsNoBudget(t *testing.T) {
 	}
 }
 
-// TestCheckProviderAuthReportsFederation drives the real `provider-auth check`
-// engine path (memql#4335): load the DSL tree exactly as boot does, pick an
-// Anthropic provider, force one exchange, and list models. It is the only test
-// that exercises all of that together, which is the whole value of the
-// subcommand -- each half works in isolation and the cutover depends on the
-// composition.
-func TestCheckProviderAuthReportsFederation(t *testing.T) {
-	f := newFakeAnthropic(t)
-	// Route both the exchange and models.list at the fake, and configure
-	// federation through the SAME env names the ConfigMap sets in a pod.
+// The check command (design 2026-11-21, A5).
+//
+// `memql provider-auth check` used to sign in and list models itself, as a
+// second process in the engine's pod. A vendor that accepts an identity token
+// once refuses whichever of the two goes second: the check either took the
+// engine's sign-in for that rotation or reported a working federation as
+// refused. It now reports the record the ENGINE wrote and contacts no vendor.
+
+// anthropicFederationEnv configures federation through the SAME env names the
+// ConfigMap sets in a pod, pointed at the fake.
+func anthropicFederationEnv(t *testing.T, f *fakeAnthropic) {
+	t.Helper()
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
 	t.Setenv("ANTHROPIC_BASE_URL", f.srv.URL)
@@ -299,25 +542,408 @@ func TestCheckProviderAuthReportsFederation(t *testing.T) {
 	t.Setenv(envAnthropicServiceAccountID, "svac_test")
 	t.Setenv(envAnthropicWorkspaceID, "")
 	t.Setenv(envAnthropicIdentityTokenFile, validIdentityToken(t))
+}
+
+// engineRecorded writes a sign-in record the way the engine in this pod would.
+func engineRecorded(t *testing.T, rec vendorSignInRecord) {
+	t.Helper()
+	vendorSignInStatusFile.Store(true)
+	if rec.Vendor == "" {
+		rec.Vendor = metrics.FederationVendorAnthropic
+	}
+	if rec.At.IsZero() {
+		rec.At = time.Now()
+	}
+	if rec.Ids == nil {
+		rec.Ids = map[string]string{
+			authKeyFederationRuleID: "fdrl_engine",
+			authKeyOrganizationID:   "99999999-2222-3333-4444-555555555555",
+			authKeyServiceAccountID: "svac_engine",
+		}
+	}
+	writeVendorSignInStatus(rec)
+}
+
+func (f *fakeAnthropic) requestCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.exchangeRequests) + len(f.modelsHeaders) + len(f.messageHeaders)
+}
+
+func TestCheckProviderAuthReportsTheEnginesSignIn(t *testing.T) {
+	f := newFakeAnthropic(t)
+	anthropicFederationEnv(t, f)
+	engineRecorded(t, vendorSignInRecord{
+		Outcome:       "ok",
+		ExpiresAt:     time.Now().Add(time.Hour),
+		TokenSubject:  "system:serviceaccount:memql:memql-engine",
+		TokenAudience: []string{anthropicAudience},
+		Proof:         signInProofOK,
+		ModelsListed:  7,
+	})
 
 	report, err := CheckProviderAuth(context.Background(), nil, "anthropic")
 	if err != nil {
 		t.Fatalf("CheckProviderAuth: %v", err)
 	}
-	if report.CredentialPath != string(credentialPathFederation) {
-		t.Fatalf("credential path = %q, want federation", report.CredentialPath)
+	if report.CredentialPath != string(credentialPathFederation) || !report.Recorded {
+		t.Fatalf("credential path = %q recorded = %v, want federation and a record", report.CredentialPath, report.Recorded)
 	}
-	if report.FederationRuleID != "fdrl_test" || report.ServiceAccountID != "svac_test" {
-		t.Fatalf("ids not reported: %+v", report)
+	// The ids are the ENGINE's, from its record, not this process's environment:
+	// ids applied through Settings win over the environment in the engine.
+	if report.FederationRuleID != "fdrl_engine" || report.ServiceAccountID != "svac_engine" {
+		t.Fatalf("ids reported = %q / %q, want the engine's fdrl_engine / svac_engine", report.FederationRuleID, report.ServiceAccountID)
 	}
 	if report.TokenSubject != "system:serviceaccount:memql:memql-engine" {
 		t.Fatalf("token subject = %q", report.TokenSubject)
 	}
-	if report.ExchangeOutcome != metrics.FederationExchangeOK {
-		t.Fatalf("exchange outcome = %q, want ok", report.ExchangeOutcome)
+	if report.ExchangeOutcome != metrics.FederationExchangeOK || report.ModelsListed != 7 {
+		t.Fatalf("outcome = %q, models listed = %d; want ok and 7", report.ExchangeOutcome, report.ModelsListed)
 	}
-	if report.TokenExpiresIn != time.Hour {
-		t.Fatalf("token expiry = %v, want 1h", report.TokenExpiresIn)
+	if report.TokenExpiresIn <= 59*time.Minute || report.TokenExpiresIn > time.Hour {
+		t.Fatalf("token expires in %v, want just under an hour", report.TokenExpiresIn)
+	}
+	if got := f.requestCount(); got != 0 {
+		t.Fatalf("the check sent %d requests to the vendor; it must send none", got)
+	}
+}
+
+func TestCheckProviderAuthReportsARefusal(t *testing.T) {
+	f := newFakeAnthropic(t)
+	anthropicFederationEnv(t, f)
+	engineRecorded(t, vendorSignInRecord{Outcome: "denied", Status: 401, Detail: "match_subject_prefix"})
+
+	report, err := CheckProviderAuth(context.Background(), nil, "anthropic")
+	if err == nil {
+		t.Fatal("a refused sign-in was reported as accepted")
+	}
+	if errors.Is(err, ErrSignInNotVerified) {
+		t.Fatalf("a plain refusal was reported as not verified yet: %v", err)
+	}
+	if !strings.Contains(err.Error(), "match_subject_prefix") {
+		t.Fatalf("the error drops the vendor's own reason: %v", err)
+	}
+	if report.ExchangeOutcome != "denied" {
+		t.Fatalf("outcome = %q, want denied", report.ExchangeOutcome)
+	}
+}
+
+// A refusal that may only be a restarted container re-presenting a used token,
+// a wait for the next token, and a sign-in the vendor never answered are all
+// "cannot say yet". None of them is the vendor refusing the configuration.
+func TestCheckProviderAuthDoesNotCallAnOpenQuestionARefusal(t *testing.T) {
+	due := time.Now().Add(6 * time.Minute).UTC().Truncate(time.Second)
+	for name, rec := range map[string]vendorSignInRecord{
+		"possible replay": {Outcome: "denied", Status: 401, Detail: "jti_reused", MayBeReplay: true, NextTokenDue: due},
+		"waiting":         {Outcome: "waiting", NextTokenDue: due},
+		"no answer":       {Outcome: "error", Detail: "dial tcp: connection refused"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFakeAnthropic(t)
+			anthropicFederationEnv(t, f)
+			engineRecorded(t, rec)
+
+			_, err := CheckProviderAuth(context.Background(), nil, "anthropic")
+			if !errors.Is(err, ErrSignInNotVerified) {
+				t.Fatalf("err = %v, want ErrSignInNotVerified", err)
+			}
+			if !rec.NextTokenDue.IsZero() && !strings.Contains(err.Error(), due.Format(time.RFC3339)) {
+				t.Fatalf("the error does not say when the next identity token is due: %v", err)
+			}
+		})
+	}
+}
+
+func TestCheckProviderAuthWaitsForARecord(t *testing.T) {
+	f := newFakeAnthropic(t)
+	anthropicFederationEnv(t, f)
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		engineRecorded(t, vendorSignInRecord{Outcome: "ok", ExpiresAt: time.Now().Add(time.Hour), Proof: signInProofOK, ModelsListed: 1})
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	report, err := CheckProviderAuth(ctx, nil, "anthropic")
+	if err != nil {
+		t.Fatalf("CheckProviderAuth did not wait for the engine's record: %v", err)
+	}
+	if report.ExchangeOutcome != "ok" {
+		t.Fatalf("outcome = %q, want ok", report.ExchangeOutcome)
+	}
+}
+
+func TestCheckProviderAuthSaysWhenNothingIsRecorded(t *testing.T) {
+	f := newFakeAnthropic(t)
+	anthropicFederationEnv(t, f)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 700*time.Millisecond)
+	defer cancel()
+	report, err := CheckProviderAuth(ctx, nil, "anthropic")
+	if !errors.Is(err, ErrSignInNotVerified) {
+		t.Fatalf("err = %v, want ErrSignInNotVerified", err)
+	}
+	if report.Recorded {
+		t.Fatal("the report claims a record that does not exist")
+	}
+	// Federation IS configured in this environment, and the report says so
+	// with the ids it found there.
+	if report.CredentialPath != string(credentialPathFederation) || report.FederationRuleID != "fdrl_test" {
+		t.Fatalf("report = %+v, want the configured federation ids", report)
+	}
+	if got := f.requestCount(); got != 0 {
+		t.Fatalf("with nothing recorded the check sent %d requests to the vendor; it must send none", got)
+	}
+}
+
+// Ids applied through Settings live in concept storage, which this command
+// cannot read. The engine's record is how it reports them anyway.
+func TestCheckProviderAuthReportsIdsAppliedThroughSettings(t *testing.T) {
+	f := newFakeAnthropic(t)
+	t.Setenv("ANTHROPIC_BASE_URL", f.srv.URL)
+	for _, name := range []string{
+		envAnthropicFederationRuleID, envAnthropicOrganizationID,
+		envAnthropicServiceAccountID, envAnthropicWorkspaceID, envAnthropicIdentityTokenFile,
+	} {
+		t.Setenv(name, "")
+	}
+	engineRecorded(t, vendorSignInRecord{Outcome: "ok", ExpiresAt: time.Now().Add(time.Hour), Proof: signInProofOK, ModelsListed: 3})
+
+	report, err := CheckProviderAuth(context.Background(), nil, "anthropic")
+	if err != nil {
+		t.Fatalf("CheckProviderAuth: %v", err)
+	}
+	if report.CredentialPath != string(credentialPathFederation) || report.FederationRuleID != "fdrl_engine" || !report.Recorded {
+		t.Fatalf("report = %+v, want the engine's federation record", report)
+	}
+}
+
+// A REAL POD ALWAYS CARRIES THE TOKEN FILE'S PATH: every Deployment sets it.
+// The two tests above clear it, which no pod does, and that is how the command
+// came to print FAILED: HALF-CONFIGURED on a local cluster that was set up
+// through Settings and signed in. These are the same two answers in a pod's
+// real environment.
+func podEnvironmentWithNoIds(t *testing.T, f *fakeAnthropic) {
+	t.Helper()
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
+	t.Setenv("ANTHROPIC_BASE_URL", f.srv.URL)
+	for _, name := range []string{
+		envAnthropicFederationRuleID, envAnthropicOrganizationID,
+		envAnthropicServiceAccountID, envAnthropicWorkspaceID,
+	} {
+		t.Setenv(name, "")
+	}
+	t.Setenv(envAnthropicIdentityTokenFile, validIdentityToken(t))
+}
+
+func TestCheckProviderAuthInAPodSetUpThroughSettings(t *testing.T) {
+	f := newFakeAnthropic(t)
+	podEnvironmentWithNoIds(t, f)
+	engineRecorded(t, vendorSignInRecord{Outcome: "ok", ExpiresAt: time.Now().Add(time.Hour), Proof: signInProofOK, ModelsListed: 3})
+
+	report, err := CheckProviderAuth(context.Background(), nil, "anthropic")
+	if err != nil {
+		t.Fatalf("a pod whose engine signed in was reported as failing: %v", err)
+	}
+	if report.CredentialPath != string(credentialPathFederation) || report.FederationRuleID != "fdrl_engine" || !report.Recorded {
+		t.Fatalf("report = %+v, want the engine's federation record", report)
+	}
+	if got := f.requestCount(); got != 0 {
+		t.Fatalf("the check sent %d requests to the vendor; it must send none", got)
+	}
+}
+
+// A cluster exactly as it was installed. The engine says nobody set the vendor
+// up, and the check repeats it as an answer of its own kind: not a failure, and
+// NOT "verified". It used to return success here, which the installer read as
+// "federation verified" for a vendor with no ids at all.
+func TestCheckProviderAuthInAPodNobodySetUp(t *testing.T) {
+	f := newFakeAnthropic(t)
+	podEnvironmentWithNoIds(t, f)
+	engineRecorded(t, vendorSignInRecord{Outcome: signInOutcomeNotConfigured,
+		Detail: "no federation ids are set for this vendor on this node", Ids: map[string]string{}})
+
+	report, err := CheckProviderAuth(context.Background(), nil, "anthropic")
+	if !errors.Is(err, ErrVendorNotSetUp) {
+		t.Fatalf("err = %v, want ErrVendorNotSetUp", err)
+	}
+	if errors.Is(err, ErrSignInNotVerified) {
+		t.Fatalf("a vendor nobody set up was reported as a sign-in that is merely late: %v", err)
+	}
+	if report.CredentialPath != string(credentialPathUnavailable) || !report.Recorded {
+		t.Fatalf("report = %+v, want the unavailable answer, taken from the engine's record", report)
+	}
+	if got := f.requestCount(); got != 0 {
+		t.Fatalf("the check sent %d requests to the vendor; it must send none", got)
+	}
+}
+
+// With nothing recorded the check cannot know whether the vendor is set up: the
+// ids may be in the cluster's storage, which it cannot read. It waits for the
+// engine, and when the engine says nothing it says so. It never says success.
+func TestCheckProviderAuthNothingRecordedIsNeverSuccess(t *testing.T) {
+	f := newFakeAnthropic(t)
+	podEnvironmentWithNoIds(t, f)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	report, err := CheckProviderAuth(ctx, nil, "anthropic")
+	if !errors.Is(err, ErrSignInNotVerified) {
+		t.Fatalf("err = %v, want ErrSignInNotVerified: with nothing recorded the check has no answer", err)
+	}
+	if report.Recorded {
+		t.Fatal("the report claims a record that does not exist")
+	}
+}
+
+// Ids applied through Settings are invisible to this command, so "no ids in my
+// environment" is not a reason to answer before the engine has. It used to
+// answer "unavailable" at once, straight after a rollout, for a vendor the
+// engine was a second away from signing in to.
+func TestCheckProviderAuthWaitsEvenWithNoIdsInItsEnvironment(t *testing.T) {
+	f := newFakeAnthropic(t)
+	podEnvironmentWithNoIds(t, f)
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		engineRecorded(t, vendorSignInRecord{Outcome: "ok", ExpiresAt: time.Now().Add(time.Hour), Proof: signInProofOK, ModelsListed: 2})
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	report, err := CheckProviderAuth(ctx, nil, "anthropic")
+	if err != nil {
+		t.Fatalf("CheckProviderAuth did not wait for the engine's record: %v", err)
+	}
+	if report.FederationRuleID != "fdrl_engine" || !report.Recorded {
+		t.Fatalf("report = %+v, want the engine's record", report)
+	}
+}
+
+// An accepted sign-in is a bearer. It is a working vendor only once the
+// vendor's API has taken that bearer, and the check used to say OK without
+// asking: a failed model list was only logged, and a bearer the API had
+// answered 401 for still read as accepted.
+func TestCheckProviderAuthAnAcceptedSignInIsNotYetAWorkingVendor(t *testing.T) {
+	hour := time.Now().Add(time.Hour)
+	t.Run("the API refused the bearer", func(t *testing.T) {
+		f := newFakeAnthropic(t)
+		anthropicFederationEnv(t, f)
+		engineRecorded(t, vendorSignInRecord{Outcome: "ok", ExpiresAt: hour,
+			Proof: signInProofRefused, ProofStatus: 403, ProofDetail: "permission_error: the service account has no access to this workspace"})
+
+		report, err := CheckProviderAuth(context.Background(), nil, "anthropic")
+		if err == nil {
+			t.Fatal("a vendor whose API refuses the bearer was reported as working")
+		}
+		if errors.Is(err, ErrSignInNotVerified) || errors.Is(err, ErrVendorNotSetUp) {
+			t.Fatalf("a refusal by the vendor's API was reported as something milder: %v", err)
+		}
+		if !strings.Contains(err.Error(), "permission_error") || !strings.Contains(err.Error(), "403") {
+			t.Fatalf("the error drops the API's own answer: %v", err)
+		}
+		if report.Proof != signInProofRefused {
+			t.Fatalf("report.Proof = %q, want %q", report.Proof, signInProofRefused)
+		}
+	})
+	for name, rec := range map[string]vendorSignInRecord{
+		"the API did not answer":      {Outcome: "ok", ExpiresAt: hour, Proof: signInProofError, ProofDetail: "context deadline exceeded"},
+		"the bearer was dropped":      {Outcome: "ok", ExpiresAt: hour, Proof: signInProofOK, ModelsListed: 3, BearerDroppedAt: time.Now()},
+		"nothing has used the bearer": {Outcome: "ok", ExpiresAt: hour},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFakeAnthropic(t)
+			anthropicFederationEnv(t, f)
+			engineRecorded(t, rec)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+			defer cancel()
+			_, err := CheckProviderAuth(ctx, nil, "anthropic")
+			if !errors.Is(err, ErrSignInNotVerified) {
+				t.Fatalf("err = %v, want ErrSignInNotVerified", err)
+			}
+		})
+	}
+}
+
+// The engine's sign-in and its model list are one call, a moment apart. The
+// check waits for the second half rather than answering between the two.
+func TestCheckProviderAuthWaitsForTheProof(t *testing.T) {
+	f := newFakeAnthropic(t)
+	anthropicFederationEnv(t, f)
+	hour := time.Now().Add(time.Hour)
+	engineRecorded(t, vendorSignInRecord{Outcome: "ok", ExpiresAt: hour})
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		engineRecorded(t, vendorSignInRecord{Outcome: "ok", ExpiresAt: hour, Proof: signInProofOK, ModelsListed: 5})
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	report, err := CheckProviderAuth(ctx, nil, "anthropic")
+	if err != nil {
+		t.Fatalf("the check answered before the engine had listed the vendor's models: %v", err)
+	}
+	if report.ModelsListed != 5 || report.Proof != signInProofOK {
+		t.Fatalf("report = %+v, want the proven record", report)
+	}
+}
+
+// Ids the engine itself refuses (a partial set, an identity token it cannot
+// use) are a failure with the engine's own reason, whichever place the ids
+// came from.
+func TestCheckProviderAuthReportsAVendorTheEngineRefuses(t *testing.T) {
+	f := newFakeAnthropic(t)
+	podEnvironmentWithNoIds(t, f)
+	reason := `provider "claudeHaiku" is HALF-CONFIGURED for Anthropic workload identity federation: ` +
+		envAnthropicFederationRuleID + " set, " + envAnthropicOrganizationID + " missing"
+	engineRecorded(t, vendorSignInRecord{Outcome: signInOutcomeMisconfigured, Detail: reason, Ids: map[string]string{}})
+
+	_, err := CheckProviderAuth(context.Background(), nil, "anthropic")
+	if err == nil || errors.Is(err, ErrSignInNotVerified) || errors.Is(err, ErrVendorNotSetUp) {
+		t.Fatalf("err = %v, want a plain failure: the engine refuses this configuration", err)
+	}
+	if !strings.Contains(err.Error(), envAnthropicOrganizationID+" missing") {
+		t.Fatalf("the error drops the engine's own reason: %v", err)
+	}
+}
+
+// With nothing recorded, a partial set in this process's own environment is
+// still a refusal the check can state by itself, at once.
+func TestCheckProviderAuthStatesAPartialSetInItsOwnEnvironment(t *testing.T) {
+	f := newFakeAnthropic(t)
+	podEnvironmentWithNoIds(t, f)
+	t.Setenv(envAnthropicFederationRuleID, "fdrl_only")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	started := time.Now()
+	_, err := CheckProviderAuth(ctx, nil, "anthropic")
+	if err == nil || !strings.Contains(err.Error(), "HALF-CONFIGURED") {
+		t.Fatalf("err = %v, want the half-configured refusal", err)
+	}
+	if errors.Is(err, ErrSignInNotVerified) || errors.Is(err, ErrVendorNotSetUp) {
+		t.Fatalf("a partial set was reported as something milder: %v", err)
+	}
+	if waited := time.Since(started); waited > 5*time.Second {
+		t.Fatalf("the check waited %v before stating a refusal it could see by itself", waited)
+	}
+}
+
+// The identity node signs in to no vendor. Asked there, the check says so
+// rather than waiting for a record that will never come.
+func TestCheckProviderAuthSaysWhenThisNodeSignsInToNothing(t *testing.T) {
+	f := newFakeAnthropic(t)
+	anthropicFederationEnv(t, f)
+	engineRecorded(t, vendorSignInRecord{Outcome: signInOutcomeNotUsed,
+		Detail: "this node type calls no models and does not sign in to a vendor", Ids: map[string]string{}})
+
+	_, err := CheckProviderAuth(context.Background(), nil, "anthropic")
+	if !errors.Is(err, ErrVendorNotSetUp) {
+		t.Fatalf("err = %v, want ErrVendorNotSetUp", err)
+	}
+	if !strings.Contains(err.Error(), "calls no models") {
+		t.Fatalf("the error does not say why this node has no sign-in: %v", err)
 	}
 }
 
@@ -342,10 +968,12 @@ func TestCheckProviderAuthReportsUnavailableWithNoFederation(t *testing.T) {
 	} {
 		t.Setenv(name, "")
 	}
+	engineRecorded(t, vendorSignInRecord{Outcome: signInOutcomeNotConfigured,
+		Detail: "no federation ids are set for this vendor on this node", Ids: map[string]string{}})
 
 	report, err := CheckProviderAuth(context.Background(), nil, "anthropic")
-	if err != nil {
-		t.Fatalf("CheckProviderAuth: %v", err)
+	if !errors.Is(err, ErrVendorNotSetUp) {
+		t.Fatalf("err = %v, want ErrVendorNotSetUp", err)
 	}
 	if report.CredentialPath != string(credentialPathUnavailable) {
 		t.Fatalf("credential path = %q, want %q", report.CredentialPath, credentialPathUnavailable)
@@ -370,21 +998,25 @@ func TestCheckProviderAuthReportsUnavailableWithNoFederation(t *testing.T) {
 // satisfied by a command that accepted everything.
 func TestCheckProviderAuthCoversBothFederatingVendors(t *testing.T) {
 	t.Run("an OpenAI provider is accepted", func(t *testing.T) {
+		isolateVendorSignIns(t)
 		for _, name := range []string{
 			envOpenAIIdentityProviderID, envOpenAIServiceAccountID, envOpenAIIdentityTokenFile,
 		} {
 			t.Setenv(name, "")
 		}
+		engineRecorded(t, vendorSignInRecord{Vendor: metrics.FederationVendorOpenAI,
+			Outcome: signInOutcomeNotConfigured, Ids: map[string]string{}})
 
 		report, err := CheckProviderAuth(context.Background(), nil, "chat54Mini")
-		if err != nil {
-			t.Fatalf("CheckProviderAuth refused an OpenAI provider: %v", err)
+		// With no ids configured the answer is "not set up", which is the state
+		// of every cluster nobody has set OpenAI up on, and is not a refusal to
+		// check an OpenAI provider.
+		if !errors.Is(err, ErrVendorNotSetUp) {
+			t.Fatalf("CheckProviderAuth on an OpenAI provider nobody set up: err = %v, want ErrVendorNotSetUp", err)
 		}
 		if report.Vendor != metrics.FederationVendorOpenAI {
 			t.Errorf("report vendor = %q, want %q", report.Vendor, metrics.FederationVendorOpenAI)
 		}
-		// With no ids configured the honest answer is "unavailable", not an
-		// error: that is the state of every local cluster.
 		if report.CredentialPath != string(credentialPathUnavailable) {
 			t.Errorf("credential path = %q, want %q", report.CredentialPath, credentialPathUnavailable)
 		}
@@ -396,45 +1028,6 @@ func TestCheckProviderAuthCoversBothFederatingVendors(t *testing.T) {
 			t.Fatal("CheckProviderAuth accepted a provider that is not declared")
 		}
 	})
-}
-
-// TestCheckProviderAuthModelsCallCarriesNoKey closes the loop the cutover
-// depends on: the live call the check makes must itself use the federated
-// bearer. A check that verified the exchange and then listed models with a
-// stray key would report success for the wrong credential -- which is exactly
-// the reassurance step 5 must not be given before deleting the key.
-func TestCheckProviderAuthModelsCallCarriesNoKey(t *testing.T) {
-	f := newFakeAnthropic(t)
-	t.Setenv("ANTHROPIC_API_KEY", "")
-	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
-	t.Setenv("ANTHROPIC_BASE_URL", f.srv.URL)
-	// Both configured -- federation must win, per D3.
-	t.Setenv(envAnthropicFederationRuleID, "fdrl_test")
-	t.Setenv(envAnthropicOrganizationID, "11111111-2222-3333-4444-555555555555")
-	t.Setenv(envAnthropicServiceAccountID, "svac_test")
-	t.Setenv(envAnthropicWorkspaceID, "")
-	t.Setenv(envAnthropicIdentityTokenFile, validIdentityToken(t))
-
-	report, err := CheckProviderAuth(context.Background(), nil, "anthropic")
-	if err != nil {
-		t.Fatalf("CheckProviderAuth: %v", err)
-	}
-	if report.CredentialPath != string(credentialPathFederation) {
-		t.Fatalf("with both configured the check reported %q", report.CredentialPath)
-	}
-
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if len(f.modelsHeaders) == 0 {
-		t.Fatal("models.list was never called")
-	}
-	h := f.modelsHeaders[len(f.modelsHeaders)-1]
-	if got := h.Get("x-api-key"); got != "" {
-		t.Fatalf("models.list carried x-api-key %q while reporting federation", got)
-	}
-	if got := h.Get("Authorization"); !strings.HasPrefix(got, "Bearer ") {
-		t.Fatalf("models.list Authorization = %q, want the federated bearer", got)
-	}
 }
 
 // TestFederationSurvivesAnAmbientAnthropicKey is the regression test for the

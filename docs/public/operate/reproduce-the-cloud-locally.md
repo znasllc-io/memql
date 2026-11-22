@@ -208,10 +208,13 @@ following in order:
    below), unless `MEDIA=0`. If it does not start, `make up` fails after every
    other step has finished, naming the reason.
 
-`make up-refresh` runs the same bring-up preceded by a purge teardown
-(`make down PURGE=1`), so the in-cluster Postgres is wiped and the
-environment repaves from scratch. It is idempotent and honors the same
-`SERVERS`/`AGENTS`/`REVISION` overrides as `make up`.
+`make up-refresh` runs the same bring-up preceded by a purge teardown, so the
+in-cluster Postgres is wiped and the environment repaves from scratch. It is
+idempotent and honors the same `SERVERS`/`AGENTS`/`REVISION` overrides as
+`make up`. Its teardown differs from `make down PURGE=1` in one thing: it
+keeps the cluster's token signing key (`~/.memql/k3d/<cluster>/service-account.key`),
+so the recreated cluster is the same issuer and public keys already given to a
+vendor stay good. `make down PURGE=1` deletes that key.
 
 ### The calls media server
 

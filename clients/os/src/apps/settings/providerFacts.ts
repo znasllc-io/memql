@@ -150,7 +150,7 @@ export function sourceCopy(source: string): string {
  * `MEMQL_AI_ANTHROPIC_IDENTITY_TOKEN_FILE` and `MEMQL_AI_OPENAI_IDENTITY_TOKEN_FILE`
  * beside the projected volume they name (deploy/k8s/base) -- so a text box for
  * it in a browser could only ever disagree with the mount, and a path that
- * disagrees with the mount is a federation that refuses boot for a reason the
+ * disagrees with the mount is a vendor no node can sign in to, for a reason the
  * person who typed it cannot see. The panel says where it went, because an
  * operator who used the old five-field form will look for it.
  *
@@ -215,10 +215,13 @@ export function missingFederationFields(
  * What this vendor's door is, read from the registry THIS node answered with.
  *
  *  - `open`  -- ids applied, the exchange is the credential, nothing is stored.
- *  - `unset` -- no ids. NORMAL: it is how every cluster is installed and the
- *               permanent state of every local one. Not a fault, not amber.
- *  - `half`  -- some ids set and some missing. The engine REFUSES BOOT on this,
- *               so it is the one state that is actionable and urgent.
+ *  - `unset` -- no ids. NORMAL: it is how every cluster is installed. Not a
+ *               fault, not amber.
+ *  - `half`  -- some ids set and some missing. Every node refuses the VENDOR
+ *               on this (it keeps running, and cannot use the vendor), so it
+ *               is the one state that is actionable and urgent. The token
+ *               file's path on its own is not this state: every Deployment
+ *               sets it, and the engine reads "no id" as not set up.
  *
  * `half` IS CHECKED FIRST, and the order is the fail-safe direction: a stale
  * federated row alongside a half-configured one must not let the dangerous
@@ -256,12 +259,15 @@ export function doorFor(vendor: string, rows: readonly ProviderStatusRow[]): Ven
 }
 
 /**
- * Whether either vendor could reach this cluster's OIDC issuer at all.
+ * Whether a vendor can FETCH this cluster's public keys from its OIDC issuer.
  *
- * A LOCAL CLUSTER CAN NEVER FEDERATE (design D6): its issuer is private, so
- * neither vendor can discover it, and uploading a JWKS per developer cluster
- * is not reproducible. Offering the form there invites somebody to fill in ids
- * that cannot work and then wait for an exchange that will never happen.
+ * It decides wording, never whether the form is offered. A local cluster's
+ * issuer is private, so a vendor cannot fetch its keys; both vendors accept
+ * them pasted in instead, and then the ids work as anywhere. Settings > Vendors
+ * says so beside the form on a local cluster. This comment used to say a local
+ * cluster could never federate (design D6 of the federation epic), which the
+ * vendors' own documentation contradicts (design record
+ * 2026-11-21-vendor-accounts-and-api-keys, A6).
  *
  * THE OS HAD NO LOCALITY CONVENTION, so this MIRRORS the engine's rather than
  * inventing a second one: `integrations/email/delivery.go` `IsLocalDomain`,
@@ -274,8 +280,8 @@ export function doorFor(vendor: string, rows: readonly ProviderStatusRow[]): Ven
  * reads an empty domain as local, because a process with no domain configured
  * is not a cloud install. In a browser an empty `config.domain` means the
  * runtime config has not landed yet, which is not the same claim -- and
- * flashing "federation is not available on a local cluster" at a cloud
- * operator for one frame is a lie the surface would have no way to take back.
+ * flashing a local cluster's instruction at a cloud operator for one frame is
+ * a sentence the surface would have no way to take back.
  * So the answer is `unknown`, and the surface holds the sentence rather than
  * guessing which way to be wrong.
  *

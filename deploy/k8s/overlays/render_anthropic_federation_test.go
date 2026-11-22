@@ -196,8 +196,17 @@ func assertAnthropicIdentity(t *testing.T, overlay, name string, w workload) {
 			t.Errorf("%s/%s: projected token audience is %q, want %q -- an audience mismatch is the most common federation denial and it is invisible until the exchange",
 				overlay, name, src.Audience, anthropicAudience)
 		}
-		if src.ExpirationSeconds != 3600 {
-			t.Errorf("%s/%s: projected token expirationSeconds is %d, want 3600 (the rule's token_lifetime_seconds)",
+		// 600, NOT THE HOUR IT USED TO BE (design record
+		// 2026-11-21-vendor-accounts-and-api-keys, A3 and A4). Anthropic
+		// accepts an identity token once, so a container that restarts inside
+		// a living pod reads a token its predecessor already used and is
+		// refused until kubelet replaces the file, at 80 percent of this
+		// lifetime: about 8 minutes at 600, 48 at 3600. 600 is the lowest
+		// value Kubernetes accepts. The bearer Anthropic mints is not
+		// shortened by it: that lifetime is the rule's token_lifetime_seconds.
+		if src.ExpirationSeconds != 600 {
+			t.Errorf("%s/%s: projected token expirationSeconds is %d, want 600 (a new token about every 8 minutes, "+
+				"so a restarted container waits at most that long; design 2026-11-21 A3)",
 				overlay, name, src.ExpirationSeconds)
 		}
 		if src.Path != "token" {

@@ -33,9 +33,8 @@ func TestSTTBearerIsAbsentWithoutAnEngine(t *testing.T) {
 
 // TestSTTBearerIsAbsentWithoutFederation is the same refusal one layer in: an
 // engine is present, but no OpenAI provider on it carries federation ids. That
-// is the state of EVERY local cluster (its OIDC issuer is private, so neither
-// vendor can federate with it) and of a fresh cloud cluster, so it is the
-// common case rather than an edge one.
+// is the state of every freshly installed cluster, local or cloud, so it is
+// the common case rather than an edge one.
 //
 // The engine is a zero value rather than a booted one on purpose: this asserts
 // the guard, and booting an engine here would need a database and would make a

@@ -8,10 +8,11 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/openai/openai-go/v3/option"
+
+	"github.com/znasllc-io/memql/component/metrics"
 )
 
 // OpenAI workload identity federation (epic memql#5088).
@@ -81,9 +82,8 @@ const (
 // configured at all.
 //
 // It is a PATH rather than an error because it is the normal state of a fresh
-// cluster and of every local cluster: a k3d cluster's OIDC issuer is private,
-// so neither vendor can discover it, and after this epic there is no key to
-// fall back to (design D6). The readiness model reports that as `ai`
+// cluster, local or cloud: no vendor has been set up yet, and the cluster has
+// no key to fall back to. The readiness model reports that as `ai`
 // unconfigured; nothing about it is a fault.
 const credentialPathUnavailable credentialPath = "unavailable"
 
@@ -98,8 +98,11 @@ type openaiFederation struct {
 	TokenEndpoint string
 }
 
-// requiredFederationFields is the set that decides the branch: all three
-// present means federate, none means unavailable, anything between refuses.
+// requiredFederationFields is the set federation needs: all three present
+// means federate. Whether the vendor is configured at all is asked of the two
+// ids alone (anyIdSet): the token file's path is set by every Deployment on
+// every cluster and is not a configuration on its own (the Anthropic twin of
+// this function says what counting it cost).
 //
 // The order is the order the missing-field error names them in, which is the
 // order the runbook creates them in.
@@ -125,6 +128,12 @@ func (f openaiFederation) present() []string {
 		}
 	}
 	return out
+}
+
+// anyIdSet reports whether an operator set either id. The token file is not
+// asked: see requiredFederationFields.
+func (f openaiFederation) anyIdSet() bool {
+	return f.IdentityProviderID != "" || f.ServiceAccountID != ""
 }
 
 func (f openaiFederation) missing() []string {
@@ -166,81 +175,47 @@ type BearerSource interface {
 	Bearer(ctx context.Context) (token string, expiresAt time.Time, err error)
 }
 
-// openaiRefreshMandatory is the point past which a cached bearer is not handed
-// out at all: inside this window the next caller pays for a fresh exchange.
+// openaiExchanger performs the RFC 8693 token exchange: one post, no cache.
 //
-// ONE THRESHOLD, NOT TWO, and the design named two. Its second -- an advisory
-// 120s at which a refresh is STARTED EARLY so no request waits on the network
-// -- only means something for a BACKGROUND refresher, and this exchanger is
-// synchronous. Pre-empting inside an advisory window here would make some
-// unlucky caller wait for a round trip in order to spare a later one, which is
-// not a trade, and a constant declared for a behaviour that does not exist is
-// the kind of thing a reader later takes for a description of one.
-//
-// The number is the Anthropic SDK's own, adopted rather than invented so both
-// vendors behave alike.
-const openaiRefreshMandatory = 30 * time.Second
-
-// openaiExchanger performs the RFC 8693 token exchange and caches the result.
+// IT USED TO CACHE, and there used to be one per provider record plus one more
+// for each transcription path, each presenting the pod's identity token for
+// itself (design record 2026-11-21-vendor-accounts-and-api-keys, A1). The
+// cache, the clock and the lock now belong to the process's vendorSignIn, which
+// every OpenAI consumer shares; what is left here is the exchange.
 type openaiExchanger struct {
 	fed        openaiFederation
 	httpClient *http.Client
-
-	// now is injectable so the refresh-threshold tests do not sleep.
-	now func() time.Time
-
-	mu        sync.Mutex
-	token     string
-	expiresAt time.Time
 }
 
-func newOpenAIExchanger(fed openaiFederation, httpClient *http.Client) *openaiExchanger {
+// openaiSignInConfig describes the cluster's OpenAI account as a sign-in.
+//
+// NOT REPLAY-PROTECTED: OpenAI documents no rule against presenting an identity
+// token twice, and its bearer never outlives the token it was minted from, so
+// the sign-in may present the same token again once its bearer has died.
+func openaiSignInConfig(fed openaiFederation, httpClient *http.Client) vendorSignInConfig {
 	if httpClient == nil {
 		httpClient = guardedHTTPClient(nil)
 	}
-	return &openaiExchanger{fed: fed, httpClient: httpClient, now: time.Now}
+	exchanger := &openaiExchanger{fed: fed, httpClient: httpClient}
+	return vendorSignInConfig{
+		Vendor: metrics.FederationVendorOpenAI,
+		Fingerprint: signInFingerprint(metrics.FederationVendorOpenAI,
+			fed.IdentityProviderID, fed.ServiceAccountID, fed.TokenFile, fed.tokenEndpoint()),
+		TokenFile: fed.TokenFile,
+		Ids: map[string]string{
+			authKeyIdentityProviderID:     fed.IdentityProviderID,
+			authKeyOpenAIServiceAccountID: fed.ServiceAccountID,
+		},
+		Exchange: exchanger.exchange,
+	}
 }
 
-// Bearer returns a valid access token, exchanging the projected identity token
-// for a new one when the cached bearer is missing or close to expiry.
-//
-// THE LOCK IS HELD ACROSS THE NETWORK EXCHANGE, ON PURPOSE. Every engine node
-// runs one of these behind a dozen providers, so a bearer expiring under load
-// means many goroutines arrive at once; releasing the lock to "avoid blocking
-// on I/O" would let each of them perform its own exchange, against a vendor
-// that rate-limits the endpoint and a counter that would then report a dozen
-// exchanges per rotation. Serialising means the first caller pays and the rest
-// wake to a cached token. The wait is bounded by the caller's own context,
-// which the exchange honours.
-func (x *openaiExchanger) Bearer(ctx context.Context) (string, time.Time, error) {
-	x.mu.Lock()
-	defer x.mu.Unlock()
-
-	if x.token != "" && x.expiresAt.After(x.now().Add(openaiRefreshMandatory)) {
-		return x.token, x.expiresAt, nil
-	}
-
-	token, expiresAt, err := x.exchange(ctx)
-	if err != nil {
-		// THE LAST GOOD BEARER KEEPS WORKING. A denial is a configuration
-		// answer that arrives while a perfectly valid token is still in hand,
-		// and dropping it would turn a misconfiguration an operator has up to
-		// an hour to fix into an immediate outage. This mirrors what the
-		// Anthropic SDK does with its own cache, and the `denied` counter is
-		// what makes the window visible.
-		//
-		// The clock is read AGAIN here rather than reused from above: the
-		// exchange that just failed may have spent seconds timing out, and a
-		// token that was valid when this call started can have expired during
-		// it. Handing that one back would replace a clear error with a 401.
-		if x.token != "" && x.expiresAt.After(x.now()) {
-			return x.token, x.expiresAt, nil
-		}
-		return "", time.Time{}, err
-	}
-
-	x.token, x.expiresAt = token, expiresAt
-	return token, expiresAt, nil
+// newOpenAIExchanger builds a sign-in for one OpenAI federation that is NOT the
+// process's shared one. Production code takes the shared sign-in from
+// openaiCredential; this is for the tests that drive one exchange on a clock of
+// their own.
+func newOpenAIExchanger(fed openaiFederation, httpClient *http.Client) *vendorSignIn {
+	return newVendorSignIn(openaiSignInConfig(fed, httpClient), time.Now, vendorSignInProcessStarted)
 }
 
 // exchangeRequest is the RFC 8693 token-exchange body OpenAI expects.
@@ -257,20 +232,12 @@ const (
 	subjectTokenTypeJWT    = "urn:ietf:params:oauth:token-type:jwt"
 )
 
-// exchange posts the projected token and returns the bearer it is exchanged
-// for. The caller holds x.mu.
-func (x *openaiExchanger) exchange(ctx context.Context) (string, time.Time, error) {
-	// The token file is re-read on EVERY exchange rather than cached at
-	// construction. Kubernetes rewrites a projected token in place as it
-	// approaches expiry, and a copy taken at boot is a copy that stops being
-	// valid on a schedule nothing here controls.
-	subject, err := readFileTrimmed(x.fed.TokenFile)
-	if err != nil {
-		return "", time.Time{}, fmt.Errorf(
-			"cannot read the projected identity token at %s (%s): %w",
-			x.fed.TokenFile, envOpenAIIdentityTokenFile, err)
-	}
-
+// exchange posts one identity token and returns the bearer it is exchanged
+// for. A zero expiry means OpenAI named none. A status that refuses the token
+// (signInStatusRefuses: a 4xx other than 408, 425 and 429) is returned as
+// *vendorExchangeRefused, which is what tells the sign-in the vendor answered
+// and refused rather than never answering.
+func (x *openaiExchanger) exchange(ctx context.Context, subject string) (string, time.Time, error) {
 	body, err := json.Marshal(exchangeRequest{
 		GrantType:        tokenExchangeGrantType,
 		SubjectTokenType: subjectTokenTypeJWT,
@@ -309,9 +276,11 @@ func (x *openaiExchanger) exchange(ctx context.Context) (string, time.Time, erro
 		// string can act without reading any of our code. The SUBJECT TOKEN is
 		// never in an error body -- it is something we sent, not something the
 		// vendor echoes -- and is never logged from here either.
-		return "", time.Time{}, fmt.Errorf(
-			"openai refused the token exchange (status %d): %s. Runbook: docs/public/operate/auth/openai-federation.md",
-			resp.StatusCode, truncateForLog(string(raw), maxFederationBodyNote))
+		note := truncateForLog(string(raw), maxFederationBodyNote)
+		if signInStatusRefuses(resp.StatusCode) {
+			return "", time.Time{}, &vendorExchangeRefused{Status: resp.StatusCode, Body: note}
+		}
+		return "", time.Time{}, fmt.Errorf("openai token exchange faulted (status %d): %s", resp.StatusCode, note)
 	}
 
 	var parsed struct {
@@ -319,22 +288,18 @@ func (x *openaiExchanger) exchange(ctx context.Context) (string, time.Time, erro
 		ExpiresIn   int    `json:"expires_in"`
 	}
 	if err := json.Unmarshal(raw, &parsed); err != nil {
-		// The body is NOT included: on a 2xx it holds the bearer.
-		return "", time.Time{}, fmt.Errorf("openai token exchange response is not JSON (status %d)", resp.StatusCode)
+		return "", time.Time{}, fmt.Errorf("parse openai token exchange response: %w", err)
 	}
 	if strings.TrimSpace(parsed.AccessToken) == "" {
-		return "", time.Time{}, fmt.Errorf("openai token exchange returned no access_token (status %d)", resp.StatusCode)
+		return "", time.Time{}, fmt.Errorf("openai token exchange response carried no access_token")
 	}
-
-	expiresIn := time.Duration(parsed.ExpiresIn) * time.Second
-	if expiresIn <= 0 {
+	if parsed.ExpiresIn <= 0 {
 		// OpenAI documents at most an hour and always sends expires_in. A
-		// missing value is treated as the shortest sensible lifetime rather
-		// than as forever: an over-eager re-exchange costs one request, and a
-		// token cached forever is a token that stops working silently.
-		expiresIn = openaiRefreshMandatory * 2
+		// missing value is left for the sign-in to treat as short-lived rather
+		// than as forever.
+		return parsed.AccessToken, time.Time{}, nil
 	}
-	return parsed.AccessToken, x.now().Add(expiresIn), nil
+	return parsed.AccessToken, time.Now().Add(time.Duration(parsed.ExpiresIn) * time.Second), nil
 }
 
 // openaiBearerMiddleware sets Authorization from the bearer source on every
@@ -344,14 +309,32 @@ func (x *openaiExchanger) exchange(ctx context.Context) (string, time.Time, erro
 // a middleware rather than option.WithAPIKey: a bearer expires within the hour
 // and a header fixed at construction would serve a stale one for the rest of
 // the process's life.
+//
+// A 401 DOES NOT DROP THE BEARER, unlike Anthropic's middleware. OpenAI answers
+// 401 for more than a bearer it no longer accepts: a service account without
+// one endpoint's permission gets a 401 there and is served everywhere else
+// (its error-code reference lists "Invalid Authentication" for exactly that).
+// The bearer is the whole process's, so dropping it on any 401 let one such
+// request sign every OpenAI consumer on the node out. It is kept until it
+// expires, at most an hour, which is what this did before the shared sign-in.
+// TestOpenAIKeepsItsBearerThroughA401.
+//
+// A SERVED CALL IS PROOF. The source is told when the vendor serves a request
+// made with its bearer: that is the only proof a bearer bought by a renewal
+// ever gets, and what `memql provider-auth check` reports as verified.
 func openaiBearerMiddleware(src BearerSource) option.Middleware {
+	prover, _ := src.(interface{ NoteServed(bearer string) })
 	return func(req *http.Request, next option.MiddlewareNext) (*http.Response, error) {
 		token, _, err := src.Bearer(req.Context())
 		if err != nil {
 			return nil, err
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
-		return next(req)
+		resp, err := next(req)
+		if prover != nil && err == nil && resp != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			prover.NoteServed(token)
+		}
+		return resp, err
 	}
 }
 
@@ -375,11 +358,25 @@ func openaiCredential(cfg ProviderConfig, httpClient *http.Client) ([]option.Req
 	present, missing := fed.present(), fed.missing()
 
 	switch {
+	case !fed.anyIdSet():
+		// No id. NOT AN ERROR: nobody set OpenAI up on this cluster. The token
+		// file's path is set by the Deployment on every pod and is not a
+		// configuration on its own. The provider registers as unavailable and
+		// the readiness model reports `ai` unconfigured.
+		return nil, nil, credentialPathUnavailable, nil
+
 	case len(missing) == 0:
 		if err := preflightIdentityToken(fed.TokenFile, openaiAudience, envOpenAIIdentityTokenFile); err != nil {
 			return nil, nil, "", fmt.Errorf("provider %q openai federation preflight: %w", cfg.Name, err)
 		}
-		source := newOpenAIExchanger(fed, httpClient)
+		// ONE SIGN-IN FOR EVERY OPENAI CONSUMER IN THIS PROCESS (design record
+		// 2026-11-21-vendor-accounts-and-api-keys, A1): chat, streaming,
+		// speech, transcription, embeddings and the transcription socket all
+		// receive this same source. The exchange rides a guarded client of the
+		// sign-in's own, never the calling client's, so a streaming client's
+		// timeouts do not apply to it and the exchange observer still sees it.
+		// TestOpenAIClientsAndTranscriptionShareOneSignIn.
+		source := processVendorSignIn(openaiSignInConfig(fed, nil))
 		opts := []option.RequestOption{
 			option.WithHTTPClient(httpClient),
 			option.WithMiddleware(openaiBearerMiddleware(source)),
@@ -398,24 +395,17 @@ func openaiCredential(cfg ProviderConfig, httpClient *http.Client) ([]option.Req
 		}
 		return opts, source, credentialPathFederation, nil
 
-	case len(present) > 0:
-		// One or two set: refuse. Naming both halves is deliberate -- the
-		// operator is mid-runbook and needs to know which of the three they
-		// have, not only which they lack.
+	default:
+		// An id set and something missing: refuse. Naming both halves is
+		// deliberate -- the operator is mid-runbook and needs to know which of
+		// the three they have, not only which they lack.
 		return nil, nil, "", fmt.Errorf(
 			"provider %q is HALF-CONFIGURED for OpenAI workload identity federation: %s set, %s missing. "+
-				"Set all three, or none to leave the OpenAI providers unavailable. A partial federation config "+
-				"is refused rather than quietly read as 'not configured', because an operator halfway through "+
-				"the runbook believes they are ENABLING OpenAI, not disabling it. "+
+				"Set all three, or clear the ids to leave the OpenAI providers unavailable. A partial federation "+
+				"config is refused rather than quietly read as 'not configured', because an operator halfway "+
+				"through the runbook believes they are ENABLING OpenAI, not disabling it. "+
 				"Runbook: docs/public/operate/auth/openai-federation.md",
 			cfg.Name, strings.Join(present, ", "), strings.Join(missing, ", "))
-
-	default:
-		// None set. NOT AN ERROR: this is a fresh cloud cluster and every local
-		// cluster, and after key removal there is nothing else it could mean.
-		// The provider registers as unavailable and the readiness model reports
-		// `ai` unconfigured.
-		return nil, nil, credentialPathUnavailable, nil
 	}
 }
 
@@ -424,7 +414,17 @@ func openaiCredential(cfg ProviderConfig, httpClient *http.Client) ([]option.Req
 //
 // It exists for the ONE consumer that cannot take an SDK client: the Realtime
 // transcription WebSocket, which dials with an Authorization header of its own
-// (app/integrations_stt.go wires it). `provider-auth check` uses it too.
+// (app/integrations_stt.go wires it).
+//
+// THE SOURCE FOLLOWS A RELOAD. The transcription path takes it once, when the
+// node is wired, and keeps it for the life of the process. It used to be the
+// sign-in object of that moment, so after an operator corrected an id and
+// pressed Apply every other OpenAI consumer moved to a sign-in under the new
+// ids and transcription stayed on the old one until the node restarted: a
+// second sign-in in the process (the one hole in "one sign-in per vendor"),
+// under ids somebody had just replaced. The source now asks the registry for
+// the current sign-in each time a bearer is wanted, and says so when OpenAI is
+// no longer set up. TestTheTranscriptionBearerFollowsAnApply.
 //
 // It resolves from a registered OpenAI provider's auth map rather than reading
 // the environment, so it goes through the same three-tier resolution
@@ -434,6 +434,30 @@ func openaiCredential(cfg ProviderConfig, httpClient *http.Client) ([]option.Req
 // consumer on the same node, which is the kind of split that presents as
 // "transcription is broken" long after the change that caused it.
 func (e *MemQLEngine) OpenAIBearer() (BearerSource, bool) {
+	if _, ok := e.openaiSignIn(); !ok {
+		return nil, false
+	}
+	return openaiEngineBearer{engine: e}, true
+}
+
+// openaiEngineBearer is the bearer source OpenAIBearer hands out: the engine's
+// CURRENT OpenAI sign-in, looked up on every call.
+type openaiEngineBearer struct {
+	engine *MemQLEngine
+}
+
+func (b openaiEngineBearer) Bearer(ctx context.Context) (string, time.Time, error) {
+	signIn, ok := b.engine.openaiSignIn()
+	if !ok {
+		return "", time.Time{}, fmt.Errorf("OpenAI is not set up on this node: its federation ids are not set, " +
+			"or were removed since this consumer started. Runbook: docs/public/operate/auth/openai-federation.md")
+	}
+	return signIn.Bearer(ctx)
+}
+
+// openaiSignIn returns the process's sign-in for the cluster's OpenAI account,
+// from the ids the registry's OpenAI records carry now.
+func (e *MemQLEngine) openaiSignIn() (*vendorSignIn, bool) {
 	if e == nil || e.providers == nil {
 		return nil, false
 	}
@@ -450,7 +474,11 @@ func (e *MemQLEngine) OpenAIBearer() (BearerSource, bool) {
 		// these ids was constructed at boot, which is where a structurally
 		// wrong token is refused. Repeating it would make a transcription
 		// session fail for a reason the provider registry already reported.
-		return newOpenAIExchanger(fed, guardedHTTPClient(nil)), true
+		//
+		// The process's shared sign-in, never one of its own: this used to
+		// build a new exchanger on every call, which was one more sign-in with
+		// the pod's identity token for each transcription path.
+		return processVendorSignIn(openaiSignInConfig(fed, nil)), true
 	}
 	return nil, false
 }

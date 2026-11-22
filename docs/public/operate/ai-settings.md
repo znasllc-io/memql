@@ -71,16 +71,19 @@ One row per vendor: what is true of it now, and its form.
 resolved at boot does not move until Apply broadcasts. They are two controls
 because they are two facts.
 
-**A half-configured vendor is the state that shouts**, because the engine
-refuses to boot on it -- hours after the save that caused it. One to three of
-Anthropic's four ids, or one of OpenAI's two, and the fleet goes down at its
-next restart. That row carries the engine's own sentence, which names exactly
-which ids are set.
+**A half-configured vendor is the state that shouts**, because every node
+refuses the vendor on it: one or two of Anthropic's three ids, or one of
+OpenAI's two, and no node can use that vendor until every id is set. The nodes
+still start and serve everything that needs no model. That row carries the
+engine's own sentence, which names exactly which ids are set.
 
-**A local cluster is told, not asked.** Its OIDC issuer is not reachable from
-the public internet, so neither vendor can verify a token it mints. The forms
-are absent there with a sentence in their place -- no id you enter could ever
-work.
+**A local cluster gets the same form, and one more step.** Its OIDC issuer is
+not reachable from the public internet, so a vendor cannot fetch its keys; it
+is given them instead. `make federation-keys` prints the issuer, the public
+keys and the subjects, which you paste (Anthropic) or upload (OpenAI) once.
+The form carries a sentence saying so. The steps are in the
+[Anthropic](auth/anthropic-federation.md#on-a-local-cluster) and
+[OpenAI](auth/openai-federation.md#on-a-local-cluster) runbooks.
 
 ## Settings > Levels
 

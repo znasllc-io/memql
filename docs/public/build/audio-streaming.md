@@ -165,12 +165,12 @@ Two consequences worth knowing before debugging a silent microphone:
 - **A cluster that has not federated with OpenAI has no transcription at all.**
   The audio websocket stays disabled and says so at boot; it does not fail
   per-request.
-- **A local k3d cluster cannot federate**, because its OIDC issuer is not
-  publicly reachable -- so streaming transcription and Whisper are off locally,
-  by construction. See
-  [openai-federation.md](../operate/auth/openai-federation.md), which also
-  records whether OpenAI's Realtime WebSocket accepts a federated bearer at
-  all: that is verified per cluster by the runbook rather than assumed here.
+- **A local k3d cluster has none until it is set up**, because its OIDC issuer
+  is not publicly reachable: OpenAI has to be given the cluster's public keys
+  first. See [openai-federation.md](../operate/auth/openai-federation.md),
+  which has the local steps and also records whether OpenAI's Realtime
+  WebSocket accepts a federated bearer at all: that is verified per cluster by
+  the runbook rather than assumed here.
 
 `MEMQL_STT_LANGUAGE` **overrides any client-supplied language hint by
 design**, and pinning it is the fix for the classic multi-language

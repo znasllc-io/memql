@@ -317,6 +317,64 @@ func TestVerifyProviderFederationUnrunnableIsOperationalFailure(t *testing.T) {
 	}
 }
 
+// TestVerifyProviderNotVerifiedYetIsNotARefusal: the check RAN and could not
+// say. The engine in the pod has recorded no sign-in yet, or is waiting for its
+// next identity token. `provider-auth check` exits 4 for that. It must not
+// surface as 3: an installer told "refused" re-does the console steps for a
+// node that only needed another moment.
+func TestVerifyProviderNotVerifiedYetIsNotARefusal(t *testing.T) {
+	binDir, argvFile := vpkStubKubectl(t)
+	stdout, _, code := vpkRun(t, vpkStubEnv(binDir, argvFile, "4", "provider-auth check: NOT VERIFIED YET: the engine in this pod has recorded no anthropic sign-in"),
+		"--provider=anthropic", "--federation-deploy=agent")
+	if code != 5 {
+		t.Fatalf("an unverified sign-in exited %d, want 5\nstdout: %s", code, stdout)
+	}
+	env := vpkParse(t, stdout)
+	if env.Error == nil || env.Error.Code != 5 {
+		t.Fatalf("want error.code=5, got: %s", stdout)
+	}
+	if !strings.Contains(env.Error.Message, "not verified") {
+		t.Errorf("the message reads as a failure to run the check, not as an open question: %q", env.Error.Message)
+	}
+	if strings.Contains(env.Error.Message, "could not run") {
+		t.Errorf("the check DID run; the message must not say it could not: %q", env.Error.Message)
+	}
+	if v := vpkResultField(t, env, "valid"); v != false {
+		t.Errorf("result.valid = %v, want false", v)
+	}
+}
+
+// TestVerifyProviderNotSetUpIsNeverSuccess: the check RAN and the engine in the
+// pod said it holds no account at the vendor. `provider-auth check` exits 3 for
+// that (it used to exit 0, which this script read as "Federation verified" for
+// a pod with no ids at all). The installer runs this step only after it has
+// written federation ids, so a pod that holds none is a configuration that did
+// not arrive: exit 3, with words that say so, and never a failure to run.
+func TestVerifyProviderNotSetUpIsNeverSuccess(t *testing.T) {
+	binDir, argvFile := vpkStubKubectl(t)
+	stdout, _, code := vpkRun(t, vpkStubEnv(binDir, argvFile, "3",
+		"provider-auth check: NOT SET UP: the vendor is not set up on this node: no federation ids are set for this vendor on this node"),
+		"--provider=anthropic", "--federation-deploy=agent")
+	if code != 3 {
+		t.Fatalf("a pod with no federation ids exited %d, want 3\nstdout: %s", code, stdout)
+	}
+	env := vpkParse(t, stdout)
+	if env.OK || env.Error == nil || env.Error.Code != 3 {
+		t.Fatalf("want ok=false error.code=3, got: %s", stdout)
+	}
+	if !strings.Contains(env.Error.Message, "not set up") {
+		t.Errorf("the message does not say the vendor is not set up in that pod: %q", env.Error.Message)
+	}
+	for _, wrong := range []string{"could not run", "did not accept", "was refused"} {
+		if strings.Contains(env.Error.Message, wrong) {
+			t.Errorf("the message says %q, which is not what happened: %q", wrong, env.Error.Message)
+		}
+	}
+	if v := vpkResultField(t, env, "valid"); v != false {
+		t.Errorf("result.valid = %v, want false", v)
+	}
+}
+
 // TestVerifyProviderBadParams covers the invocation errors that must be exit 2
 // and must never reach a cluster.
 func TestVerifyProviderBadParams(t *testing.T) {

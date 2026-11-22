@@ -5,8 +5,9 @@
 #
 # Capability: k3d.down -- tear down the local k3d cluster.
 #
-# Deletes the cluster and optionally removes the kubeconfig entry. Idempotent:
-# deleting an absent cluster is a successful no-op (changed=false).
+# Deletes the cluster and optionally purges what it leaves on this machine: the
+# kubeconfig entry and the cluster's token signing key. Idempotent: deleting an
+# absent cluster is a successful no-op (changed=false).
 #
 # THE LOCAL CALLS MEDIA SERVER GOES FIRST. `make up` starts it beside the
 # cluster (scripts/media/local-up.sh), with `restart: unless-stopped` and its
@@ -29,8 +30,8 @@
 # Contract: docs/internal/design/capability-script-contract.md
 #
 # Usage:
-#   make down                       # delete cluster, keep kubeconfig context
-#   make down PURGE=1               # delete cluster + purge kubeconfig context
+#   make down                       # delete cluster, keep kubeconfig context and signing key
+#   make down PURGE=1               # delete cluster + purge kubeconfig context and signing key
 #   scripts/k3d/down.sh --cluster=memql --purge
 #   scripts/k3d/down.sh --print-spec
 #
@@ -48,7 +49,8 @@ source "${SCRIPT_DIR}/../lib/capability.sh"
 
 cap_init "k3d.down" "Tear down the local k3d cluster."
 cap_spec_param "cluster" "k3d cluster name"
-cap_spec_param "purge"   "also remove the kubeconfig context (flag)"
+cap_spec_param "purge"   "also remove the kubeconfig context and the cluster's token signing key (flag)"
+cap_spec_param "keep-signing-key" "with purge: keep the token signing key, so a cluster recreated next is the same issuer (flag; the clean-slate bring-up passes it)"
 
 # The media server's teardown, found from the repository root rather than as a
 # sibling of this directory, and only when it is there: see the file note, and
@@ -140,6 +142,48 @@ function remove_kubeconfig() {
     fi
 }
 
+# remove_signing_key <cluster> <purge> <keep> -- delete the cluster's token
+# signing key on an operator's purge, and only then.
+#
+# `make up` keeps a local cluster's signing key in a file so that a recreated
+# cluster is the same issuer and the public keys given to a vendor stay good
+# (up.sh, ensure_signing_key; design record
+# 2026-11-21-vendor-accounts-and-api-keys, A7). TWO TEARDOWNS MUST KEEP IT:
+#
+#   - a plain one, which says nothing about the cluster being gone for good;
+#   - the clean-slate bring-up's (`make up-refresh`, bringup.sh nuke). That one
+#     IS a purge, because a clean slate must not inherit a stale kubeconfig
+#     context, and it is also the exact case the key is kept for: the cluster
+#     is recreated a moment later. It passes --keep-signing-key. Deleting the
+#     key there made every refresh a new issuer, which the first version of
+#     this function did.
+#
+# An operator's own purge (`make down PURGE=1`) is them saying the cluster is
+# gone for good, and the key is a secret that should not outlive it.
+#
+# One file and its own directory, by exact path: never a recursive removal.
+SIGNING_KEY_REMOVED=false
+function remove_signing_key() {
+    local cluster="$1" purge="$2" keep="$3" key
+    key="${HOME}/.memql/k3d/${cluster}/service-account.key"
+    if [[ ! -e "${key}" ]]; then
+        return 0
+    fi
+    if [[ -z "$purge" ]]; then
+        cap_info "Token signing key kept at ${key}: the next 'make up' is the same issuer (set --purge to delete it)."
+        return 0
+    fi
+    if [[ -n "$keep" ]]; then
+        cap_info "Token signing key kept at ${key}: the cluster created next is the same issuer."
+        return 0
+    fi
+    rm -f "${key}"
+    rmdir "$(dirname "${key}")" 2>/dev/null || true
+    SIGNING_KEY_REMOVED=true
+    cap_changed
+    cap_info "Token signing key deleted. A vendor that was given this cluster's public keys must be given the next cluster's."
+}
+
 #=============================================================================
 # ENTRY POINT
 #=============================================================================
@@ -148,12 +192,13 @@ function main() {
     cap_handle_meta "$@"
     cap_parse_flags "$@"
 
-    local cluster purge
+    local cluster purge keep_signing_key
     cluster="$(cap_param cluster "${MEMQL_K3D_CLUSTER:-memql}")"
     # "" or "1", read with cap_bool. PURGE in the environment is the default
     # and an explicit --purge=<bool> beats it. Both used to be emptiness tests,
     # so --purge=false and PURGE=0 removed the kubeconfig context.
     if cap_bool purge "${PURGE:-false}"; then purge=1; else purge=""; fi
+    if cap_bool keep-signing-key; then keep_signing_key=1; else keep_signing_key=""; fi
     cap_require cluster "$cluster"
 
     check_prerequisites
@@ -165,10 +210,12 @@ function main() {
         cap_changed
     fi
     remove_kubeconfig "$cluster" "$purge"
+    remove_signing_key "$cluster" "$purge" "$keep_signing_key"
 
     cap_result_set     cluster "$cluster"
     cap_result_set_raw deleted "$deleted"
     cap_result_set_raw purged  "$( [[ -n "$purge" ]] && echo true || echo false )"
+    cap_result_set_raw signingKeyRemoved "$SIGNING_KEY_REMOVED"
     cap_result_set     mediaServer "$MEDIA_STATE"
     cap_result_set     mediaServerDetail "$MEDIA_DETAIL"
     if [[ "$MEDIA_STATE" == "failed" ]]; then

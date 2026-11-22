@@ -1533,9 +1533,10 @@ func newOpenAIClientWithCredential(cfg ProviderConfig, httpClient *http.Client) 
 		// unconfigured.
 		return nil, nil, fmt.Errorf(
 			"provider %q has no OpenAI credential: workload identity federation is not configured on this cluster. "+
-				"Set %s, %s and %s (docs/public/operate/auth/openai-federation.md). There is no API key to fall "+
-				"back to -- a local cluster cannot federate, because its OIDC issuer is private, and reaches "+
-				"models through a signed-in fleet machine or a local model instead",
+				"Set %s, %s and %s, in Settings > Vendors or the overlay "+
+				"(docs/public/operate/auth/openai-federation.md, which has the steps for a local cluster too). "+
+				"The cluster has no API key to fall back to; until then it reaches models through a signed-in "+
+				"fleet machine or a local model",
 			cfg.Name, envOpenAIIdentityProviderID, envOpenAIServiceAccountID, envOpenAIIdentityTokenFile)
 	}
 	if baseURL := strings.TrimSpace(cfg.Auth["baseURL"]); baseURL != "" {

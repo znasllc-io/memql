@@ -3,10 +3,13 @@ package memql
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -51,10 +54,16 @@ type exchangeServer struct {
 	expiresIn      int
 	status         int
 	denyBody       string
+
+	// apiStatusOnce answers the next API call with this status and apiBodyOnce.
+	apiStatusOnce int
+	apiBodyOnce   string
 }
 
 func newExchangeServer(t *testing.T) *exchangeServer {
 	t.Helper()
+	isolateVendorSignIns(t)
+	isolateLLMGuard(t)
 	f := &exchangeServer{token: "sk-federated-1", expiresIn: 3600, status: http.StatusOK}
 
 	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -85,11 +94,26 @@ func newExchangeServer(t *testing.T) *exchangeServer {
 
 		f.mu.Lock()
 		f.apiAuth = append(f.apiAuth, req.Header.Get("Authorization"))
+		once, onceBody := f.apiStatusOnce, f.apiBodyOnce
+		f.apiStatusOnce, f.apiBodyOnce = 0, ""
 		f.mu.Unlock()
+		if once != 0 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(once)
+			_, _ = w.Write([]byte(onceBody))
+			return
+		}
 		writeJSON(w, chatCompletionResponse())
 	}))
 	t.Cleanup(f.srv.Close)
 	return f
+}
+
+// failNextAPICall makes the API answer its next call with status and body.
+func (f *exchangeServer) failNextAPICall(status int, body string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.apiStatusOnce, f.apiBodyOnce = status, body
 }
 
 func (f *exchangeServer) exchanges() []map[string]any {
@@ -118,6 +142,26 @@ func (f *exchangeServer) deny(status int, body string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.status, f.denyBody = status, body
+}
+
+// rotateIdentityToken replaces the identity token at path the way kubelet
+// rotates a projected one: same path, new content.
+func rotateIdentityToken(t *testing.T, path, audience string) {
+	t.Helper()
+	payload, err := json.Marshal(map[string]any{
+		"aud": []any{audience},
+		"sub": "system:serviceaccount:memql:memql-engine",
+		"exp": 4102444800,
+		"jti": fmt.Sprintf("rotated-%d", time.Now().UnixNano()),
+	})
+	if err != nil {
+		t.Fatalf("marshal claims: %v", err)
+	}
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT"}`))
+	token := header + "." + base64.RawURLEncoding.EncodeToString(payload) + ".c2ln"
+	if err := os.WriteFile(path, []byte(token), 0o600); err != nil {
+		t.Fatalf("rotate token: %v", err)
+	}
 }
 
 func readAllBody(req *http.Request) ([]byte, error) {
@@ -183,11 +227,12 @@ func TestOpenAICredentialRefusesOneOrTwo(t *testing.T) {
 	tokenFile := validOpenAIIdentityToken(t)
 	full := openaiFederatedAuth(tokenFile)
 
-	// Every proper non-empty subset must refuse, and must name both halves.
+	// Every proper non-empty subset must refuse, and must name both halves,
+	// EXCEPT the token file on its own, which is not a configuration at all
+	// (TestOpenAITokenFileAloneIsNotAConfiguration).
 	subsets := [][]string{
 		{authKeyIdentityProviderID},
 		{authKeyOpenAIServiceAccountID},
-		{authKeyOpenAITokenFile},
 		{authKeyIdentityProviderID, authKeyOpenAIServiceAccountID},
 		{authKeyIdentityProviderID, authKeyOpenAITokenFile},
 		{authKeyOpenAIServiceAccountID, authKeyOpenAITokenFile},
@@ -222,6 +267,42 @@ func TestOpenAICredentialRefusesOneOrTwo(t *testing.T) {
 	}
 }
 
+// The token file's path is set by every Deployment on every cluster, so it is
+// not something an operator configured: see
+// TestAnthropicTokenFileAloneIsNotAConfiguration for what counting it cost.
+func TestOpenAITokenFileAloneIsNotAConfiguration(t *testing.T) {
+	cfg := ProviderConfig{Name: "openaiTest", Auth: map[string]string{
+		authKeyOpenAITokenFile: validOpenAIIdentityToken(t),
+	}}
+	opts, source, path, err := openaiCredential(cfg, guardedHTTPClient(nil))
+	if err != nil {
+		t.Fatalf("a pod with the token file and no ids was refused as misconfigured: %v", err)
+	}
+	if path != credentialPathUnavailable || source != nil || len(opts) != 0 {
+		t.Fatalf("credential path = %q, want %q and no credential", path, credentialPathUnavailable)
+	}
+
+	_, err = newOpenAIClient(cfg, guardedHTTPClient(nil))
+	if err == nil {
+		t.Fatal("a client was built with no credential")
+	}
+	if strings.Contains(err.Error(), "HALF-CONFIGURED") {
+		t.Errorf("a cluster nobody set up is told it is half-configured: %v", err)
+	}
+}
+
+func TestOpenAIIdsWithoutATokenFileRefuse(t *testing.T) {
+	auth := openaiFederatedAuth(validOpenAIIdentityToken(t))
+	delete(auth, authKeyOpenAITokenFile)
+	_, _, _, err := openaiCredential(ProviderConfig{Name: "openaiTest", Auth: auth}, guardedHTTPClient(nil))
+	if err == nil {
+		t.Fatal("ids with no token file were accepted")
+	}
+	if !strings.Contains(err.Error(), "HALF-CONFIGURED") || !strings.Contains(err.Error(), envOpenAIIdentityTokenFile) {
+		t.Errorf("the refusal does not name the missing token file: %v", err)
+	}
+}
+
 func TestOpenAICredentialRefusesATokenWithTheWrongAudience(t *testing.T) {
 	// The cheapest wrong implementation is mounting the Anthropic projected
 	// token at OpenAI's path. It is a well-formed service-account JWT and
@@ -240,6 +321,207 @@ func TestOpenAICredentialRefusesATokenWithTheWrongAudience(t *testing.T) {
 }
 
 // --- the exchange ----------------------------------------------------------
+
+// TestOpenAIClientsAndTranscriptionShareOneSignIn: every consumer of the
+// cluster's OpenAI account takes its bearer from the one sign-in the process
+// keeps (design 2026-11-21, A1). Each used to build an exchanger of its own,
+// and the transcription socket built another every time it asked.
+func TestOpenAIClientsAndTranscriptionShareOneSignIn(t *testing.T) {
+	f := newExchangeServer(t)
+	cfg := openaiFederatedConfig(t, f)
+	ctx := context.Background()
+
+	chat, err := newOpenAIProvider(cfg)
+	if err != nil {
+		t.Fatalf("newOpenAIProvider: %v", err)
+	}
+	stream, err := newOpenAIStreamProvider(cfg)
+	if err != nil {
+		t.Fatalf("newOpenAIStreamProvider: %v", err)
+	}
+	speech, err := newOpenAITTSProvider(cfg)
+	if err != nil {
+		t.Fatalf("newOpenAITTSProvider: %v", err)
+	}
+	transcribe, err := newOpenAISTTProvider(cfg)
+	if err != nil {
+		t.Fatalf("newOpenAISTTProvider: %v", err)
+	}
+	embed, err := newOpenAIEmbeddingProvider(cfg)
+	if err != nil {
+		t.Fatalf("newOpenAIEmbeddingProvider: %v", err)
+	}
+
+	registry := newProviderRegistry()
+	registry.setEntry(&ProviderConfigEntry{Config: cfg, Client: chat, Available: true})
+	socket, ok := (&MemQLEngine{providers: registry}).OpenAIBearer()
+	if !ok {
+		t.Fatal("OpenAIBearer found no federated OpenAI provider")
+	}
+
+	var clients []*openai.Client
+	for _, p := range []AIProvider{chat, stream, speech} {
+		client, ok := openAIClientOf(p)
+		if !ok {
+			t.Fatalf("%T carries no OpenAI client", p)
+		}
+		clients = append(clients, client)
+	}
+	clients = append(clients, transcribe.(*openAISTTProvider).client)
+	for i, client := range clients {
+		if _, err := client.Chat.Completions.New(ctx, buildMinimalChatParams()); err != nil {
+			t.Fatalf("client %d: %v", i, err)
+		}
+	}
+	embedBearer, _, err := embed.(*OpenAIEmbeddingClient).bearer.Bearer(ctx)
+	if err != nil {
+		t.Fatalf("embedding bearer: %v", err)
+	}
+	socketBearer, _, err := socket.Bearer(ctx)
+	if err != nil {
+		t.Fatalf("transcription bearer: %v", err)
+	}
+
+	if n := len(f.exchanges()); n != 1 {
+		t.Fatalf("six consumers of one OpenAI account made %d sign-ins, want 1", n)
+	}
+	auths := f.apiAuthorizations()
+	if len(auths) != len(clients) {
+		t.Fatalf("API requests = %d, want %d", len(auths), len(clients))
+	}
+	for i, auth := range auths {
+		if auth != "Bearer sk-federated-1" {
+			t.Errorf("client %d sent Authorization %q, want the one federated bearer", i, auth)
+		}
+	}
+	if embedBearer != "sk-federated-1" || socketBearer != "sk-federated-1" {
+		t.Errorf("embedding bearer %q, transcription bearer %q; want the one federated bearer", embedBearer, socketBearer)
+	}
+}
+
+func TestOpenAIBearerIsTheSharedSignIn(t *testing.T) {
+	f := newExchangeServer(t)
+	cfg := openaiFederatedConfig(t, f)
+	ctx := context.Background()
+
+	_, source, _, err := openaiCredential(cfg, guardedHTTPClient(nil))
+	if err != nil {
+		t.Fatalf("openaiCredential: %v", err)
+	}
+	registry := newProviderRegistry()
+	registry.setEntry(&ProviderConfigEntry{Config: cfg, Available: true})
+	engine := &MemQLEngine{providers: registry}
+
+	first, ok := engine.OpenAIBearer()
+	if !ok {
+		t.Fatal("OpenAIBearer found no federated OpenAI provider")
+	}
+	second, _ := engine.OpenAIBearer()
+
+	// One sign-in behind all three: the provider clients' source and both
+	// sources the engine handed out give the same bearer from one exchange.
+	want, _, err := source.Bearer(ctx)
+	if err != nil {
+		t.Fatalf("the clients' bearer: %v", err)
+	}
+	for i, src := range []BearerSource{first, second} {
+		got, _, err := src.Bearer(ctx)
+		if err != nil {
+			t.Fatalf("OpenAIBearer source %d: %v", i, err)
+		}
+		if got != want {
+			t.Fatalf("OpenAIBearer source %d handed out %q, want the clients' bearer %q", i, got, want)
+		}
+	}
+	if n := len(f.exchanges()); n != 1 {
+		t.Fatalf("the clients' source and two OpenAIBearer sources made %d sign-ins, want 1", n)
+	}
+}
+
+// Transcription is the one OpenAI consumer that takes a bearer source and no
+// SDK client, and it takes it ONCE, when the node is wired (app/
+// integrations_stt.go). The source used to be the sign-in object of that
+// moment. After an operator corrected an id and pressed Apply, every other
+// consumer moved to a sign-in under the new ids and transcription stayed on
+// the old one until the node restarted: a second sign-in in the process, under
+// ids somebody had just replaced. The source now asks the registry each time.
+func TestTheTranscriptionBearerFollowsAnApply(t *testing.T) {
+	f := newExchangeServer(t)
+	cfg := openaiFederatedConfig(t, f)
+	ctx := context.Background()
+
+	chat, err := newOpenAIProvider(cfg)
+	if err != nil {
+		t.Fatalf("newOpenAIProvider: %v", err)
+	}
+	registry := newProviderRegistry()
+	registry.setEntry(&ProviderConfigEntry{Config: cfg, Client: chat, Available: true})
+	engine := &MemQLEngine{providers: registry}
+
+	socket, ok := engine.OpenAIBearer() // kept by the transcription path for the life of the process
+	if !ok {
+		t.Fatal("OpenAIBearer found no federated OpenAI provider")
+	}
+	if got, _, err := socket.Bearer(ctx); err != nil || got != "sk-federated-1" {
+		t.Fatalf("before the Apply: bearer %q, err %v", got, err)
+	}
+
+	// The Apply: the same record, rebuilt from the corrected ids.
+	fixed := cfg
+	fixed.Auth = map[string]string{}
+	for k, v := range cfg.Auth {
+		fixed.Auth[k] = v
+	}
+	fixed.Auth[authKeyOpenAIServiceAccountID] = "svc_fixed"
+	f.setToken("sk-federated-2")
+	rebuilt, err := newOpenAIProvider(fixed)
+	if err != nil {
+		t.Fatalf("newOpenAIProvider after the Apply: %v", err)
+	}
+	registry.setEntry(&ProviderConfigEntry{Config: fixed, Client: rebuilt, Available: true})
+
+	got, _, err := socket.Bearer(ctx)
+	if err != nil {
+		t.Fatalf("after the Apply: %v", err)
+	}
+	if got != "sk-federated-2" {
+		t.Fatalf("after the Apply transcription was handed %q, the bearer of the ids the operator replaced", got)
+	}
+	exchanges := f.exchanges()
+	if len(exchanges) != 2 {
+		t.Fatalf("sign-ins = %d, want 2: one under each set of ids", len(exchanges))
+	}
+	if id := exchanges[1]["service_account_id"]; id != "svc_fixed" {
+		t.Fatalf("the second sign-in named service account %v, want svc_fixed", id)
+	}
+}
+
+// And when the ids are taken away, the source says so instead of going on
+// handing out a bearer for an account the cluster no longer has.
+func TestTheTranscriptionBearerEndsWhenOpenAIIsRemoved(t *testing.T) {
+	f := newExchangeServer(t)
+	cfg := openaiFederatedConfig(t, f)
+	ctx := context.Background()
+
+	registry := newProviderRegistry()
+	registry.setEntry(&ProviderConfigEntry{Config: cfg, Available: true})
+	engine := &MemQLEngine{providers: registry}
+	socket, ok := engine.OpenAIBearer()
+	if !ok {
+		t.Fatal("OpenAIBearer found no federated OpenAI provider")
+	}
+	if _, _, err := socket.Bearer(ctx); err != nil {
+		t.Fatalf("before the ids were removed: %v", err)
+	}
+
+	removed := cfg
+	removed.Auth = map[string]string{authKeyOpenAITokenFile: cfg.Auth[authKeyOpenAITokenFile]}
+	registry.setEntry(&ProviderConfigEntry{Config: removed})
+
+	if got, _, err := socket.Bearer(ctx); err == nil {
+		t.Fatalf("with OpenAI's ids removed, transcription was still handed a bearer (%q)", got)
+	}
+}
 
 func TestOpenAIExchangeHappyPath(t *testing.T) {
 	f := newExchangeServer(t)
@@ -342,10 +624,26 @@ func TestOpenAIExchangeCachesAndReExchangesBeforeExpiry(t *testing.T) {
 		t.Fatalf("a cached token still cost %d exchanges", n)
 	}
 
-	// Inside the mandatory window: it must re-exchange rather than hand out a
-	// token that is about to stop working mid-request.
+	// Near expiry with the SAME identity token on disk: the bearer in hand is
+	// still valid and the token has already bought it, so nothing is presented.
+	exchanger.now = func() time.Time { return expiresAt.Add(-15 * time.Second) }
+	if again, _, err := exchanger.Bearer(context.Background()); err != nil || again != first {
+		t.Fatalf("near-expiry Bearer with no new identity token = %q, %v; want the cached token", again, err)
+	}
+	if n := len(f.exchanges()); n != 1 {
+		t.Fatalf("the same identity token was presented again: %d exchanges", n)
+	}
+
+	// Kubelet rotates the token. Near expiry it must sign in again rather than
+	// go on handing out a bearer that is about to stop working. The call that
+	// starts the renewal is answered with the bearer in hand, which is still
+	// valid; the renewal runs behind it and the next call has the new one.
+	rotateIdentityToken(t, fed.TokenFile, openaiAudience)
 	f.setToken("sk-federated-2")
-	exchanger.now = func() time.Time { return expiresAt.Add(-openaiRefreshMandatory / 2) }
+	if during, _, err := exchanger.Bearer(context.Background()); err != nil || during != first {
+		t.Fatalf("the call that started the renewal got %q, %v; want the bearer still in hand", during, err)
+	}
+	settle(t, exchanger)
 	renewed, _, err := exchanger.Bearer(context.Background())
 	if err != nil {
 		t.Fatalf("renewal Bearer: %v", err)
@@ -378,8 +676,9 @@ func TestOpenAIExchangeKeepsTheLastGoodBearerThroughADenial(t *testing.T) {
 		t.Fatalf("first Bearer: %v", err)
 	}
 
+	rotateIdentityToken(t, fed.TokenFile, openaiAudience)
 	f.deny(http.StatusForbidden, `{"error":{"message":"subject does not match the mapping"}}`)
-	exchanger.now = func() time.Time { return expiresAt.Add(-openaiRefreshMandatory / 2) }
+	exchanger.now = func() time.Time { return expiresAt.Add(-15 * time.Second) }
 
 	still, _, err := exchanger.Bearer(context.Background())
 	if err != nil {
@@ -387,6 +686,13 @@ func TestOpenAIExchangeKeepsTheLastGoodBearerThroughADenial(t *testing.T) {
 	}
 	if still != first {
 		t.Errorf("bearer after a denial = %q, want the last good one %q", still, first)
+	}
+	settle(t, exchanger)
+	if after, _, err := exchanger.Bearer(context.Background()); err != nil || after != first {
+		t.Fatalf("once the denial arrived the bearer is %q, %v; want the last good one", after, err)
+	}
+	if n := len(f.exchanges()); n != 2 {
+		t.Fatalf("exchanges = %d, want 2: the rotated token must have been presented and refused", n)
 	}
 
 	// Once it has actually expired there is nothing to fall back to, and the
@@ -513,6 +819,157 @@ func TestOpenAIExchangeIsCountedAgainstTheOpenAIVendor(t *testing.T) {
 	}
 }
 
+// --- what an API answer means for the sign-in ------------------------------
+
+// openaiClientAgainst builds a provider the way boot does and returns its SDK
+// client and the process's sign-in behind it.
+func openaiClientAgainst(t *testing.T, f *exchangeServer) (*openai.Client, *vendorSignIn) {
+	t.Helper()
+	provider, err := newOpenAIProvider(openaiFederatedConfig(t, f))
+	if err != nil {
+		t.Fatalf("newOpenAIProvider: %v", err)
+	}
+	client, ok := openAIClientOf(provider)
+	if !ok {
+		t.Fatal("the provider carries no OpenAI client")
+	}
+	signIn, ok := currentVendorSignIn(metrics.FederationVendorOpenAI)
+	if !ok {
+		t.Fatal("constructing a federated provider registered no OpenAI sign-in")
+	}
+	return client, signIn
+}
+
+func chatOnce(client *openai.Client) error {
+	_, err := client.Chat.Completions.New(context.Background(), buildMinimalChatParams(), option.WithMaxRetries(0))
+	return err
+}
+
+// OpenAI answers 401 for more than a bearer it no longer accepts: a service
+// account that lacks one endpoint's permission gets a 401 on that endpoint and
+// is served everywhere else. The middleware used to drop the process's bearer
+// on ANY 401 (added in part 1 of this work, with no test), so one such call
+// signed every OpenAI consumer on the node out, and the identity token that
+// bought the bearer could not buy another for five seconds at best. The bearer
+// is kept until it expires, as it was before.
+func TestOpenAIKeepsItsBearerThroughA401(t *testing.T) {
+	f := newExchangeServer(t)
+	client, _ := openaiClientAgainst(t, f)
+
+	if err := chatOnce(client); err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	f.failNextAPICall(http.StatusUnauthorized,
+		`{"error":{"message":"You have insufficient permissions for this operation. Missing scopes: model.request","type":"invalid_request_error"}}`)
+	if err := chatOnce(client); err == nil {
+		t.Fatal("the vendor's 401 reached the caller as success")
+	}
+	if err := chatOnce(client); err != nil {
+		t.Fatalf("the call after a 401: %v -- one refused request signed the whole process out of OpenAI", err)
+	}
+
+	if n := len(f.exchanges()); n != 1 {
+		t.Fatalf("sign-ins = %d, want 1: a 401 on one API call is not a reason to sign in again", n)
+	}
+	sent := f.apiAuthorizations()
+	if len(sent) != 3 {
+		t.Fatalf("%d API calls reached the vendor, want 3", len(sent))
+	}
+	for i, got := range sent {
+		if got != "Bearer sk-federated-1" {
+			t.Fatalf("call %d carried Authorization %q, want the one federated bearer", i, got)
+		}
+	}
+}
+
+// A served call proves a bearer as well as a model list does, and it is the
+// only proof a bearer gets when a renewal bought it, long after the start.
+func TestAServedOpenAICallProvesTheBearer(t *testing.T) {
+	f := newExchangeServer(t)
+	client, signIn := openaiClientAgainst(t, f)
+
+	if err := chatOnce(client); err != nil {
+		t.Fatalf("the call: %v", err)
+	}
+	rec, ok := signIn.Record()
+	if !ok || rec.Outcome != signInOutcomeOK {
+		t.Fatalf("record = %+v (found %v), want an accepted sign-in", rec, ok)
+	}
+	if rec.Proof != signInProofOK {
+		t.Fatalf("proof = %q after the vendor served a call with the bearer, want %q: the check command "+
+			"would go on saying this vendor is not verified", rec.Proof, signInProofOK)
+	}
+}
+
+// A refused call proves nothing, and must not be written down as proof.
+func TestARefusedOpenAICallIsNotProof(t *testing.T) {
+	f := newExchangeServer(t)
+	client, signIn := openaiClientAgainst(t, f)
+
+	f.failNextAPICall(http.StatusForbidden, `{"error":{"message":"Country, region, or territory not supported"}}`)
+	if err := chatOnce(client); err == nil {
+		t.Fatal("the vendor's 403 reached the caller as success")
+	}
+	if rec, _ := signIn.Record(); rec.Proof == signInProofOK {
+		t.Fatal("a call the vendor refused was recorded as proof that the bearer works")
+	}
+}
+
+// 408, 425 and 429 are 4xx statuses and are not refusals: the vendor asked to
+// be asked again. They were recorded as the vendor refusing the configuration,
+// which is never retried without a person, so a sign-in that met one rate limit
+// left the node without the vendor until its identity token was replaced.
+func TestAnOpenAISignInToldToComeBackIsTriedAgain(t *testing.T) {
+	for _, status := range []int{http.StatusTooManyRequests, http.StatusRequestTimeout, http.StatusTooEarly} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			f := newExchangeServer(t)
+			f.deny(status, `{"error":{"message":"Rate limit reached for requests"}}`)
+			fed := openaiFederation{
+				IdentityProviderID: "idp_test",
+				ServiceAccountID:   "svc_test",
+				TokenFile:          validOpenAIIdentityToken(t),
+				TokenEndpoint:      f.srv.URL + "/oauth/token",
+			}
+			var clockMu sync.Mutex
+			now := time.Now()
+			clock := func() time.Time {
+				clockMu.Lock()
+				defer clockMu.Unlock()
+				return now
+			}
+			s := newVendorSignIn(openaiSignInConfig(fed, guardedHTTPClient(nil)), clock, now)
+
+			deniedBefore := metrics.AIFederationExchangesValue(metrics.FederationVendorOpenAI, metrics.FederationExchangeDenied)
+			if _, _, err := s.Bearer(context.Background()); err == nil {
+				t.Fatal("a sign-in the vendor did not serve handed out a bearer")
+			}
+			rec, _ := s.Record()
+			if rec.Outcome != signInOutcomeError {
+				t.Fatalf("outcome = %q, want %q: status %d asks the engine to come back, it says nothing "+
+					"about the configuration", rec.Outcome, signInOutcomeError, status)
+			}
+			if got := metrics.AIFederationExchangesValue(metrics.FederationVendorOpenAI, metrics.FederationExchangeDenied); got != deniedBefore {
+				t.Fatalf("the denial counter moved %v -> %v on status %d: operators alert on that counter, "+
+					"and a rate limit is not a denial", deniedBefore, got, status)
+			}
+
+			// The vendor recovers. The same identity token is presented again once
+			// the pause has passed, with nobody asking.
+			f.deny(http.StatusOK, "")
+			clockMu.Lock()
+			now = now.Add(vendorSignInRetryBackoff + time.Second)
+			clockMu.Unlock()
+			bearer, _, err := s.Bearer(context.Background())
+			if err != nil || bearer != "sk-federated-1" {
+				t.Fatalf("after the pause: bearer %q, err %v -- the sign-in was never tried again", bearer, err)
+			}
+			if n := len(f.exchanges()); n != 2 {
+				t.Fatalf("sign-ins = %d, want 2", n)
+			}
+		})
+	}
+}
+
 // --- the middleware --------------------------------------------------------
 
 // staticBearer hands out whatever it is told to, so the middleware can be
@@ -540,6 +997,7 @@ func TestOpenAIMiddlewareSetsTheCurrentBearerOnEveryRequest(t *testing.T) {
 	// THE POINT OF THE MIDDLEWARE. A header fixed at construction serves the
 	// first bearer for the life of the process, and the failure arrives an hour
 	// later as 401s on every node at once.
+	isolateLLMGuard(t)
 	var seen []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		seen = append(seen, req.Header.Get("Authorization"))
@@ -600,18 +1058,17 @@ func buildMinimalChatParams() openai.ChatCompletionNewParams {
 }
 
 // TestOpenAIExchangeIsPerformedOnceUnderConcurrentCallers backs the claim the
-// exchanger's lock discipline makes.
+// sign-in's single flight makes.
 //
-// Every engine node runs one exchanger behind a dozen providers, so a bearer
-// expiring under load means many goroutines arrive at once. Holding the mutex
-// across the network exchange is what makes the first caller pay and the rest
-// wake to a cached token; releasing it "to avoid blocking on I/O" would let
-// each of them exchange separately, against a vendor that rate-limits the
-// endpoint.
+// Every engine node runs one sign-in behind a dozen providers, so a process
+// starting under load means many goroutines arrive at once with no bearer. The
+// first starts the one exchange and the rest wait for it (ai_vendor_signin.go,
+// Bearer); an exchange per caller would present one identity token many times,
+// against a vendor that rate-limits the endpoint.
 //
 // This is not a probabilistic race test: the assertion is an EXACT count of
 // requests the server saw, which is 1 whatever order the goroutines run in. A
-// broken lock discipline gives some number greater than 1 rather than a
+// broken single flight gives some number greater than 1 rather than a
 // timing-dependent flake.
 func TestOpenAIExchangeIsPerformedOnceUnderConcurrentCallers(t *testing.T) {
 	f := newExchangeServer(t)

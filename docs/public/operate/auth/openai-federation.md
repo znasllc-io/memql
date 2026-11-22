@@ -23,6 +23,9 @@ because the key path is gone from the product rather than merely unused.
 
 Epic: memql#5088. Design:
 `docs/superpowers/specs/2026-09-06-openai-federation-and-key-removal-design.md`.
+The one-sign-in rule, the check command's behaviour and the local-cluster path
+are from design record
+`docs/superpowers/specs/2026-11-21-vendor-accounts-and-api-keys-design.md`.
 
 The Anthropic runbook is the sibling of this one:
 [anthropic-federation.md](anthropic-federation.md). Read whichever vendor you
@@ -37,27 +40,54 @@ Kubernetes projects a signed OIDC token into each engine pod, minted for the
 audience `https://api.openai.com/v1` and carrying the subject
 `system:serviceaccount:memql:memql-engine`. The engine POSTs that token to
 OpenAI's token endpoint as an RFC 8693 token exchange, naming an identity
-provider and a service account. OpenAI fetches the cluster's public JWKS,
-verifies the token, checks it against the provider's mapping, and returns a
-short-lived bearer. The engine re-exchanges before expiry. There is no refresh
-token and nothing long-lived at rest.
+provider and a service account. OpenAI verifies the token against the
+cluster's public keys, checks it against the provider's mapping, and returns a
+short-lived bearer. The engine signs in again before the bearer expires. There
+is no refresh token and nothing long-lived at rest.
+
+**Each engine process keeps one sign-in for OpenAI**, shared by chat,
+streaming, speech, transcription, embeddings and the transcription socket. It
+used to make one per provider record and one more for each transcription
+path. Every node type that calls models signs in once when it starts and lists
+OpenAI's models with the bearer, so there is a result to read before the first
+call; only both halves count as verified. A sign-in OpenAI refused is not
+retried on a timer. After fixing something on OpenAI's side, press **Apply**
+in Settings > Vendors: it lets every node present its refused token once more.
+**Verify** does the same for the one node that answers it, and no other.
+
+**"Come back later" is not a refusal.** A sign-in OpenAI answers with 408, 425
+or 429 is tried again after a short pause, by itself, and is not counted as a
+denial.
+
+**A 401 on one API call does not sign the node out.** OpenAI answers 401 for
+more than a dead bearer: a service account without one endpoint's permission
+gets a 401 there and is served everywhere else. The engine keeps the bearer
+until it expires, at most an hour. (Anthropic's 401 means the credential
+itself, so there the engine drops the bearer.)
+
+The projected token stays at 3600 seconds, unlike Anthropic's 600. An OpenAI
+bearer never outlives the token it was minted from, so a 600 second token
+would force a sign-in every 8 minutes with about 90 seconds between
+Kubernetes replacing the token and the bearer expiring. OpenAI documents no
+rule against presenting a token twice, so the restarted-container case that
+motivates Anthropic's short token does not arise here.
 
 ### CONFIRM THE TOKEN ENDPOINT BEFORE THE FIRST CUTOVER
 
 The engine posts to **`https://auth.openai.com/oauth/token`**
 (`openaiTokenEndpoint`, component/memql/ai_openai_federation.go).
 
-**The PATH is from the design record; the HOST is an inference and nobody here
-has checked it against OpenAI's live documentation.** The record says "OpenAI's
-auth host at `/oauth/token`" and does not name the host. That makes this the
-single most load-bearing constant in the feature: every other id can be wrong
-in a way that produces a refusal you can read, and this one wrong produces a
+**Checked against OpenAI's documentation on 2026-11-21, and not yet against
+the live endpoint.** OpenAI's workload identity federation reference names
+this address and the five JSON fields the engine sends. It is still the single
+most load-bearing constant in the feature: every other id can be wrong in a
+way that produces a refusal you can read, and this one wrong produces a
 connection error at a hostname, which reads like a network problem.
 
-So the first cutover confirms it, and the confirmation is cheap -- step 4's
-`provider-auth check` either reaches an endpoint that answers an RFC 8693
-exchange or it does not. If OpenAI documents a different host, change that one
-constant; nothing else in the exchange depends on it.
+So the first cutover confirms it: after a node starts, step 4's
+`provider-auth check` reports a sign-in OpenAI answered, or a fault at that
+address. If OpenAI moves it, change that one constant; nothing else in the
+exchange depends on it.
 
 Two properties of that bearer are worth knowing before you plan around it: it
 never outlives the subject token it was minted from, and it is scoped to a
@@ -99,8 +129,9 @@ OpenAI's: it renders, deploys, and fails only at the first exchange.
 
 Two ids, produced in the OpenAI Platform console and written into the cloud
 overlay's ConfigMap. They are **per cluster**: the identity provider is bound to
-the cluster's OIDC issuer, so a re-created cluster has a new issuer and needs
-steps 1 to 3 again.
+the cluster's OIDC issuer, so a re-created cloud cluster has a new issuer and
+needs steps 1 to 3 again. A local cluster keeps its issuer and keys across
+recreation: see [On a local cluster](#on-a-local-cluster).
 
 | Value | Where it comes from |
 |---|---|
@@ -114,14 +145,19 @@ by `deploy/k8s/base` on every engine Deployment; you do not fill it in.
 
 ## The rule that decides everything: all three, or none
 
-The engine reads the three values -- identity provider, service account, token
-file -- as a set:
+The engine needs three values to federate: identity provider, service account
+and token file. The two ids decide whether OpenAI is configured at all:
 
 | What is set | What the engine does |
 |---|---|
-| all three | federates |
-| none | leaves the OpenAI providers registered as unavailable |
-| one or two | **refuses to boot**, naming which are missing |
+| both ids and the token file | federates |
+| no id | leaves the OpenAI providers registered as unavailable |
+| one id, or both ids with no token file | **refuses the vendor**: every OpenAI provider registers as unavailable, with a message naming what is set and what is missing. `provider-auth check` prints that message and exits 1 |
+
+**The token file's path is not yours to set, and does not count on its own.**
+Every Deployment sets `MEMQL_AI_OPENAI_IDENTITY_TOKEN_FILE` and mounts the
+projected token, on every cluster. With no id the vendor is simply not
+configured.
 
 The middle row is not an error. A cluster with no federated vendor boots,
 serves everything that needs no model, and reports `ai` as unconfigured; that
@@ -132,7 +168,9 @@ still has a "none" arm because a cluster may reasonably federate one vendor and
 not the other; neither switch has a KEY arm any more. A half-configured
 federation that quietly fell back to something would work in every test, boot
 every node, and stop working the hour you finished step 3 -- on whichever node
-nobody was watching. A refusal at boot is loud, immediate and attributable.
+nobody was watching. A refusal that names both halves, on every call that would
+have used the vendor and in `memql provider-auth check`, is loud, immediate and
+attributable.
 
 ---
 
@@ -140,8 +178,9 @@ nobody was watching. A refusal at boot is loud, immediate and attributable.
 
 ### Step 1 -- Confirm the cluster's OIDC issuer is publicly reachable
 
-OpenAI fetches the issuer's JWKS over the public internet. If it cannot,
-nothing else here will work.
+OpenAI fetches the issuer's JWKS over the public internet. A cluster whose
+issuer cannot be reached that way, which is every local one, uploads its keys
+instead: skip to [On a local cluster](#on-a-local-cluster).
 
 ```bash
 az aks show --resource-group <rg> --name <cluster> \
@@ -157,9 +196,9 @@ feature. Enable it (`az aks update --enable-oidc-issuer`) and re-read; it is a
 control-plane change, not a node roll.
 
 INFO: on AKS the identity provider is registered by DISCOVERY -- OpenAI reads
-the issuer document above. A self-hosted cluster whose issuer is not reachable
-has to upload its JWKS instead, and then re-upload it whenever the cluster's
-signing keys change. Prefer a discoverable issuer.
+the issuer document above. A cluster whose issuer is not reachable uploads its
+keys instead, and uploads them again whenever its signing keys change. Prefer
+a discoverable issuer where there is one.
 
 ### Step 2 -- Create the service account and the identity provider in the console
 
@@ -212,9 +251,29 @@ belong in your install notes.
 kubectl exec -n memql deploy/agent -- /app/memql provider-auth check --provider=openai
 ```
 
-Exit code 0 means OpenAI accepted the credential -- not merely that the config
-parses. Run it against more than one node type; each pod holds its own token,
-so "it works on agent" is not "it works".
+The command reports what the engine in that pod recorded when it started, and
+waits up to its `--timeout` for the engine to have signed in and listed
+OpenAI's models. It contacts nobody itself.
+
+Two lines carry the answer. `signIn` is OpenAI accepting the identity token.
+`api` is OpenAI's API taking the bearer that sign-in bought, which is the half
+that makes the vendor usable.
+
+| Exit | Meaning |
+|---|---|
+| 0 | Verified: OpenAI accepted the engine's sign-in, and its API took the bearer (a model list, or a served call). Not merely that the config parses |
+| 1 | Refused: by OpenAI at sign-in, by its API when the engine listed models with the bearer, or by the engine itself (one id of the two, an identity token it cannot use). The reason is on stderr, in the words of whoever refused |
+| 3 | Not set up: this pod holds no OpenAI ids, or it is a node type that signs in to no vendor |
+| 4 | Cannot say yet: nothing is recorded (the node has only just started), OpenAI did not answer, or nothing has used the bearer. Run it again |
+
+The ids printed are the ones the engine used, including ids applied through
+Settings > Vendors. Run it against more than one node type; each pod holds its
+own token, so "it works on agent" is not "it works".
+
+In MemQL OS, **Settings > Vendors > Verify** asks the node that answers to
+list OpenAI's models through its own client. It costs no tokens. It makes a
+sign-in only when that node's last one was refused, which Verify lets it try
+once more; use **Apply** to reach every node at once.
 
 Then watch the exchange counter across a refresh cycle or two:
 
@@ -223,8 +282,8 @@ memql_ai_federation_exchanges_total{vendor="openai",outcome="ok"}      # should 
 memql_ai_federation_exchanges_total{vendor="openai",outcome="denied"}  # must stay flat
 ```
 
-A steady low `ok` rate is the healthy shape -- roughly one per token lifetime
-per client. **Alert on `denied`.** A denial does not break traffic immediately:
+A steady low `ok` rate is the healthy shape -- roughly one per bearer lifetime
+per pod. **Alert on `denied`.** A denial does not break traffic immediately:
 the last good bearer keeps working until it expires, so the outage arrives up to
 an hour after the cause and looks unrelated to whatever was changed.
 
@@ -236,9 +295,11 @@ scripts/install/verify-provider-key.sh \
   --provider=openai --federation-deploy=agent --namespace=memql
 ```
 
-It has no key mode. Exit 3 means the check RAN and OpenAI refused -- go back to
-step 2. Exit 5 means the check could not be run at all, which says nothing about
-the credential.
+It has no key mode. Exit 3 means the check RAN and the credential is not
+usable: OpenAI refused it (go back to step 2), or the pod holds no OpenAI ids
+at all (the overlay or Settings > Vendors, and whether the pods rolled); the
+message says which. Exit 5 means the check could not be run, or ran and could
+not say yet, which says nothing about the credential.
 
 ### Step 5 -- There is nothing to remove
 
@@ -257,7 +318,7 @@ working.
 
 Put the two ids in the install notes for this cluster
 ([azure-entry-install.md](../azure-entry-install.md) lists them among the
-per-cluster values). A re-created cluster gets a new OIDC issuer, which
+per-cluster values). A re-created cloud cluster gets a new OIDC issuer, which
 invalidates the identity provider and needs steps 1 to 3 again.
 
 ---
@@ -309,6 +370,7 @@ the message finds nothing at all.
 | the audience does not match | the token was minted for a different audience | the projected volume's `audience` field; the render gate pins it to `https://api.openai.com/v1` |
 | the issuer cannot be reached | OpenAI cannot fetch the cluster's JWKS | re-run step 1 from outside your network |
 | the token has expired | clock skew, or a token older than the projected lifetime | check node clocks; the projected token is re-minted hourly |
+| `408`, `425` or `429` on the sign-in | OpenAI asked the engine to come back | nothing. The engine tries again after a short pause; it is logged as a fault, not counted as a denial |
 | the service account is gone | the account was deleted or removed from the project | Platform -> Settings -> Service accounts |
 
 Boot-time refusals are a different class and never reach OpenAI:
@@ -338,38 +400,60 @@ mapping does not name.
 This costs nothing today: identity does not call OpenAI. If it ever needs to,
 review its required authority and extend the explicit allowlist in the existing
 mapping; do not change its Kubernetes identity to inherit another node's grants.
-`provider-auth check` run against identity will report the subject mismatch,
-which is the honest answer rather than a surprise.
+For the same reason identity does not sign in when it starts, as every other
+node type does: the sign-in would be refused on every boot. `provider-auth
+check` run against identity therefore reports that this node type signs in to
+no vendor, and exits 3. If identity ever needs OpenAI, remove its opt-out in
+`app/build_identity.go` as well.
 
 ---
 
-## A local cluster CANNOT federate, and that is the whole local story
+## On a local cluster
 
-k3d's issuer is `https://kubernetes.default.svc.cluster.local`, whose JWKS lives
-on a node IP that no vendor can reach. Uploading a JWKS per developer cluster
-and re-pasting it after every `make up-refresh` is not a reproducible path. So
-**no local cluster federates with either vendor**, and since the key path is
-gone there is no second door to offer instead.
+A local cluster can federate. What it cannot do is be fetched from: k3d's
+issuer is `https://kubernetes.default.svc.cluster.local`, and its keys live
+where no vendor can reach. OpenAI takes the keys **uploaded** instead, and
+after that never contacts the cluster. An earlier version of this runbook said
+no local cluster federates with either vendor; that was wrong.
 
-What that means in practice, on a machine running `make up`:
+1. Run `make federation-keys`. It prints the issuer, the public keys, the two
+   engine subjects and the audience. It prints public material only.
+2. In the console, register the identity provider for that issuer, choose
+   uploaded keys for token verification and upload the `jwks` value from the
+   result. Create the service account and the mapping exactly as in step 2 of
+   the cutover.
+3. In MemQL OS, open Settings > Vendors, choose **Set up OpenAI**, enter the
+   ids and press **Apply**. A local cluster has no overlay to edit; the ids are
+   stored in the cluster and every node reads them on Apply.
+4. Verify as in step 4 of the cutover.
+
+**The signing key.** `make up` keeps a local cluster's token signing key in
+`~/.memql/k3d/<cluster>/service-account.key` and gives it back to the cluster
+each time the cluster is created. `make up-refresh` therefore leaves the
+issuer and its keys unchanged, and what you uploaded stays good. A cluster
+created before this existed gets the file the next time it is recreated; run
+`make federation-keys` and upload once more then. `make down PURGE=1` deletes
+the file.
+
+**That file is a secret.** Anyone who holds it can mint a token OpenAI accepts
+for this cluster's mapping. It is readable by its owner only and is never
+printed. Put the service account in a project with a low spend limit, and
+remove the identity provider in the console when the cluster is gone for good.
+
+A local cluster that has not been set up this way has no vendor, which is how
+every cluster is installed:
 
 - **Cloud models** are reached through a signed-in app on a fleet machine, or
   not at all. See [local-models.md](../local-models.md) for the machine-local
   option and the fleet route.
-- **Streaming transcription and Whisper are off.** Both are OpenAI calls, both
-  need a federated bearer, and a local cluster has none. There is no local
-  substitute today.
+- **Streaming transcription and Whisper are off.** Both are OpenAI calls and
+  both need a federated bearer.
 - **Everything that needs no model still works**, which is most of the product.
 
-This is a cost the design accepted rather than an oversight: the alternative was
-keeping a key path alive "for local only", which is a long-lived credential at
-rest on every developer machine and the single easiest thing to copy into a
-cloud cluster by accident. The manifests are identical everywhere; only the two
-ids differ, and locally they are empty. See
+The manifests are identical everywhere; only the two ids differ. See
 [environment-parity.md](../environment-parity.md) -- credential source for a
-vendor is an allowed value difference.
-
-CI already installs keyless, so the local path is the one CI exercises.
+vendor is an allowed value difference. CI installs with no vendor, so that is
+the path CI exercises.
 
 ---
 
@@ -398,5 +482,8 @@ CI already installs keyless, so the local path is the one CI exercises.
 - [../../build/audio-streaming.md](../../build/audio-streaming.md) -- the
   transcription surface whose bearer this runbook decides.
 - `component/memql/ai_openai_federation.go` -- the credential decision and the
-  exchanger.
+  exchange.
+- `component/memql/ai_vendor_signin.go` -- the one sign-in a process keeps per
+  vendor, and the record `provider-auth check` reads.
+- `scripts/k3d/federation-keys.sh` -- what a vendor is given to trust a cluster.
 - `deploy/k8s/base/openai-federation.yaml` -- the ConfigMap seam.

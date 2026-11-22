@@ -211,7 +211,7 @@ db:
 
 ##@ Local cluster (k3d + ArgoCD -- the blessed local topology, #2061)
 ##> This IS the deploy path (same manifests as the cloud) -- there is no imperative alternative.
-.PHONY: up up-refresh down secrets dev status scale media-up media-down
+.PHONY: up up-refresh down secrets dev status federation-keys scale media-up media-down
 
 ## Fresh k3d bring-up: cluster + ArgoCD + secrets + images, wait healthy (SERVERS=2 AGENTS=1 for multi-node)
 ## install ArgoCD (pinned v2.13.3, same as the cloud), apply the memql-local
@@ -341,6 +341,15 @@ status:
 		$${CLUSTER:+--cluster=$${CLUSTER}} \
 		$${NAMESPACE:+--namespace=$${NAMESPACE}} \
 		$${APP_NAME:+--app-name="$${APP_NAME}"}
+
+## Print what a vendor needs to trust this cluster's identity tokens: the
+## issuer, the public keys, each engine pod's token subject and the audiences.
+## For setting up Anthropic or OpenAI federation, above all on a local cluster,
+## whose keys are pasted into the vendor's console. Public material only.
+federation-keys:
+	@bash scripts/k3d/federation-keys.sh \
+		$${CONTEXT:+--context=$${CONTEXT}} \
+		$${NAMESPACE:+--namespace=$${NAMESPACE}}
 
 ## Scale the app Deployments to N replicas, in namespace `memql` (NAMESPACE
 ## overrides). ArgoCD ignoreDifferences excludes /spec/replicas so selfHeal

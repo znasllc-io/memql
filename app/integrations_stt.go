@@ -66,7 +66,9 @@ func (a *App) selectSTTProvider() {
 //
 // The returned function is called PER DIAL and per request, never captured:
 // a bearer expires within the hour and a reconnect after that must not present
-// the token the first connection opened with.
+// the token the first connection opened with. The source behind it follows a
+// provider reload too (memql.OpenAIBearer): after an Apply with new ids it
+// hands out a bearer of the new sign-in, not of the one this node started with.
 func (a *App) openAIBearerForSTT() (func(ctx context.Context) (string, error), bool) {
 	if a.engine == nil {
 		return nil, false
@@ -101,10 +103,9 @@ func (a *App) initOpenAIRealtimeProvider(name string) {
 	bearer, ok := a.openAIBearerForSTT()
 	if !ok {
 		// NOT AN ERROR, and the message says which fact it is reporting. A
-		// local cluster cannot federate at all -- its OIDC issuer is private --
-		// so streaming transcription is off there by design (memql#5088, D6),
-		// and a fresh cloud cluster is in the same state until an operator
-		// finishes the runbook.
+		// cluster nobody has set OpenAI up on, local or cloud, has no
+		// transcription: it is how every cluster is installed (memql#5088),
+		// and it stays that way until an operator finishes the runbook.
 		a.Logger.Info("audio websocket disabled (no OpenAI federation on this cluster)",
 			"runbook", "docs/public/operate/auth/openai-federation.md")
 		return

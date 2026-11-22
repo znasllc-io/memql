@@ -241,9 +241,11 @@ test("the skip is UNCONDITIONAL -- no caller can make this lane call a vendor", 
   // Under memql#4440 the skip was CONDITIONAL: supplying a key file made the
   // step run, so the plan had two branches and the old case pinned the second.
   // There is no key to supply, and the reason this lane never verifies is not
-  // "nothing was supplied" -- it is that a local cluster cannot federate at all
-  // (design D6). A conditional skip would be a way to send a k3d cluster's
-  // unverifiable token to a vendor and fail the install on the answer.
+  // "nothing was supplied" -- it is that the install sets no vendor up: a
+  // local cluster federates only after a vendor has been given its public keys
+  // by hand, which is after install. A conditional skip would be a way to send
+  // a k3d cluster's token to a vendor that cannot verify it yet and fail the
+  // install on the answer.
   //
   // So: every route a caller has into the plan is tried, and none of them
   // reaches `run`. `stepParams` is the escape hatch the CLI exposes as
@@ -350,7 +352,7 @@ test("a keyless install still runs every mutating step", async () => {
   }
   assert.ok(
     !ran.includes("install.verifyProviderKey"),
-    "the vendor was called on an install of a cluster that cannot federate",
+    "the vendor was called on an install, which sets no vendor up",
   );
 });
 
