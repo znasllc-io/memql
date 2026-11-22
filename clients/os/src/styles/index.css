@@ -4663,6 +4663,14 @@ a.os-button {
 .os-files-share-expiry .os-select-wrap { flex: 0 0 auto; }
 .os-files-share-until { color: var(--os-muted); font-size: var(--os-text-sm); white-space: nowrap; }
 .os-files-share-calendar { position: absolute; top: calc(100% + 4px); left: 0; z-index: 40; padding: 10px; border: 1px solid var(--os-line); border-radius: var(--os-radius-xs); background: var(--os-glass-solid); box-shadow: var(--os-shadow-float); }
+/* Two cards a row, down the page (Nov 20 2026 call): each column at least
+ * half the width, so a wide window still shows two and a narrow one (under
+ * two 240px cards) shows one. */
+.os-files-share-cards {
+  list-style: none; margin: 0; padding: 3px; display: grid; gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(max(240px, calc((100% - 8px) / 2)), 1fr));
+}
+.os-files-share-cards > li { min-width: 0; }
 .os-files-share-card .os-editable-card-open { cursor: default; }
 .os-files-share-card .os-editable-card-open > strong { display: inline-flex; align-items: center; gap: 6px; }
 

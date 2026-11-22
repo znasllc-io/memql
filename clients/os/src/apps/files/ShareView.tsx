@@ -6,7 +6,6 @@ import { ContextMenu } from "../../chrome/ContextMenu";
 import { Caption, Head, NextPage, Notice, Select, Button } from "../../kit";
 import { AnchoredPicker } from "../../kit/AnchoredPicker";
 import { CalendarMonth, addDays, dayOf, type CalendarDay } from "../../kit/CalendarMonth";
-import { CardCarousel } from "../../kit/CardCarousel";
 import { CardCollectionSearch, CardCollectionSkeleton } from "../../kit/CardCollectionEditor";
 import { listScrollTop } from "../../kit/controls";
 import { IconButton } from "../../kit/IconButton";
@@ -61,6 +60,8 @@ import { shareFileCall, timeLeftLabel, useFileShares, useShareDirectory, type Fi
 // left (integrations/library/share.go).
 
 const LENGTHS = [1, 7, 30] as const;
+/** Cards shown at first, and revealed per step: three rows of two. */
+const CARDS_PER_STEP = 6;
 const PICK = "date";
 /** The furthest a share may end (integrations/library/share.go, shareMaxDays). */
 const MAX_DAYS = 90;
@@ -125,6 +126,13 @@ export function ShareView({ file, backLabel, onBack }: { file: ArtifactRow; back
   const [pending, setPending] = useState("");
   const [failure, setFailure] = useState("");
   const [menu, setMenu] = useState<{ share: FileShare; anchor: HTMLElement; x: number; y: number } | null>(null);
+  // THE CARDS, TWO A ROW, MORE AS YOU SCROLL (Nov 20 2026 call, 24:20-24:54:
+  // Jesús, "I don't like the scrolling here, maybe rows of two"; José, "if I
+  // scroll it ... when you reach the bottom ... skeleton load show up ...
+  // maybe one" row). Fleet's sideways carousel paged two at a time; this
+  // shows three rows and reveals three more each time the end comes into
+  // view, behind one skeleton row.
+  const [shownCards, setShownCards] = useState(CARDS_PER_STEP);
   const ready = directory.people !== null;
   const candidates: Candidate[] = ready ? [
     ...directory.groups.map((g): Candidate => ({ kind: "group", id: g.groupId, name: g.displayName, detail: groupSize(g.members) })),
@@ -269,6 +277,12 @@ export function ShareView({ file, backLabel, onBack }: { file: ArtifactRow; back
   // The cards follow the search too, as Fleet's do.
   const matches = shares.filter((share) => (searchBy === "all" || searchBy === (share.recipientGroupId ? "group" : "person")) &&
     matchesQuery(query, share.recipientDisplayName));
+  useEffect(() => { setShownCards(CARDS_PER_STEP); }, [query, searchBy]);
+  // Whoever was just added is shown, however far down the list they land.
+  const revealIndex = revealKey ? matches.findIndex((share) => shareKey(share) === revealKey) : -1;
+  useEffect(() => {
+    if (revealIndex >= 0) setShownCards((shown) => Math.max(shown, revealIndex + 1));
+  }, [revealIndex]);
   const nameOf = (share: FileShare) => {
     const offered = share.recipientGroupId
       ? directory.groups.find((g) => sameEntityId(g.groupId, share.recipientGroupId))?.displayName
@@ -355,10 +369,11 @@ export function ShareView({ file, backLabel, onBack }: { file: ArtifactRow; back
               </AnchoredPicker> : null}
             </div>
             <p className="os-sr-only" id={`${searchId}-selection`} role="status" aria-live="polite" aria-atomic="true">{selection.length} selected</p>
-            {!ready ? <CardCollectionSkeleton label="Loading users and groups" /> : matches.length ? <CardCarousel key={`${searchBy}:${query}`} items={matches} itemKey={shareKey} revealKey={revealKey} minCardWidth={240}
-              label="Sharing access cards" listLabel="Shared users and groups" noun="entry" plural="entries" renderItem={(share) => {
+            {!ready ? <CardCollectionSkeleton label="Loading users and groups" /> : matches.length ? <>
+              <ul className="os-files-share-cards" aria-label="Shared users and groups">
+              {matches.slice(0, shownCards).map((share) => {
                 const who = nameOf(share);
-                return <div className="os-editable-card os-files-share-card">
+                return <li key={shareKey(share)}><div className="os-editable-card os-files-share-card">
                   <div className="os-editable-card-open">
                     <strong>{share.recipientGroupId ? <Users size={13} aria-hidden /> : <User size={13} aria-hidden />} {who}</strong>
                     <span>{share.recipientGroupId ? "Group" : "User"} · {timeLeftLabel(share.expiresAt, now)}</span>
@@ -367,8 +382,14 @@ export function ShareView({ file, backLabel, onBack }: { file: ArtifactRow; back
                     <IconButton label={`Actions for ${who}`} aria-haspopup="menu" aria-expanded={menu?.share.shareId === share.shareId} disabled={locked}
                       onClick={(event) => { if (menu) closeMenu(); else openMenu(share, event.currentTarget); }}><Ellipsis size={15} aria-hidden /></IconButton>
                   </div>
-                </div>;
-              }} /> : !searching && query.trim() && !available.length && ready ? <Caption>No matching users or groups.</Caption> : null}
+                </div></li>;
+              })}
+              </ul>
+              <NextPage key={`cards:${searchBy}:${query}`} rows={1} label="Showing more people and groups" feed={{
+                hasMore: matches.length > shownCards, loadingMore: false, loadMoreError: "", progress: shownCards,
+                enabled: true, loadMore: () => setShownCards((shown) => shown + CARDS_PER_STEP),
+              }} />
+            </> : !searching && query.trim() && !available.length && ready ? <Caption>No matching users or groups.</Caption> : null}
             {directory.error ? <Notice tone="warn" sentence="Users and groups could not be read." detail={directory.error} /> : null}
           </div>
         </section>
