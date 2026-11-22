@@ -1148,7 +1148,11 @@ button:not(:disabled):active {
  * and then it scrolls inside. The frame sits at the bottom of the surface's
  * column, so growing takes rows from the log above -- upward. */
 .os-ask-input { display: flex; flex: none; flex-direction: column; gap: 6px; margin: 0 18px 18px; padding: 10px 10px 6px; border: 1px solid var(--os-line); border-radius: 12px; background: var(--os-plate); }
-.os-ask-field { width: 100%; min-width: 0; resize: none; min-height: calc(var(--os-text-base) * 1.5 * 2 + 10px); padding: 5px 2px; font: inherit; font-size: var(--os-text-base); color: inherit; border: 0; background: transparent; line-height: 1.5; overflow-y: hidden; }
+/* THE SAME TEXT AS THE MESSAGES (José, Nov 20 2026 call: "the font that shows
+ * in the messages does not match the font that we're typing"). The log is
+ * app content at --os-text-md, and what a person types becomes one of those
+ * messages, so the field types at that size too (it was the chrome size). */
+.os-ask-field { width: 100%; min-width: 0; resize: none; min-height: calc(var(--os-text-md) * 1.5 * 2 + 10px); padding: 5px 2px; font: inherit; font-size: var(--os-text-md); color: inherit; border: 0; background: transparent; line-height: 1.5; overflow-y: hidden; }
 .os-ask-field:focus { outline: 0; }.os-ask-input:focus-within { border-color: color-mix(in srgb, var(--os-accent) 45%, var(--os-line)); }
 .os-ask-controls { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: var(--os-control-h); }
 .os-ask-controls-start, .os-ask-controls-end { display: flex; align-items: center; gap: 2px; min-width: 0; }
