@@ -651,7 +651,7 @@ export function Select({
    * What the closed trigger reads, when the selected option's label alone
    * would not say it (Files' kind menu adds how many other filters are on).
    */
-  display?: string;
+  display?: ReactNode;
 }) {
   const options = selectOptionsFrom(children);
   const [open, setOpen] = useState(false);
