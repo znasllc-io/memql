@@ -3382,6 +3382,7 @@
           "siteAccessCode",
           "upstreamIdentity",
           "user",
+          "vendorKey",
           "worker",
           "workerPairingCode"
         ]
@@ -6680,6 +6681,83 @@
         "name",
         "ownerUserId"
       ]
+    },
+    {
+      "concept": "v1:router:vendorKey",
+      "file": "router/concepts.memql",
+      "fields": [
+        "addedAt",
+        "autoUse",
+        "checkedBy",
+        "encryptedValue",
+        "fingerprint",
+        "isDefault",
+        "label",
+        "ownerUserId",
+        "removedAt",
+        "removedBy",
+        "sharing",
+        "status",
+        "vendor"
+      ],
+      "required": [
+        "addedAt",
+        "encryptedValue",
+        "fingerprint",
+        "label",
+        "ownerUserId",
+        "status",
+        "vendor"
+      ],
+      "enums": {
+        "checkedBy": [
+          "list",
+          "use"
+        ],
+        "status": [
+          "active",
+          "removed"
+        ],
+        "vendor": [
+          "anthropic",
+          "openai"
+        ]
+      }
+    },
+    {
+      "concept": "v1:router:vendorKeyState",
+      "file": "router/concepts.memql",
+      "fields": [
+        "checkedAt",
+        "detail",
+        "evidenceAt",
+        "goodAt",
+        "heldUntil",
+        "keyId",
+        "lastUsedAt",
+        "notifiedAt",
+        "ownerUserId",
+        "state",
+        "vendor"
+      ],
+      "required": [
+        "evidenceAt",
+        "keyId",
+        "ownerUserId",
+        "state",
+        "vendor"
+      ],
+      "enums": {
+        "state": [
+          "credit",
+          "good",
+          "refused"
+        ],
+        "vendor": [
+          "anthropic",
+          "openai"
+        ]
+      }
     },
     {
       "concept": "v1:safety:approvalRequest",

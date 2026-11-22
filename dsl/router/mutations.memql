@@ -159,3 +159,221 @@ mutation route routeWrite {
     }
   }
 }
+
+// ---- API keys (design record 2026-11-21-vendor-accounts-and-api-keys) ----
+//
+// Six writes over two rows, and the split is by WHO DECIDES. createVendorKey, updateVendorKey,
+// setVendorKeySharing and removeVendorKey write what a key's OWNER decides (v1:router:vendorKey);
+// createVendorKeyState and updateVendorKeyState write what the ENGINE observed
+// (v1:router:vendorKeyState). No write touches both, so an engine stamp can never undo an owner's
+// decision.
+//
+// ALL SIX ARE @serverOnly, and actor.userId scoping is not the fix for any of them. Each row claims
+// something only the integration can vouch for: that the sealed value is a key the vendor accepted
+// a moment ago, that the label is free among this person's keys, that a person named in a share is
+// somebody the owner may pick, that a verdict is the vendor's answer to a real call. A caller who
+// could write the row could store a key nobody checked, or mark somebody else's key refused. The
+// concepts are @serverWritten besides, so a raw write is refused as well.
+
+/// Store a new API key. Called by vendorKeyAdd after the vendor accepted the key, as the person
+/// adding it: the owner is stamped from the actor and is not an argument. A new key is active, lent
+/// to nobody, and not switched on for Auto.
+///
+/// @serverOnly, and actor.userId scoping is not the fix: the stamp above already is that scoping.
+/// What it cannot establish is what the row CLAIMS: that the sealed value is a key the vendor
+/// accepted a moment ago and not an organization admin key, that the label is free among this
+/// person's keys, and that the person is under the limit. Only the Go frame that checked may write.
+@actor
+@serverOnly
+mutation vendorKey createVendorKey {
+  args {
+    keyId           string!
+    vendor          enum("anthropic", "openai")!
+    label           string!  @maxLength(60)
+    encryptedValue  string!
+    fingerprint     string!
+    isDefault       bool
+    checkedBy       enum("list", "use")!
+  }
+  insert {
+    id:             args.keyId
+    ownerUserId:    actor.userId
+    vendor:         args.vendor
+    label:          args.label
+    encryptedValue: args.encryptedValue
+    fingerprint:    args.fingerprint
+    isDefault:      args.isDefault ?? false
+    autoUse:        false
+    checkedBy:      args.checkedBy
+    status:         "active"
+    addedAt:        now
+    sharing: {
+      mode: "owner",
+      paused: false,
+      userIds: [],
+      groupIds: [],
+      pausedUserIds: [],
+      pausedGroupIds: [],
+      sharedAt: now,
+      sharedBy: actor.userId
+    }
+  }
+}
+
+/// The owner's settings on a key: its name, whether it is the default for its vendor, and whether
+/// Auto may spend it. Each is optional and an absent one is left as it was. Called by
+/// vendorKeyUpdate, which has checked that the caller is the key's owner: nobody else may rename a
+/// key, make it the default or switch Auto on, a cluster owner included.
+///
+/// @serverOnly, and actor.userId scoping is not the fix: the tier's cluster-owner arm would admit a
+/// cluster owner to this write, and switching Auto on for somebody else's key is spending their
+/// money. Making one key the default also has to clear the flag on the owner's other key at the
+/// vendor, and a new label has to be free among the owner's keys; a mutation body can check
+/// neither.
+@actor
+@serverOnly
+mutation vendorKey updateVendorKey {
+  args {
+    keyId      string!
+    label      string  @maxLength(60)
+    isDefault  bool
+    autoUse    bool
+  }
+  update {
+    accept { label, isDefault, autoUse }
+    stamp {
+      id: args.keyId
+    }
+  }
+}
+
+/// Set who a key is lent to. A whole block every time, so the owner's last save is exactly what
+/// the resolver reads, and the lists are written empty under owner so a share that was taken back
+/// leaves no names behind. Called by vendorKeySetSharing as the key's owner, after it has checked
+/// that every person and group named is one the owner may pick.
+///
+/// @serverOnly, and actor.userId scoping is not the fix: whether a user or a group is somebody the
+/// owner may pick is a question about the owner's groups, which a mutation body has no way to ask,
+/// and the tier's cluster-owner arm would let a cluster owner lend a key that is not theirs.
+@actor
+@serverOnly
+mutation vendorKey setVendorKeySharing {
+  args {
+    keyId           string!
+    /// owner or people. There is no cluster-wide mode: a key is one person's money.
+    mode            enum("owner", "people")!
+    paused          bool
+    userIds         []string
+    groupIds        []string
+    pausedUserIds   []string
+    pausedGroupIds  []string
+  }
+  update {
+    id: args.keyId
+    sharing: {
+      mode: args.mode,
+      paused: args.paused ?? false,
+      userIds: args.userIds ?? [],
+      groupIds: args.groupIds ?? [],
+      pausedUserIds: args.pausedUserIds ?? [],
+      pausedGroupIds: args.pausedGroupIds ?? [],
+      sharedAt: now,
+      sharedBy: actor.userId
+    }
+  }
+}
+
+/// Remove a key: one-way, and the row stays. The key stops paying at once, is the default for
+/// nothing, is switched off for Auto and is lent to nobody.
+///
+/// `removedBy` IS AN ARGUMENT, supplied by the integration from the authenticated caller. A cluster
+/// owner may remove any key on their cluster, and the write then runs as the cluster acting, so the
+/// actor is not the person who asked.
+///
+/// @serverOnly, and actor.userId scoping is not the fix: a cluster owner removing somebody else's
+/// key is one of the two callers this write exists for, and a removal must write its audit event
+/// beside it, which only the builtin does.
+@actor
+@serverOnly
+mutation vendorKey removeVendorKey {
+  args {
+    keyId      string!
+    removedBy  string!
+  }
+  update {
+    id:        args.keyId
+    status:    "removed"
+    removedAt: now
+    removedBy: args.removedBy
+    isDefault: false
+    autoUse:   false
+    sharing: {
+      mode: "owner",
+      paused: false,
+      userIds: [],
+      groupIds: [],
+      pausedUserIds: [],
+      pausedGroupIds: [],
+      sharedAt: now,
+      sharedBy: args.removedBy
+    }
+  }
+}
+
+/// Start the engine's record of a key, beside the key itself. Called by vendorKeyAdd as the person
+/// adding the key, right after createVendorKey, with the verdict of the check that let the key in.
+/// The row's short id is the key's.
+///
+/// @serverOnly, and actor.userId scoping is not the fix: the stamp already scopes the row to its
+/// owner. The row is the ENGINE's account of what a vendor answered, and an owner who could write
+/// it could mark their own refused key good.
+@actor
+@serverOnly
+mutation vendorKeyState createVendorKeyState {
+  args {
+    keyId       string!
+    vendor      enum("anthropic", "openai")!
+    state       enum("good", "refused", "credit")!
+    evidenceAt  datetime!
+    checkedAt   datetime
+    goodAt      datetime
+    detail      string  @maxLength(300)
+  }
+  insert {
+    accept { keyId, vendor, state, evidenceAt, checkedAt, goodAt, detail }
+    stamp {
+      id:          args.keyId
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Record what the engine observed about a key: a verdict with the time of its evidence, a hold, a
+/// check, a use, a notice sent. Each field is optional and an absent one is left as it was. The
+/// writer compares `evidenceAt` with the stored one first and drops an older verdict.
+///
+/// @serverOnly, and actor.userId scoping is not the fix: the verdict arrives on whichever replica
+/// made the call the key paid for, which is often a borrower's call and never the owner's write, so
+/// it is written as the cluster acting. A person who could write it could mark somebody else's key
+/// refused, or their own good.
+@actor
+@serverOnly
+mutation vendorKeyState updateVendorKeyState {
+  args {
+    keyId       string!
+    state       enum("good", "refused", "credit")
+    evidenceAt  datetime
+    detail      string  @maxLength(300)
+    heldUntil   datetime
+    checkedAt   datetime
+    goodAt      datetime
+    lastUsedAt  datetime
+    notifiedAt  datetime
+  }
+  update {
+    accept { state, evidenceAt, detail, heldUntil, checkedAt, goodAt, lastUsedAt, notifiedAt }
+    stamp {
+      id: args.keyId
+    }
+  }
+}

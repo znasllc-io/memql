@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use common.traits.{ isActiveRecord }
+use common.traits.{ isActiveRecord, statusIsActive }
 use worker.concepts.{ registration }
 
 // Caching (5.5 / memql#1969): the router budget config is a small bounded set
@@ -267,4 +267,130 @@ query call routerCallsForBudget {
   }
   filter  row => actor.isClusterOwner == true && row.userId == args.userId && row.createdAt >= args.since
   shape   routerCallSpend
+}
+
+// ---- API keys (design record 2026-11-21-vendor-accounts-and-api-keys) ----
+//
+// Every read below is @serverOnly, and none filters on the caller. Both are deliberate.
+//
+// THE WIRE. What a caller may see of a key depends on who they are: its owner reads everything but
+// the value, a person it is lent to reads a short card, a cluster owner reads its facts. Only the
+// builtins decide that (dsl/router/builtins.memql), so no query here is client-callable, and the
+// concepts are on clientUnreadableConcepts so a raw read is refused as well.
+//
+// THE CALLER. These are read by integrations/vendorkeys with internal origin, as the caller for a
+// person's own list and as the cluster acting for the two reads no person could make: which keys
+// are lent to somebody (a key's row belongs to its owner, so the borrower's tier admits nothing),
+// and the daily check. actor.userId scoping would empty exactly those two. The row tier still
+// decides every row for the actor the read runs as.
+//
+// @cache(0) on all of them: whether a key may pay is decided per call from the rows, and a removal,
+// a pause or a refusal must reach every replica by the next call.
+
+/// One API key by its id, without its sealed value.
+///
+/// @serverOnly, and actor.userId scoping is not the fix: the reads that need a key by id are the
+/// resolver judging a key somebody LENT to the caller and a cluster owner stopping a key on their
+/// cluster, and neither caller is the row's owner. What each may then see of the key is the
+/// builtin's to decide, not this read's.
+@serverOnly
+@unbounded("an API key by id -- a single row (id is the row's own primary key)")
+@cache(0)
+query vendorKey vendorKeyById {
+  args {
+    keyId  string!
+  }
+  filter  row => row.id == args.keyId
+  shape   vendorKeyCard
+}
+
+/// One API key's SEALED VALUE, for the one request to the vendor that key pays for. The only read
+/// that carries vendorKeySealed. A removed key still answers, with its status, so the reader can
+/// refuse by name rather than mistake a removed key for a missing one.
+///
+/// @serverOnly, and actor.userId scoping is not the fix: a key pays for the calls of the people it
+/// is lent to, so the request that unseals it is often not its owner's, and it is made by the
+/// engine as the cluster acting. A caller-scoped read would refuse every borrowed call. The wire
+/// is what the annotation withholds: a client-callable projection of the ciphertext is a way to
+/// carry the sealed value out of the cluster.
+@serverOnly
+@unbounded("an API key by id -- a single row (id is the row's own primary key)")
+@cache(0)
+query vendorKey vendorKeySealedById {
+  args {
+    keyId  string!
+  }
+  filter  row => row.id == args.keyId
+  shape   vendorKeySealed
+}
+
+/// The ACTIVE keys of one person, at both vendors. Bounded by construction: a person holds at most
+/// ten active keys per vendor, and a removed key leaves this list and stays readable by id.
+///
+/// @serverOnly, and actor.userId scoping is not the fix: the owner is an ARGUMENT because the
+/// resolver reads a person's keys on whichever replica runs their call, where the actor is often
+/// the run's own principal and not the person, and because a cluster owner may list somebody
+/// else's keys through the builtin. A caller-scoped read would answer neither.
+@serverOnly
+@unbounded("one person's active API keys -- at most ten per vendor by the add's own limit")
+@cache(0)
+query vendorKey vendorKeysForOwner {
+  args {
+    ownerUserId  string!
+  }
+  filter  row => row.ownerUserId == args.ownerUserId && statusIsActive(row)
+  shape   vendorKeyCard
+}
+
+/// Every ACTIVE key at one vendor, whoever owns it: what the resolver reads to find the keys lent to
+/// a person, and what the daily check sweeps. Read as the cluster acting. Unbounded because a page
+/// cap would silently drop a key somebody lent, and the call it should have paid for would be
+/// refused or paid by another account with nothing saying why.
+///
+/// @serverOnly, and actor.userId scoping is not the fix: a lent key's row belongs to its OWNER, so
+/// a read scoped to the borrower returns nothing, and the daily check has no person at all. The
+/// integration reads this as the cluster acting and then decides, key by key, whether the person it
+/// is resolving for is admitted by that key's sharing block.
+@serverOnly
+@unbounded("every active API key at one vendor -- at most ten per person, and a page cap would hide a lent key from the call it should pay for")
+@cache(0)
+query vendorKey vendorKeysActiveAtVendor {
+  args {
+    vendor  string!
+  }
+  filter  row => row.vendor == args.vendor && statusIsActive(row)
+  shape   vendorKeyCard
+}
+
+/// What the engine observed about one key.
+///
+/// @serverOnly, and actor.userId scoping is not the fix: the state is read beside a key by whoever
+/// the key's builtin admitted (its owner, a borrower's card, a cluster owner) and by the engine
+/// before it writes a verdict, none of which a caller-scoped filter describes.
+@serverOnly
+@unbounded("an API key's state by key id -- one row per key")
+@cache(0)
+query vendorKeyState vendorKeyStateById {
+  args {
+    keyId  string!
+  }
+  filter  row => row.id == args.keyId
+  shape   vendorKeyStateFull
+}
+
+/// What the engine observed about several keys, in one read: a list of a person's keys and the
+/// resolver both need the state beside each key.
+///
+/// @serverOnly, and actor.userId scoping is not the fix: the resolver asks for the states of keys
+/// lent to a person, whose rows belong to the keys' owners, so a read scoped to the borrower would
+/// return none of them and every lent key would look unchecked.
+@serverOnly
+@unbounded("the states of a named set of API keys -- one row per key, bounded by the list asked for")
+@cache(0)
+query vendorKeyState vendorKeyStatesForKeys {
+  args {
+    keyIds  []string!
+  }
+  filter  row => row.keyId in args.keyIds.select(candidate => canonicalId(candidate, vendorKey))
+  shape   vendorKeyStateFull
 }

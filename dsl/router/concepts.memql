@@ -142,8 +142,13 @@ concept call {
   executionSurface    string  @description("Where the call ran (memql#4362, memql#4681): empty for MemQL's own provider calls, 'cockpit-app:<appId>' for a call made by a local app on a user's machine through a delegated session, 'fleet:<registrationId>' for a call a machine in the user's fleet took, whether it served it or failed it, so read outcome before counting a row as served (memql#6414). A machine that declined the call before handing it to a runtime ran nothing and is not named. Lets a cost reader separate 'what we spent' from 'what ran somewhere we do not pay for' without joining to the session or registration row -- and, for the fleet case, answers 'which of my machines did this' from the ledger alone.")
   route               string  @description("The route a PERSON chose for this call in Ask (design record 2026-10-18-routes): `local`, `apps` or the id of one of their own routes. EMPTY MEANS AUTO -- the rules decided, which is every call nobody chose a route for and every call made before routes existed. It is what History filters on to answer 'what did my Apps route actually do'.")
   accountKind         enum("cluster", "key")  @description("Which ACCOUNT paid for a vendor text call (design record 2026-11-21-vendor-accounts-and-api-keys, K15): `cluster` is the cluster's own account at the vendor, its workload identity federation; `key` is a person's API key. ABSENT MEANS THE SOURCE TAKES NO ACCOUNT: a local model, an app, and the vendor surfaces a key does not pay for (vision, speech, transcription, embeddings, images), which are every row written before this field. On a `fallback_used` row it is the account that FAILED. A key's spend is metered spend, so billing stays `metered` whichever account paid.")
-  accountKeyId        string  @description("The bare id of the v1:router:vendorKey that paid, when accountKind is `key`; empty otherwise. THE KEY'S NAME AND FINGERPRINT ARE NEVER ON THIS ROW: every signed-in person can read a call record, so a screen resolves the name through the key's own read, and a person who may not see the key reads 'a key'.")
-  accountKeyOwnerUserId string  @description("The bare v1:identity:user id of the person the paying key belongs to, when accountKind is `key`; empty otherwise. It differs from userId when the key was lent: userId is whose call it was, this is whose money paid.")
+  accountKeyId        string  @description("The id of the v1:router:vendorKey that paid, when accountKind is `key`; empty otherwise. THE KEY'S NAME AND FINGERPRINT ARE NEVER ON THIS ROW: every signed-in person can read a call record, so a screen resolves the name through the key's own read, and a person who may not see the key reads 'a key'.")
+  accountKeyOwnerUserId string  @description("The v1:identity:user the paying key belongs to, when accountKind is `key`; empty otherwise. It differs from userId when the key was lent: userId is whose call it was, this is whose money paid.")
+
+  // The two ids a key-paid row carries name rows, so they are declared: a
+  // key's activity is read by the key's id, which arrives bare.
+  @relationship(type="references", as="paidByKey", field="accountKeyId", target=vendorKey, direction="outgoing")
+  @relationship(type="references", as="paidByKeyOwner", field="accountKeyOwnerUserId", target=user, direction="outgoing")
 }
 
 /// A route a PERSON made and named (design record 2026-10-18-routes, "Your own routes"): which
@@ -176,6 +181,118 @@ concept route {
   updatedAt    datetime  @description("When the route was last written.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+}
+
+// ---- API keys (design record 2026-11-21-vendor-accounts-and-api-keys) ----
+
+/// A PERSON'S API KEY at a model vendor (design record 2026-11-21-vendor-accounts-and-api-keys,
+/// decisions K1 to K6 and K16). It is the second kind of ACCOUNT that can pay for a vendor call; the
+/// first is the cluster's own workload identity federation, which has no row.
+///
+/// IT BELONGS TO THE PERSON WHO ADDED IT. The cluster's own work never spends one and there is no
+/// cluster key: a call with no acting person, and a call made for a visitor under a person's
+/// borrowed authority, is paid by the cluster's account or by nothing. Its owner may lend it to
+/// named people and groups, and Auto spends it only after its owner switches that on.
+///
+/// THIS ROW HOLDS WHAT ITS OWNER DECIDES: the vendor, the name, the sealed value, whether it is the
+/// default, the Auto switch, who it is lent to, and removal. What the engine OBSERVES about the key
+/// (the last check, a refusal, a hold for credit, the last use) is v1:router:vendorKeyState, a row of
+/// its own. The split is the point: the engine stamps what it observes from any replica, often, and
+/// a write is a read-merge of the whole row, so an engine stamp on THIS row could put back a share
+/// its owner had just taken away.
+///
+/// THE VALUE IS SEALED, exactly as a source credential's is: component/secret.Encrypt under
+/// MEMQL_MASTER_KEY, on the node that received it, into `encryptedValue`. It is unsealed for one
+/// request to the vendor's own address and nowhere else, and never after the key is removed.
+///
+/// NO CLIENT WRITES THIS ROW. @serverWritten requires internal origin for every write, a raw insert
+/// and an inline update included, and every named write is @serverOnly: integrations/vendorkeys is
+/// the only writer, after it has checked who is asking and, for a new key, asked the vendor whether
+/// it accepts the key.
+///
+/// NO CLIENT READS IT EITHER, by any path. The tier below would admit the owner and a cluster owner
+/// to a raw read; clientUnreadableConcepts (component/memql/site_access_guards.go) refuses them,
+/// because what a caller may see of a key differs by who they are and only the builtins decide it:
+/// the owner sees everything but the value, a person it is lent to sees a short card, a cluster
+/// owner sees its facts. For the same reason a write publishes NO GRAPH EVENT: an event carries the
+/// whole row, the sealed value included, to every subscriber, and nothing may subscribe to a key or
+/// trigger on one. Cache invalidation is a separate channel that carries the concept's name alone.
+///
+/// A REMOVED KEY'S ROW STAYS. Removal is one-way; the row is the record of what paid for the calls
+/// that name it, and a deleted row answers no question after an incident. Removing a key here does
+/// not revoke it at the vendor, and the sealed value remains in the row's history.
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@displayCard(primary="label", secondary="vendor", tertiary="fingerprint", status="status")
+@belongsTo(cluster)
+concept vendorKey {
+  ownerUserId     string!  @description("The v1:identity:user this key belongs to: the person who added it, whose money it spends. Stamped by createVendorKey from the actor the write runs as and never an argument. It never moves: a cluster owner who removes a key does not come to own it.")
+  vendor          enum("anthropic", "openai")!  @description("The vendor the key is for. A key is sent to that vendor's own public API address and nowhere else; a cluster that sends the vendor's calls to another address uses no key for it.")
+  label           string!  @description("The owner's name for the key, one to 60 characters, unique among that person's active keys. It is never written on a call record: a screen resolves it through the key's own read, so a person who may not see the key reads 'a key'.")
+  encryptedValue  string!  @secret  @description("Base64-encoded nonce || NaCl-secretbox ciphertext of the key, sealed under MEMQL_MASTER_KEY by component/secret.Encrypt on the node that received it. Opaque: never rendered, projected by the one sealed shape a @serverOnly read carries, and unsealed only inside one request to the vendor into a local that dies with it. @secret redacts a rejected value in the function-args validator, which matches by argument name, so the writer's argument is named encryptedValue too.")
+  fingerprint     string!  @description("The last four characters of the key, prefixed with '...', for telling two keys apart without revealing either. Display only.")
+  isDefault       bool     @description("True for the one key of its owner at this vendor that pays first for the owner's own calls. The owner's other keys at the vendor are used only when a source pins them.")
+  autoUse         bool     @description("True once the key's owner switched on 'Let Auto use this key'. False for a new key. A call nobody chose a route for is paid by a key only when this is true; choosing the API route, a route of one's own, or pinning a vendor model is the telling, and Auto is not.")
+  checkedBy       enum("list", "use")  @description("How the key is checked. `list` is the default: its vendor's models are listed with it, which sends no prompt and costs no tokens. `use` is a key that may not list models (a restricted key): it is checked only by the real calls it pays for, and the daily check skips it.")
+  status          enum("active", "removed")!  @description("`active` pays; `removed` never pays again and is never unsealed again. One-way: a removed key is not restored, a new one is added.")
+  addedAt         datetime!  @description("When the key was added, stamped from the clock. Among keys lent to a person, the one added earliest is tried first.")
+  removedAt       datetime   @description("When the key was removed, or empty.")
+  removedBy       string     @description("The v1:identity:user who removed it: its owner, or a cluster owner stopping a key on their cluster. Supplied by the integration from the authenticated caller.")
+
+  // WHO THE KEY IS LENT TO. A machine's sharing block (v1:worker:registration.sharing)
+  // without its cluster-wide mode: there is no way to lend a key to everyone, because a
+  // key is one person's money. Admission is the same rule a machine's is
+  // (component/worker.Sharing), judged on every call from the rows.
+  sharing {
+    mode            enum("owner", "people")  @description("Who else may spend this key. owner, the default and the absent case, is its owner only. people is exactly the users in userIds and the active members of the active groups in groupIds.")
+    paused          bool      @description("Pause every borrower while keeping the audience. The owner's own calls are not affected.")
+    userIds         []string  @description("Under people: the v1:identity:user ids the key is lent to. Empty under owner.")
+    groupIds        []string  @description("Under people: the v1:identity:group ids whose active members may spend the key, resolved on every call from the membership rows.")
+    pausedUserIds   []string  @description("Listed users whose own grant is paused. A group grant that still admits them is independent.")
+    pausedGroupIds  []string  @description("Listed groups whose grant is paused.")
+    sharedAt        datetime  @description("When the owner last changed who the key is lent to, stamped from the clock.")
+    sharedBy        string    @description("Who changed it, stamped from the actor: the record of who lent a key must not be writable by whoever is holding the keyboard.")
+  }
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="removedBy", field="removedBy", target=user, direction="outgoing")
+}
+
+/// WHAT THE ENGINE OBSERVED ABOUT ONE API KEY (design record
+/// 2026-11-21-vendor-accounts-and-api-keys, decisions K1, K11 and K13): whether the vendor accepts
+/// it, a hold while its account is out of credit, and when it was last checked and last used. One
+/// row per key, at the key's own short id.
+///
+/// A ROW OF ITS OWN so that the engine never writes v1:router:vendorKey. Every real call a key pays
+/// for is evidence about it, the evidence arrives on whichever replica made the call, and a write is
+/// a read-merge of the whole row: if these stamps lived beside the sharing block, a stale engine
+/// write could undo an owner's decision to stop lending.
+///
+/// OLDER EVIDENCE NEVER REPLACES NEWER. `evidenceAt` is the time of the evidence behind `state`. A
+/// long call that started before a key was revoked can finish, successfully, after the refusal was
+/// recorded; its late good verdict carries an earlier time and is dropped by the writer.
+///
+/// @serverWritten and client-unreadable for vendorKey's reasons: it is the engine's own account of
+/// something only the engine did, and its `detail` is a vendor's words about a person's account.
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@displayCard(primary="keyId", secondary="vendor", status="state")
+@belongsTo(cluster)
+concept vendorKeyState {
+  keyId        string!  @description("The v1:router:vendorKey this row is about. The row's own short id is the key's.")
+  ownerUserId  string!  @description("The key's owner, stamped by createVendorKeyState from the actor the write runs as, which is the owner adding the key. The row-authz key; it never moves.")
+  vendor       enum("anthropic", "openai")!  @description("The key's vendor, copied at creation so a sweep reads one concept.")
+  state        enum("good", "refused", "credit")!  @description("`good`: the vendor served a call or a check with the key. `refused`: the vendor does not accept it, and it is passed over until a check or its owner says otherwise. `credit`: its account is out of credit or at a spend limit, and it is passed over until heldUntil.")
+  evidenceAt   datetime!  @description("The time of the evidence behind `state`: when the call or check that produced it STARTED. A verdict with an earlier time than this is not written.")
+  detail       string    @description("The vendor's words behind a refusal or a hold, with anything key-shaped removed, at most 300 characters. Empty when good.")
+  heldUntil    datetime  @description("Under `credit`: when the next real call may try the key again, one hour after the evidence. Compared with the clock at the time of a call; a past time holds nothing.")
+  checkedAt    datetime  @description("When the key's models were last listed, by the add, the daily check or Check now.")
+  goodAt       datetime  @description("When the vendor last served a call or a check with the key, stamped at most once an hour. The daily check lists the models of any active key whose goodAt is more than 24 hours old.")
+  lastUsedAt   datetime  @description("When a real call was last paid by the key, to within an hour. A heartbeat: it must never enter an arrival-cue fingerprint.")
+  notifiedAt   datetime  @description("When the owner was last told the key went from good to refused or out of credit. One notice per fall: none again until the key has been good since.")
+
+  @relationship(type="parent", field="keyId", target=vendorKey, direction="outgoing")
+  @relationship(type="references", as="keyOwner", field="ownerUserId", target=user, direction="outgoing")
 }
 
 /// Virtual projection of a registered AI provider entry. Never persisted -- rows are produced at

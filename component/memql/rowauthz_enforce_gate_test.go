@@ -143,6 +143,28 @@ var tierDecidesTheRead = map[string]string{
 	// injected term leaves the result set exactly as the filter wrote it.
 	"routeForOwner": "Routes: @serverOnly, read under the maintenance principal the composite tier admits; the owner is a server-supplied argument the filter requires.",
 	"routesOfOwner": "Routes: @serverOnly, read under the maintenance principal, as routeForOwner.",
+	// A person's API key and what the engine observed about it (design record
+	// 2026-11-21-vendor-accounts-and-api-keys). Six reads, all @serverOnly, all
+	// made by integrations/vendorkeys with internal origin, and none carries the
+	// caller-scope conjunct, because the conjunct would be wrong for the two
+	// readers the rows exist for. A LENT key's row belongs to its owner: the
+	// resolver finding the keys a person may spend reads them as the cluster
+	// acting, whom the clusterOwner arm admits, and then judges each key's
+	// sharing block for that person; the daily check has no person at all. For
+	// a person's own list the read runs as the caller, and the tier is the
+	// whole answer: their own rows, or every row for a cluster owner, who may
+	// see any key's facts (K5). What a caller is then SHOWN is the builtin's to
+	// decide, and no client reaches these rows another way: both concepts are
+	// on clientUnreadableConcepts. TestVendorKeyRowsAreUnreadableByAClient
+	// (vendor_key_rows_db_test.go) is the test that fails if this is wrong: the
+	// owner, a borrower, a cluster owner and a stranger read nothing without
+	// internal origin, and with it a stranger is still refused by the tier.
+	"vendorKeyById":            "API keys: @serverOnly, read by integrations/vendorkeys as the caller or as the cluster acting; the owned tier with its clusterOwner arm decides every row, and a caller-scope conjunct would hide a lent key from the resolver.",
+	"vendorKeySealedById":      "API keys, as vendorKeyById: the one read that carries the sealed value, made as the cluster acting inside a request to the vendor, often for a borrower's call.",
+	"vendorKeysForOwner":       "API keys, as vendorKeyById: the owner is a server-supplied argument, because the resolver reads a person's keys on whichever replica runs their call and a cluster owner may list anybody's.",
+	"vendorKeysActiveAtVendor": "API keys, as vendorKeyById: every active key at a vendor, read as the cluster acting by the resolver of lent keys and by the daily check.",
+	"vendorKeyStateById":       "API keys, as vendorKeyById, over the state row read beside its key.",
+	"vendorKeyStatesForKeys":   "API keys, as vendorKeyById, over the state rows of a named set of keys.",
 	// Shopify propagation hydrates an outbox row reference under the named
 	// connector actor. The concepts' @mirroredTo("shopify") declaration is
 	// its authority (memql#4378), not cluster ownership. The connector row

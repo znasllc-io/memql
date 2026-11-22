@@ -150,3 +150,56 @@ shape call routerCallSpend {
   billing
   row.createdAt
 }
+
+// ---- API keys (design record 2026-11-21-vendor-accounts-and-api-keys) ----
+
+/// Everything about an API key BUT ITS SEALED VALUE, for the reads integrations/vendorkeys makes
+/// before it decides what a caller may see. The omission is the security property: no list and no
+/// by-id read returns ciphertext, because only vendorKeySealed projects it.
+@row
+shape vendorKey vendorKeyCard {
+  row.id
+  row.createdAt
+  ownerUserId
+  vendor
+  label
+  fingerprint
+  isDefault
+  autoUse
+  checkedBy
+  status
+  addedAt
+  removedAt
+  removedBy
+  sharing
+}
+
+/// The one projection that carries an API key's sealed value. Carried by vendorKeySealedById alone,
+/// which is @serverOnly and read from inside one request to the vendor; the ciphertext is unsealed
+/// into a local that dies with the request. `status` and `ownerUserId` ride along so the unsealing
+/// can refuse a removed key from the row it already read.
+@row
+shape vendorKey vendorKeySealed {
+  row.id
+  ownerUserId
+  vendor
+  status
+  encryptedValue
+}
+
+/// What the engine observed about an API key.
+@row
+shape vendorKeyState vendorKeyStateFull {
+  row.id
+  keyId
+  ownerUserId
+  vendor
+  state
+  evidenceAt
+  detail
+  heldUntil
+  checkedAt
+  goodAt
+  lastUsedAt
+  notifiedAt
+}
