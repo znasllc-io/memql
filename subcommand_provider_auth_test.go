@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -27,6 +29,8 @@ func TestProviderAuthReportFederationPath(t *testing.T) {
 		TokenSubject:      "system:serviceaccount:memql:memql-engine",
 		TokenAudience:     []string{"https://api.anthropic.com"},
 		ExchangeOutcome:   "ok",
+		Recorded:          true,
+		SignInAt:          expires.Add(-time.Hour),
 		TokenExpiresAt:    expires,
 		TokenExpiresIn:    time.Hour,
 		ModelsListed:      12,
@@ -44,7 +48,10 @@ func TestProviderAuthReportFederationPath(t *testing.T) {
 		"https://api.anthropic.com",
 		"2026-08-23T18:04:11Z",
 		"12 models returned",
-		"concept storage",
+		// Said every time: the reader must know whose sign-in this is, and
+		// that running the command did not spend the pod's identity token.
+		"engine's own sign-in",
+		"contacts no vendor",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the federation report does not mention %q:\n%s", want, out)
@@ -111,6 +118,64 @@ func TestProviderAuthReportPrintsNoCredential(t *testing.T) {
 	for _, secretish := range []string{"sk-ant-", "Bearer ", "eyJ"} {
 		if strings.Contains(out, secretish) {
 			t.Fatalf("the report contains something credential-shaped (%q):\n%s", secretish, out)
+		}
+	}
+}
+
+// A refusal the vendor gave is exit 1, which the installer reads as "the
+// federation configuration is wrong". Anything the check cannot say yet must
+// not share that code, or a node that has only just started would be reported
+// to an operator as a broken rule.
+func TestProviderAuthExitCodes(t *testing.T) {
+	if got := providerAuthExitCode(nil); got != 0 {
+		t.Errorf("an accepted sign-in exits %d, want 0", got)
+	}
+	if got := providerAuthExitCode(errors.New("the vendor refused the engine's sign-in (status 401): match_subject_prefix")); got != 1 {
+		t.Errorf("a refusal exits %d, want 1", got)
+	}
+	notYet := fmt.Errorf("%w: nothing recorded", memql.ErrSignInNotVerified)
+	if got := providerAuthExitCode(notYet); got != 4 {
+		t.Errorf("an unverified sign-in exits %d, want 4", got)
+	}
+}
+
+// A report with no record says so, and still prints the configuration.
+func TestProviderAuthReportWithNothingRecorded(t *testing.T) {
+	var buf bytes.Buffer
+	writeProviderAuthReport(&buf, memql.ProviderAuthReport{
+		Provider:         "claudeSonnet",
+		Vendor:           "anthropic",
+		CredentialPath:   "federation",
+		FederationRuleID: "fdrl_abc",
+		TokenSubject:     "system:serviceaccount:memql:memql-engine",
+	})
+	out := buf.String()
+	for _, want := range []string{"fdrl_abc", "nothing recorded by the engine", "concept storage", "contacts no vendor"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the report with no record does not mention %q:\n%s", want, out)
+		}
+	}
+}
+
+// A refusal that a restart alone explains is reported as such, with the time
+// the next identity token is due.
+func TestProviderAuthReportExplainsAPossibleReplay(t *testing.T) {
+	var buf bytes.Buffer
+	due := time.Date(2026, 11, 22, 10, 8, 0, 0, time.UTC)
+	writeProviderAuthReport(&buf, memql.ProviderAuthReport{
+		Provider:        "claudeSonnet",
+		Vendor:          "anthropic",
+		CredentialPath:  "federation",
+		Recorded:        true,
+		ExchangeOutcome: "denied",
+		Detail:          "jti_reused",
+		MayBeReplay:     true,
+		NextTokenDue:    due,
+	})
+	out := buf.String()
+	for _, want := range []string{"denied", "jti_reused", "issued before this engine process started", "2026-11-22T10:08:00Z"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the report does not mention %q:\n%s", want, out)
 		}
 	}
 }

@@ -173,6 +173,19 @@ func TestSignInAtStartRecordsTheModelsListed(t *testing.T) {
 	if got := f.exchangeCount(); got != 1 {
 		t.Fatalf("sign-in at start made %d sign-ins, want 1", got)
 	}
+	// The model list is asked for with the federated bearer and no key. A
+	// list made with a stray key would record success for the wrong credential.
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.modelsHeaders) != 1 {
+		t.Fatalf("models were listed %d times, want 1", len(f.modelsHeaders))
+	}
+	if got := f.modelsHeaders[0].Get("Authorization"); got != "Bearer sk-ant-oat01-fake" {
+		t.Fatalf("the model list carried Authorization %q, want the federated bearer", got)
+	}
+	if got := f.modelsHeaders[0].Get("x-api-key"); got != "" {
+		t.Fatalf("the model list carried x-api-key %q", got)
+	}
 }
 
 func TestSignInAtStartDoesNothingWithNoVendorConfigured(t *testing.T) {

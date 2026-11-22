@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -13,9 +14,15 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 )
 
-// `memql provider-auth check` -- prove, from inside a pod, which credential
-// this node is really using to reach a cloud vendor and that the vendor
-// accepts it (memql#4335, extended to both vendors by memql#5088).
+// `memql provider-auth check` -- report, from inside a pod, which credential
+// this node is really using to reach a cloud vendor and whether the vendor
+// accepted it (memql#4335, extended to both vendors by memql#5088).
+//
+// IT REPORTS THE ENGINE'S OWN SIGN-IN AND MAKES NONE (design record
+// 2026-11-21-vendor-accounts-and-api-keys, A5). The engine in the pod signs in
+// at start and records what happened; this command reads that record. It used
+// to sign in itself, as a second process, and a vendor that accepts an identity
+// token once refuses whichever of two signers goes second.
 //
 // --provider takes `anthropic` or `openai` (the vendor) or one DSL provider
 // name. It is the verification step of either federation runbook
@@ -30,7 +37,29 @@ import (
 // of, and the answer can differ per node -- that is exactly what makes it
 // worth running per node.
 
-const providerAuthCheckExitFail = 1
+const (
+	// providerAuthCheckExitFail: the vendor refused the engine's sign-in.
+	// `scripts/install/verify-provider-key.sh` reads exactly this code as a
+	// refusal, so nothing else may use it.
+	providerAuthCheckExitFail = 1
+	// providerAuthCheckExitNotVerified: the check cannot say. Nothing is
+	// recorded yet, the engine is waiting for its next identity token, or the
+	// vendor never answered. The installer reads any code but 0 and 1 as "says
+	// nothing about the credential", which is what this is.
+	providerAuthCheckExitNotVerified = 4
+)
+
+// providerAuthExitCode maps CheckProviderAuth's error to the exit code.
+func providerAuthExitCode(err error) int {
+	switch {
+	case err == nil:
+		return 0
+	case errors.Is(err, memql.ErrSignInNotVerified):
+		return providerAuthCheckExitNotVerified
+	default:
+		return providerAuthCheckExitFail
+	}
+}
 
 func runProviderAuthSubcommand(args []string) int {
 	if len(args) == 0 {
@@ -53,16 +82,20 @@ func printProviderAuthUsage() {
 	fmt.Fprintln(os.Stderr, `usage: memql provider-auth <subcommand> [flags]
 
 Subcommands:
-  check   Report which credential this node uses for an AI provider, and prove
-          the provider accepts it with one live, token-free models.list call.
+  check   Report which credential this node uses for an AI provider and what
+          the vendor said to the engine's own sign-in. The engine in this pod
+          signs in once at start and lists the vendor's models; this command
+          reads its record and contacts no vendor.
 
 Example (from an operator machine, against a running cluster):
   kubectl exec -n memql deploy/agent -- /app/memql provider-auth check
 
 Exit codes:
-  0  the provider accepted the credential
-  1  it did not (or the credential is misconfigured); the reason is on stderr
+  0  the vendor accepted the engine's sign-in
+  1  the vendor refused it; the vendor's reason is on stderr
   2  bad usage
+  4  cannot say yet: nothing is recorded, the engine is waiting for its next
+     identity token, or the vendor did not answer. Run it again
 
 Run "memql provider-auth check --help" for flags.`)
 }
@@ -74,7 +107,7 @@ func runProviderAuthCheck(args []string) int {
 			"available provider of that vendor; a DSL provider name (e.g. streamClaudeSonnet, "+
 			"chat54Mini) checks that one. The default stays `anthropic` so existing runbook steps "+
 			"and CI invocations keep meaning what they meant.")
-	timeout := fs.Duration("timeout", 30*time.Second, "bound on the live provider call")
+	timeout := fs.Duration("timeout", 30*time.Second, "how long to wait for the engine's sign-in to be recorded")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -97,13 +130,21 @@ func runProviderAuthCheck(args []string) int {
 
 	report, err := memql.CheckProviderAuth(ctx, logger, *provider)
 	writeProviderAuthReport(os.Stdout, report)
-	if err != nil {
+	code := providerAuthExitCode(err)
+	switch code {
+	case 0:
+		fmt.Fprintln(os.Stderr, "\nprovider-auth check: OK")
+	case providerAuthCheckExitNotVerified:
+		fmt.Fprintf(os.Stderr, "\nprovider-auth check: NOT VERIFIED YET: %v\n", err)
+	default:
 		fmt.Fprintf(os.Stderr, "\nprovider-auth check: FAILED: %v\n", err)
-		fmt.Fprintln(os.Stderr, "Runbook: docs/public/operate/auth/anthropic-federation.md")
-		return providerAuthCheckExitFail
+		runbook := "docs/public/operate/auth/anthropic-federation.md"
+		if report.Vendor == "openai" {
+			runbook = "docs/public/operate/auth/openai-federation.md"
+		}
+		fmt.Fprintln(os.Stderr, "Runbook: "+runbook)
 	}
-	fmt.Fprintln(os.Stderr, "\nprovider-auth check: OK")
-	return 0
+	return code
 }
 
 // writeProviderAuthReport prints the report as aligned key/value lines.
@@ -154,10 +195,25 @@ func writeProviderAuthReport(w io.Writer, r memql.ProviderAuthReport) {
 		// match_subject_prefix.
 		line("tokenSubject", r.TokenSubject)
 		line("tokenAudience", strings.Join(r.TokenAudience, ", "))
-		line("exchange", r.ExchangeOutcome)
+		if !r.Recorded {
+			line("signIn", "nothing recorded by the engine in this pod")
+			break
+		}
+		line("signIn", r.ExchangeOutcome)
+		if !r.SignInAt.IsZero() {
+			line("signInAt", r.SignInAt.UTC().Format(time.RFC3339))
+		}
 		if !r.TokenExpiresAt.IsZero() {
 			line("tokenExpires", fmt.Sprintf("%s (in %s)",
 				r.TokenExpiresAt.UTC().Format(time.RFC3339), r.TokenExpiresIn.Round(time.Second)))
+		}
+		line("vendorSaid", r.Detail)
+		if r.MayBeReplay {
+			line("note", "the identity token was issued before this engine process started, so the refusal "+
+				"may only mean an earlier process in this pod already used it")
+		}
+		if !r.NextTokenDue.IsZero() {
+			line("nextTokenDue", r.NextTokenDue.UTC().Format(time.RFC3339))
 		}
 	case "unavailable":
 		line("note", "this node has NO credential for this vendor: federation is not configured. "+
@@ -167,10 +223,17 @@ func writeProviderAuthReport(w io.Writer, r memql.ProviderAuthReport) {
 	}
 
 	if r.ModelsListed > 0 {
-		line("models.list", fmt.Sprintf("%d models returned", r.ModelsListed))
+		line("models.list", fmt.Sprintf("%d models returned to the engine", r.ModelsListed))
 	}
-	// Said every time, because the report otherwise looks like it can see
-	// everything the node can.
-	fmt.Fprintln(w, "\nRead from the process environment only; values seeded into concept storage")
-	fmt.Fprintln(w, "(v1:platform:globalSecret / globalVariable) are not visible to this check.")
+	// Said every time, because the report otherwise reads as though this
+	// command had asked the vendor itself.
+	if r.Recorded {
+		fmt.Fprintln(w, "\nThis is the engine's own sign-in in this pod, as the engine recorded it. The ids")
+		fmt.Fprintln(w, "are the ones the engine used, including any applied through Settings. This command")
+		fmt.Fprintln(w, "contacts no vendor.")
+		return
+	}
+	fmt.Fprintln(w, "\nThe ids above are read from the process environment only; values seeded into")
+	fmt.Fprintln(w, "concept storage (v1:platform:globalSecret / globalVariable) are not visible here")
+	fmt.Fprintln(w, "until the engine has signed in with them. This command contacts no vendor.")
 }

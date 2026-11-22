@@ -2,6 +2,7 @@ package memql
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -17,19 +18,30 @@ import (
 // The engine half of `memql provider-auth check` (memql#4335).
 //
 // WHY A SUBCOMMAND AND NOT A HEALTH ENDPOINT. The question this answers --
-// "is this pod authenticating to Anthropic the way I think it is, right now"
+// "is this pod authenticating to a vendor the way I think it is, right now"
 // -- is asked exactly twice in the life of a cluster: at the moment of the
 // cutover, and the moment something looks wrong afterwards. Both times the
 // operator is already at a shell (`kubectl exec`), and both times the answer
 // must come from INSIDE a pod, because the whole premise of federation is
 // that the credential is the pod's own projected token and exists nowhere
-// else. A health endpoint would have to be reachable, authorized and shaped,
-// and would still be answering from the same place.
+// else.
 //
-// It forces a REAL exchange and a REAL API call on purpose. Reading config
-// back proves the config parses; the failure modes that matter here -- a rule
-// whose subject prefix does not match, an audience typo, a service account
-// removed in the Console -- are all invisible until Anthropic answers.
+// IT REPORTS THE ENGINE'S SIGN-IN AND MAKES NONE OF ITS OWN (design record
+// docs/superpowers/specs/2026-11-21-vendor-accounts-and-api-keys-design.md,
+// A5). It used to force a real exchange and a real API call from this second
+// process. A vendor that accepts an identity token once refuses whichever of
+// two signers goes second: the check either took the engine's sign-in for that
+// rotation, or was itself refused and reported a working federation as broken.
+// The engine in the pod signs in at start and writes what happened to a small
+// status file (ai_vendor_signin.go); this command reads it. What it reads is
+// still a REAL sign-in and a REAL model list, made by the process that serves
+// the traffic, which is a better answer to "is this pod authenticating" than a
+// second process's would be.
+//
+// The ids it prints are the ENGINE'S, from that record. Ids applied through
+// Settings live in concept storage, which this command cannot read, and win
+// over the environment in the engine; the record is how they are reported
+// anyway.
 
 // ProviderAuthReport is what `provider-auth check` prints. Every field is
 // safe to show an operator: ids name objects, never credentials. The bearer
@@ -71,10 +83,37 @@ type ProviderAuthReport struct {
 	TokenExpiresAt  time.Time
 	TokenExpiresIn  time.Duration
 
-	// ModelsListed is the count returned by the live models.list call -- the
-	// proof that the credential is not merely well-formed but accepted.
+	// ModelsListed is the count the vendor returned when the ENGINE listed
+	// models with the bearer of its sign-in -- the proof that the credential
+	// is not merely well-formed but accepted.
 	ModelsListed int
+
+	// Recorded says the engine in this pod has recorded a sign-in for the
+	// vendor. False means everything below describes configuration only.
+	Recorded bool
+	// SignInAt is when the recorded sign-in was attempted.
+	SignInAt time.Time
+	// Detail is the vendor's own reason on a refusal, or the fault when the
+	// vendor never answered.
+	Detail string
+	// MayBeReplay marks a refusal of an identity token issued before the
+	// engine started: a container restarted inside its pod reads the same
+	// token again, and a vendor that accepts a token once refuses it.
+	MayBeReplay bool
+	// NextTokenDue is when the identity token is expected to be replaced.
+	NextTokenDue time.Time
 }
+
+// ErrSignInNotVerified is returned when the check cannot say whether the
+// vendor accepts this pod's credential: the engine has recorded no sign-in
+// yet, is waiting for the next identity token, was refused in a way a restart
+// alone explains, or got no answer. None of those is the vendor refusing the
+// configuration, and the installer must not read them as one.
+var ErrSignInNotVerified = errors.New("the engine's sign-in is not verified yet")
+
+// providerAuthCheckPoll is how often the check looks for the engine's record
+// while it waits.
+const providerAuthCheckPoll = 200 * time.Millisecond
 
 // anthropicProviderTypes are the DSL provider types this check understands.
 var anthropicProviderTypes = map[string]bool{
@@ -97,21 +136,23 @@ func isOpenAIProviderType(providerType string) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(providerType)), "openai")
 }
 
-// CheckProviderAuth builds the provider the way boot does, forces one
-// credential exchange, and calls models.list.
+// CheckProviderAuth reports how this pod authenticates to a vendor: the
+// configuration it can see, and the sign-in the engine in this pod recorded.
+// It contacts no vendor.
 //
 // providerName selects one DSL provider entry by name; empty picks the first
-// available Anthropic entry in name order (deterministic, so two runs on two
-// pods compare).
+// Anthropic entry in name order (deterministic, so two runs on two pods
+// compare).
 //
-// ONE HONEST LIMITATION, stated here and in the command's output: this runs
-// without the engine, so the two concept-storage tiers of auth resolution
-// (v1:platform:globalSecret, globalVariable) are not consulted -- only the
-// process environment, which is where a pod's credential config actually
-// lives. An operator who seeded the key into concept storage instead will see
-// this report say the key is absent while the running node has it. It is the
-// same trade `memql env` makes, for the same reason: a check that needed a
-// database would not run in the situations it exists for.
+// It WAITS, until ctx ends, for the engine's record when federation is
+// configured in this environment and nothing is recorded yet: the installer
+// runs this straight after a rollout, and the engine signs in a moment after
+// it starts. With no ids in the environment and no record it does not wait:
+// that is a vendor nobody set up, and the report says so.
+//
+// The error is nil when the recorded sign-in was accepted, wraps
+// ErrSignInNotVerified when the check cannot say, and is a plain error when
+// the vendor refused.
 func CheckProviderAuth(ctx context.Context, logger *slog.Logger, providerName string) (ProviderAuthReport, error) {
 	registry := newProviderRegistry()
 	if _, err := LoadUnifiedProviders(logger, registry); err != nil {
@@ -135,10 +176,9 @@ func CheckProviderAuth(ctx context.Context, logger *slog.Logger, providerName st
 		Vendor:   vendor,
 	}
 
-	// Rebuild the credential from the resolved auth map rather than reading
-	// the registered client's, so the report describes the same decision the
-	// constructor made and names it in the constructor's own words when it
-	// refuses.
+	// What THIS process can see: the ids in the environment, and the identity
+	// token on disk. A half-configured set is refused here in the
+	// constructor's own words, exactly as boot refuses it.
 	var path credentialPath
 	if vendor == metrics.FederationVendorOpenAI {
 		fed := openaiFederationFrom(entry.Config.Auth)
@@ -177,45 +217,99 @@ func CheckProviderAuth(ctx context.Context, logger *slog.Logger, providerName st
 	}
 	report.CredentialPath = string(path)
 
-	// UNAVAILABLE IS AN ANSWER, NOT A FAILURE. A cluster with no federation
-	// ids for this vendor is a fresh cloud cluster or any local one, and the
-	// command's job there is to say so plainly rather than to error out on a
-	// provider that is behaving exactly as designed. Returning here also
-	// avoids reporting a models.list failure whose real cause is "no
-	// credential", which reads as an outage.
-	if path == credentialPathUnavailable {
-		return report, nil
-	}
-
-	if !entry.Available || entry.Client == nil {
-		if entry.err != nil {
-			return report, fmt.Errorf("provider %q did not construct: %w", entry.Config.Name, entry.err)
-		}
-		return report, fmt.Errorf("provider %q is registered but unavailable", entry.Config.Name)
-	}
-
-	// The live call. models.list is the cheapest authenticated request either
-	// vendor serves -- it spends no tokens, so a check that runs on every
-	// deploy costs nothing but a round trip.
-	listed, err := listModelsForCheck(ctx, entry, vendor)
+	// What the ENGINE recorded. Waited for only when this environment says
+	// federation is configured.
+	rec, recorded, err := waitForSignInRecord(ctx, vendor, path == credentialPathFederation)
 	if err != nil {
-		if rec := LastFederationExchange(); rec != nil && rec.Vendor == vendor {
-			report.ExchangeOutcome = rec.Outcome
+		return report, fmt.Errorf("read the engine's sign-in record: %w", err)
+	}
+	if !recorded {
+		if path == credentialPathUnavailable {
+			// UNAVAILABLE IS AN ANSWER, NOT A FAILURE. No ids here and no
+			// record: nobody set this vendor up on this node, and the command's
+			// job is to say so plainly rather than to error out on a provider
+			// that is behaving exactly as designed.
+			return report, nil
 		}
-		return report, fmt.Errorf("models.list failed on the %s credential path: %w", report.CredentialPath, err)
+		return report, fmt.Errorf("%w: the engine in this pod has recorded no %s sign-in. It signs in once at "+
+			"start; if the node has only just started, run the check again", ErrSignInNotVerified, vendor)
 	}
-	report.ModelsListed = listed
 
-	// The exchange record is per-process and holds the LAST exchange of any
-	// vendor, so it is only this report's evidence when the vendors match.
-	// Reading it unconditionally would attribute Anthropic's expiry to an
-	// OpenAI check on any node that had done both.
-	if rec := LastFederationExchange(); rec != nil && rec.Vendor == vendor && path == credentialPathFederation {
-		report.ExchangeOutcome = rec.Outcome
-		report.TokenExpiresAt = rec.ExpiresAt
-		report.TokenExpiresIn = rec.ExpiresIn
+	applySignInRecord(&report, rec)
+	switch rec.Outcome {
+	case signInOutcomeOK:
+		return report, nil
+	case signInOutcomeWaiting:
+		return report, fmt.Errorf("%w: the engine is waiting for the next identity token%s. The one on disk has "+
+			"already been presented, and the vendor accepts a token once",
+			ErrSignInNotVerified, dueClause(rec.NextTokenDue))
+	case signInOutcomeDenied:
+		if rec.MayBeReplay {
+			return report, fmt.Errorf("%w: the vendor refused the sign-in (status %d: %s), but the identity token "+
+				"was issued before this engine process started, so it may only have been used already by the "+
+				"process this one replaced. The engine signs in again with the next token%s",
+				ErrSignInNotVerified, rec.Status, rec.Detail, dueClause(rec.NextTokenDue))
+		}
+		return report, fmt.Errorf("the vendor refused the engine's sign-in (status %d): %s", rec.Status, rec.Detail)
+	default:
+		return report, fmt.Errorf("%w: the engine's last sign-in got no answer from the vendor: %s",
+			ErrSignInNotVerified, rec.Detail)
 	}
-	return report, nil
+}
+
+// waitForSignInRecord reads the engine's record for a vendor. With wait set it
+// polls until one exists or ctx ends; without, it reads once.
+func waitForSignInRecord(ctx context.Context, vendor string, wait bool) (vendorSignInRecord, bool, error) {
+	for {
+		rec, ok, err := readVendorSignInStatus(vendor)
+		if err != nil || ok || !wait {
+			return rec, ok, err
+		}
+		select {
+		case <-ctx.Done():
+			return vendorSignInRecord{}, false, nil
+		case <-time.After(providerAuthCheckPoll):
+		}
+	}
+}
+
+// applySignInRecord fills the report from the engine's record. The ids and
+// the token claims are the record's, which is what the engine really used.
+func applySignInRecord(report *ProviderAuthReport, rec vendorSignInRecord) {
+	report.Recorded = true
+	report.CredentialPath = string(credentialPathFederation)
+	report.ExchangeOutcome = rec.Outcome
+	report.SignInAt = rec.At
+	report.Detail = rec.Detail
+	report.MayBeReplay = rec.MayBeReplay
+	report.NextTokenDue = rec.NextTokenDue
+	report.ModelsListed = rec.ModelsListed
+	if !rec.ExpiresAt.IsZero() {
+		report.TokenExpiresAt = rec.ExpiresAt
+		report.TokenExpiresIn = time.Until(rec.ExpiresAt)
+	}
+	if rec.TokenSubject != "" {
+		report.TokenSubject = rec.TokenSubject
+		report.TokenAudience = rec.TokenAudience
+	}
+	if len(rec.Ids) > 0 {
+		report.IdentityProviderID = rec.Ids[authKeyIdentityProviderID]
+		report.FederationRuleID = rec.Ids[authKeyFederationRuleID]
+		report.OrganizationID = rec.Ids[authKeyOrganizationID]
+		report.WorkspaceID = rec.Ids[authKeyWorkspaceID]
+		// Both vendors spell this key the same way.
+		if id := rec.Ids[authKeyServiceAccountID]; id != "" {
+			report.ServiceAccountID = id
+		}
+	}
+}
+
+// dueClause says when the next identity token is expected, or nothing.
+func dueClause(due time.Time) string {
+	if due.IsZero() {
+		return ""
+	}
+	return ", due about " + due.UTC().Format(time.RFC3339)
 }
 
 // listModelsForCheck makes the one authenticated call, per vendor.

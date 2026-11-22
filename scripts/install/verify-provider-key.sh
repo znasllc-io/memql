@@ -25,6 +25,14 @@
 # against more than one node type: each pod projects its own token, so "it
 # works on agent" is not "it works".
 #
+# THE CHECK REPORTS THE ENGINE'S OWN SIGN-IN AND MAKES NONE (design record
+# docs/superpowers/specs/2026-11-21-vendor-accounts-and-api-keys-design.md,
+# A5). The engine in each pod signs in once at start, lists the vendor's models
+# with the bearer, and records what happened; `provider-auth check` reads that
+# record and waits up to its timeout for one to exist. It contacts no vendor.
+# A vendor that accepts an identity token once would refuse whichever of two
+# signers in a pod went second, which is why the check stopped being one.
+#
 # THE NAME IS OLDER THAN THE BEHAVIOUR. This file and its capability id still
 # say "key"; both are referenced by the DSL action, the engine's capability
 # allowlist, the install graph, the editor extension and its tests, so renaming
@@ -41,14 +49,17 @@
 #      console steps for.
 #   4  prerequisite missing (kubectl absent)
 #   5  the check could not be RUN (no such deployment, no cluster, exec
-#      refused). Says nothing whatever about the credential.
+#      refused), or it ran and could not say yet: the engine has recorded no
+#      sign-in, is waiting for its next identity token, or got no answer from
+#      the vendor. Says nothing whatever about the credential.
 #
 # The 3-versus-5 split is the reason this is not one exit code: "your mapping
 # does not match" and "you are pointed at the wrong cluster" ask for opposite
 # next actions, and `kubectl exec` collapses both into a non-zero exit unless
 # they are told apart deliberately. They are told apart by whether the command
 # RAN: kubectl exec returns the command's own status, and `provider-auth check`
-# uses 1 for a refusal, so 1 is a refusal and anything else is a failure to run.
+# uses 1 for a refusal and 4 for "cannot say yet", so 1 is a refusal, 4 is an
+# open question the caller asks again, and anything else is a failure to run.
 #
 # This is a CAPABILITY SCRIPT: non-interactive, structured params in, a single
 # JSON result envelope on stdout, human logs on stderr, honest exit codes.
@@ -71,7 +82,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/capability.sh"
 
 cap_init "install.verifyProviderKey" \
-    "Verify a cluster's AI-provider credential by running provider-auth check inside a pod: workload identity federation is the only door, so the pod that holds the projected token is the only thing that can answer."
+    "Verify a cluster's AI-provider credential by running provider-auth check inside a pod: the cluster's account at a vendor is workload identity federation, so the pod that holds the projected token is the only thing that can answer. The check reports the sign-in the engine in that pod made at start."
 cap_spec_param "provider"          "vendor to verify: anthropic | openai"
 # NOT cap_spec_param_required, and deliberately so: an installer that supplied
 # no federation ids has nothing to check and SKIPS this step rather than
@@ -80,7 +91,7 @@ cap_spec_param "provider"          "vendor to verify: anthropic | openai"
 cap_spec_param "federation-deploy" "the Deployment to exec provider-auth check in (e.g. agent). The credential lives inside the pod, so the check runs there"
 cap_spec_param "namespace"         "Kubernetes namespace holding --federation-deploy (default memql)"
 cap_spec_param "memql-binary"      "path to the memql binary inside the pod (default /app/memql)"
-cap_spec_param "timeout"           "per-check timeout in seconds (default 15)"
+cap_spec_param "timeout"           "how long, in seconds, to wait for the engine's sign-in to be recorded (default 15)"
 
 #=============================================================================
 # THE FEDERATION PROBE -- ask the pod, because the credential is the pod's
@@ -118,6 +129,13 @@ function probe_federation() {
             cap_result_set_raw valid false
             cap_error "The pod ran the check and ${provider} did not accept the federated credential."
             cap_fail 3 "federation was refused: ${note}"
+            ;;
+        4)
+            # The check ran and could not say. Not a refusal: the engine has
+            # recorded no sign-in yet, or is waiting for its next identity
+            # token. The caller asks again.
+            cap_result_set_raw valid false
+            cap_fail 5 "the sign-in in ${namespace}/${deployment} is not verified yet; this says nothing about the credential, so run the check again: ${note}"
             ;;
         *)
             cap_result_set_raw valid false
