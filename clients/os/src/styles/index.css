@@ -15959,7 +15959,7 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
    grow, so nothing can jump. It borrows the core gate's mark, heading, sentence
    and note, so it reads in the same voice and the current theme. */
 .os-desktop-only {
-  min-height: 100dvh;
+  min-height: calc(100dvh / var(--os-scale, 1));
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
