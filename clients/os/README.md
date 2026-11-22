@@ -1448,11 +1448,13 @@ authenticated download path without navigating away or opening an empty tab.
 
 **Add to this folder** offers Upload files, New folder and New file, with no
 heading. New file is not an action: hovering it (or Right arrow / Enter) opens a
-side menu of the kinds of file it can make, the kit's `Submenu`; today that is
-Markdown file. Markdown file opens Make a file on Name with Markdown, the
-current folder, and a way back to Files. Searching, Bin, Materializer and the Library root name
-no destination folder. The Markdown item is absent when Materializer cannot be
-opened.
+side menu of the kinds of file it can make, the kit's `Submenu`: every kind the
+Materializer writes, in its order and words (Markdown, Web page, Plain text,
+Spreadsheet (CSV), Data (JSON), Word document, PDF; Nov 20 2026 call). Each opens
+Make a file set to that kind, the current folder, and a way back to Files; the
+first five can start blank, Word and PDF ask what to write. Searching, Bin,
+Materializer and the Library root name no destination folder. The kinds are
+absent when Materializer cannot be opened.
 
 Ordinary uploads are independent copies. Host-path tracking belongs only to
 explicit folder backups; see the [upload contract](../../docs/public/operate/library.md#uploads-and-folder-backups).
@@ -2092,7 +2094,7 @@ kinds, complete return addresses, and opaque ids exactly as received. Emails are
 not made here: a setup that asks for one (`outputKind: "email_template"`) is read
 as an ordinary file, and emails are composed in the Email app. The wizard applies the
 setup together to a fresh draft and opens the next unanswered step; Files' New
-Markdown file opens Name. Leaving abandons the draft. Its first made file keeps
+file > Markdown opens Name. Leaving abandons the draft. Its first made file keeps
 the way back only for that trip; Start over creates a new draft without it.
 The way back appears only when the shell holds the destination app and the
 person may open it. Section ids are shared constants: `composer` for a setup,

@@ -17,7 +17,7 @@ beforeEach(() => {
 async function addMarkdown() {
   await click(screen.getByRole("button", { name: "Add" }));
   fireEvent.mouseEnter(screen.getByRole("menuitem", { name: "New file" }).parentElement!);
-  await click(screen.getByRole("menuitem", { name: "Markdown file" }));
+  await click(screen.getByRole("menuitem", { name: "Markdown" }));
 }
 it("opens Make a file with Markdown, this folder and the way back", async () => {
   await renderFiles({ intent: { id: "folder", payload: { place: "library", folderId: "research" } } });
@@ -72,12 +72,21 @@ it("New file is not an action: clicking it opens nothing and makes nothing", asy
   expect(screen.getByRole("menu", { name: "Add to this folder" })).toBeTruthy();
   expect(screen.queryByRole("menu", { name: "New file" })).toBeNull();
 });
-it("reaches Markdown file from the keyboard", async () => {
+it("offers every kind the Materializer writes, in its order and words (Nov 20 call)", async () => {
+  await renderFiles({ intent: { id: "folder", payload: { place: "library", folderId: "research" } } });
+  await click(screen.getByRole("button", { name: "Add" }));
+  fireEvent.mouseEnter(screen.getByRole("menuitem", { name: "New file" }).parentElement!);
+  const kinds = ["Markdown", "Web page", "Plain text", "Spreadsheet (CSV)", "Data (JSON)", "Word document", "PDF"];
+  for (const name of kinds) expect(screen.getByRole("menuitem", { name })).toBeTruthy();
+  await click(screen.getByRole("menuitem", { name: "Spreadsheet (CSV)" }));
+  expect(h.open).toHaveBeenCalledExactlyOnceWith("materializer", "composer", { compose: { format: "csv", folderId: "research", returnTo: { appId: "files", sectionId: "browse" } } });
+});
+it("reaches Markdown from the keyboard", async () => {
   await renderFiles();
   await click(screen.getByRole("button", { name: "Add" }));
   const newFile = screen.getByRole("menuitem", { name: "New file" });
   fireEvent.keyDown(newFile, { key: "ArrowRight" });
-  const markdown = screen.getByRole("menuitem", { name: "Markdown file" });
+  const markdown = screen.getByRole("menuitem", { name: "Markdown" });
   expect(document.activeElement).toBe(markdown);
   await click(markdown);
   expect(h.open).toHaveBeenCalledOnce();
