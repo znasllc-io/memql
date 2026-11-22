@@ -19,6 +19,7 @@ import { setEffectiveCapabilities } from "../../src/system/roles";
 import { chooseOption, openSelect } from "../selectControl";
 import { installSeededAccess, seededAccessWithout } from "../seededAccess";
 import { timeLeftLabel } from "../../src/apps/files/useSharing";
+import { intersect } from "../intersectionObserver";
 import { artifactRow, click, emit, fakeConnection, noticeRow, renderFiles, shareRow, type FakeConnection, type FakeSeed } from "./harness";
 
 // Wiring the Files app to the engine's file sharing (Nov 2026): the Share
@@ -140,6 +141,22 @@ describe("the share view", () => {
       'builtin libraryShareFile(artifactId: "a-1", recipientGroupId: "g-design", days: 7)',
     ]);
     expect(box().querySelectorAll(".os-chip")).toHaveLength(0);
+  });
+
+  it("shows the people it is shared with two a row, and more as the list end comes into view (Nov 20 call)", async () => {
+    const many = Array.from({ length: 8 }, (_, i) =>
+      shareRow({ id: `s-${i}`, artifactId: "a-1", recipientUserId: `u-${i}`, recipientDisplayName: `Person ${i}`, days: 7 }));
+    connect({ shares: many });
+    await renderFiles();
+    await openShare();
+    const list = await screen.findByRole("list", { name: "Shared users and groups" });
+    // No sideways pager: a list, three rows of two to start.
+    expect(screen.queryByRole("region", { name: "Sharing access cards" })).toBeNull();
+    expect(within(list).getAllByRole("listitem")).toHaveLength(6);
+    const sentinel = document.querySelector(".os-files-share .os-next-page-sentinel");
+    expect(sentinel).toBeTruthy();
+    await act(async () => intersect(sentinel!));
+    expect(within(screen.getByRole("list", { name: "Shared users and groups" })).getAllByRole("listitem")).toHaveLength(8);
   });
 
   it("offers groups beside people, and shares with a whole group", async () => {
