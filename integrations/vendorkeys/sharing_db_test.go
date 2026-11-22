@@ -185,7 +185,11 @@ func TestOnlyAnOfferedSubjectCanBeAdded(t *testing.T) {
 	require.NoError(t, err)
 	directory := cardOf(t, nodes)
 	current := map[string]map[string]any{}
-	for _, item := range directory["currentPeople"].([]any) {
+	// The same shape a machine's directory answers in, so one editor reads both.
+	onTheKey, _ := directory["current"].(map[string]any)
+	require.NotNil(t, onTheKey, "the directory does not say who is on the key under `current`")
+	require.Empty(t, onTheKey["groups"])
+	for _, item := range onTheKey["people"].([]any) {
 		entry := item.(map[string]any)
 		current[entry["id"].(string)] = entry
 	}

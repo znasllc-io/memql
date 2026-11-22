@@ -518,6 +518,11 @@ func TestListShowsMineLentAndForAnOwnerAll(t *testing.T) {
 	require.Empty(t, every, "a developer asked for every key and got it")
 	require.EqualValues(t, 2, mine[0]["lentTo"])
 	require.Equal(t, "...0001", mine[0]["fingerprint"])
+	// Her own card says who she lent it to: it is her setting to edit.
+	lending, _ := mine[0]["sharing"].(map[string]any)
+	require.Equal(t, "people", lending["mode"])
+	require.ElementsMatch(t, []string{wes, omar}, bareList(lending["userIds"]))
+	require.Equal(t, false, lending["paused"])
 
 	// Wes holds no part and no key. He sees the card of the key lent to him.
 	mine, lent, every = d.list(session(wes, auth.RoleWriter), true)
@@ -544,6 +549,9 @@ func TestListShowsMineLentAndForAnOwnerAll(t *testing.T) {
 		if c["id"] == danas["id"] {
 			require.Equal(t, "lent", c["relation"])
 			require.Equal(t, "...0001", c["fingerprint"], "a cluster owner reads a key's facts")
+			// How many it is lent to is a fact. Who they are is its owner's.
+			require.EqualValues(t, 2, c["lentTo"])
+			require.NotContains(t, c, "sharing", "a cluster owner's card of somebody's key names who it is lent to")
 		}
 	}
 

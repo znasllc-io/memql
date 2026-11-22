@@ -11736,7 +11736,7 @@ func VendorKeySetSharingBuild(args VendorKeySetSharingArgs) string {
 	return b.String()
 }
 
-// VendorKeyShareDirectory -- Who you can lend one of your keys to, and who it is lent to now. One row: {people, groups, currentPeople, currentGroups, everyone, sharing}. The people and groups offered are the ones a machine of yours could be lent to: the groups you are in and the people in them, or everyone when you may already read every person on the cluster. Somebody already on the list is named even when they are no longer offered, so you can see who has the key and take them off. Only the key's owner may ask.
+// VendorKeyShareDirectory -- Who you can lend one of your keys to, and who it is lent to now. One row: {people, groups, current: {people, groups}, everyone, mode, paused, max}, the shape fleetShareDirectory answers in, so the editor that lends a machine lends a key. The people and groups offered are the ones a machine of yours could be lent to: the groups you are in and the people in them, or everyone when you may already read every person on the cluster. Somebody already on the list is named even when they are no longer offered, so you can see who has the key and take them off. Only the key's owner may ask.
 type VendorKeyShareDirectoryArgs struct {
 	// One of your own keys.
 	KeyId string
@@ -11807,7 +11807,7 @@ func VendorKeyUpdateBuild(args VendorKeyUpdateArgs) string {
 	return b.String()
 }
 
-// VendorKeysForActor -- The API keys you can see. One row: {mine, lent, all}. `mine` are your own keys, with their state and settings. `lent` are short cards of keys other people lent to you: the name, the vendor, the owner and whether it works. `all` is every active key on the cluster, for a cluster owner who asks, and is empty for anybody else. No card carries a key's value.
+// VendorKeysForActor -- The API keys you can see. One row: {mine, lent, all}. `mine` are your own keys, with their state and settings, and under `sharing` who each is lent to, which no other card carries. `lent` are short cards of keys other people lent to you: the name, the vendor, the owner and whether it works. `all` is every active key on the cluster, for a cluster owner who asks, and is empty for anybody else. No card carries a key's value.
 type VendorKeysForActorArgs struct {
 	// A cluster owner may ask for every active key on the cluster, to stop one. Ignored for anybody else.
 	All    bool

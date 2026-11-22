@@ -255,16 +255,19 @@ func (i *Integration) handleShareDirectory(ctx context.Context, args map[string]
 			"paused": listed(key.Sharing.PausedGroupIds, bare),
 		})
 	}
+	// THE SHAPE A MACHINE'S DIRECTORY ANSWERS IN (fleetShareDirectory): who can
+	// be picked under `people` and `groups`, who is already on the list under
+	// `current`. Lending a key is edited by the editor that lends a machine,
+	// and one editor reading two shapes is how the two would drift.
 	return i.node("shareDirectory:"+key.Id, map[string]any{
-		"keyId":         key.Id,
-		"everyone":      directory.Everyone,
-		"people":        people,
-		"groups":        groups,
-		"currentPeople": currentPeople,
-		"currentGroups": currentGroups,
-		"mode":          key.Sharing.Mode,
-		"paused":        key.Sharing.Paused,
-		"max":           memql.ShareSubjectsMax,
+		"keyId":    key.Id,
+		"everyone": directory.Everyone,
+		"people":   people,
+		"groups":   groups,
+		"current":  map[string]any{"people": currentPeople, "groups": currentGroups},
+		"mode":     key.Sharing.Mode,
+		"paused":   key.Sharing.Paused,
+		"max":      memql.ShareSubjectsMax,
 	})
 }
 

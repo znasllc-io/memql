@@ -2,6 +2,9 @@ package vendorkeys
 
 import (
 	"time"
+
+	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/worker"
 )
 
 // cards.go -- what a caller is shown of a key (design record
@@ -80,7 +83,41 @@ func fullCard(key Key, states map[string]State, names map[string]string, relatio
 	if word == StateCredit && state.HeldUntil.After(now) {
 		card["heldUntil"] = timeOrEmpty(state.HeldUntil)
 	}
+	// WHO IT IS LENT TO is on the owner's own card and no other. It is their
+	// setting, and the page that edits it starts from it. A cluster owner
+	// reading every key's facts gets the count above and not the names (K5):
+	// they may stop a key, not see who its owner trusts with it.
+	if relation == relationMine {
+		card["sharing"] = map[string]any{
+			"mode":           sharingModeOf(key),
+			"paused":         key.Sharing.Paused,
+			"userIds":        bareIds(key.Sharing.UserIds),
+			"groupIds":       bareIds(key.Sharing.GroupIds),
+			"pausedUserIds":  bareIds(key.Sharing.PausedUserIds),
+			"pausedGroupIds": bareIds(key.Sharing.PausedGroupIds),
+		}
+	}
 	return card
+}
+
+// sharingModeOf is a key's lending mode in the two words a key has: its
+// owner's alone, or named people and groups.
+func sharingModeOf(key Key) string {
+	if key.Sharing.Mode == worker.SharingModePeople {
+		return worker.SharingModePeople
+	}
+	return worker.SharingModeOwner
+}
+
+// bareIds is a list of ids as a client compares them, never nil.
+func bareIds(ids []string) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if bare := memql.BareShortId(id); bare != "" {
+			out = append(out, bare)
+		}
+	}
+	return out
 }
 
 // lentCard is what a person a key is lent to sees of it. `paused` says its
