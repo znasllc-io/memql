@@ -184,6 +184,14 @@ describe("a new arrival glows (Jesus's pick 6B, Nov 22 2026)", () => {
     expect(hook.result.current.glowing("old")).toBe(false);
   });
 
+  it("a second hydrate (local store swapped for the graph one) is a baseline too", () => {
+    const hook = renderHook(({ h, n }) => useArrivalGlow(h, true, n), { initialProps: { h: holds({ local: null }), n: 0 } });
+    hook.rerender({ h: holds({ local: null, synced: null }), n: 1 });
+    expect(hook.result.current.glowing("synced")).toBe(false);
+    hook.rerender({ h: holds({ local: null, synced: null, fresh: null }), n: 1 });
+    expect(hook.result.current.glowing("fresh")).toBe(true);
+  });
+
   it("an upload glows once it has landed, not while dim", () => {
     const d = arrivals({});
     d.holds({ up: "uploading" });

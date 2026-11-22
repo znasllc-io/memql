@@ -184,10 +184,12 @@ export const GLOW_MS = 10_000;
  * there when the desk first draws do not. An upload glows once it has landed,
  * not while it is dim. Memory only: nothing is stored or acknowledged.
  */
-export function useArrivalGlow(holds: ReadonlyMap<string, Hold>, ready = true) {
+export function useArrivalGlow(holds: ReadonlyMap<string, Hold>, ready = true, hydrations = 0) {
   // The desktop document can land after the desk first draws. Files on it, and
   // anything shown before it, are the baseline: only what comes after glows.
   const wasReady = useRef(ready);
+  // Every hydrate (including the one after the local -> graph store swap) is a baseline.
+  const lastHydrations = useRef(hydrations);
   const seen = useRef(new Set(holds.keys()));
   const fresh = useRef(new Set<string>());
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
@@ -205,9 +207,10 @@ export function useArrivalGlow(holds: ReadonlyMap<string, Hold>, ready = true) {
   };
 
   useEffect(() => {
-    if (!ready || !wasReady.current) {
+    if (!ready || !wasReady.current || hydrations !== lastHydrations.current) {
       for (const id of holds.keys()) seen.current.add(id);
       wasReady.current = ready;
+      lastHydrations.current = hydrations;
       return;
     }
     for (const id of holds.keys()) {
@@ -227,7 +230,7 @@ export function useArrivalGlow(holds: ReadonlyMap<string, Hold>, ready = true) {
     }
     // `clear` only touches refs and a stable setter.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [holds, ready]);
+  }, [holds, ready, hydrations]);
 
   useEffect(() => {
     const pending = timers.current;

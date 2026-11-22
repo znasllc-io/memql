@@ -72,6 +72,10 @@ export interface OsState {
   /** False until a store that will hydrate has delivered the desktop; files on
    *  that first document are the baseline, not arrivals (items/deskFileState.ts). */
   deskResolved: boolean;
+  /** Counts desktops adopted as "hydrate". The store is swapped once (local ->
+   *  graph) and the new one hydrates again, after deskResolved is already true;
+   *  each hydrate re-baselines the arrival glow. */
+  deskHydrations: number;
   shell: ShellState;
   surfaces: Record<DeskId, DeskSurface>;
   dock: DockState;
@@ -352,6 +356,7 @@ export function seedDocument(registry: OsRegistry, grid: GridSize, actorRole = "
     previewPack: null,
     selectedItemId: null,
     deskResolved: true,
+    deskHydrations: 0,
   };
 }
 
@@ -371,6 +376,7 @@ function stateFromDocument(doc: DesktopDocument): OsState {
     previewPack: null,
     selectedItemId: null,
     deskResolved: true,
+    deskHydrations: 0,
   };
 }
 
@@ -440,6 +446,7 @@ export function adoptDocument(s: OsState, doc: DesktopDocument, origin: "hydrate
     // theme out from under somebody mid-hover.
     previewPack: s.previewPack,
     deskResolved: true,
+    deskHydrations: s.deskHydrations + (origin === "hydrate" ? 1 : 0),
     // Selection survives adoption only while its item does: the arriving
     // desktop is a statement about ITEMS, and a selection of one it no
     // longer carries would highlight nothing.
