@@ -211,6 +211,23 @@ func TestSignInAtStartDoesNothingWithNoVendorConfigured(t *testing.T) {
 	}
 }
 
+// The identity node runs under a service account the vendor's rule does not
+// admit, and never calls a model. Signing in from it at start would put a
+// refusal in the vendor's console and in the denial counter on every boot, for
+// a node that had no use for the bearer.
+func TestSignInAtStartIsSkippedOnANodeThatCallsNoModels(t *testing.T) {
+	f := newFakeAnthropic(t)
+	e, _, _ := anthropicFederatedEngine(t, f, newTestBus(t))
+	e.DisableVendorSignInAtStart()
+
+	e.SignInToConfiguredVendors(context.Background())
+	e.vendorSignInWG.Wait()
+
+	if got := f.requestCount(); got != 0 {
+		t.Fatalf("a node that calls no models sent %d requests to the vendor at start", got)
+	}
+}
+
 func TestVerifyAllowsOneMoreTryAfterARefusal(t *testing.T) {
 	f := newFakeAnthropic(t)
 	f.setTokenStatus(http.StatusUnauthorized)

@@ -100,11 +100,29 @@ func (e *MemQLEngine) clusterVendorAccount(vendor string) (*vendorSignIn, *Provi
 	return nil, nil, false
 }
 
+// DisableVendorSignInAtStart makes this node sign in to a vendor only when a
+// model call needs it, never ahead of one.
+//
+// FOR A NODE TYPE THAT CALLS NO MODELS, which today is the identity node. It
+// runs under a service account of its own, and a vendor's federation rule
+// admits only the engine's (the runbooks map exactly those subjects). Signing
+// in from it at start would be refused on every boot: a line in the vendor's
+// console, a tick of the denial counter operators are told to alert on, and a
+// "refused" in the check command, all for a bearer the node had no use for.
+// The opt-out is the node type's to declare (app/build_identity.go), because
+// the engine does not know which node it is running in.
+func (e *MemQLEngine) DisableVendorSignInAtStart() {
+	if e != nil {
+		e.vendorSignInAtStartOff.Store(true)
+	}
+}
+
 // SignInToConfiguredVendors signs in to every vendor whose cluster account is
 // set up on this node, in the background, and records the result where
-// `memql provider-auth check` and Settings read it. It returns at once.
+// `memql provider-auth check` and Settings read it. It returns at once, and
+// does nothing on a node that called DisableVendorSignInAtStart.
 func (e *MemQLEngine) SignInToConfiguredVendors(ctx context.Context) {
-	if e == nil {
+	if e == nil || e.vendorSignInAtStartOff.Load() {
 		return
 	}
 	e.vendorSignInWG.Add(1)

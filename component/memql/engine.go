@@ -33,6 +33,9 @@ type MemQLEngine struct {
 	// vendorSignInWG counts the background sign-ins SignInToConfiguredVendors
 	// has started, so a test can wait for one (ai_vendor_signin_boot.go).
 	vendorSignInWG sync.WaitGroup
+	// vendorSignInAtStartOff is set by a node type that calls no models
+	// (DisableVendorSignInAtStart). The zero value signs in.
+	vendorSignInAtStartOff atomic.Bool
 
 	beforeWriteMu      sync.RWMutex
 	beforeWriteHooks   map[string][]BeforeWriteHook

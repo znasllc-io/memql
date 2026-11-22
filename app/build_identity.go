@@ -27,6 +27,12 @@ func Build(serviceLogger *slog.Logger, version string, overrides Overrides) *App
 	// thinned Deploy path wired in setupDeployControlService.
 	a.anchorDeployPack()
 	a.engineAndBus()
+	// The identity node calls no models and runs under a service account a
+	// vendor's federation rule does not admit, so it must not sign in to a
+	// vendor at start: every boot would be a refusal in the vendor's console
+	// and in the denial counter (component/memql/ai_vendor_signin_boot.go).
+	// TestOnlyTheIdentityNodeOptsOutOfVendorSignInAtStart holds this.
+	a.engine.DisableVendorSignInAtStart()
 	a.integrationsIdentity()
 	a.transportBase()
 	// Deploy-control gRPC service: depends on the gRPC server existing
