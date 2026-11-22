@@ -119,6 +119,7 @@ export function Input({
   type = "text",
   invalid = false,
   describedBy,
+  conceal = false,
 }: {
   /** `email` asks for an address: a phone offers its address keyboard. */
   type?: "text" | "password" | "email";
@@ -144,7 +145,17 @@ export function Input({
   invalid?: boolean;
   /** The id of what describes the field: its problem, or a hint beside it. */
   describedBy?: string;
+  /**
+   * The value is a secret typed once and never shown again: an API key. It is
+   * hidden as it is typed, the browser is told not to keep it, and it is never
+   * written into the page's markup (`ConcealedInput`, below). `type` and `code`
+   * do not apply.
+   */
+  conceal?: boolean;
 }) {
+  if (conceal) {
+    return <ConcealedInput id={id} label={label} value={value} onChange={onChange} placeholder={placeholder} disabled={disabled} onEnter={onEnter} invalid={invalid} describedBy={describedBy} />;
+  }
   return (
     <>
       <label className="os-sr-only" htmlFor={id}>
@@ -162,6 +173,83 @@ export function Input({
         spellCheck={code ? false : undefined}
         autoCapitalize={code ? "off" : undefined}
         autoCorrect={code ? "off" : undefined}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={
+          onEnter
+            ? (e) => {
+                if (e.key !== "Enter") return;
+                e.preventDefault();
+                onEnter();
+              }
+            : undefined
+        }
+      />
+    </>
+  );
+}
+
+/**
+ * A secret typed once: `Input` with `conceal`.
+ *
+ * THREE THINGS MAKE IT DIFFERENT FROM A FIELD, and each closes a way a secret
+ * leaves a page.
+ *
+ * IT IS HIDDEN AS IT IS TYPED, by the stylesheet (`.os-input-concealed`), so a
+ * shared screen, a recording or a screenshot shows dots. Where a browser does
+ * not hide text this way the value shows, which is what every field did before.
+ *
+ * IT IS NOT A PASSWORD FIELD. `type="password"` is what a browser's password
+ * manager looks for: it would offer to keep an API key as this site's
+ * password, and fill one in next time. So it is a text field with
+ * autocomplete off, no name, and the marks the common password managers read
+ * as "leave this alone".
+ *
+ * ITS VALUE IS NEVER AN ATTRIBUTE. React writes a controlled input's value
+ * into the element's `value` attribute, where anything that reads the page's
+ * markup reads it. This input is uncontrolled: the value lives in the element's
+ * property, each change is handed to the owner, and the owner's value is
+ * written back to the property only when it differs (the owner cleared it, or
+ * the field was drawn again with a value already held).
+ *
+ * It stands on the control line like any `Input` (rule 5), in the code face,
+ * because what is typed is a token and not a word.
+ */
+function ConcealedInput({ id, label, value, onChange, placeholder, disabled, onEnter, invalid, describedBy }: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (next: string) => void;
+  placeholder?: string;
+  disabled?: boolean;
+  onEnter?: () => void;
+  invalid?: boolean;
+  describedBy?: string;
+}) {
+  const field = useRef<HTMLInputElement | null>(null);
+  useLayoutEffect(() => {
+    if (field.current !== null && field.current.value !== value) field.current.value = value;
+  }, [value]);
+  return (
+    <>
+      <label className="os-sr-only" htmlFor={id}>
+        {label}
+      </label>
+      <input
+        ref={field}
+        id={id}
+        type="text"
+        className="os-input os-mono os-input-concealed"
+        disabled={disabled}
+        placeholder={placeholder}
+        aria-invalid={invalid || undefined}
+        aria-describedby={describedBy}
+        autoComplete="off"
+        spellCheck={false}
+        autoCapitalize="off"
+        autoCorrect="off"
+        data-1p-ignore=""
+        data-lpignore="true"
+        data-form-type="other"
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={
           onEnter
