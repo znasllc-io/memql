@@ -826,33 +826,50 @@ describe("Settings -> Vendors: saving the ids", () => {
   });
 });
 
-describe("Settings -> Vendors: a local cluster cannot federate", () => {
-  it("withholds both forms and says why, rather than offering ids that cannot work", async () => {
+// A LOCAL CLUSTER FEDERATES BY PASTED KEYS (design record
+// 2026-11-21-vendor-accounts-and-api-keys, A6). This page used to withhold both
+// forms on a local cluster and say no id typed there could ever work. That was
+// wrong: a vendor cannot FETCH a local cluster's public keys, but both accept
+// them pasted in, and after that the ids work as they do anywhere. So the form
+// is offered, with the one thing a local cluster needs first said beside it.
+describe("Settings -> Vendors: a local cluster federates by pasted keys", () => {
+  it("offers both forms on a local cluster, as on any other", async () => {
     h.state.providers = [];
     await renderDoors("owner", "memql.localhost");
     for (const id of ["anthropic", "openai"] as const) {
       const row = doorRow(id);
-      expect(doorStateIn(id)).toBe("shut");
-      expect(doorWordIn(id)).toBe(VENDOR_WORDS.closed);
-      // RE-POINTED. The reason used to live in the standing panel; it is now
-      // on the row, and the ACT that would open a form is ABSENT rather than
-      // disabled -- DESIGN.md rule 12's position, applied to a control whose
-      // only outcome would be an afternoon of work that cannot succeed.
-      expect(within(row).queryByRole("button")).toBeNull();
-      expect(row.textContent).toMatch(/local cluster/i);
-      expect(row.textContent).toMatch(/no id typed here would ever be accepted/i);
+      // The word a reachable cluster's unset vendor wears: it can be set up.
+      expect(doorWordIn(id)).toBe(VENDOR_WORDS.unset);
+      expect(within(row).getByRole("button", { name: /^Set up / })).toBeTruthy();
+      expect(row.textContent).not.toMatch(/would ever be accepted/i);
     }
-    // ...and there is no form anywhere on the surface to reach by any route.
-    expect(screen.queryByRole("button", { name: /Save .* ids/ })).toBeNull();
-    expect(screen.queryByLabelText(/Service account id/)).toBeNull();
+    const openai = await openVendorPanel("openai", "OpenAI");
+    expect(within(openai).getByLabelText("Identity provider id")).toBeTruthy();
+    expect(within(openai).getByRole("button", { name: "Save OpenAI ids" })).toBeTruthy();
   });
 
-  it("offers the form while the domain is still unread, rather than guessing local", async () => {
+  it("says the vendor must be given this cluster's public keys first, and where they come from", async () => {
+    h.state.providers = [];
+    await renderDoors("owner", "memql.localhost");
+    const anthropic = await openVendorPanel("anthropic", "Anthropic");
+    expect(anthropic.textContent).toMatch(/public keys/i);
+    expect(anthropic.textContent).toMatch(/make federation-keys/);
+  });
+
+  it("says nothing about pasting keys on a cluster a vendor can reach", async () => {
+    h.state.providers = [];
+    await renderDoors("owner", "example.com");
+    const openai = await openVendorPanel("openai", "OpenAI");
+    expect(within(openai).getByLabelText("Identity provider id")).toBeTruthy();
+    expect(openai.textContent).not.toMatch(/make federation-keys/);
+  });
+
+  it("offers the form while the domain is still unread, without the local sentence", async () => {
     h.state.providers = [];
     await renderDoors("owner", "");
     const openai = await openVendorPanel("openai", "OpenAI");
     expect(within(openai).getByLabelText("Identity provider id")).toBeTruthy();
-    expect(openai.textContent).not.toMatch(/local cluster/i);
+    expect(openai.textContent).not.toMatch(/make federation-keys/);
   });
 });
 
