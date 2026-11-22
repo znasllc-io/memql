@@ -59,7 +59,7 @@ func (e *MemQLEngine) routesForActorBuiltin(ctx context.Context, _ map[string]an
 }
 
 // routeSummaries is every route this person can pick, with readiness: Auto,
-// Local, Apps, then their own by name.
+// Local, Apps, API, then their own by name.
 func (e *MemQLEngine) routeSummaries(ctx context.Context, owner string) ([]routeSummaryJSON, int64, error) {
 	if e == nil || e.policies == nil {
 		return nil, 0, fmt.Errorf("routing is not configured on this node")
@@ -70,7 +70,7 @@ func (e *MemQLEngine) routeSummaries(ctx context.Context, owner string) ([]route
 	}
 	readiness := e.routeReadinessFor(ctx)
 	var out []routeSummaryJSON
-	for _, id := range []string{RouteIdAuto, RouteIdLocal, RouteIdApps} {
+	for _, id := range builtinRouteOrder {
 		var override *RouteJobs
 		if j, ok := doc.Routes[id]; ok {
 			c := j.Clone()
@@ -201,7 +201,7 @@ func (e *MemQLEngine) routeDeleteBuiltin(ctx context.Context, args map[string]an
 	return singleVirtualRow(RouteConceptID, spec.Id, map[string]any{"id": spec.Id, "status": "deleted"})
 }
 
-// routeResetBuiltin restores Local or Apps to the shipped default.
+// routeResetBuiltin restores Local, Apps or API to the shipped default.
 func (e *MemQLEngine) routeResetBuiltin(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	if _, err := routeCaller(ctx); err != nil {
 		return nil, err
@@ -468,6 +468,9 @@ func (r routeReadiness) summarize(spec RouteSpec) routeSummaryJSON {
 		}
 		return out
 	}
+	if spec.Kind == RouteKindApi {
+		out.Description = apiRouteDescription(r.doors)
+	}
 	ready := true
 	reason := ""
 	for _, job := range []struct {
@@ -497,6 +500,18 @@ func (r routeReadiness) summarize(spec RouteSpec) routeSummaryJSON {
 	out.Ready = ready
 	out.Reason = reason
 	return out
+}
+
+// apiRouteDescription is API's one line for the person reading it. It names
+// the cluster's account only when the cluster has one AND it pays for them
+// (vendor_account_cluster.go): to anybody else the route is paid by an API
+// key, and a line promising an account they cannot use would send them
+// looking for it.
+func apiRouteDescription(d inferenceDoors) string {
+	if d.ClusterFederation && d.ClusterAccountOpen {
+		return builtinRouteDescriptions[RouteIdApi]
+	}
+	return apiRouteDescriptionKeyOnly
 }
 
 // servesNow says whether one source can serve this person now, and how to
