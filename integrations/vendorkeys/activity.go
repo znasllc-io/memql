@@ -6,7 +6,6 @@ import (
 	"time"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
-	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -126,15 +125,6 @@ func (i *Integration) handleActivity(ctx context.Context, args map[string]any, _
 		"priced":        priced,
 		"people":        people,
 	})
-}
-
-// callsPaidBy reads the calls the router recorded as paid by one key since a
-// moment, as the cluster acting.
-func (s *Store) callsPaidBy(ctx context.Context, keyId string, since time.Time) ([]map[string]any, error) {
-	call, err := langparser.RenderCall("routerCallsPaidByKey", map[string]any{
-		"keyId": keyId, "since": since.UTC().Format(time.RFC3339),
-	})
-	return s.read(ctx, "the calls an API key paid for", call, err)
 }
 
 // roundCost keeps a sum of estimates from reading as more exact than it is:
