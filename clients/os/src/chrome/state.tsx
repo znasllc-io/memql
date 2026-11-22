@@ -65,7 +65,8 @@ import {
   type DesktopStore,
 } from "../system/store";
 import type { AppId, DeskId, WindowId } from "../system/windows";
-import { applyPackStyles, BUILT_IN_THEME_ID, type OsThemePack } from "../themes/registry";
+import { applyPackStyles, BUILT_IN_THEME_ID, themePackById, themePackCss, type OsThemePack } from "../themes/registry";
+import { rememberThemePack } from "../themes/bootHint";
 import type { ChromeLayout } from "../app/layout";
 
 export interface OsState {
@@ -910,7 +911,14 @@ export function OsProvider({
     // naming that pack, so it takes effect the moment it arrives instead of
     // being silently rewritten to graphite behind the person's back.
     document.documentElement.setAttribute("data-os-theme", state.previewPack ?? state.themePack);
-  }, [state.themePack, state.previewPack]);
+    // Remember what is on screen, so the next loading and sign-in screens
+    // start in it (themes/bootHint.ts; José, Nov 20 2026 call). Never a
+    // preview, and never a pack this bundle cannot draw yet.
+    if (state.previewPack === null) {
+      const pack = themePackById(state.themePack, state.installedPacks);
+      if (pack) rememberThemePack(pack.id, pack.id === BUILT_IN_THEME_ID ? "" : themePackCss(pack));
+    }
+  }, [state.themePack, state.previewPack, state.installedPacks]);
 
   return <OsContext.Provider value={value}>{children}</OsContext.Provider>;
 }
