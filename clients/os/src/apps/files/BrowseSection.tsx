@@ -33,7 +33,7 @@ import { Submenu } from "../../kit/Submenu";
 import { InPlaceAsk } from "../../kit/pressHold";
 import { FileFolders } from "./FileFolders";
 import { FilesRail } from "./Rail";
-import { noticeFromRow, outgoingFromRow, overseenSharers, shareStands, useCanShareFiles, useSharedWithMe, useSharesOverseen, useSharing, useShareTitles, type OutgoingShare, type SharedNotice } from "./useSharing";
+import { noticeFromRow, outgoingFromRow, overseenSharers, shareFileCall, shareStands, useCanShareFiles, useSharedWithMe, useSharesOverseen, useSharing, useShareTitles, type OutgoingShare, type SharedNotice } from "./useSharing";
 import { roleAdmits } from "../../system/roles";
 import { AutoRefresh } from "../../kit/AutoRefresh";
 import { SharingPlace } from "./SharingPlace";
@@ -634,6 +634,14 @@ export function BrowseSection({
     if (query === null) throw new Error("Not connected to the cluster, so the share was not stopped.");
     await query.libraryShareStop({ shareId });
   };
+  // Its Renew: a re-share with the same person or group, which the engine
+  // renews in place (ShareView's renew); the new end lands on the share's event.
+  const renewShare = async (share: OutgoingShare, days: number) => {
+    const query = connection?.query ?? null;
+    if (query === null) throw new Error("Not connected to the cluster, so the share was not renewed.");
+    const to = share.recipientGroupId ? { groupId: share.recipientGroupId } : { userId: share.recipientUserId };
+    await query.executeNamed("libraryShareFile", shareFileCall(share.artifactId, to, { days }));
+  };
 
   const selected = content.find((r) => r.id === selectedId)
     ?? (explicitSelection?.id === selectedId ? explicitSelection : null);
@@ -660,8 +668,8 @@ export function BrowseSection({
   });
   const pickedNotice = shared && picked !== "" ? noticeList?.snapshot.rows.find((n) => n.id === picked) ?? null : null;
   // SHARING: the caller's own shares, across every file (Nov 19 2026). Its
-  // rows are shares, not files, so nothing here is picked; each row carries
-  // its one act, Stop. A share that runs out while the page is open leaves at
+  // rows are shares; SharingPlace folds them into one tile per file and keeps
+  // its own pick, so the Head's icons never act on a share. A share that runs out while the page is open leaves at
   // the next tick of the list's clock (SharingPlace), with no event behind it.
   const sharingPlace = filter.place === "sharing";
   const outgoing = useSharing(sharingPlace);
@@ -792,7 +800,11 @@ export function BrowseSection({
   // facets and search included -- never a different population's number
   // beside the scope's name. Showing Folders, that is the folders.
   const listedSnapshot = shared ? noticeList?.snapshot : sharingPlace ? (byOthers ? overseenList : outgoingList)?.snapshot : list?.snapshot;
-  const listedCount = foldersOnly ? visibleFolders.length : listedSnapshot?.rows.length ?? 0;
+  // Sharing counts FILES, as its tiles show them (one per file, however many
+  // people have it), not the shares behind them.
+  const listedCount = foldersOnly ? visibleFolders.length
+    : sharingPlace ? new Set((listedSnapshot?.rows as OutgoingShare[] | undefined)?.map((share) => share.artifactId || share.id)).size
+    : listedSnapshot?.rows.length ?? 0;
   const pageRoot = usePageScroll(`${filter.place}:${filter.folderId ?? ""}:${selectedId}`);
 
   const clearFilters = () =>
@@ -1101,6 +1113,16 @@ export function BrowseSection({
                   }
                   // Somebody else's share sends no event here: read again.
                   if (overseer) overseen.reseed();
+                }}
+                // Only your own shares renew: a re-share of someone else's file
+                // would be a share of your own, or refused.
+                onRenew={byOthers ? undefined : async (share, days) => {
+                  setRowNote(null);
+                  try {
+                    await renewShare(share, days);
+                  } catch (err: unknown) {
+                    refuse("Sharing was not renewed.", "It still ends when it did.", err);
+                  }
                 }}
               />
             </>

@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { Check, Ellipsis, FileText, User, Users } from "lucide-react";
 import { sameEntityId } from "@znasllc-io/memql-sdk-core/client";
 
-import { ContextMenu } from "../../chrome/ContextMenu";
+import { ContextMenu, type MenuEntry } from "../../chrome/ContextMenu";
 import { Caption, Head, NextPage, Notice, Select, Button } from "../../kit";
 import { AnchoredPicker } from "../../kit/AnchoredPicker";
 import { CalendarMonth, addDays, dayOf, type CalendarDay } from "../../kit/CalendarMonth";
@@ -124,7 +124,6 @@ export function ShareView({ file, backLabel, onBack }: { file: ArtifactRow; back
   const [revealKey, setRevealKey] = useState<string>();
   const [pending, setPending] = useState("");
   const [failure, setFailure] = useState("");
-  const [menu, setMenu] = useState<{ share: FileShare; anchor: HTMLElement; x: number; y: number } | null>(null);
   const ready = directory.people !== null;
   const candidates: Candidate[] = ready ? [
     ...directory.groups.map((g): Candidate => ({ kind: "group", id: g.groupId, name: g.displayName, detail: groupSize(g.members) })),
@@ -199,27 +198,6 @@ export function ShareView({ file, backLabel, onBack }: { file: ArtifactRow; back
     }
   }
 
-  // The card's "⋯" menu, on the shell's one menu (chrome/ContextMenu), opened
-  // under the button as Ask's message menu is. Focus goes back to the button
-  // it came from, and a scroll or resize shuts it rather than leave it behind.
-  const closeMenu = () => {
-    menu?.anchor.focus({ preventScroll: true });
-    setMenu(null);
-  };
-  useEffect(() => {
-    if (!menu) return;
-    const dismiss = () => setMenu(null);
-    window.addEventListener("resize", dismiss);
-    window.addEventListener("scroll", dismiss, true);
-    return () => {
-      window.removeEventListener("resize", dismiss);
-      window.removeEventListener("scroll", dismiss, true);
-    };
-  }, [menu]);
-  function openMenu(share: FileShare, anchor: HTMLElement) {
-    const rect = anchor.getBoundingClientRect();
-    setMenu({ share, anchor, x: rect.right, y: rect.bottom });
-  }
   /** "Renew for 7 days", or "Renew until Fri, Nov 27" for a picked day. */
   const renewLabel = end === null ? "Renew: pick the day it ends first" : "days" in end
     ? `Renew for ${end.days === 1 ? "1 day" : `${end.days} days`}` : `Renew until ${inWords(end.until)}`;
@@ -364,18 +342,14 @@ export function ShareView({ file, backLabel, onBack }: { file: ArtifactRow; back
                     <span>{share.recipientGroupId ? "Group" : "User"} · {timeLeftLabel(share.expiresAt, now)}</span>
                   </div>
                   <div className="os-editable-card-actions">
-                    <IconButton label={`Actions for ${who}`} aria-haspopup="menu" aria-expanded={menu?.share.shareId === share.shareId} disabled={locked}
-                      onClick={(event) => { if (menu) closeMenu(); else openMenu(share, event.currentTarget); }}><Ellipsis size={15} aria-hidden /></IconButton>
+                    <ShareCardActions who={who} disabled={locked} entries={shareMenuEntries(
+                      { label: renewLabel, disabled: end === null, onSelect: () => renew(share) }, () => remove(share))} />
                   </div>
                 </div>;
               }} /> : !searching && query.trim() && !available.length && ready ? <Caption>No matching users or groups.</Caption> : null}
             {directory.error ? <Notice tone="warn" sentence="Users and groups could not be read." detail={directory.error} /> : null}
           </div>
         </section>
-        {menu ? <ContextMenu x={menu.x} y={menu.y} label={`Actions for ${nameOf(menu.share)}`} anchor={menu.anchor} onClose={closeMenu} entries={[
-          { id: "renew", label: renewLabel, disabled: end === null, onSelect: () => renew(menu.share) },
-          { id: "remove", label: "Remove sharing", separated: true, tone: "danger", onSelect: () => remove(menu.share) },
-        ]} /> : null}
         {failure ? (
           <div className="fleet-share-error">
             <Notice tone="error" sentence="Sharing could not be updated." detail={failure}>
@@ -385,5 +359,53 @@ export function ShareView({ file, backLabel, onBack }: { file: ArtifactRow; back
         ) : null}
       </div>
     </section>
+  );
+}
+
+/**
+ * A share card's "⋯" menu: Renew (when the card may renew) and, under a
+ * hairline in the danger colour, "Remove sharing". The share view and Files >
+ * Sharing (José, Nov 22: Sharing in tiles, its people as these cards) both
+ * build it here, so the two menus never drift apart.
+ */
+export function shareMenuEntries(renew: { label: string; disabled?: boolean; onSelect: () => unknown } | null, remove: () => unknown): MenuEntry[] {
+  return [
+    ...(renew ? [{ id: "renew", ...renew }] : []),
+    { id: "remove", label: "Remove sharing", separated: renew !== null, tone: "danger" as const, onSelect: remove },
+  ];
+}
+
+/**
+ * A share card's "⋯" button and its menu, on the shell's one menu
+ * (chrome/ContextMenu), opened under the button as Ask's message menu is.
+ * Focus goes back to the button it came from, and a scroll or resize shuts it
+ * rather than leave it behind.
+ */
+export function ShareCardActions({ who, disabled, entries }: { who: string; disabled: boolean; entries: MenuEntry[] }) {
+  const [menu, setMenu] = useState<{ anchor: HTMLElement; x: number; y: number } | null>(null);
+  const close = () => {
+    menu?.anchor.focus({ preventScroll: true });
+    setMenu(null);
+  };
+  useEffect(() => {
+    if (!menu) return;
+    const dismiss = () => setMenu(null);
+    window.addEventListener("resize", dismiss);
+    window.addEventListener("scroll", dismiss, true);
+    return () => {
+      window.removeEventListener("resize", dismiss);
+      window.removeEventListener("scroll", dismiss, true);
+    };
+  }, [menu]);
+  return (
+    <>
+      <IconButton label={`Actions for ${who}`} aria-haspopup="menu" aria-expanded={menu !== null} disabled={disabled}
+        onClick={(event) => {
+          if (menu) return close();
+          const rect = event.currentTarget.getBoundingClientRect();
+          setMenu({ anchor: event.currentTarget, x: rect.right, y: rect.bottom });
+        }}><Ellipsis size={15} aria-hidden /></IconButton>
+      {menu ? <ContextMenu x={menu.x} y={menu.y} label={`Actions for ${who}`} anchor={menu.anchor} onClose={close} entries={entries} /> : null}
+    </>
   );
 }
