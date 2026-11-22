@@ -511,23 +511,28 @@ another copy, by design.
 
   | Caller | Sees and may stop |
   |---|---|
-  | owner (there can be several) | their own, and everyone else's -- **not other owners'** ("what an owner shares is completely private in their account") |
-  | developer | their own, **other developers'**, and those of anyone ranked below them: admins', members', viewers' |
+  | owner (there can be several) | their own and everyone else's, **other owners' included** |
+  | developer | their own, and those of anyone ranked below them: admins', members', viewers' -- **not other developers'** |
   | admin | their own, and members' and viewers' -- not owners', developers' or **other admins'** |
   | member | their own, and viewers' |
   | viewer | only their own |
 
   In short: everybody oversees the people ranked strictly below them
-  ("trickle-down of authority", José, settled by Jesús Nov 20 2026), nobody an
-  equal -- except developers, who see each other's on purpose: "as a
-  developer, I should be able to see what another developer is sharing since
-  we are developing the app." (an access rule flagged to José). Everybody is
-  shown only the shares they can stop. A custom role slots in by its rank; one
-  ranked exactly where the catalog ranks `developer` counts as a developer. A
-  sharer whose role does not resolve ranks at the ladder's floor, below
-  everyone. A borrowed, synthetic or client-account caller oversees nobody. The
-  sharer's rank is read off their user row (`role`), as the row-authz rank tier
-  reads it. Tested in `TestFileSharingBetweenRanksDB` (`OversightFollowsRank`).
+  ("trickle-down of authority"), nobody an equal -- except owners, who see
+  each other's. José decided it on the Nov 20 2026 call: "owners can see
+  everybody including each other's", "developers cannot see each other's
+  stuff", and "this is just overall, a permissions hierarchy thing". It
+  replaced a Nov 20 draft in which owners did not see each other and
+  developers did. Everybody is shown only the shares they can stop. A custom
+  role slots in by its rank; one ranked exactly where the catalog ranks
+  `owner` counts as an owner. A sharer whose role does not resolve ranks at
+  the ladder's floor, below everyone. A borrowed, synthetic or client-account
+  caller oversees nobody. The sharer's rank is read off their user row
+  (`role`), as the row-authz rank tier reads it. **Not yet by account:** the
+  ranks are the cluster's, so on a cluster serving several accounts an owner
+  sees every account's shares; scoping to an account waits on the
+  primary-account model, which is not built. Tested in
+  `TestFileSharingBetweenRanksDB` (`OversightFollowsRank`).
 - **Expiry** writes nothing: every access compares `expiresAt`, and both lists
   filter it out.
 - **Archive**: every access refuses an archived artifact as soon as it is

@@ -9,25 +9,33 @@ package memql
 // sharing" and cancel it. José's rule (45:39-46:05): "owners and developers
 // should be able to do that, but developers shouldn't be able to manage
 // owners' files" -- "It's a trickle-down thing." -- "There could be more than
-// one owner." Settled by Jesús, Nov 20 (checklist item 14, José's words):
+// one owner." Decided by José on the Nov 20 call (43:35-45:45 of the
+// recording; it replaced the Nov 20 draft in which owners did not see each
+// other and developers did): "owners can see everybody including each
+// other's", "developers cannot see each other's stuff", "admins or users,
+// they're not able to see each other's stuff. However, developers are able
+// to see every admin's stuff" -- "everything below them", and "this is just
+// overall, a permissions hierarchy thing":
 //
 //   - everybody sees their own shares;
 //   - everybody sees the shares of the people ranked STRICTLY below them
-//     ("trickle-down of authority"): an owner everyone else's, a developer
-//     admins' and down, an admin members' and viewers', a member viewers';
-//     a viewer only their own;
-//   - nobody sees an EQUAL's shares -- "what an owner shares is completely
-//     private in their account"; "an admin cannot see what other admins are
-//     sharing" ("they are co-workers in the environment") --
-//   - EXCEPT developers, who do see each other's: "as a developer, I should
-//     be able to see what another developer is sharing since we are
-//     developing the app." Deliberate, and an access rule to flag to José.
+//     ("trickle-down of authority"): a developer admins' and down, an admin
+//     members' and viewers', a member viewers'; a viewer only their own;
+//   - nobody sees an EQUAL's shares (developers not each other's, admins
+//     not each other's) --
+//   - EXCEPT owners, who see each other's, so an owner sees every share
+//     there is. There can be any number of owners.
 //
 // Ranks come from the cluster's role ladder (rankLadder), so a custom role
 // slots in where its rank puts it, exactly as the row-authz rank tier reads it;
-// "developer" is whichever roles rank exactly where the catalog ranks the
-// developer slug. A sharer whose role does not resolve ranks 0 (the ladder's
-// floor), i.e. below everyone.
+// "owner" is whichever roles rank exactly where the catalog ranks the owner
+// slug. A sharer whose role does not resolve ranks 0 (the ladder's floor),
+// i.e. below everyone.
+//
+// NOT YET BY ACCOUNT: José put it "in their own account". The ranks here are
+// the cluster's, so on a cluster serving several accounts an owner sees every
+// account's shares. Scoping this to an account waits on the primary-account
+// model he described on the same call, which is not built.
 //
 // SEE ONLY WHAT YOU CAN STOP (Jesús, Nov 20): everybody is listed exactly the
 // shares this rule lets them stop, nothing more, so the list is the rule.
@@ -63,11 +71,11 @@ const conceptLibraryArtifact = "v1:library:artifact"
 // shareOversight is one caller's answer to "whose shares are mine to see and
 // stop".
 type shareOversight struct {
-	caller        string // bare
-	callerRank    int
-	developerRank int
-	ladder        roleLadder
-	roles         map[string]string // bare user id -> role slug
+	caller     string // bare
+	callerRank int
+	ownerRank  int
+	ladder     roleLadder
+	roles      map[string]string // bare user id -> role slug
 }
 
 // oversees reports whether the caller may see and stop sharer's shares.
@@ -83,8 +91,8 @@ func (o shareOversight) oversees(sharer string) bool {
 		return false // unranked authority oversees nobody (file header)
 	}
 	rank := o.ladder.rankOf(o.roles[sharer])
-	// Strictly below, or a fellow developer (the one peer exception).
-	return rank < o.callerRank || (rank == o.callerRank && o.callerRank == o.developerRank)
+	// Strictly below, or a fellow owner (the one peer exception).
+	return rank < o.callerRank || (rank == o.callerRank && o.callerRank == o.ownerRank)
 }
 
 // evaluateLibrarySharesOverseenExpression serves `librarySharesOverseen`: one
@@ -101,10 +109,10 @@ func (e *MemQLEngine) evaluateLibrarySharesOverseenExpression(ctx context.Contex
 	}
 	ladder := e.rankLadder(ctx)
 	o := shareOversight{
-		caller:        caller,
-		developerRank: ladder.rankOf(string(auth.RoleDeveloper)),
-		ladder:        ladder,
-		roles:         map[string]string{},
+		caller:    caller,
+		ownerRank: ladder.rankOf(string(auth.RoleOwner)),
+		ladder:    ladder,
+		roles:     map[string]string{},
 	}
 	// Rank 0 -- nobody but yourself -- for authority that is not a person's
 	// own seniority (see the file header).

@@ -1119,10 +1119,10 @@ func testShareOversight(t *testing.T, x *shareFixture) {
 		return m
 	}
 	for viewer, expect := range map[string]map[string]bool{
-		"alice": want("alice", "dev", "devi", "adam", "ada", "mike", "vera"), // not olga's
-		"olga":  want("olga", "dev", "devi", "adam", "ada", "mike", "vera"),  // not alice's
-		"dev":   want("dev", "devi", "adam", "ada", "mike", "vera"),          // devi's too: the peer exception
-		"devi":  want("devi", "dev", "adam", "ada", "mike", "vera"),
+		"alice": want("alice", "olga", "dev", "devi", "adam", "ada", "mike", "vera"), // olga's too: the owner exception
+		"olga":  want("olga", "alice", "dev", "devi", "adam", "ada", "mike", "vera"),
+		"dev":   want("dev", "adam", "ada", "mike", "vera"), // not devi's: developers do not see each other's
+		"devi":  want("devi", "adam", "ada", "mike", "vera"),
 		"adam":  want("adam", "mike", "vera"), // not ada's
 		"ada":   want("ada", "mike", "vera"),
 		"mike":  want("mike", "vera"), // a member: viewers'
@@ -1142,12 +1142,12 @@ func testShareOversight(t *testing.T, x *shareFixture) {
 		_, err := f.second.handleStopShare(x.as(by, shareRoles[by]), map[string]any{"shareId": shareOf[sharer]}, 0)
 		return err
 	}
-	for _, refused := range [][2]string{{"alice", "olga"}, {"olga", "alice"}, {"dev", "alice"}, {"adam", "ada"}, {"adam", "dev"}, {"mike", "adam"}, {"vera", "mike"}} {
+	for _, refused := range [][2]string{{"dev", "devi"}, {"devi", "dev"}, {"dev", "alice"}, {"adam", "ada"}, {"adam", "dev"}, {"mike", "adam"}, {"vera", "mike"}} {
 		if err := stop(refused[0], refused[1]); err == nil || !strings.Contains(err.Error(), "not one you can stop") {
 			t.Fatalf("%s stopped %s's share: %v", refused[0], refused[1], err)
 		}
 	}
-	// Every share still active: alice's list, plus olga's own.
+	// Every share still active: an owner's list holds them all.
 	everyone := func() map[string]bool {
 		m := listed(x.alice(), "alice")
 		for p := range listed(x.as("olga", shareRoles["olga"]), "olga") {
@@ -1158,10 +1158,10 @@ func testShareOversight(t *testing.T, x *shareFixture) {
 	if got := everyone(); fmt.Sprint(got) != fmt.Sprint(want(sharers...)) {
 		t.Fatalf("a refused stop ended a share: %v", got)
 	}
-	// Allowed: a developer stops a fellow developer's and a member's, a member
-	// a viewer's, an owner an admin's -- and each ends access and the
+	// Allowed: an owner stops a fellow owner's and an admin's, a developer a
+	// member's, a member a viewer's -- and each ends access and the
 	// recipient's notice.
-	for _, allowed := range [][2]string{{"devi", "dev"}, {"dev", "mike"}, {"mike", "vera"}, {"alice", "adam"}} {
+	for _, allowed := range [][2]string{{"olga", "alice"}, {"dev", "mike"}, {"mike", "vera"}, {"alice", "adam"}} {
 		if err := stop(allowed[0], allowed[1]); err != nil {
 			t.Fatalf("%s could not stop %s's share: %v", allowed[0], allowed[1], err)
 		}
@@ -1172,7 +1172,7 @@ func testShareOversight(t *testing.T, x *shareFixture) {
 			recipient = "adam"
 		}
 		code, _ := x.download(f.other, x.as(recipient, shareRoles[recipient]), artifact, "")
-		stopped := p == "dev" || p == "mike" || p == "vera" || p == "adam"
+		stopped := p == "alice" || p == "mike" || p == "vera" || p == "adam"
 		if stopped != (code == http.StatusNotFound) {
 			t.Fatalf("after the oversight stops, %s's file answers %s with %d", p, recipient, code)
 		}
@@ -1180,7 +1180,7 @@ func testShareOversight(t *testing.T, x *shareFixture) {
 			t.Fatalf("%s's stopped share is still on %s's list", p, recipient)
 		}
 	}
-	if got := everyone(); fmt.Sprint(got) != fmt.Sprint(want("alice", "olga", "devi", "ada")) {
+	if got := everyone(); fmt.Sprint(got) != fmt.Sprint(want("olga", "dev", "devi", "ada")) {
 		t.Fatalf("after four stops the active shares are %v", got)
 	}
 	// The sharer keeps the stopped share as the record, stopped.
