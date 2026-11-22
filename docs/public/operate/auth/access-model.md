@@ -304,6 +304,17 @@ organization for any change of either binding, clearing included, so the deny
 holds there too. The two named mutations ask for the part on every call,
 clearing included.
 
+**Fleet carries one part of its own, `app:fleet/keys`** (vendor accounts
+design, K4). `read app:fleet/keys` opens **Fleet > API keys** and `execute
+app:fleet/keys` adds an API key; both are seeded on owner and developer, the
+roles that can open Fleet, and anybody else needs a grant of the part and of
+Fleet itself. The part gates the door and the act of adding. What a caller may
+do to a key that exists is decided by the key's own row and not by the part:
+its owner changes, lends and removes it, a cluster owner may check and remove
+it and may not change or lend it, and a person it is lent to pays with it
+holding no part at all. A key is added only in a person's own session, never
+by a token, a delegation or a step of a run ([API keys](../api-keys.md)).
+
 **The Modules pack switch is a grant plus a declaration** (Connect Shopify
 design, D4). Reading the inventory is `read` on `app:cluster/modules`, seeded
 on owner, developer and admin -- the same name the OS registry puts on the

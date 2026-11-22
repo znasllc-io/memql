@@ -468,6 +468,37 @@ where it would be invisible to the one control that stops runaway cost. That is
 the fail-safe direction, and it is why `ExecutorResult.EffectiveBilling()`
 defaults the empty string to `metered` rather than to `unknown`.
 
+### A person's API key is metered spend
+
+A vendor call can be paid by a person's own
+[API key](../operate/api-keys.md) instead of the cluster's account. It is
+counted exactly as the cluster's own vendor spend is:
+
+| Control | A call an API key paid for |
+|---|---|
+| `v1:router:call.billing` | `metered` |
+| The process cost ceiling and the kill switch (Layer 0 and 1) | **included** |
+| A run's token and cost ceilings | **included** |
+| The loop caps | **included** |
+| A person's monthly budget | counted for the person who **made** the call, whoever's key paid |
+
+There is no exemption for a key and no cap per key. The money is a person's
+rather than the cluster's, and a person's money needs the protection the
+cluster's has: a runaway loop on somebody's key is stopped by the same
+ceilings, at the same numbers.
+
+Two consequences follow. A goal whose ceilings forbid paid providers is not
+served by a key either: the account is asked for after every gate that already
+stands in front of a vendor, so nothing that stops the cluster's account lets
+a key through. And the cost ceiling counts both kinds of account together, so a
+cluster with many people's keys reaches the process ceiling sooner than one
+with only its own account. Raise the ceiling for that, not around it.
+
+The row says which account paid (`accountKind`, `accountKeyId`,
+`accountKeyOwnerUserId`), so a cost reader can separate the cluster's bill from
+each key's without a join. Costs on the row are MemQL's estimate from the
+catalog's listed prices in both cases, never a vendor's invoice.
+
 ## Layer 4b — the ceiling gates the FEDERATION HOP (memql#5096)
 
 The shipped policies changed shape in epic memql#5096: every one begins

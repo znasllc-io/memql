@@ -1968,6 +1968,126 @@ production installation has no vendor configured, so the third door stays
 empty until the owner configures one. The `inferenceUnavailable` sweep did not
 re-try the parked diagnosis after its `resumeAt`; that is not addressed here.
 
+## Which account pays for a vendor call (2026-11-22)
+
+Owner brief, 2026-11-21: API keys come back, as a person's own sealed secret
+beside the cluster's federation, and the cluster's own work never spends one.
+The [design record](../../superpowers/specs/2026-11-21-vendor-accounts-and-api-keys-design.md)
+holds the decisions (K1 to K19); [API keys](../../public/operate/api-keys.md)
+is the operator's page.
+
+**The account is a second decision, after the model** (`accountsFor`,
+`component/router/accounts.go`). Routing picks a vendor text record exactly as
+before. Only then is "who pays" asked, and only after every gate that already
+stood in front of a vendor: the run's no-paid-provider ceiling, the cost
+ceiling, the context floor, the modality check. The alternative, a key as a
+source of its own in a chain, would have let a route reach a paid model around
+those gates and made "which model" depend on who was asking. Tests:
+`TestPaidProvidersForbiddenStillStopsAKey`,
+`TestTheCostCeilingIsAskedBeforeAnyAccount`, `TestAKeyPaidCallIsMeteredSpend`.
+
+**Evidence used, and the order** (`KeysFor`,
+`integrations/vendorkeys/resolver.go`; `chosenByActor`,
+`component/router/chosen.go`). Who the call is for (`ResolveRequest.UserId`),
+whether that authority was borrowed for a visitor (`ForVisitor`), and whether
+the acting person made the choice themselves (`PinnedBy` or `RouteBy` equals
+the actor). No person, or a synthetic actor: the cluster's account only. A
+visitor: never a key. A choice of the actor's own: their default key, then keys
+lent to them by `addedAt`, then the cluster's. Everything else, Auto included:
+the same order, counting only keys whose owner switched Auto on. A choice
+somebody else made is not a choice: an agent's stored pin is its owner's, and a
+shared run keeps its opener's route. Tests:
+`TestAChosenRouteIsPaidByThePersonsKeyThenLentKeysThenTheCluster`,
+`TestAutoCountsOnlyKeysSwitchedOn`,
+`TestWorkWithNoPersonIsPaidByTheClusterOnly`,
+`TestAVisitorsCallIsNeverPaidByAKey`.
+
+**Fallback: the next account for the same model, then the next model**
+(`chainEntriesFor`, `accountHop`). The chain a fallback wrapper walks spells a
+vendor record once per account that can pay (`<record>@key:<id>`, then
+`<record>@cluster`). A failure the vendor attributes to the account
+(`VendorAccountFailure`: refused, permission, credit, unavailable) moves to the
+next account. Any other failure skips the record's remaining accounts, which is
+the fallback that existed before. Stop condition: with no account left the
+record is passed over like a shut door, each account's reason on its
+`considered` line. A reason never names a key, because the record is readable
+by every signed-in person. Tests:
+`TestAccountFailureMovesToTheNextAccountForTheSameModel`,
+`TestAnotherFailureMovesToTheNextModel`,
+`TestNoAccountMeansTheModelIsPassedOverWithItsReason`,
+`TestTheRecordNamesTheAccountAndNeverTheKeysName`.
+
+**Freshness: nothing is remembered** (`integrations/vendorkeys/store.go`,
+`asCluster`). Every answer reads the key rows and their state rows from the
+database at the time of the call, on whichever replica makes it, skipping the
+result cache (`memql.ContextWithFreshRead`; the concepts are also off the
+default cache path). One resolution asks once per vendor (`accountMemo`) and
+the memo dies with the resolution. The call itself judges its chain entry again
+by name, so a key removed, paused or refused between resolution and call is not
+spent. Group membership is the one cached input, with machine sharing's bound
+of 30 seconds. Tests: `TestKeysForReadsRowsFreshOnEveryCall`,
+`TestAnAccountIsJudgedAgainWhenTheCallIsMade`, and the two-engine tests in
+`integrations/vendorkeys/hop_db_test.go`.
+
+**Retained and temporary.** Retained: the sealed value (in
+`v1:router:vendorKey`, under `MEMQL_MASTER_KEY`, and in the row's history after
+removal), the key's settings, and what the engine observed
+(`v1:router:vendorKeyState`). Temporary: the unsealed value, which exists
+inside one vendor request on the node making it (`Secret`) and is neither
+cached nor sent across the mesh; a forwarded call carries the key's id. Neither
+concept publishes a graph event, and no client reads either row
+(`clientUnreadableConcepts`).
+
+**What a call learns is written from any replica, in evidence order**
+(`observe`, `integrations/vendorkeys/observe.go`). Under the key's write gate,
+a verdict older than the row's `evidenceAt` is dropped, so a slow "good" from a
+call that started earlier cannot overwrite a later "refused". A node with no
+gate pool does not write. A refused key is passed over until a check or a
+served call says otherwise, and a key out of credit for one hour. A rate limit
+or an outage is not a verdict. Tests:
+`integrations/vendorkeys/observe_db_test.go`.
+
+**Two passes act on a person's key with nobody asking, and both spend
+nothing.** The daily check (`vendorKeysDailyCheck`, 04:40, `sweep.go`) lists
+the vendor's models with keys idle for a day. It skips keys that may not list
+models and keys held for credit, and stops asking a vendor after three answers
+that say nothing about a key. The notice pass (`vendorKeysOwnerNotices`, every
+ten minutes, `notice.go`) mails the owner of a key that stopped working, once
+per fall. Each answers only to the engine's own automation of its name
+(`auth.IsEngineAutomationActor`): not a person, a cluster owner included, and
+not a bundle's automation of the same name.
+
+The notice is not sent by the node that saw the fall, which is mid-request on
+an agent or a planner as often as not, and mail has to be retried. The pass
+reads the state rows instead. Under the key's gate it records that it is
+trying (`noticeTriedAt`) before it sends, and after the send it records the
+fall it told about (`notifiedAt`, the evidence time, so a key that recovers
+while its mail is being sent still owes a notice the next time it falls). The
+lease places the pass on one bff replica; the gate and the stamp are what make
+it one mail. A failed send stays owed and is tried again 30 minutes later, with
+no give-up. Tests: `sweep_db_test.go`, `notice_db_test.go`,
+`component/automations/vendor_keys_daily_check_test.go`,
+`component/automations/vendor_keys_owner_notices_test.go`.
+
+**Permission and ownership.** Adding needs `execute app:fleet/keys` and a
+person's own session (`auth.RequirePersonSession`), and is refused inside a
+run. A key's owner alone renames it, moves the default, switches Auto and lends
+it. A cluster owner may read its facts, check it and remove it, and nothing
+else. Every write to either row requires internal origin (`@serverWritten`), so
+the builtins are the only way in. Tests: `builtins_db_test.go`,
+`sharing_db_test.go`.
+
+**Limits.** Nothing here ran against a real vendor: the vendors are test
+servers answering as their documentation describes. A restricted OpenAI key is
+recognised by the wording of OpenAI's refusal, which is not documented as
+stable. Vision, embeddings, speech, transcription and images are never paid by
+a key. A person's non-default key at a vendor is never spent until a route can
+name an account. `recordRouterCall` is reachable from a signed-in client, so a
+key's activity counts only the rows the router wrote (`row.createdBy`), and a
+call record a person wrote naming somebody's key changes no figure. The owner
+notice is at-least-once: a mail that went, and whose record then failed to
+write, goes again.
+
 ## First pipeline PR qualification keeps approval on one attempt (2026-10-28)
 
 Ordinary connect reads the default branch, so it cannot test a repository's

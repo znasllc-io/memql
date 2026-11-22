@@ -57,6 +57,7 @@ path, or use this detailed reference index. Layout + rules:
 ### AI (`ai/`)
 - [LLM Cost Control](docs/public/ai/llm-cost-control.md) — the layered guardrails. · [Operator Capabilities](docs/public/ai/operator-capabilities.md) — capability slugs.
 - [AI routing: levels, policies and rules](docs/public/operate/ai-routing.md) — the three nouns a call is decided by. A call declares a LEVEL (fast / strong / reasoning / embeddings) and never a model; a RULE maps the call's metadata to a POLICY; a policy is an ordered chain that reaches the fleet, then a signed-in app, then a vendor, so paid inference is last by construction rather than by care. Also: degrade versus park and why embeddings never degrades, what @locked enforces, how to add a rule, and the decision record every resolution writes.
+- [API keys](docs/public/operate/api-keys.md) — a person's own account at Anthropic or OpenAI. A vendor call is paid by an ACCOUNT: the cluster's own sign-in, or a key a person added in Fleet and may lend. Which account pays and in what order, the Auto switch, lending, the checks that cost nothing, the one email when a key stops working, removal, and what a cluster owner can and cannot do to somebody's key.
 
 ### Build Against It (`build/`)
 - [Building a Spine](docs/public/build/building-a-spine.md) — selectable DSL planning workflows, immutable run snapshots and bounded native operations

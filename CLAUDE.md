@@ -753,19 +753,55 @@ and [ai-routing.md](docs/public/operate/ai-routing.md). A prompt's
 `@defaultProvider` survives as an EXPLICIT PIN that wins over every rule, which
 is why it is refused at load when it names a policy.
 
-**Both vendor credentials are workload identity federation, everywhere, and
-there is no manually entered API key left in the product** (epics memql#4333,
-memql#5088): the engine presents the pod's projected Kubernetes token and
-exchanges it for a short-lived bearer; a partial set of ids REFUSES THAT VENDOR,
-naming both halves (the token file's path, which every Deployment sets, does not
-count on its own).
-`TestNoVendorApiKeyEntryPoint` (`vendor_api_key_gate_test.go`) fails the build
-if any retired key env var or the retired key-setting builtin reappears in a
-tracked source file. **Read that file rather than restating its list here --
-the gate walks this file too**; `vendor_api_key` as a globalSecret KIND stays
-legitimate for the router's BYOK path and the Shopify connector.
+**A vendor call is paid by an ACCOUNT, and there are two kinds** (design record
+[2026-11-21](docs/superpowers/specs/2026-11-21-vendor-accounts-and-api-keys-design.md)).
+The CLUSTER'S account is workload identity federation, everywhere (epics
+memql#4333, memql#5088): the engine presents the pod's projected Kubernetes
+token and exchanges it for a short-lived bearer; a partial set of ids REFUSES
+THAT VENDOR, naming both halves (the token file's path, which every Deployment
+sets, does not count on its own). **The cluster has no API key and never gets
+one**: `TestNoVendorApiKeyEntryPoint` (`vendor_api_key_gate_test.go`) fails the
+build if any retired key env var reappears in a tracked source file. **Read
+that file rather than restating its list here -- the gate walks this file
+too**; `vendor_api_key` as a globalSecret KIND stays legitimate (the Shopify
+connector seals its secrets under it).
 [anthropic-federation.md](docs/public/operate/auth/anthropic-federation.md) ·
 [openai-federation.md](docs/public/operate/auth/openai-federation.md).
+
+**A PERSON'S API key is the other kind** ([api-keys.md](docs/public/operate/api-keys.md)):
+Anthropic or OpenAI only, added in Fleet > API keys behind `app:fleet/keys`
+(owner and developer), in a person's own session and never in a run. It is
+checked by listing the vendor's models (no prompt, no charge), sealed under
+`MEMQL_MASTER_KEY` by `integrations/vendorkeys`, and never returned, logged or
+sent across the mesh. Two rows, both client-unreadable and publishing NO graph
+event: `v1:router:vendorKey` (what its owner decides) and
+`v1:router:vendorKeyState` (what the engine observes, written under a per-key
+write gate and ordered by the time of the evidence). Only the `vendorKey*`
+builtins decide what a caller sees.
+
+- **Which account pays is decided per call, from rows read fresh, on the node
+  making the call** (`component/router/accounts.go`,
+  `integrations/vendorkeys/resolver.go`). No person behind the call, or a
+  synthetic actor: the cluster's account only. A person's authority borrowed
+  for a visitor: never a key. A route or pin the acting person chose
+  THEMSELVES: their default key, then keys lent to them (earliest added
+  first), then the cluster's. Auto and everything else: the same order,
+  counting only keys whose owner switched Auto on.
+- **An account failure moves to the next ACCOUNT for the same model** before
+  the route moves to its next model; the chain carries both
+  (`<record>@key:<id>`, then `<record>@cluster`). A rate limit or an outage is
+  not about the account.
+- **Text surfaces only.** Vision, embeddings, speech, transcription and images
+  stay on the cluster's account.
+- **A key's spend is METERED.** Every ceiling and loop cap counts it; there is
+  no exemption and no cap per key.
+- **Readiness is per person** (`ProviderRegistry.VendorDoorFor`):
+  `inferenceStatus.federationConfigured` is the cluster's own account,
+  `keyAccount` is whether the READER holds a key that can pay.
+- **Two engine-only passes, each on one bff replica behind a lease**:
+  `vendorKeysDailyCheck` (04:40, lists models with keys idle for a day) and
+  `vendorKeysOwnerNotices` (every ten minutes: one email per fall to the key's
+  owner, claimed under the key's gate before it is sent, no link in it).
 
 **A LOCAL cluster federates by pasted keys** (design record
 [2026-11-21](docs/superpowers/specs/2026-11-21-vendor-accounts-and-api-keys-design.md)).
@@ -1802,8 +1838,8 @@ builtin workbenchDispatchHost {
 Core integrations (registered via the plug-in system): agents, auth, database,
 deployversion, email, embedding, files, azureblob (as `storage`),
 harnessRecall, identity, knowledge, library, rbac, router, shopify,
-similarity, timeutil, workbench, workTrace, plus node-type-scoped ones (agent,
-stt) wired in `app/integrations_*.go`. `training` is a product-repo pack.
+similarity, timeutil, vendorkeys, workbench, workTrace, plus node-type-scoped
+ones (agent, stt) wired in `app/integrations_*.go`. `training` is a product-repo pack.
 
 `shopify` is a CONNECTOR, the reference implementation of
 `component/memql/sync.Connector` (epic memql#4389): it owns one external
