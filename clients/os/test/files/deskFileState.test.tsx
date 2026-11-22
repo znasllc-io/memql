@@ -175,6 +175,15 @@ describe("a new arrival glows (Jesus's pick 6B, Nov 22 2026)", () => {
     expect(d.glowing("old")).toBe(false);
   });
 
+  it("files on the hydrate document are the baseline, a later file glows", () => {
+    const hook = renderHook(({ h, r }) => useArrivalGlow(h, r), { initialProps: { h: holds({}), r: false } });
+    hook.rerender({ h: holds({ old: null }), r: true });
+    expect(hook.result.current.glowing("old")).toBe(false);
+    hook.rerender({ h: holds({ old: null, fresh: null }), r: true });
+    expect(hook.result.current.glowing("fresh")).toBe(true);
+    expect(hook.result.current.glowing("old")).toBe(false);
+  });
+
   it("an upload glows once it has landed, not while dim", () => {
     const d = arrivals({});
     d.holds({ up: "uploading" });

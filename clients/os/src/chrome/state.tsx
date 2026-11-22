@@ -69,6 +69,9 @@ import { applyPackStyles, BUILT_IN_THEME_ID, type OsThemePack } from "../themes/
 import type { ChromeLayout } from "../app/layout";
 
 export interface OsState {
+  /** False until a store that will hydrate has delivered the desktop; files on
+   *  that first document are the baseline, not arrivals (items/deskFileState.ts). */
+  deskResolved: boolean;
   shell: ShellState;
   surfaces: Record<DeskId, DeskSurface>;
   dock: DockState;
@@ -348,6 +351,7 @@ export function seedDocument(registry: OsRegistry, grid: GridSize, actorRole = "
     installedPacks: [],
     previewPack: null,
     selectedItemId: null,
+    deskResolved: true,
   };
 }
 
@@ -366,6 +370,7 @@ function stateFromDocument(doc: DesktopDocument): OsState {
     installedPacks: doc.installedPacks,
     previewPack: null,
     selectedItemId: null,
+    deskResolved: true,
   };
 }
 
@@ -434,6 +439,7 @@ export function adoptDocument(s: OsState, doc: DesktopDocument, origin: "hydrate
     // arriving desktop says nothing about it, and dropping it would snap the
     // theme out from under somebody mid-hover.
     previewPack: s.previewPack,
+    deskResolved: true,
     // Selection survives adoption only while its item does: the arriving
     // desktop is a statement about ITEMS, and a selection of one it no
     // longer carries would highlight nothing.
@@ -509,7 +515,9 @@ export function OsProvider({
 
   const [state, setState] = useState<OsState>(() => {
     const loaded = storeRef.current.load();
-    return loaded ? stateFromDocument(loaded) : seedDocument(registry, grid, actorRole);
+    const first = loaded ? stateFromDocument(loaded) : seedDocument(registry, grid, actorRole);
+    // A store that can subscribe will deliver the desktop (origin "hydrate").
+    return { ...first, deskResolved: !storeRef.current.subscribe };
   });
   const [notice, setNotice] = useState<OsNotice | null>(null);
 

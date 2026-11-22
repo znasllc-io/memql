@@ -169,7 +169,7 @@ export function Desktop({
     if (wait === "open") openFile(item);
     else void fileIntoFolder(item, wait.folderId);
   });
-  const arrival = useArrivalGlow(holds);
+  const arrival = useArrivalGlow(holds, state.deskResolved);
   const fileLook = (id: string) => ({ hold: holds.get(id) ?? null, line: fileStates.line(id), glow: arrival.glowing(id) });
 
   // The desktop is a strip of plates that only the pager moves. Anything that

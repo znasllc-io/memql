@@ -184,7 +184,10 @@ export const GLOW_MS = 10_000;
  * there when the desk first draws do not. An upload glows once it has landed,
  * not while it is dim. Memory only: nothing is stored or acknowledged.
  */
-export function useArrivalGlow(holds: ReadonlyMap<string, Hold>) {
+export function useArrivalGlow(holds: ReadonlyMap<string, Hold>, ready = true) {
+  // The desktop document can land after the desk first draws. Files on it, and
+  // anything shown before it, are the baseline: only what comes after glows.
+  const wasReady = useRef(ready);
   const seen = useRef(new Set(holds.keys()));
   const fresh = useRef(new Set<string>());
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
@@ -202,6 +205,11 @@ export function useArrivalGlow(holds: ReadonlyMap<string, Hold>) {
   };
 
   useEffect(() => {
+    if (!ready || !wasReady.current) {
+      for (const id of holds.keys()) seen.current.add(id);
+      wasReady.current = ready;
+      return;
+    }
     for (const id of holds.keys()) {
       if (!seen.current.has(id)) {
         seen.current.add(id);
@@ -219,7 +227,7 @@ export function useArrivalGlow(holds: ReadonlyMap<string, Hold>) {
     }
     // `clear` only touches refs and a stable setter.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [holds]);
+  }, [holds, ready]);
 
   useEffect(() => {
     const pending = timers.current;
