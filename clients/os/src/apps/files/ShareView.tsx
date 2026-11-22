@@ -353,11 +353,12 @@ export function ShareView({ file, backLabel, onBack }: { file: ArtifactRow; back
                 setCalendar(next === PICK);
               }}
               onCommit={() => { if (length === PICK) setCalendar(true); }}
+              // The end sits in the closed menu itself (José, Nov 22: "3B"), muted after the length.
+              display={endsAt && length !== PICK ? <>{`${length === "1" ? "1 day" : `${length} days`}`}<span className="os-files-share-until"> · ends {inWords(endsAt)}</span></> : undefined}
             >
               {LENGTHS.map((days) => <option key={days} value={String(days)}>{days === 1 ? "1 day" : `${days} days`}</option>)}
               <option value={PICK}>{picked ? inWords(endOfDay(picked)) : "Pick a date…"}</option>
             </Select>
-            <span className="os-files-share-until" aria-live="polite">{endsAt ? `until ${inWords(endsAt)}` : "Pick the day it ends"}</span>
             {calendar ? (
               <div className="os-files-share-calendar" role="dialog" aria-label="Pick the day the share ends">
                 <CalendarMonth

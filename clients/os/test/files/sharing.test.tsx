@@ -114,7 +114,9 @@ describe("the share view", () => {
     await openShare();
     expect(expires().textContent).toContain("7 days");
     const end = new Date(Date.now() + 7 * 86_400_000).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
-    expect(screen.getByText(`until ${end}`)).toBeTruthy();
+    // The end is in the closed menu itself, and nowhere else on the page.
+    expect(expires().textContent).toBe(`7 days · ends ${end}`);
+    expect(screen.queryByText(/^until /)).toBeNull();
     expect(within(openSelect(expires())).getAllByRole("option").map((o) => o.textContent)).toEqual(["1 day", "7 days", "30 days", "Pick a date…"]);
   });
 
@@ -294,7 +296,6 @@ describe("the share view", () => {
     await click(within(calendar).getByRole("button", { name: label(inTwo) }));
     expect(screen.queryByRole("dialog", { name: "Pick the day the share ends" })).toBeNull();
     const words = inTwo.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
-    expect(screen.getByText(`until ${words}`)).toBeTruthy();
     expect(expires().textContent).toContain(words);
     await pick("Dana Cole");
     await click(addButton());
