@@ -19,7 +19,7 @@ import { setEffectiveCapabilities } from "../../src/system/roles";
 import { chooseOption, openSelect } from "../selectControl";
 import { installSeededAccess, seededAccessWithout } from "../seededAccess";
 import { timeLeftLabel } from "../../src/apps/files/useSharing";
-import { artifactRow, click, emit, fakeConnection, noticeRow, renderFiles, shareRow, type FakeConnection, type FakeSeed } from "./harness";
+import { artifactRow, click, emit, fakeConnection, fileRow, noticeRow, renderFiles, shareRow, type FakeConnection, type FakeSeed } from "./harness";
 
 // Wiring the Files app to the engine's file sharing (Nov 2026): the Share
 // panel's three acts, where the panel is absent, and the Shared with me place.
@@ -73,8 +73,7 @@ describe("the share view", () => {
     connect({});
     await renderFiles();
     const view = await openShare();
-    expect(within(view).getByRole("heading", { name: "Share" })).toBeTruthy();
-    expect(view.textContent).toContain("brief.pdf");
+    expect(within(view).getByRole("heading", { name: "brief.pdf" })).toBeTruthy();
     // Not a modal: the rail is still there and still works.
     expect(rail()).toBeTruthy();
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -83,6 +82,21 @@ describe("the share view", () => {
     await click(screen.getByRole("button", { name: "Back to Library" }));
     expect(screen.queryByRole("region", { name: /^Share / })).toBeNull();
     expect(screen.getByRole("button", { name: /brief\.pdf/ }).closest("[hidden]")).toBeNull();
+  });
+
+  // Option 2A (Nov 22): no "Share · icon · name" header; the file's glyph on a
+  // small tile, its name as the heading, and kind · size · where under it.
+  it("heads the page with the file: its glyph, its name, and kind · size · where", async () => {
+    connect({
+      artifacts: [artifactRow({ id: "a-1", title: "logo.png", sourceConceptRef: "v1:library:file:f-1" })],
+      files: [fileRow({ id: "f-1", name: "logo.png", mimeType: "image/png", size: 1363149 })],
+    });
+    await renderFiles();
+    const view = await openShare(/logo\.png/);
+    expect(within(view).queryByRole("heading", { name: "Share" })).toBeNull();
+    expect(within(view).getByRole("heading", { name: "logo.png" })).toBeTruthy();
+    expect(await within(view).findByText("Image · 1.3 MiB · in Library")).toBeTruthy();
+    expect(view.querySelector(".os-files-share-preview .os-files-sheet b")?.textContent).toBe("PNG");
   });
 
   it("is a verb on the right-click menu too", async () => {
