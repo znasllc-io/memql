@@ -483,8 +483,12 @@ func TestTheCheapestVendorIsThePriceOrderAtTheCallsLevel(t *testing.T) {
 	}
 }
 
-// What a selector left out is on the decision, once per record, with why.
-func TestTheDecisionSaysWhichVendorRecordsASelectorLeftOut(t *testing.T) {
+// A record that declares NO level is on the decision, once, with why: it is a
+// record somebody may have expected a selector to choose. A record that serves
+// OTHER levels is not: it was never a candidate for this call, and a line for
+// each of them on every decision roughly doubled the row and buried the lines
+// that say what happened.
+func TestTheDecisionNamesARecordWithNoLevelAndNotTheOnesForOtherLevels(t *testing.T) {
 	r := jobRouter(t, "federation:strongest", jobCatalog...)
 	_, resolved, err := r.ResolveChat(ResolveRequest{Level: airoute.LevelReasoning})
 	if err != nil {
@@ -494,14 +498,18 @@ func TestTheDecisionSaysWhichVendorRecordsASelectorLeftOut(t *testing.T) {
 	for _, c := range resolved.Decision.Considered {
 		notes[c.Entry] = append(notes[c.Entry], c.Reason)
 	}
-	for name, want := range map[string]string{
-		"haiku":  "serves fast, not reasoning",
-		"sonnet": "serves fast and strong, not reasoning",
-		"legacy": "declares no level, so a vendor selector does not choose it",
-	} {
-		if got := notes[name]; len(got) != 1 || got[0] != want {
-			t.Errorf("%s is noted as %q, want exactly %q", name, got, want)
+	if got, want := notes["legacy"], "declares no level, so a vendor selector does not choose it"; len(got) != 1 || got[0] != want {
+		t.Errorf("legacy is noted as %q, want exactly %q", got, want)
+	}
+	for _, name := range []string{"haiku", "sonnet"} {
+		if got := notes[name]; len(got) != 0 {
+			t.Errorf("%s serves other levels and is noted on a reasoning call as %q", name, got)
 		}
+	}
+	// The whole walk of a served call is short: the record with no level, and
+	// the candidates the selector offered.
+	if n := len(resolved.Decision.Considered); n > 4 {
+		t.Errorf("a served call under one selector carries %d considered lines: %+v", n, resolved.Decision.Considered)
 	}
 }
 
@@ -582,5 +590,60 @@ func TestASelectorKeepsItsOldOrderForACallWithNoJobLevel(t *testing.T) {
 		if !equalStrings(names, want) {
 			t.Errorf("level %q: %v, want every record by price, %v", level, names, want)
 		}
+	}
+}
+
+// A RULE MAY RAISE THE LEVEL A CALL IS SERVED AT (`@level`), and the vendor
+// selectors choose for the level it is served at, not the one the caller
+// declared. Before this the walk handed the selectors the declared level: a
+// strong call a rule raised to reasoning was served by a record that declares
+// only strong, while the decision said it was served at reasoning.
+func TestAVendorSelectorChoosesForTheLevelARuleRaisedTheCallTo(t *testing.T) {
+	for selector, want := range map[string]string{
+		"federation:strongest": "opus",
+		// The cheapest record that serves REASONING, not the cheapest that
+		// serves strong (sonnet).
+		"federation:cheapest": "opus",
+	} {
+		t.Run(selector, func(t *testing.T) {
+			providers := memql.NewProviderRegistryForTest()
+			for _, rec := range []jobRecordSpec{
+				{"sonnet", "Anthropic", "strong", 600, 2, 10},
+				{"opus", "Anthropic", "reasoning", 900, 5, 25},
+			} {
+				providers.RegisterWithParamsForTest(rec.name, rec.providerType, "model-"+rec.name, map[string]any{
+					"contextWindow": 200000, "levels": rec.levels, "rank": rec.rank,
+					"inputCostPerMillion": rec.in, "outputCostPerMillion": rec.out,
+				}, pricedProvider{})
+			}
+			policies := memql.NewPolicyRegistryForTest(map[string][]string{"p": {selector}})
+			raise := &memql.RuleConfig{
+				Name:          "operatorReasoning",
+				When:          memql.RuleWhen{Prompt: "agentReply", Present: map[string]bool{"prompt": true}},
+				Level:         airoute.LevelReasoning,
+				Policy:        "p",
+				Precedence:    60,
+				OnUnavailable: memql.OnUnavailableDegrade,
+				Locked:        true,
+			}
+			r := New(providers, policies, testRules(t, raise, defaultRule("p")), nil, nil)
+
+			_, resolved, err := r.ResolveChat(ResolveRequest{Level: airoute.LevelStrong, PromptName: "agentReply"})
+			if err != nil {
+				t.Fatalf("ResolveChat: %v", err)
+			}
+			d := resolved.Decision
+			if d.Rule != "operatorReasoning" || d.Level != airoute.LevelReasoning || d.ServedLevel != airoute.LevelReasoning {
+				t.Fatalf("rule=%q level=%q served=%q, want the raising rule at reasoning", d.Rule, d.Level, d.ServedLevel)
+			}
+			if resolved.ProviderName != want {
+				t.Fatalf("served by %q, want %q: the decision says reasoning and the record must serve it", resolved.ProviderName, want)
+			}
+			// A call the rule does not match is still served at its own level.
+			_, plain, err := r.ResolveChat(ResolveRequest{Level: airoute.LevelStrong})
+			if err != nil || plain.ProviderName != "sonnet" {
+				t.Fatalf("an unmatched strong call got %q, %v; want sonnet", plain.ProviderName, err)
+			}
+		})
 	}
 }

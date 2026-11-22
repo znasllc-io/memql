@@ -509,7 +509,17 @@ func (r *Router) resolveChain(ctx context.Context, req ResolveRequest, mod provi
 			for _, e := range removed {
 				report.noteConsidered(e, doorFor(e), "excluded by rule "+rule.Name)
 			}
-			winner, err := r.walkChain(walkCtx, levelReq, mod, chain, rule.Excludes, report, rule.Policy)
+			// THE WALK IS MADE AT THE LEVEL THE RULE SERVES THE CALL AT. A rule
+			// may raise it (`@level`), and everything the walk asks by level
+			// follows: a vendor selector chooses among the records that
+			// declare the level (selectors.go), and a winner's client is bound
+			// to it. Walking at the level the caller declared served a strong
+			// call a rule raised to reasoning with a record that declares only
+			// strong, under a decision that said reasoning. The rule itself
+			// was matched on the declared level, above, and stays so.
+			walkReq := levelReq
+			walkReq.Level = effective
+			winner, err := r.walkChain(walkCtx, walkReq, mod, chain, rule.Excludes, report, rule.Policy)
 			if err != nil {
 				return nil, Resolved{}, err
 			}

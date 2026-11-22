@@ -193,6 +193,22 @@ func noAccountReason(passedOver []memql.VendorAccountPassedOver) string {
 // it needs the record to be available. A REFERENCE names its account, and a
 // key is judged again from the rows (S9). A reference on a surface no account
 // pays for resolves nothing.
+//
+// A PLAIN NAME OF A VENDOR RECORD ASKS WHO THE CLUSTER'S ACCOUNT PAYS FOR
+// (clusterAccountGated). The walk asks that of every vendor candidate it
+// considers, but a plain name reaches here without having been walked: every
+// fallback wrapper resolves the rest of its chain by name after the source it
+// chose fails when called (audio.go, fallback.go, fallback_structured.go,
+// fallback_stream_chat.go), and a consented fallback resolves one name
+// directly. With the question asked only in the walk, a person the account is
+// closed to was refused a vendor's speech when no local model was online and
+// served it, on the cluster's account, when one was online and failed; the
+// same went for a vendor behind an app that failed. Embeddings do not ask,
+// here as in the walk. The cluster's own work is always paid.
+//
+// A record passed over here leaves no line of its own on the decision: the
+// lookup has no channel for a reason, as for a record that is unavailable.
+// The person is told what failed in front of it.
 func (r *Router) accountAtCall(
 	ctx context.Context,
 	req ResolveRequest,
@@ -202,6 +218,10 @@ func (r *Router) accountAtCall(
 ) (account memql.VendorAccount, paid, ok bool) {
 	if ref == "" {
 		if !entry.Available {
+			return memql.VendorAccount{}, false, false
+		}
+		if doorFor(entry.Config.Name) == DoorFederation && clusterAccountGated(mod) &&
+			r.providers.ClusterAccountClosedTo(ctx, req.UserId) != "" {
 			return memql.VendorAccount{}, false, false
 		}
 		if vendor := memql.VendorOfEntry(entry); vendor != "" && accountsApply(mod) {

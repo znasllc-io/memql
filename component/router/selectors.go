@@ -380,11 +380,18 @@ func contextFloorMiss(cfg memql.ProviderConfig, floor int) string {
 func (r *Router) jobCandidates(selector string, level airoute.Level, report *doorReporter) []candidate {
 	ordered, passedOver := r.providers.VendorRecordsFor(level, selector)
 
-	// What the selector left out, once per record however many selectors the
-	// chain names, in name order so two replicas write the same record.
+	// A RECORD THAT DECLARES NO LEVEL is noted, once per record however many
+	// selectors the chain names, in name order so two replicas write the same
+	// record: it resolves by name, and somebody may have expected a selector
+	// to choose it. A record that serves OTHER levels is not noted. It was
+	// never a candidate for this call, and with a catalog of a dozen records a
+	// line for each on every decision roughly doubled the row, on the busiest
+	// table there is, and buried the lines that say what happened.
 	left := make([]string, 0, len(passedOver))
 	for name := range passedOver {
-		left = append(left, name)
+		if entry, ok := r.providers.Entry(name); ok && entry != nil && len(entry.Config.Levels()) == 0 {
+			left = append(left, name)
+		}
 	}
 	sort.Strings(left)
 	for _, name := range left {

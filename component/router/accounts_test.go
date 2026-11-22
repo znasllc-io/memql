@@ -1321,3 +1321,44 @@ func TestAVendorRecordThatTakesNoKeyStillAsksWhoTheClustersAccountPaysFor(t *tes
 		t.Fatalf("the cluster's own work got %q, %v", resolved.ProviderName, err)
 	}
 }
+
+// A CHAIN ENTRY RESOLVED BY ITS PLAIN NAME AT THE CALL is the record on the
+// cluster's own account: the media wrappers walk the rest of a chain that way
+// after a local model fails, and so does a consented fallback. The question
+// the walk asks is asked there too, or a person the account is closed to is
+// paid by it for a picture, speech or transcription as soon as their local
+// model fails.
+func TestAPlainRecordNameResolvedAtTheCallAsksWhoTheClustersAccountPaysFor(t *testing.T) {
+	f := newAccountFixture(t, []string{"claude"}, nil, claudeRecord)
+	ctx := personCtx(alice)
+	req := autoRequest(airoute.ModalityChat)
+	surfaces := map[string]providerModality{
+		"a picture":           modalityVision,
+		"a chat turn":         modalityChat,
+		"a structured answer": modalityStructured,
+	}
+	for name, mod := range surfaces {
+		if _, _, ok := f.router.providerLookup(ctx, req, "claude", mod); !ok {
+			t.Fatalf("%s: a person the account pays for was not served", name)
+		}
+	}
+
+	f.clusterAccountClosedTo(alice)
+	for name, mod := range surfaces {
+		if _, _, ok := f.router.providerLookup(ctx, req, "claude", mod); ok {
+			t.Errorf("%s: the cluster's account was spent at the call for a person it is closed to", name)
+		}
+	}
+
+	// The cluster's own work resolves as it always did.
+	own := req
+	own.UserId = ""
+	if _, _, ok := f.router.providerLookup(context.Background(), own, "claude", modalityVision); !ok {
+		t.Error("the cluster's own picture was refused at the call")
+	}
+	// Embeddings are never asked: the memory space is the cluster's.
+	entry, _ := f.providers.Entry("claude")
+	if _, _, ok := f.router.accountAtCall(ctx, req, entry, "", modalityEmbedding); !ok {
+		t.Error("an embedding was refused for a person the account is closed to")
+	}
+}
