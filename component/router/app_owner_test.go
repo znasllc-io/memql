@@ -52,7 +52,7 @@ func (c *everyCloud) CallChatStreamWithTools(context.Context, []common.ChatMessa
 // so only the owner rule can keep a sweep away from it.
 func appFirstRouter(t *testing.T, chain ...string) (*Router, *everyCloud, *stubAppInference, *recordingDelegate) {
 	t.Helper()
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	providers.SetFleetInference(&stubFleetInference{})
 	apps := &stubAppInference{doors: []memql.AppDoor{openApp("claude-code")}}
 	providers.SetAppInference(apps)

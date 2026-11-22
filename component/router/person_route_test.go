@@ -24,7 +24,7 @@ import (
 // back to the rules would show as a vendor call rather than as a coincidence.
 func routeRouter(t *testing.T, models []memql.FleetModel, doors []memql.AppDoor) (*Router, *countingCloud, *stubAppInference) {
 	t.Helper()
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	providers.SetFleetInference(&stubFleetInference{models: models})
 	apps := &stubAppInference{doors: doors}
 	providers.SetAppInference(apps)

@@ -930,10 +930,12 @@ func (r *Router) walkChain(
 				report.note(cand.Name, why)
 				continue
 			}
-			// A vendor surface that takes no key of a person's is the cluster's
-			// account or nothing, and that account is not a pool for everybody
-			// (accounts.go, clusterAccountGated). Asked here, beside WHO PAYS,
-			// after every gate that stands in front of a vendor.
+			// A vendor candidate whose accounts are not composed below is the
+			// cluster's account or nothing, and that account is not a pool
+			// for everybody (accounts.go, clusterAccountGated): a picture,
+			// speech, transcription, an image, and any record whose client
+			// takes no key. Asked here, beside WHO PAYS, after every gate that
+			// stands in front of a vendor. Embeddings are never asked.
 			if cand.Door == DoorFederation && !paidByAccount && clusterAccountGated(mod) {
 				if closed := r.providers.ClusterAccountClosedTo(ctx, req.UserId); closed != "" {
 					report.note(cand.Name, closed)

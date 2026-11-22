@@ -2203,8 +2203,10 @@ a permissive default. Asked in the composition of a record's accounts
 (`VendorAccountsWith`, lazily and once per answer, so a cluster with no vendor
 account reads nothing), again at the call for `<record>@cluster`
 (`VendorAccountUsable`), in readiness (`VendorDoorFor`: `ClusterSetUp` is the
-old meaning, `Cluster` is "pays for this person"), and by the router for the
-vendor surfaces that take no key: vision, speech, transcription and images
+old meaning, `Cluster` is "pays for this person"), and by the router for every
+vendor candidate whose accounts are not composed: vision, speech,
+transcription and images, and any record whose client takes no key, so the
+rule does not depend on what kind of client a record has
 (`clusterAccountGated`). Embeddings are never asked: the memory space is the
 cluster's, one model for everybody. A visitor's call is judged by the person
 whose authority it borrows. Invariant: no person spends the cluster's vendor

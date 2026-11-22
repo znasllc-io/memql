@@ -79,7 +79,7 @@ func TestAFullSizeReviewSkipsTheLocalDoor(t *testing.T) {
 // router without the run's tags; ResolveFor, the one function every model call
 // reaches, applies them from the run context the executing node built.
 func TestResolveForAppliesTheRunsCallTags(t *testing.T) {
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	providers.SetFleetInference(&stubFleetInference{models: []memql.FleetModel{sizedModel("qwen3.8:27b", 27_000_000_000, 131072)}})
 	policies := memql.NewPolicyRegistryForTest(map[string][]string{
 		"localFirst": {memql.FleetStrongest}, "federationStrongest": {memql.FleetStrongest}, "localFirstStrongest": {memql.FleetStrongest},

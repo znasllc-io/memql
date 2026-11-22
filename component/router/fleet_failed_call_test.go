@@ -26,7 +26,7 @@ func (s *failingFleetInference) Call(context.Context, memql.FleetCallRequest) (m
 // against the machine whenever a route had somewhere else to go.
 func TestAFailedFleetCallWithARouteBehindItNamesItsMachineOnOneRow(t *testing.T) {
 	cloud := &countingCloud{}
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	providers.SetFleetInference(&failingFleetInference{stubFleetInference{models: []memql.FleetModel{fleetModel("llama3.1:8b", true)}}})
 	providers.RegisterForTest("streamClaudeSonnet", "AnthropicStream", "claude-sonnet", cloud)
 	policies := memql.NewPolicyRegistryForTest(map[string][]string{"testPolicy": {"fleet:llama3.1:8b", "streamClaudeSonnet"}})

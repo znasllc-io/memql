@@ -1128,6 +1128,21 @@ func TestACeilingRefusalAfterAKeyFailedNeverQuotesTheVendor(t *testing.T) {
 	}
 }
 
+// registryOpenToEverybody is a provider registry in which the cluster's own
+// vendor account pays for every person.
+//
+// The registry gives that account to NO person until a gate says who may use
+// it (component/memql vendor_account_cluster.go), and most tests in this
+// package are about something else: a level walking down, a selector's order,
+// what a ledger row says. Their fixtures are built with this, which states the
+// assumption they always made. The tests about who may use the account build
+// a registry of their own and are below.
+func registryOpenToEverybody() *memql.ProviderRegistry {
+	providers := memql.NewProviderRegistryForTest()
+	providers.SetClusterAccountGate(func(context.Context, string) bool { return true })
+	return providers
+}
+
 // OWNER DECISION 2026-11-22: the cluster's own vendor account is not a pool
 // for everybody. It pays for the cluster's own work, and for a person's calls
 // only when that person may use it (component/memql vendor_account_cluster.go).
@@ -1260,15 +1275,49 @@ func TestEmbeddingsStayOnTheClustersAccountForEverybody(t *testing.T) {
 	if clusterAccountGated(modalityEmbedding) {
 		t.Fatal("embeddings ask the gate: a person whose writes were not embedded would be missing from everybody's search")
 	}
-	for _, mod := range []providerModality{modalityVision, modalitySpeech, modalityTranscribe, modalityImage} {
+	// EVERY OTHER SURFACE ASKS. A record whose accounts are composed (a
+	// vendor's text model on a text surface) is asked there; any other vendor
+	// record is the cluster's account or nothing, whatever the surface.
+	for _, mod := range []providerModality{
+		modalityVision, modalitySpeech, modalityTranscribe, modalityImage,
+		modalityStreamTools, modalityChat, modalityStreamChat, modalityTools, modalityStructured,
+	} {
 		if !clusterAccountGated(mod) {
-			t.Errorf("modality %v is paid by the cluster's account for a person without asking whether they may use it", mod)
+			t.Errorf("modality %v can be paid by the cluster's account for a person without asking whether they may use it", mod)
 		}
 	}
-	// The text surfaces ask through their accounts, not through this.
-	for _, mod := range []providerModality{modalityStreamTools, modalityChat, modalityStreamChat, modalityTools, modalityStructured} {
-		if clusterAccountGated(mod) {
-			t.Errorf("modality %v asks twice", mod)
-		}
+}
+
+// THE RULE DOES NOT DEPEND ON WHAT KIND OF CLIENT A RECORD HAS. A vendor
+// record whose client cannot be paid by a key composes no accounts, so on a
+// text surface nothing asked whether the cluster's account pays for the
+// person: it was simply available. Both vendors' text clients can take a key
+// today, so no shipped record is like this; the next kind of record must not
+// be open to everybody by default.
+func TestAVendorRecordThatTakesNoKeyStillAsksWhoTheClustersAccountPaysFor(t *testing.T) {
+	providers := memql.NewProviderRegistryForTest()
+	providers.RegisterWithParamsForTest("plain", "Anthropic", "model-plain", map[string]any{"contextWindow": 200000}, pricedProvider{})
+	allowed := map[string]bool{bob: true}
+	providers.SetClusterAccountGate(func(_ context.Context, userId string) bool { return allowed[userId] })
+	policies := memql.NewPolicyRegistryForTest(map[string][]string{"p": {"plain"}})
+	r := New(providers, policies, testRules(t, defaultRule("p")), nil, nil)
+
+	_, _, err := r.resolveChat(personCtx(alice), ResolveRequest{UserId: alice})
+	var refusal *InferenceUnavailable
+	if !errors.As(err, &refusal) {
+		t.Fatalf("err = %v, want a refusal: the cluster's account does not pay for her", err)
+	}
+	said := false
+	for _, door := range refusal.Doors {
+		said = said || strings.Contains(door.Reason, memql.ClusterAccountClosedReason)
+	}
+	if !said {
+		t.Errorf("the refusal does not say why: %+v", refusal.Doors)
+	}
+	if _, resolved, err := r.resolveChat(personCtx(bob), ResolveRequest{UserId: bob}); err != nil || resolved.ProviderName != "plain" {
+		t.Fatalf("a person the account pays for got %q, %v", resolved.ProviderName, err)
+	}
+	if _, resolved, err := r.resolveChat(context.Background(), ResolveRequest{}); err != nil || resolved.ProviderName != "plain" {
+		t.Fatalf("the cluster's own work got %q, %v", resolved.ProviderName, err)
 	}
 }

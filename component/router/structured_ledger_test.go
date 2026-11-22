@@ -140,7 +140,7 @@ func failedLine(t *testing.T, args map[string]any) string {
 // Before this the line said "selected", so Settings > Decisions showed a
 // failed call through a signed-in app with no reason at all.
 func TestAStructuredCallWhoseAppDoorFailsRecordsWhy(t *testing.T) {
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	providers.SetFleetInference(&stubFleetInference{})
 	apps := &failingApps{
 		stubAppInference: stubAppInference{doors: []memql.AppDoor{openApp("claude-code")}},
@@ -305,7 +305,7 @@ func (u *usageCloud) CallChatStructuredWithUsage(context.Context, []common.ChatM
 // CallChatStructured would silently turn every measured call into an
 // unmeasured one. And the row carries the measured counts, not an estimate.
 func TestTheStructuredObserverKeepsTheProvidersMeasuredUsage(t *testing.T) {
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	cloud := &usageCloud{}
 	providers.RegisterWithParamsForTest("streamClaudeSonnet", "AnthropicStream", "claude-sonnet",
 		map[string]any{"contextWindow": 200000}, cloud)
@@ -348,7 +348,7 @@ func TestTheStructuredObserverKeepsTheProvidersMeasuredUsage(t *testing.T) {
 func TestALedgerRowWithNoFootprintRendersAnEmptyList(t *testing.T) {
 	// A vendor-only route: the row's shape is the point, and a local call
 	// would spend the process-wide local rate ceiling every test here shares.
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	providers.RegisterWithParamsForTest("streamClaudeSonnet", "AnthropicStream", "claude-sonnet",
 		map[string]any{"contextWindow": 200000}, &everyCloud{})
 	r := New(providers, memql.NewPolicyRegistryForTest(map[string][]string{"vendor": {"streamClaudeSonnet"}}),
@@ -380,7 +380,7 @@ func TestALedgerRowWithNoFootprintRendersAnEmptyList(t *testing.T) {
 // could not know is read from the call's own context. Routing is untouched:
 // neither field decides anything.
 func TestAStructuredClientResolvedOnceWritesEachCallAsItsOwn(t *testing.T) {
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	providers.RegisterWithParamsForTest("streamClaudeSonnet", "AnthropicStream", "claude-sonnet",
 		map[string]any{"contextWindow": 200000}, &everyCloud{})
 	r := New(providers, memql.NewPolicyRegistryForTest(map[string][]string{"vendor": {"streamClaudeSonnet"}}),

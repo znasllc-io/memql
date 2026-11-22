@@ -55,7 +55,7 @@ func sizedEmbedder(id string, window int) memql.FleetModel {
 // fleetRouter builds a router whose one rule names a one-entry chain.
 func fleetRouter(t *testing.T, entry string, models []memql.FleetModel) *Router {
 	t.Helper()
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	providers.SetFleetInference(&stubFleetInference{models: models})
 	policies := memql.NewPolicyRegistryForTest(map[string][]string{"p": {entry}})
 	return New(providers, policies, testRules(t, defaultRule("p")), nil, nil)
@@ -261,7 +261,7 @@ func TestSelectorsSkipEntriesUnderTheContextFloor(t *testing.T) {
 // the ordering above, arriving at the one place where being wrong means a
 // truncated answer nobody can see.
 func TestFederationRecordWithNoContextWindowIsSkippedAndNamesTheParam(t *testing.T) {
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	providers.RegisterForTest("noWindow", "AnthropicStream", "claude-sonnet", pricedProvider{})
 	policies := memql.NewPolicyRegistryForTest(map[string][]string{"p": {"noWindow"}})
 	r := New(providers, policies, testRules(t, defaultRule("p")), nil, nil)
@@ -318,7 +318,7 @@ func TestSelectorsSkipEntriesThatCannotServeTheNeeds(t *testing.T) {
 // THE THREE NEW MODALITIES each check their own interface and say which one an
 // entry does not serve.
 func TestNewModalityEntryPointsNameTheModalityAnEntryCannotServe(t *testing.T) {
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	// A chat-only client: it answers CallChat and nothing else.
 	providers.RegisterForTest("chatOnly", "OpenAI", "gpt", pricedProvider{})
 	policies := memql.NewPolicyRegistryForTest(map[string][]string{"p": {"chatOnly"}})
@@ -363,7 +363,7 @@ func TestNewModalityEntryPointsNameTheModalityAnEntryCannotServe(t *testing.T) {
 // an afternoon in the provider registry looking for a record that was never
 // meant to be there.
 func TestAPolicyReferenceAtResolutionIsNamedAsALoaderBug(t *testing.T) {
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	policies := memql.NewPolicyRegistryForTest(map[string][]string{"p": {"policy:localFirst"}})
 	r := New(providers, policies, testRules(t, defaultRule("p")), nil, nil)
 
@@ -383,7 +383,7 @@ func TestAPolicyReferenceAtResolutionIsNamedAsALoaderBug(t *testing.T) {
 // rule at a chain naming `entry`.
 func federationRouter(t *testing.T, entry string, prices map[string][2]float64) (*Router, *memql.ProviderRegistry) {
 	t.Helper()
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	for name, p := range prices {
 		providers.RegisterWithParamsForTest(name, "AnthropicStream", "model-"+name, map[string]any{
 			"inputCostPerMillion":  p[0],

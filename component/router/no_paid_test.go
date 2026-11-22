@@ -25,7 +25,7 @@ func (e *evaluationEmbedder) Dimensions() int { return 2 }
 func TestNoPaidCeilingCoversEmbeddingAndCallTimeFallback(t *testing.T) {
 	embed := &evaluationEmbedder{}
 	cloud := &countingCloud{}
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	providers.RegisterWithParamsForTest("paidEmbedder", "OpenAIEmbedding", "test-embedder", nil, embed)
 	providers.RegisterWithParamsForTest("paidChat", "OpenAI", "test-chat", map[string]any{"contextWindow": 200000}, cloud)
 	r := New(providers, memql.NewPolicyRegistryForTest(map[string][]string{"p": {"paidChat"}}), testRules(t, defaultRule("p")), nil, nil)

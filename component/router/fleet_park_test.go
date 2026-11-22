@@ -69,7 +69,7 @@ func newParkRouter(t *testing.T, models []memql.FleetModel, chain []string, clou
 	cloud := &countingCloud{}
 	fleet := &stubFleetInference{models: models}
 
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	providers.SetFleetInference(fleet)
 	if cloudName != "" {
 		providers.RegisterForTest(cloudName, "AnthropicStream", "claude-sonnet", cloud)
@@ -209,13 +209,13 @@ func TestARefusalDistinguishesNoMachinesFromNoMatch(t *testing.T) {
 // A button that cannot work converts "your machines are asleep" into "you
 // clicked the fix and it did not fix it".
 func TestApproveCloudIsOnlyOfferedWhenACloudProviderExists(t *testing.T) {
-	withCloud := memql.NewProviderRegistryForTest()
+	withCloud := registryOpenToEverybody()
 	withCloud.RegisterForTest("streamClaudeSonnet", "AnthropicStream", "claude-sonnet", &countingCloud{})
 	if !withCloud.HasCloudProviderConfigured() {
 		t.Fatal("a registered, available cloud provider must be reported as configured")
 	}
 
-	fleetOnly := memql.NewProviderRegistryForTest()
+	fleetOnly := registryOpenToEverybody()
 	fleetOnly.SetFleetInference(&stubFleetInference{models: []memql.FleetModel{fleetModel("llama3.1:8b", true)}})
 	if fleetOnly.HasCloudProviderConfigured() {
 		t.Fatal("a fully-local cluster must not be reported as having a cloud provider -- the park " +
@@ -340,7 +340,7 @@ func TestConsentSurvivesWithNoPolicyCorpus(t *testing.T) {
 	cloud := &countingCloud{}
 	fleet := &stubFleetInference{models: models}
 
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	providers.SetFleetInference(fleet)
 	providers.RegisterForTest("streamClaudeSonnet", "AnthropicStream", "claude-sonnet", cloud)
 

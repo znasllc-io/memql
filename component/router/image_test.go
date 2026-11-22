@@ -25,7 +25,7 @@ func TestImageRoutingRequiresGenerationAndNoChatWindow(t *testing.T) {
 	image := sizedModel("image-model", 4000000000, 0)
 	image.ImageGen = true
 	fleet := &imageContextFleet{contextFleet{models: []memql.FleetModel{text, image}}}
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	providers.SetFleetInference(fleet)
 	r := New(providers, memql.NewPolicyRegistryForTest(map[string][]string{"p": {memql.FleetFastest}}), testRules(t, defaultRule("p")), nil, nil)
 	resolved, err := r.ResolveFor(ctx, ResolveRequest{UserId: "alice", Level: airoute.LevelFast, Modality: airoute.ModalityImage, Needs: airoute.Needs{MinContextTokens: 8192}})

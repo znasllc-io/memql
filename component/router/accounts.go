@@ -63,19 +63,19 @@ func accountsApply(mod providerModality) bool {
 // by itself, whether the cluster's own account pays for the person it is for
 // (owner decision 2026-11-22; component/memql vendor_account_cluster.go).
 //
-// The text surfaces ask through their accounts (accountsApply): the cluster's
-// account is one of the accounts composed for the record, and is left out for
-// a person it is closed to. A picture, speech, transcription and an image take
-// no key of a person's, so they are the cluster's account or nothing, and the
-// walk asks here. EMBEDDINGS DO NOT ASK: the memory space is the cluster's,
-// one model for everybody, and a person whose writes were not embedded would
-// be missing from everybody's search.
+// A vendor's text model on a text surface asks through its accounts
+// (accountRecord): the cluster's account is one of the accounts composed for
+// the record, and is left out for a person it is closed to. EVERY OTHER vendor
+// candidate is the cluster's account or nothing, so the walk asks here: a
+// picture, speech, transcription and an image, which take no key of a
+// person's, and equally a record on a text surface whose client cannot be paid
+// by a key. The rule must not depend on what kind of client a record has.
+//
+// EMBEDDINGS DO NOT ASK: the memory space is the cluster's, one model for
+// everybody, and a person whose writes were not embedded would be missing from
+// everybody's search.
 func clusterAccountGated(mod providerModality) bool {
-	switch mod {
-	case modalityVision, modalitySpeech, modalityTranscribe, modalityImage:
-		return true
-	}
-	return false
+	return mod != modalityEmbedding
 }
 
 // accountQuery is who a call is for and how its route was chosen, in the words
