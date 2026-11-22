@@ -127,8 +127,9 @@ func TestNeitherMeansTheVendorDoorIsShut(t *testing.T) {
 		t.Fatalf("door = %+v, want everything shut", door)
 	}
 
-	readiness := routeReadiness{doors: (&MemQLEngine{providers: reg}).inferenceDoors(personContext("ana")), embeddingReachable: true}
-	if _, ok := readiness.servesNow("federation:cheapest"); ok {
+	readiness := newRouteReadiness((&MemQLEngine{providers: reg}).inferenceDoors(personContext("ana")), reg)
+	readiness.embeddingReachable = true
+	if _, ok := readiness.servesNow(airoute.LevelFast, "federation:cheapest"); ok {
 		t.Fatal("a vendor source serves now with no account that can pay")
 	}
 	vendorsOnly := RouteSpec{Id: "mine", Name: "Mine", Kind: RouteKindCustom, Jobs: RouteJobs{
@@ -320,7 +321,20 @@ func TestRouteReadinessCountsAKeyOnlyWhereItMayBeSpent(t *testing.T) {
 		Reasoning: []string{"federation:strongest"},
 	}}
 
-	keyNotOnForAuto := routeReadiness{doors: inferenceDoors{Federation: true, KeyAccount: true}, embeddingReachable: true}
+	// A catalog whose records declare a job, and a person whose key at
+	// Anthropic is not switched on for Auto.
+	reg := apiCatalog(nil)
+	autoKeys := keysHeldBy("ana", keyAccount(VendorAnthropic, "k1", "ana"))
+	reg.SetVendorKeys(autoKeys)
+	readinessOf := func() routeReadiness {
+		r := newRouteReadiness((&MemQLEngine{providers: reg}).inferenceDoors(personContext("ana")), reg)
+		r.embeddingReachable = true
+		return r
+	}
+	keyNotOnForAuto := readinessOf()
+	if d := keyNotOnForAuto.doors; !d.Federation || d.FederationAuto || !d.KeyAccount {
+		t.Fatalf("doors = %+v, want a key that serves a chosen route and not Auto", d)
+	}
 	// The reason points at the switch: this person has added a source, and
 	// "needs a source" would send them looking for another one.
 	if s := keyNotOnForAuto.summarize(auto); s.Ready || s.Reason != "An API key you can use is off for Auto" {
@@ -338,7 +352,8 @@ func TestRouteReadinessCountsAKeyOnlyWhereItMayBeSpent(t *testing.T) {
 		}
 	}
 
-	keyOnForAuto := routeReadiness{doors: inferenceDoors{Federation: true, FederationAuto: true, KeyAccount: true}, embeddingReachable: true}
+	autoKeys.autoUsable = &[]VendorAccount{keyAccount(VendorAnthropic, "k1", "ana")}
+	keyOnForAuto := readinessOf()
 	if s := keyOnForAuto.summarize(auto); !s.Ready {
 		t.Fatalf("Auto = not ready (%q); want ready once the key is on for Auto", s.Reason)
 	}

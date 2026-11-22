@@ -265,7 +265,11 @@ func TestTheVendorDoorOpensOnTheClustersAccountOnlyForThoseWhoMayUseIt(t *testin
 // vendor account" is not something they can add: a key is.
 func TestARouteOfVendorsSaysTheClustersAccountIsNotOpenToThePerson(t *testing.T) {
 	reg := newProviderRegistry()
-	reg.setEntry(federatedOpenAI(vendorRecord("gpt", VendorOpenAI, true, "")))
+	gpt := federatedOpenAI(vendorRecord("gpt", VendorOpenAI, true, ""))
+	// One model that serves every job: a vendor selector offers a record only
+	// at the levels it declares.
+	gpt.Config.Params = map[string]any{"levels": "fast strong reasoning", "rank": 500}
+	reg.setEntry(gpt)
 	reg.SetVendorKeys(noKeys())
 	reg.SetClusterAccountGate(openTo("olga").gate)
 	vendorsOnly := RouteSpec{Id: "mine", Name: "Mine", Kind: RouteKindCustom, Jobs: RouteJobs{
@@ -274,7 +278,8 @@ func TestARouteOfVendorsSaysTheClustersAccountIsNotOpenToThePerson(t *testing.T)
 		Reasoning: []string{"federation:strongest"},
 	}}
 	summaryFor := func(person string) routeSummaryJSON {
-		readiness := routeReadiness{doors: (&MemQLEngine{providers: reg}).inferenceDoors(personContext(person)), embeddingReachable: true}
+		readiness := newRouteReadiness((&MemQLEngine{providers: reg}).inferenceDoors(personContext(person)), reg)
+		readiness.embeddingReachable = true
 		return readiness.summarize(vendorsOnly)
 	}
 

@@ -201,6 +201,11 @@ type inferenceDoors struct {
 	// this caller. It is not a pool for everybody (owner decision 2026-11-22,
 	// vendor_account_cluster.go): a person it is closed to has the vendor door
 	// only through a key.
+	//
+	// VendorPayers and ActingUserId are what a route's job reads to say which
+	// vendor model serves it now and which account pays (routes_builtin.go).
+	VendorPayers       map[string]VendorPayer
+	ActingUserId       string
 	Federation         bool
 	FederationAuto     bool
 	KeyAccount         bool
@@ -278,6 +283,8 @@ func (e *MemQLEngine) inferenceDoors(ctx context.Context) inferenceDoors {
 	// already asked; a provider that is callable some other way is asked here.
 	d.CloudOpen = d.CloudConfigured && (vendor.Cluster ||
 		(!vendor.ClusterSetUp && e.providers.ClusterAccountClosedTo(ctx, actingUserFromContext(ctx)) == ""))
+	d.VendorPayers = vendor.Payers
+	d.ActingUserId = actingUserFromContext(ctx)
 	d.Federation = vendor.Chosen
 	d.FederationAuto = vendor.Auto
 	d.KeyAccount = vendor.Key

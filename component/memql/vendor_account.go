@@ -431,6 +431,19 @@ type VendorDoor struct {
 	// Key: this person has an API key that can pay on a route they choose,
 	// their own or one lent to them.
 	Key bool
+	// Payers names, for each vendor text record that has one, the first
+	// account that pays for this person on a route they choose, with the
+	// record's model: what a job's "serves now" is read from (design record
+	// R6). It is the composition a call uses (VendorAccountsWith), so a record
+	// is here exactly when a call through it would find an account. Read from
+	// the same answers as the flags above; it costs no read of its own.
+	Payers map[string]VendorPayer
+}
+
+// VendorPayer is one record's model and the account that pays for it.
+type VendorPayer struct {
+	Model   string
+	Account VendorAccount
 }
 
 // VendorDoorFor answers whether a vendor can serve one person, by asking which
@@ -499,7 +512,14 @@ func (r *ProviderRegistry) VendorDoorFor(ctx context.Context, actingUserId strin
 		// Only a KEY is taken from the composition. The cluster's account at a
 		// record is already answered above, by the predicate that asks how the
 		// record got its credential and not only whether it is available.
-		if accounts, _ := r.VendorAccountsWith(entry, chosen[vendor]); keyAmong(accounts) {
+		accounts, _ := r.VendorAccountsWith(entry, chosen[vendor])
+		if len(accounts) > 0 {
+			if door.Payers == nil {
+				door.Payers = map[string]VendorPayer{}
+			}
+			door.Payers[entry.Config.Name] = VendorPayer{Model: entry.Config.Model, Account: accounts[0]}
+		}
+		if keyAmong(accounts) {
 			door.Key, door.Chosen = true, true
 			door.ChosenStreams = door.ChosenStreams || streams
 		}
