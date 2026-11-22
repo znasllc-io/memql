@@ -721,10 +721,12 @@ describe("Settings -> Vendors: each vendor's state", () => {
     expect(doorStateIn("anthropic")).toBe("half");
     expect(doorWordIn("anthropic")).toBe(VENDOR_WORDS.half);
     const anthropic = doorRow("anthropic");
-    // The consequence, said plainly ON THE ROW -- this is the state that takes
-    // the fleet down at its next restart, hours after the save that caused it,
-    // and a person scanning the list has to meet it without opening anything.
-    expect(anthropic.textContent).toMatch(/refuses to boot/i);
+    // The consequence, said plainly ON THE ROW, and the true one: a node that
+    // reads a partial set refuses the VENDOR, not its own start. Every node
+    // keeps running and none can use the vendor until every id is set. The
+    // row used to say the node refuses to boot, which no code does.
+    expect(anthropic.textContent).toMatch(/no node can use this vendor until every id is set/i);
+    expect(anthropic.textContent).not.toMatch(/refuses to boot/i);
     // And which ids, verbatim: the engine already names both halves better
     // than a re-derivation here would.
     expect(within(anthropic).getByText(/serviceAccountId missing/)).toBeTruthy();
@@ -780,7 +782,8 @@ describe("Settings -> Vendors: saving the ids", () => {
     ]);
     // The projected token path is a deployment fact, already base env beside
     // the volume it names. A box for it here could only disagree with the
-    // mount, and a path that disagrees with the mount refuses boot.
+    // mount, and a path that disagrees with the mount is a vendor no node can
+    // sign in to.
     expect(h.state.federationCalls[0]?.["identityTokenFile"]).toBeUndefined();
     // A blank optional field is OMITTED rather than written empty: an empty
     // string is a value and "not set" is not.
@@ -814,8 +817,9 @@ describe("Settings -> Vendors: saving the ids", () => {
     fireEvent.change(within(openai).getByLabelText("Identity provider id"), {
       target: { value: "idp_1" },
     });
-    // One of the two required ids is still blank. A partial set REFUSES BOOT,
-    // so accepting one here would take the fleet down at its next restart.
+    // One of the two required ids is still blank. A partial set is refused by
+    // every node, so accepting one here would take the vendor away from all of
+    // them at their next reload.
     expect(
       within(openai)
         .getByRole("button", { name: "Save OpenAI ids" })

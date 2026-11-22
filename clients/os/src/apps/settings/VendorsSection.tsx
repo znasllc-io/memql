@@ -34,9 +34,10 @@ import { doorReadings, useInferenceStatus, type DoorId, type DoorReading } from 
 //     sits in one column so the page is read by scanning it.
 //  2. AN UNSET VENDOR IS THE QUIETEST THING ON THE SCREEN. A fresh cluster has
 //     none; a warning banner on a fresh install reads as a failed install.
-//  3. HALF-CONFIGURED IS THE ONE THAT SHOUTS, because the engine REFUSES BOOT
-//     on it -- hours after the save that caused it -- and it renders the
-//     engine's own sentence.
+//  3. HALF-CONFIGURED IS THE ONE THAT SHOUTS, because every node refuses the
+//     vendor on it (the node itself keeps running; this page used to say it
+//     refuses to boot, which no code does) -- and it renders the engine's own
+//     sentence.
 //  4. A LOCAL CLUSTER IS TOLD WHAT IT NEEDS FIRST. A vendor cannot fetch a
 //     local cluster's public keys, but both accept them pasted in, and after
 //     that the ids work as they do anywhere. So the form is offered, with one
@@ -258,8 +259,8 @@ function VendorPanel({
 /**
  * The federation form: ids from the vendor's own console, never a credential.
  *
- * ALL OR NONE. A partial set refuses boot -- hours after the save that caused
- * it -- so the client mirrors the engine's check and the Save control is
+ * ALL OR NONE. Every node refuses a vendor whose ids are a partial set, so the
+ * client mirrors the engine's check and the Save control is
  * unavailable until every required field is filled. A blank optional field is
  * OMITTED rather than written empty, because an empty string is a value and
  * "not set" is not.
@@ -326,11 +327,11 @@ function FederationForm({
           ? state === "open"
             ? `${label}'s ids are already in use. Filling these in replaces them at the next Apply -- nothing changes until then.`
             : state === "half"
-              ? `Some of ${label}'s ids are set and some are not, and a node that reads a partial set refuses to boot. Fix it before anything restarts -- and re-enter every id below, not only the missing one: the write stores the set whole.`
+              ? `Some of ${label}'s ids are set and some are not, so no node can use ${label} until every id is set. Re-enter every id below, not only the missing one: the write stores the set whole.`
               : `Ids from ${label}'s own console, not credentials -- they are stored as plaintext rows. The projected token path is not asked for here: it comes from the deployment, beside the volume it names.`
           : missing.length === 0
             ? "Saving stores the ids. Apply is what makes every node read them."
-            : `Still needed: ${missing.map((f) => f.label).join(", ")}. A partial set refuses boot, so it cannot be saved.`}
+            : `Still needed: ${missing.map((f) => f.label).join(", ")}. A partial set is refused by every node, so it cannot be saved.`}
       </Caption>
       <Button
         type="submit"

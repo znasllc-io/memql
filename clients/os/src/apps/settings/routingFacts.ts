@@ -372,7 +372,7 @@ export function doorReadings(
         state === "open"
           ? "Used when a route reaches a vendor."
           : state === "half"
-            ? "Some ids are set and some are missing, and a node that reads a partial set refuses to boot."
+            ? "Some ids are set and some are missing, so no node can use this vendor until every id is set."
             : state === "unknown"
               ? "The cluster has not answered yet."
               : "Not set up, which is the normal state of a new cluster. Nothing here is billed until it is.",

@@ -150,7 +150,7 @@ export function sourceCopy(source: string): string {
  * `MEMQL_AI_ANTHROPIC_IDENTITY_TOKEN_FILE` and `MEMQL_AI_OPENAI_IDENTITY_TOKEN_FILE`
  * beside the projected volume they name (deploy/k8s/base) -- so a text box for
  * it in a browser could only ever disagree with the mount, and a path that
- * disagrees with the mount is a federation that refuses boot for a reason the
+ * disagrees with the mount is a vendor no node can sign in to, for a reason the
  * person who typed it cannot see. The panel says where it went, because an
  * operator who used the old five-field form will look for it.
  *
@@ -217,8 +217,11 @@ export function missingFederationFields(
  *  - `open`  -- ids applied, the exchange is the credential, nothing is stored.
  *  - `unset` -- no ids. NORMAL: it is how every cluster is installed. Not a
  *               fault, not amber.
- *  - `half`  -- some ids set and some missing. The engine REFUSES BOOT on this,
- *               so it is the one state that is actionable and urgent.
+ *  - `half`  -- some ids set and some missing. Every node refuses the VENDOR
+ *               on this (it keeps running, and cannot use the vendor), so it
+ *               is the one state that is actionable and urgent. The token
+ *               file's path on its own is not this state: every Deployment
+ *               sets it, and the engine reads "no id" as not set up.
  *
  * `half` IS CHECKED FIRST, and the order is the fail-safe direction: a stale
  * federated row alongside a half-configured one must not let the dangerous
