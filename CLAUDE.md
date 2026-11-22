@@ -83,7 +83,7 @@ make scale N=2               # 2 replicas per Deployment (NAMESPACE= overrides `
 make status                  # mesh litmus: unique MEMQL_NODE_ID per pod + one shared identity keyset
 make secrets                 # re-seed secrets (idempotent; use after a cluster recreate)
 make up-refresh              # clean slate: nuke + repave (fresh DB), then bring up
-make down                    # tear down, local calls media server first (PURGE=1 also removes the kubeconfig context)
+make down                    # tear down, local calls media server first (PURGE=1 also removes the kubeconfig context and the local signing key)
 
 # Tests -- see Testing below. A bare `go test ./...` does NOT reach the engine.
 make install-deps            # first, from the same shell: PyYAML for its python3
