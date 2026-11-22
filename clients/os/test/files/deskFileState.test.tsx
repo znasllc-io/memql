@@ -5,8 +5,10 @@ import {
   ask,
   holdOf,
   NO_OPENS,
+  GLOW_MS,
   READY_MS,
   settle,
+  useArrivalGlow,
   useDeskFileStates,
   type Hold,
   type Wait,
@@ -152,5 +154,66 @@ describe("settle and ask, without React", () => {
     expect(ask(NO_OPENS, "a", "failed", "open").opens).toBe(NO_OPENS);
     expect(ask(NO_OPENS, "a", "offline", "open")).toEqual({ opens: NO_OPENS, now: false });
     expect(ask(NO_OPENS, "a", "uploading", "open")).toEqual({ opens: NO_OPENS, now: false });
+  });
+});
+
+describe("a new arrival glows (Jesus's pick 6B, Nov 22 2026)", () => {
+  function arrivals(initial: Record<string, Hold>) {
+    const hook = renderHook(({ h }) => useArrivalGlow(h), { initialProps: { h: holds(initial) } });
+    return {
+      glowing: (id: string) => hook.result.current.glowing(id),
+      clear: (id: string) => act(() => hook.result.current.clear(id)),
+      holds: (next: Record<string, Hold>) => hook.rerender({ h: holds(next) }),
+    };
+  }
+
+  it("glows a file that lands, not the icons already there", () => {
+    const d = arrivals({ old: null });
+    expect(d.glowing("old")).toBe(false);
+    d.holds({ old: null, fresh: null });
+    expect(d.glowing("fresh")).toBe(true);
+    expect(d.glowing("old")).toBe(false);
+  });
+
+  it("files on the hydrate document are the baseline, a later file glows", () => {
+    const hook = renderHook(({ h, r }) => useArrivalGlow(h, r), { initialProps: { h: holds({}), r: false } });
+    hook.rerender({ h: holds({ old: null }), r: true });
+    expect(hook.result.current.glowing("old")).toBe(false);
+    hook.rerender({ h: holds({ old: null, fresh: null }), r: true });
+    expect(hook.result.current.glowing("fresh")).toBe(true);
+    expect(hook.result.current.glowing("old")).toBe(false);
+  });
+
+  it("a second hydrate (local store swapped for the graph one) is a baseline too", () => {
+    const hook = renderHook(({ h, n }) => useArrivalGlow(h, true, n), { initialProps: { h: holds({ local: null }), n: 0 } });
+    hook.rerender({ h: holds({ local: null, synced: null }), n: 1 });
+    expect(hook.result.current.glowing("synced")).toBe(false);
+    hook.rerender({ h: holds({ local: null, synced: null, fresh: null }), n: 1 });
+    expect(hook.result.current.glowing("fresh")).toBe(true);
+  });
+
+  it("an upload glows once it has landed, not while dim", () => {
+    const d = arrivals({});
+    d.holds({ up: "uploading" });
+    expect(d.glowing("up")).toBe(false);
+    d.holds({ up: null });
+    expect(d.glowing("up")).toBe(true);
+  });
+
+  it("opening it clears the glow", () => {
+    const d = arrivals({});
+    d.holds({ a: null });
+    expect(d.glowing("a")).toBe(true);
+    d.clear("a");
+    expect(d.glowing("a")).toBe(false);
+  });
+
+  it("fades out after GLOW_MS", () => {
+    const d = arrivals({});
+    d.holds({ a: null });
+    act(() => void vi.advanceTimersByTime(GLOW_MS - 1));
+    expect(d.glowing("a")).toBe(true);
+    act(() => void vi.advanceTimersByTime(1));
+    expect(d.glowing("a")).toBe(false);
   });
 });

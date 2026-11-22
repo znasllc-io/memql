@@ -13,7 +13,7 @@ import { downloadArtifact } from "../apps/files/actions/download";
 import { useAuthSource } from "../auth/context";
 import { FileIcon } from "../items/FileIcon";
 import { FolderIcon } from "../items/FolderIcon";
-import { holdOf, useDeskFileStates, type DeskLine, type Hold } from "../items/deskFileState";
+import { holdOf, useArrivalGlow, useDeskFileStates, type DeskLine, type Hold } from "../items/deskFileState";
 import type { UploadProvider } from "../items/upload";
 import { accessAdmits, widgetById, widgetsFor } from "../system/registry";
 import { borderlessArea, halvesOf, placeWindows, type PlacementTokens, type Rect } from "../system/placement";
@@ -169,7 +169,8 @@ export function Desktop({
     if (wait === "open") openFile(item);
     else void fileIntoFolder(item, wait.folderId);
   });
-  const fileLook = (id: string) => ({ hold: holds.get(id) ?? null, line: fileStates.line(id) });
+  const arrival = useArrivalGlow(holds, state.deskResolved, state.deskHydrations);
+  const fileLook = (id: string) => ({ hold: holds.get(id) ?? null, line: fileStates.line(id), glow: arrival.glowing(id) });
 
   // The desktop is a strip of plates that only the pager moves. Anything that
   // scrolls it (a focus call, a reveal) is undone at once.
@@ -649,7 +650,10 @@ export function Desktop({
               noAnswerFor={noAnswerFor}
               fileLook={fileLook}
               onSelect={actions.selectSurfaceItem}
-              onOpenFile={(item) => fileStates.ask(item.id, "open")}
+              onOpenFile={(item) => {
+                arrival.clear(item.id);
+                fileStates.ask(item.id, "open");
+              }}
               onOpenFolder={openFolderInFiles}
               onRetryUpload={(itemId) => {
                 const file = pendingFiles.current.get(itemId);
@@ -884,6 +888,7 @@ function DeskPlate({
 interface FileLook {
   hold: Hold;
   line: DeskLine;
+  glow: boolean;
 }
 
 function SurfaceItem({
@@ -987,6 +992,7 @@ function SurfaceItem({
           entry={item}
           hold={look.hold}
           line={look.line}
+          glow={look.glow}
           selected={selected}
           noAnswerMessage={noAnswerFor === item.id ? VSCODE_NO_ANSWER_MESSAGE : null}
           onOpen={() => onOpenFile(item)}

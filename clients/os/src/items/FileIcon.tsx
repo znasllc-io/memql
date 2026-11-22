@@ -19,6 +19,7 @@ export function FileIcon({
   entry,
   hold = null,
   line = null,
+  glow = false,
   selected,
   noAnswerMessage = null,
   onOpen,
@@ -29,6 +30,8 @@ export function FileIcon({
   /** What stops it opening right now: drawn dim while uploading or offline. */
   hold?: Hold;
   line?: DeskLine;
+  /** Just arrived on the desk: a soft glow around the tile, no words. */
+  glow?: boolean;
   selected: boolean;
   /** Non-null after a handoff nothing answered; rendered as a status. */
   noAnswerMessage?: string | null;
@@ -39,7 +42,7 @@ export function FileIcon({
   const dim = hold === "uploading" || hold === "offline";
 
   return (
-    <div className="os-file" data-os-file={entry.id} data-selected={selected || undefined} data-dim={dim || undefined}>
+    <div className="os-file" data-os-file={entry.id} data-selected={selected || undefined} data-dim={dim || undefined} data-new={glow || undefined}>
       <button
         type="button"
         className="os-file-button"
