@@ -3,10 +3,13 @@ package memql
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -55,6 +58,7 @@ type exchangeServer struct {
 
 func newExchangeServer(t *testing.T) *exchangeServer {
 	t.Helper()
+	isolateVendorSignIns(t)
 	f := &exchangeServer{token: "sk-federated-1", expiresIn: 3600, status: http.StatusOK}
 
 	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -118,6 +122,26 @@ func (f *exchangeServer) deny(status int, body string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.status, f.denyBody = status, body
+}
+
+// rotateIdentityToken replaces the identity token at path the way kubelet
+// rotates a projected one: same path, new content.
+func rotateIdentityToken(t *testing.T, path, audience string) {
+	t.Helper()
+	payload, err := json.Marshal(map[string]any{
+		"aud": []any{audience},
+		"sub": "system:serviceaccount:memql:memql-engine",
+		"exp": 4102444800,
+		"jti": fmt.Sprintf("rotated-%d", time.Now().UnixNano()),
+	})
+	if err != nil {
+		t.Fatalf("marshal claims: %v", err)
+	}
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT"}`))
+	token := header + "." + base64.RawURLEncoding.EncodeToString(payload) + ".c2ln"
+	if err := os.WriteFile(path, []byte(token), 0o600); err != nil {
+		t.Fatalf("rotate token: %v", err)
+	}
 }
 
 func readAllBody(req *http.Request) ([]byte, error) {
@@ -241,6 +265,108 @@ func TestOpenAICredentialRefusesATokenWithTheWrongAudience(t *testing.T) {
 
 // --- the exchange ----------------------------------------------------------
 
+// TestOpenAIClientsAndTranscriptionShareOneSignIn: every consumer of the
+// cluster's OpenAI account takes its bearer from the one sign-in the process
+// keeps (design 2026-11-21, A1). Each used to build an exchanger of its own,
+// and the transcription socket built another every time it asked.
+func TestOpenAIClientsAndTranscriptionShareOneSignIn(t *testing.T) {
+	f := newExchangeServer(t)
+	cfg := openaiFederatedConfig(t, f)
+	ctx := context.Background()
+
+	chat, err := newOpenAIProvider(cfg)
+	if err != nil {
+		t.Fatalf("newOpenAIProvider: %v", err)
+	}
+	stream, err := newOpenAIStreamProvider(cfg)
+	if err != nil {
+		t.Fatalf("newOpenAIStreamProvider: %v", err)
+	}
+	speech, err := newOpenAITTSProvider(cfg)
+	if err != nil {
+		t.Fatalf("newOpenAITTSProvider: %v", err)
+	}
+	transcribe, err := newOpenAISTTProvider(cfg)
+	if err != nil {
+		t.Fatalf("newOpenAISTTProvider: %v", err)
+	}
+	embed, err := newOpenAIEmbeddingProvider(cfg)
+	if err != nil {
+		t.Fatalf("newOpenAIEmbeddingProvider: %v", err)
+	}
+
+	registry := newProviderRegistry()
+	registry.setEntry(&ProviderConfigEntry{Config: cfg, Client: chat, Available: true})
+	socket, ok := (&MemQLEngine{providers: registry}).OpenAIBearer()
+	if !ok {
+		t.Fatal("OpenAIBearer found no federated OpenAI provider")
+	}
+
+	var clients []*openai.Client
+	for _, p := range []AIProvider{chat, stream, speech} {
+		client, ok := openAIClientOf(p)
+		if !ok {
+			t.Fatalf("%T carries no OpenAI client", p)
+		}
+		clients = append(clients, client)
+	}
+	clients = append(clients, transcribe.(*openAISTTProvider).client)
+	for i, client := range clients {
+		if _, err := client.Chat.Completions.New(ctx, buildMinimalChatParams()); err != nil {
+			t.Fatalf("client %d: %v", i, err)
+		}
+	}
+	embedBearer, _, err := embed.(*OpenAIEmbeddingClient).bearer.Bearer(ctx)
+	if err != nil {
+		t.Fatalf("embedding bearer: %v", err)
+	}
+	socketBearer, _, err := socket.Bearer(ctx)
+	if err != nil {
+		t.Fatalf("transcription bearer: %v", err)
+	}
+
+	if n := len(f.exchanges()); n != 1 {
+		t.Fatalf("six consumers of one OpenAI account made %d sign-ins, want 1", n)
+	}
+	auths := f.apiAuthorizations()
+	if len(auths) != len(clients) {
+		t.Fatalf("API requests = %d, want %d", len(auths), len(clients))
+	}
+	for i, auth := range auths {
+		if auth != "Bearer sk-federated-1" {
+			t.Errorf("client %d sent Authorization %q, want the one federated bearer", i, auth)
+		}
+	}
+	if embedBearer != "sk-federated-1" || socketBearer != "sk-federated-1" {
+		t.Errorf("embedding bearer %q, transcription bearer %q; want the one federated bearer", embedBearer, socketBearer)
+	}
+}
+
+func TestOpenAIBearerIsTheSharedSignIn(t *testing.T) {
+	f := newExchangeServer(t)
+	cfg := openaiFederatedConfig(t, f)
+
+	_, source, _, err := openaiCredential(cfg, guardedHTTPClient(nil))
+	if err != nil {
+		t.Fatalf("openaiCredential: %v", err)
+	}
+	registry := newProviderRegistry()
+	registry.setEntry(&ProviderConfigEntry{Config: cfg, Available: true})
+	engine := &MemQLEngine{providers: registry}
+
+	first, ok := engine.OpenAIBearer()
+	if !ok {
+		t.Fatal("OpenAIBearer found no federated OpenAI provider")
+	}
+	second, _ := engine.OpenAIBearer()
+	if first != second {
+		t.Fatal("two calls to OpenAIBearer returned two different sign-ins")
+	}
+	if first != source {
+		t.Fatal("OpenAIBearer is not the sign-in the provider clients use")
+	}
+}
+
 func TestOpenAIExchangeHappyPath(t *testing.T) {
 	f := newExchangeServer(t)
 	cfg := openaiFederatedConfig(t, f)
@@ -342,10 +468,20 @@ func TestOpenAIExchangeCachesAndReExchangesBeforeExpiry(t *testing.T) {
 		t.Fatalf("a cached token still cost %d exchanges", n)
 	}
 
-	// Inside the mandatory window: it must re-exchange rather than hand out a
-	// token that is about to stop working mid-request.
+	// Near expiry with the SAME identity token on disk: the bearer in hand is
+	// still valid and the token has already bought it, so nothing is presented.
+	exchanger.now = func() time.Time { return expiresAt.Add(-15 * time.Second) }
+	if again, _, err := exchanger.Bearer(context.Background()); err != nil || again != first {
+		t.Fatalf("near-expiry Bearer with no new identity token = %q, %v; want the cached token", again, err)
+	}
+	if n := len(f.exchanges()); n != 1 {
+		t.Fatalf("the same identity token was presented again: %d exchanges", n)
+	}
+
+	// Kubelet rotates the token. Near expiry it must sign in again rather than
+	// hand out a bearer that is about to stop working mid-request.
+	rotateIdentityToken(t, fed.TokenFile, openaiAudience)
 	f.setToken("sk-federated-2")
-	exchanger.now = func() time.Time { return expiresAt.Add(-openaiRefreshMandatory / 2) }
 	renewed, _, err := exchanger.Bearer(context.Background())
 	if err != nil {
 		t.Fatalf("renewal Bearer: %v", err)
@@ -378,8 +514,9 @@ func TestOpenAIExchangeKeepsTheLastGoodBearerThroughADenial(t *testing.T) {
 		t.Fatalf("first Bearer: %v", err)
 	}
 
+	rotateIdentityToken(t, fed.TokenFile, openaiAudience)
 	f.deny(http.StatusForbidden, `{"error":{"message":"subject does not match the mapping"}}`)
-	exchanger.now = func() time.Time { return expiresAt.Add(-openaiRefreshMandatory / 2) }
+	exchanger.now = func() time.Time { return expiresAt.Add(-15 * time.Second) }
 
 	still, _, err := exchanger.Bearer(context.Background())
 	if err != nil {
@@ -387,6 +524,9 @@ func TestOpenAIExchangeKeepsTheLastGoodBearerThroughADenial(t *testing.T) {
 	}
 	if still != first {
 		t.Errorf("bearer after a denial = %q, want the last good one %q", still, first)
+	}
+	if n := len(f.exchanges()); n != 2 {
+		t.Fatalf("exchanges = %d, want 2: the rotated token must have been presented and refused", n)
 	}
 
 	// Once it has actually expired there is nothing to fall back to, and the

@@ -325,7 +325,9 @@ func (s *vendorSignIn) present(ctx context.Context, token string, hash [sha256.S
 
 	case errors.As(err, &refused):
 		s.presentedOutcome = signInOutcomeDenied
-		s.lastErr = fmt.Errorf("%s sign-in: %w", s.cfg.Vendor, err)
+		// The runbook is named because a refusal is a configuration answer, and
+		// this error is what a failed model call carries to whoever reads it.
+		s.lastErr = fmt.Errorf("%s sign-in: %w. Runbook: %s", s.cfg.Vendor, err, federationRunbookFor(s.cfg.Vendor))
 		rec := vendorSignInRecord{
 			Outcome: signInOutcomeDenied,
 			Status:  refused.Status,
