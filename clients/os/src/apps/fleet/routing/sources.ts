@@ -114,6 +114,8 @@ export function factsFrom(input: {
   inference: {
     read: boolean;
     federationConfigured: boolean;
+    /** The cluster's account pays for this reader. Absent on an engine that predates the rule, where set up meant everybody. */
+    clusterAccountOpen?: boolean;
     /** The reader has an API key that can pay for a vendor model, federation or not. */
     keyAccount?: boolean;
     error: string;
@@ -138,8 +140,12 @@ export function factsFrom(input: {
         apps: m.apps,
       })),
     // A vendor can serve this reader when an account can pay: the cluster's
-    // federation, or an API key of theirs.
-    vendor: !input.inference.read ? "unknown" : input.inference.federationConfigured || input.inference.keyAccount === true ? "ready" : "idle",
+    // federation where it pays for them, or an API key of theirs.
+    vendor: !input.inference.read
+      ? "unknown"
+      : (input.inference.clusterAccountOpen ?? input.inference.federationConfigured) || input.inference.keyAccount === true
+        ? "ready"
+        : "idle",
     routes: input.routes,
     preference: input.preference,
     eligibleModelIds:

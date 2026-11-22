@@ -5,7 +5,7 @@ import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { AutoRefresh, Button, Caption, Head, Notice, Details, DetailsSection, boolOr, stringsOf, useAppReach } from "../../../kit";
 import { useSession } from "../../../chrome/access";
-import { vendorDoorWords } from "../../settings/routingFacts";
+import { clusterAccountPaysFor, vendorDoorWords } from "../../settings/routingFacts";
 import { holds } from "../../../system/roles";
 import { useOsConnection } from "../../../live/connection";
 import { useReading } from "../../../cluster/reading";
@@ -113,6 +113,7 @@ function InferenceLine({
       appSessionsInstalled: boolOr(row, "appSessionsInstalled", false),
       cloudConfigured: boolOr(row, "cloudConfigured", false),
       federationConfigured: boolOr(row, "federationConfigured", false),
+      clusterAccountOpen: clusterAccountPaysFor(row ?? {}),
       keyAccount: boolOr(row, "keyAccount", false),
       fleetCatalogInstalled: boolOr(row, "fleetCatalogInstalled", false),
       minimumContextWindow: numberOf(row, "minimumContextWindow"),
@@ -206,6 +207,8 @@ function InferenceLine({
 function notReadyNext(facts: {
   cloudConfigured: boolean;
   federationConfigured: boolean;
+  /** The cluster's account pays for the reader. It is not a pool for everybody. */
+  clusterAccountOpen: boolean;
   fleetCatalogInstalled: boolean;
   appSessionsInstalled: boolean;
   /** The reader holds the Settings part that adds an API key. */
@@ -232,6 +235,10 @@ function notReadyNext(facts: {
     routes.push(
       "set up Anthropic or OpenAI workload-identity federation (Settings -> Vendors)",
     );
+  } else if (!facts.clusterAccountOpen) {
+    // Set up, and not this reader's to spend (owner decision 2026-11-22).
+    // Telling them to set up federation would send them to do what is done.
+    routes.push("ask the cluster's owner to let the cluster's vendor account pay for your calls (Users -> Access)");
   }
   // A person's own account at a vendor (design record
   // 2026-11-21-vendor-accounts-and-api-keys). Named only to somebody who may
@@ -259,7 +266,7 @@ function notReadyNext(facts: {
  *  named by what pays for it (`vendorDoorWords`): the cluster's federation, an
  *  API key of the reader's, or both. It drops the vendor's name, because both
  *  vendors sit behind it and the reading does not say which would answer. */
-function doorPhrase(doors: readonly string[], accounts: { federationConfigured: boolean; keyAccount: boolean }): string {
+function doorPhrase(doors: readonly string[], accounts: { clusterAccountOpen: boolean; keyAccount: boolean }): string {
   if (doors.length === 0) return "a door it did not name";
   const named = doors.map((door) =>
     door === "local"
@@ -267,7 +274,7 @@ function doorPhrase(doors: readonly string[], accounts: { federationConfigured: 
       : door === "app"
         ? "a signed-in app on one of your machines"
         : door === "federation"
-          ? vendorDoorWords(accounts.federationConfigured, accounts.keyAccount)
+          ? vendorDoorWords(accounts.clusterAccountOpen, accounts.keyAccount)
           : door,
   );
   if (named.length === 1) return named[0] as string;

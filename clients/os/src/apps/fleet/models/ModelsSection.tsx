@@ -375,11 +375,16 @@ function DoorsPanel({
             <DoorState
               name="Federation"
               // Open when an account can pay for a vendor's models for this
-              // reader: the cluster's federation, or an API key of theirs.
-              open={doors.federationConfigured || doors.keyAccount}
+              // reader: the cluster's federation where it pays for them, or
+              // an API key of theirs.
+              open={doors.clusterAccountOpen || doors.keyAccount}
               detail={
-                doors.federationConfigured || doors.keyAccount
-                  ? vendorDoorWords(doors.federationConfigured, doors.keyAccount)
+                doors.clusterAccountOpen || doors.keyAccount
+                  ? vendorDoorWords(doors.clusterAccountOpen, doors.keyAccount)
+                  : doors.federationConfigured
+                    ? // Set up, and not this reader's to spend (owner decision
+                      // 2026-11-22). What they can do about it is add a key.
+                      "the cluster's vendor account does not pay for your calls; add an API key in Settings"
                   : doors.cloudConfigured
                     ? // A callable cloud provider that is not federated cannot
                       // happen since epic memql#5088, and this is the one line
@@ -550,7 +555,7 @@ function doorSentence(doors: DoorsReading): string {
 
 /** The doors in the reader's words. An unrecognised value is printed as it
  *  came, never dropped: a door this build has no name for is still a door. */
-function doorWord(door: string, doors: Pick<DoorsReading, "federationConfigured" | "keyAccount">): string {
+function doorWord(door: string, doors: Pick<DoorsReading, "clusterAccountOpen" | "keyAccount">): string {
   switch (door) {
     case "local":
       // Yours, or lent to you (epic memql#5344): a person's catalog holds
@@ -561,7 +566,7 @@ function doorWord(door: string, doors: Pick<DoorsReading, "federationConfigured"
     case "federation":
       // The vendor door, named by what pays: the cluster's federation, an API
       // key of the reader's, or both.
-      return vendorDoorWords(doors.federationConfigured, doors.keyAccount);
+      return vendorDoorWords(doors.clusterAccountOpen, doors.keyAccount);
     // `apiKey` has no case, because nothing produces it: a person's API key is
     // an account behind the vendor door above, not a door of its own. An older
     // node still reporting it falls through to the pass-through below and is

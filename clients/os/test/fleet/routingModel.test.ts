@@ -430,6 +430,15 @@ describe("the tray", () => {
     expect(facts({ federationConfigured: false, keyAccount: false }).vendor).toBe("idle");
     expect(facts({ federationConfigured: false }).vendor).toBe("idle");
   });
+
+  it("does not count the cluster's account for a reader it does not pay for", () => {
+    const facts = (inference: { federationConfigured: boolean; clusterAccountOpen?: boolean; keyAccount?: boolean }) =>
+      factsFrom({ machines: [], machinesRead: true, inference: { read: true, error: "", ...inference }, routes: [], preference: [] });
+    // Set up, and closed to this reader: no vendor, unless a key of theirs pays.
+    expect(facts({ federationConfigured: true, clusterAccountOpen: false }).vendor).toBe("idle");
+    expect(facts({ federationConfigured: true, clusterAccountOpen: false, keyAccount: true }).vendor).toBe("ready");
+    expect(facts({ federationConfigured: true, clusterAccountOpen: true }).vendor).toBe("ready");
+  });
 });
 
 describe("the engine's local floor and the router's app order", () => {

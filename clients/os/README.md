@@ -400,6 +400,18 @@ the one Settings section a user or a viewer holds, which is what puts Settings
 on their desktop. Adding a key is the part (`execute app:settings/apikeys`,
 seeded on every predefined role).
 
+**"The cluster's account is set up" and "it pays for me" are two facts**
+(owner decision 2026-11-22). `inferenceStatus.federationConfigured` is the
+first and is the same for everybody. `clusterAccountOpen` is the second: the
+cluster's vendor account pays for the cluster's own work, and for a person only
+when its owner allowed them (`execute app:settings/clusteraccount`). Every
+surface that says a vendor can serve THE READER reads the second through
+`clusterAccountPaysFor` (`src/apps/settings/routingFacts.ts`), which falls
+back to the first on an engine that predates the rule. The Access editor names
+the part by what it grants ("Use the cluster's vendor account"), as it names
+`app:settings/apikeys` "Add API keys": neither has a section to be named
+after.
+
 **API keys is deliberately NOT a live surface.** A key's rows publish no graph
 event, by design: an event carries the whole row, the sealed value included, to
 every subscriber. So there is no collection to `retain()` and none may be
