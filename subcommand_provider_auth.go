@@ -243,8 +243,8 @@ func writeProviderAuthReport(w io.Writer, r memql.ProviderAuthReport) {
 			line("vendorSaid", r.Detail)
 		}
 		if r.MayBeReplay {
-			line("note", "the identity token was issued before this engine process started, so the refusal "+
-				"may only mean an earlier process in this pod already used it")
+			line("note", "the refusal may only mean this identity token was already presented, by an earlier "+
+				"process in this pod or by an attempt the vendor never answered; the next token settles it")
 		}
 		if !r.NextTokenDue.IsZero() {
 			line("nextTokenDue", r.NextTokenDue.UTC().Format(time.RFC3339))

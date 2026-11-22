@@ -974,6 +974,71 @@ func TestARenewalWhileTheBearerStillWorksKeepsTheProof(t *testing.T) {
 	}
 }
 
+// An attempt the vendor never answered is presented again, because the vendor
+// may not have seen it. It may equally have accepted it and lost the answer on
+// the way back, and then the second presentation is refused as a repeat. That
+// refusal says nothing about the configuration: the token was issued to this
+// process, and nobody else used it. It is marked the way a restarted
+// container's is, so the check does not call a working rule refused and the
+// engine presents the next token by itself.
+func TestARefusalAfterAnUnansweredAttemptMayOnlyBeARepeat(t *testing.T) {
+	h := newSignInHarness(t)
+	issued := h.clock()
+	h.writeTokenIssued("jti-1", issued, issued.Add(10*time.Minute)) // issued to THIS process
+	s := h.signIn(true)
+
+	h.faulting = true
+	if _, _, err := s.Bearer(context.Background()); err == nil {
+		t.Fatal("a sign-in the vendor never answered handed out a bearer")
+	}
+	// The vendor did take the token; its answer was what got lost.
+	h.mu.Lock()
+	h.faulting = false
+	h.accepted["jti-1"] = true
+	h.mu.Unlock()
+
+	h.advance(vendorSignInRetryBackoff + time.Second)
+	if _, _, err := s.Bearer(context.Background()); err == nil {
+		t.Fatal("the vendor refused the repeated token and a bearer was handed out")
+	}
+	rec, _ := s.Record()
+	if rec.Outcome != signInOutcomeDenied {
+		t.Fatalf("outcome = %q, want %q", rec.Outcome, signInOutcomeDenied)
+	}
+	if !rec.MayBeReplay || rec.NextTokenDue.IsZero() {
+		t.Fatalf("record = %+v: a refusal of a token the engine itself had already presented is recorded as "+
+			"a refusal of the configuration, with no next token to wait for", rec)
+	}
+	if want := issued.Add(8 * time.Minute); !rec.NextTokenDue.Equal(want) {
+		t.Fatalf("next token due %v, want %v", rec.NextTokenDue, want)
+	}
+}
+
+// The same refusal on a vendor with no replay rule is an answer about the
+// configuration: that vendor would have accepted the token a second time.
+func TestARefusalAfterAnUnansweredAttemptIsAnAnswerWithoutAReplayRule(t *testing.T) {
+	h := newSignInHarness(t)
+	h.allowReplay = true
+	h.writeToken("jti-1")
+	s := h.signIn(false)
+
+	h.faulting = true
+	if _, _, err := s.Bearer(context.Background()); err == nil {
+		t.Fatal("a sign-in the vendor never answered handed out a bearer")
+	}
+	h.mu.Lock()
+	h.faulting = false
+	h.refused["jti-1"] = true
+	h.mu.Unlock()
+	h.advance(vendorSignInRetryBackoff + time.Second)
+	if _, _, err := s.Bearer(context.Background()); err == nil {
+		t.Fatal("a refused sign-in handed out a bearer")
+	}
+	if rec, _ := s.Record(); rec.Outcome != signInOutcomeDenied || rec.MayBeReplay {
+		t.Fatalf("record = %+v, want a plain refusal", rec)
+	}
+}
+
 // A reload lists the vendor's models again with the bearer in hand. When that
 // list fails, for a timeout or a refusal, the record says so. The next call the
 // vendor serves with the same bearer is newer evidence and must be allowed to

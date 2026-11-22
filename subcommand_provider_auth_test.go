@@ -347,7 +347,13 @@ func TestProviderAuthReportExplainsAPossibleReplay(t *testing.T) {
 		NextTokenDue:    due,
 	})
 	out := buf.String()
-	for _, want := range []string{"denied", "jti_reused", "issued before this engine process started", "2026-11-22T10:08:00Z"} {
+	// Two things make a refusal a possible repeat: a container that restarted in
+	// its pod, and an attempt of this process the vendor never answered. The
+	// note covers both and does not claim the first when it was the second.
+	if strings.Contains(out, "issued before this engine process started") {
+		t.Errorf("the note still says only a restart can explain the refusal:\n%s", out)
+	}
+	for _, want := range []string{"denied", "jti_reused", "already presented", "2026-11-22T10:08:00Z"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the report does not mention %q:\n%s", want, out)
 		}

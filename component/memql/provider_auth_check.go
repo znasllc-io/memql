@@ -99,9 +99,10 @@ type ProviderAuthReport struct {
 	// Detail is the vendor's own reason on a refusal, or the fault when the
 	// vendor never answered.
 	Detail string
-	// MayBeReplay marks a refusal of an identity token issued before the
-	// engine started: a container restarted inside its pod reads the same
-	// token again, and a vendor that accepts a token once refuses it.
+	// MayBeReplay marks a refusal that may only mean the identity token was
+	// already presented: by the process this engine replaced (a container
+	// restarted inside its pod reads the same token again), or by an attempt
+	// of this engine the vendor never answered.
 	MayBeReplay bool
 	// NextTokenDue is when the identity token is expected to be replaced.
 	NextTokenDue time.Time
@@ -318,9 +319,9 @@ func signInVerdict(rec vendorSignInRecord) error {
 			ErrSignInNotVerified, dueClause(rec.NextTokenDue))
 	case signInOutcomeDenied:
 		if rec.MayBeReplay {
-			return fmt.Errorf("%w: the vendor refused the sign-in (status %d: %s), but the identity token "+
-				"was issued before this engine process started, so it may only have been used already by the "+
-				"process this one replaced. The engine presents the next token when it arrives%s",
+			return fmt.Errorf("%w: the vendor refused the sign-in (status %d: %s), but this identity token may "+
+				"only have been presented already: by the process this one replaced, or by an attempt of this "+
+				"one the vendor never answered. The engine presents the next token when it arrives%s",
 				ErrSignInNotVerified, rec.Status, rec.Detail, dueClause(rec.NextTokenDue))
 		}
 		return fmt.Errorf("the vendor refused the engine's sign-in (status %d): %s", rec.Status, rec.Detail)

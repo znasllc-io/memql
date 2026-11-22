@@ -233,12 +233,13 @@ type vendorSignInRecord struct {
 	ExpiresAt time.Time `json:"expiresAt,omitempty"`
 	// Detail is the vendor's reason on a refusal, or the fault on an error.
 	Detail string `json:"detail,omitempty"`
-	// MayBeReplay marks a refusal, by a vendor that accepts a token once, of a
-	// token issued before this process started: an earlier process in this pod
-	// may already have used it. It is also true of every NEW pod's first
-	// token, which kubelet mints before the container starts, so it says only
-	// that the next token will settle the question (the engine tries again
-	// when that token is due).
+	// MayBeReplay marks a refusal, by a vendor that accepts a token once, that
+	// may only mean the token was already presented: it was issued before this
+	// process started (an earlier process in this pod may have used it, and
+	// every NEW pod's first token looks the same, because kubelet mints it
+	// before the container starts), or this process presented it before and
+	// the vendor never answered. It says only that the next token will settle
+	// the question; the engine presents that token when it is due.
 	MayBeReplay bool `json:"mayBeReplay,omitempty"`
 	// NextTokenDue is when the identity token is expected to be replaced.
 	NextTokenDue  time.Time         `json:"nextTokenDue,omitempty"`
@@ -461,6 +462,9 @@ func (s *vendorSignIn) fly(ctx context.Context, flight *signInFlight, token stri
 	// The clock is read after the exchange: it may have spent seconds failing,
 	// and the pause before another attempt starts from here.
 	answered := s.now()
+	// Read before this attempt is written down: was this same token presented
+	// before, and the vendor never answered?
+	repeatOfUnanswered := s.hasPresented && s.presented == hash && s.presentedOutcome == signInOutcomeError
 	s.hasPresented, s.presented, s.presentedAt, s.retryAllowed = true, hash, answered, false
 
 	var refused *vendorExchangeRefused
@@ -503,14 +507,23 @@ func (s *vendorSignIn) fly(ctx context.Context, flight *signInFlight, token stri
 			At:      answered,
 			Detail:  refused.Body,
 		}
-		// ONLY A VENDOR WITH A REPLAY RULE CAN MEAN THIS. A token issued before
-		// this process started may already have been used by the process this
-		// one replaced, so the refusal may say nothing about the configuration.
-		// It is equally true of a new pod's first token, so the mark claims no
-		// more than "the next token settles it", and the engine presents that
-		// token when it is due (ai_vendor_signin_boot.go). A vendor that
-		// accepts a token any number of times refused for a reason of its own.
-		if s.cfg.ReplayProtected && identityTokenIssuedBefore(token, s.started) {
+		// ONLY A VENDOR WITH A REPLAY RULE CAN MEAN THIS, and two things make
+		// a refusal a possible repeat rather than an answer about the
+		// configuration:
+		//
+		//   - the token was issued before this process started, so the process
+		//     this one replaced may already have used it. It is equally true of
+		//     a new pod's first token;
+		//   - this process presented the same token before and the vendor never
+		//     answered. An unanswered attempt is retried because the vendor may
+		//     not have seen it, but it may also have accepted it and lost the
+		//     answer on the way back, and then this presentation is the repeat.
+		//
+		// Either way the mark claims no more than "the next token settles it",
+		// and the engine presents that token when it is due
+		// (ai_vendor_signin_boot.go). A vendor that accepts a token any number
+		// of times refused for a reason of its own.
+		if s.cfg.ReplayProtected && (identityTokenIssuedBefore(token, s.started) || repeatOfUnanswered) {
 			rec.MayBeReplay = true
 			rec.NextTokenDue = nextIdentityTokenDue(token)
 		}
