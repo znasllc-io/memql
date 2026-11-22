@@ -21,7 +21,7 @@ import (
 // A key that stops working does not stop anybody's work. The call moves to the
 // next account that can pay: a key somebody else lent, or the cluster's own.
 // That is the point of the order, and it is also why a dead key is silent. Its
-// owner finds out when they next open Fleet, and until then somebody else is
+// owner finds out when they next open their keys, and until then somebody else is
 // paying for calls they thought were theirs. So the owner is mailed.
 //
 // # A pass, and not the node that saw the fall
@@ -320,14 +320,14 @@ func (s *Store) tellOwner(ctx context.Context, notify Notifier, keyId string) no
 	key, found, err := s.Key(ctx, keyId)
 	if err != nil {
 		s.logger.Warn("vendorkeys: an API key stopped working and its owner was not told: the key could not be read",
-			"keyId", keyId, "reason", failureReason(err))
+			keySubject(keyId), "reason", failureReason(err))
 		return noticeFailed
 	}
 	name, email, active := "", "", false
 	if found && key.Active() {
 		if name, email, active, err = s.owner(ctx, key.OwnerUserId); err != nil {
 			s.logger.Warn("vendorkeys: an API key stopped working and its owner was not told: the owner could not be read",
-				"keyId", keyId, "reason", failureReason(err))
+				keySubject(keyId), "reason", failureReason(err))
 			return noticeFailed
 		}
 	}
@@ -336,7 +336,7 @@ func (s *Store) tellOwner(ctx context.Context, notify Notifier, keyId string) no
 		// here, or has no address. Settled, so it is not asked about again.
 		if err := s.settleNotice(ctx, keyId, fall.EvidenceAt); err != nil {
 			s.logger.Warn("vendorkeys: an API key with nobody to tell could not be settled; the next pass asks again",
-				"keyId", keyId, "reason", failureReason(err))
+				keySubject(keyId), "reason", failureReason(err))
 		}
 		return noticeNobody
 	}
@@ -351,12 +351,12 @@ func (s *Store) tellOwner(ctx context.Context, notify Notifier, keyId string) no
 		// The reason is a mail system's and may name an address; the sender
 		// logs its own. The key's id is enough to find the rest.
 		s.logger.Warn("vendorkeys: an API key stopped working and the notice to its owner was not sent; it is tried again later",
-			"keyId", keyId, "state", fall.State, "retryAfter", noticeRetryEvery.String())
+			keySubject(keyId), "state", fall.State, "retryAfter", noticeRetryEvery.String())
 		return noticeFailed
 	}
 	if err := s.settleNotice(ctx, keyId, fall.EvidenceAt); err != nil {
 		s.logger.Warn("vendorkeys: the owner of an API key was told it stopped working, and that could not be recorded; they may be told again",
-			"keyId", keyId, "reason", failureReason(err), "retryAfter", noticeRetryEvery.String())
+			keySubject(keyId), "reason", failureReason(err), "retryAfter", noticeRetryEvery.String())
 	}
 	return noticeSent
 }
@@ -369,7 +369,7 @@ func (s *Store) claimNotice(ctx context.Context, keyId string) (State, noticeOut
 	if err != nil {
 		if !errors.Is(err, memql.ErrWriteGateBusy) {
 			s.logger.Warn("vendorkeys: the gate of an API key's state could not be taken to tell its owner",
-				"keyId", keyId, "reason", failureReason(err))
+				keySubject(keyId), "reason", failureReason(err))
 		}
 		return State{}, noticeWaiting
 	}
@@ -382,7 +382,7 @@ func (s *Store) claimNotice(ctx context.Context, keyId string) (State, noticeOut
 
 	state, found, err := s.state(ctx, keyId)
 	if err != nil {
-		s.logger.Warn("vendorkeys: an API key's state could not be read to tell its owner", "keyId", keyId, "reason", failureReason(err))
+		s.logger.Warn("vendorkeys: an API key's state could not be read to tell its owner", keySubject(keyId), "reason", failureReason(err))
 		return State{}, noticeFailed
 	}
 	if !found || !owesNotice(state) {
@@ -394,7 +394,7 @@ func (s *Store) claimNotice(ctx context.Context, keyId string) (State, noticeOut
 	}
 	if err := s.writeState(ctx, keyId, map[string]any{"noticeTriedAt": now.Format(time.RFC3339Nano)}); err != nil {
 		s.logger.Warn("vendorkeys: that an API key's owner is being told could not be recorded, so nothing was sent",
-			"keyId", keyId, "reason", failureReason(err))
+			keySubject(keyId), "reason", failureReason(err))
 		return State{}, noticeFailed
 	}
 	return state, noticeClaimed

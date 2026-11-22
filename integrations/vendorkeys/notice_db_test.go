@@ -55,6 +55,28 @@ func asTheNoticePass() context.Context {
 	return auth.ContextWithAccess(context.Background(), auth.AutomationActor(auth.AutomationOriginEngine, noticeAutomation))
 }
 
+// newNoticeDesk is a desk on which no key owes a notice yet.
+//
+// The pass is the cluster's: it reads every active key in the database, and
+// the database is shared with every other package's tests. A key one of them
+// left not working is counted here as owing its owner a notice, and the counts
+// these tests read are the whole pass's. So before a test installs its own
+// notifier, passes with one that accepts everything settle what was already
+// owed (a key with nobody to tell is settled too).
+func newNoticeDesk(t *testing.T, name string) *desk {
+	t.Helper()
+	d := newDesk(t, name)
+	d.store.SetNotifier(func(context.Context, KeyNotice) error { return nil })
+	defer d.store.SetNotifier(nil)
+	for pass := 0; pass < 20; pass++ {
+		if count(t, d.tell(), "owed") == 0 {
+			return d
+		}
+	}
+	t.Fatal("keys left by other tests still owe a notice after twenty passes")
+	return nil
+}
+
 // tell runs one pass the way the automation does, and returns what it said.
 func (d *desk) tell() map[string]any {
 	d.t.Helper()
@@ -71,7 +93,7 @@ func (d *desk) falls(keyId string, verdict memql.VendorKeyVerdict, detail string
 }
 
 func TestOneNoticeWhenAGoodKeyGoesBad(t *testing.T) {
-	d := newDesk(t, "notice")
+	d := newNoticeDesk(t, "notice")
 	dana := d.member("dana", auth.RoleDeveloper)
 	out := &outbox{}
 	d.store.SetNotifier(out.notify)
@@ -111,7 +133,7 @@ func TestOneNoticeWhenAGoodKeyGoesBad(t *testing.T) {
 }
 
 func TestNoSecondNoticeUntilItRecovers(t *testing.T) {
-	d := newDesk(t, "noticeagain")
+	d := newNoticeDesk(t, "noticeagain")
 	dana := d.member("dana", auth.RoleDeveloper)
 	out := &outbox{}
 	d.store.SetNotifier(out.notify)
@@ -141,7 +163,7 @@ func TestNoSecondNoticeUntilItRecovers(t *testing.T) {
 // A key that was refused and works again before anybody was told is working:
 // a notice that it stopped would be false by the time it was read.
 func TestAKeyThatRecoversBeforeItsNoticeGetsNone(t *testing.T) {
-	d := newDesk(t, "noticerecovered")
+	d := newNoticeDesk(t, "noticerecovered")
 	dana := d.member("dana", auth.RoleDeveloper)
 	out := &outbox{}
 	d.store.SetNotifier(out.notify)
@@ -157,7 +179,7 @@ func TestAKeyThatRecoversBeforeItsNoticeGetsNone(t *testing.T) {
 // A second replica that runs it while the first is still sending reads that
 // the first is trying, and leaves the key alone.
 func TestTwoReplicasSendOneNotice(t *testing.T) {
-	d := newDesk(t, "noticereplicas")
+	d := newNoticeDesk(t, "noticereplicas")
 	dana := d.member("dana", auth.RoleDeveloper)
 	out := &outbox{}
 	keyId := d.mustAdd(session(dana, auth.RoleDeveloper), "Personal")["id"].(string)
@@ -205,7 +227,7 @@ func TestTwoReplicasSendOneNotice(t *testing.T) {
 // began before the pass reports late), and the next time it stops working its
 // owner is owed a notice like any other.
 func TestAKeyThatRecoversWhileItsOwnerIsToldStillOwesTheNextFall(t *testing.T) {
-	d := newDesk(t, "noticerace")
+	d := newNoticeDesk(t, "noticerace")
 	dana := d.member("dana", auth.RoleDeveloper)
 	out := &outbox{}
 	keyId := d.mustAdd(session(dana, auth.RoleDeveloper), "Personal")["id"].(string)
@@ -234,7 +256,7 @@ func TestAKeyThatRecoversWhileItsOwnerIsToldStillOwesTheNextFall(t *testing.T) {
 // Nothing a key could be rebuilt from is handed to the notifier, and a key
 // with nobody to tell is settled instead of being asked about for ever.
 func TestTheNoticeCarriesNoKeyMaterialAndNeedsAnOwner(t *testing.T) {
-	d := newDesk(t, "noticesafe")
+	d := newNoticeDesk(t, "noticesafe")
 	dana := d.member("dana", auth.RoleDeveloper)
 	gone := d.member("gone", auth.RoleDeveloper)
 	out := &outbox{}
@@ -276,7 +298,7 @@ func TestTheNoticeCarriesNoKeyMaterialAndNeedsAnOwner(t *testing.T) {
 // A notice that could not be sent does not undo the verdict, and is tried
 // again later: not on the next pass, and not never.
 func TestANoticeThatFailsIsTriedAgainLater(t *testing.T) {
-	d := newDesk(t, "noticefails")
+	d := newNoticeDesk(t, "noticefails")
 	dana := d.member("dana", auth.RoleDeveloper)
 	out := &outbox{}
 	out.failing(errors.New("smtp is down"))
@@ -314,7 +336,7 @@ func TestANoticeThatFailsIsTriedAgainLater(t *testing.T) {
 // With no notifier installed nothing is sent and nothing is recorded as sent,
 // so a node that can send still does.
 func TestNoNotifierIsNotAFault(t *testing.T) {
-	d := newDesk(t, "noticenone")
+	d := newNoticeDesk(t, "noticenone")
 	dana := d.member("dana", auth.RoleDeveloper)
 	keyId := d.mustAdd(session(dana, auth.RoleDeveloper), "Personal")["id"].(string)
 	d.falls(keyId, memql.VendorKeyRefused, "invalid x-api-key")
@@ -332,10 +354,39 @@ func TestNoNotifierIsNotAFault(t *testing.T) {
 	require.Len(t, out.all(), 1)
 }
 
+// Check now on a key that is out of credit lists the vendor's models, which is
+// answered whether or not the account has credit. It must not read as the key
+// working again: the next call would fail, and its owner would be mailed a
+// second time about the same empty account. A cluster owner can press Check on
+// anybody's key, so it would also be somebody else doing that to them.
+func TestCheckingAKeyOutOfCreditDoesNotMailItsOwnerAgain(t *testing.T) {
+	d := newNoticeDesk(t, "noticecheck")
+	dana := d.member("dana", auth.RoleDeveloper)
+	omar := d.member("omar", auth.RoleOwner)
+	out := &outbox{}
+	d.store.SetNotifier(out.notify)
+	keyId := d.mustAdd(session(dana, auth.RoleDeveloper), "Personal")["id"].(string)
+
+	d.falls(keyId, memql.VendorKeyCredit, "credit balance is too low")
+	require.Equal(t, 1, count(t, d.tell(), "sent"))
+
+	d.clock = d.clock.Add(5 * time.Minute)
+	d.answers(memql.VendorKeyProbeGood, "")
+	_, err := d.in.handleCheck(session(omar, auth.RoleOwner), map[string]any{"keyId": keyId}, 0)
+	require.NoError(t, err)
+
+	// The next call it pays for fails as before.
+	d.falls(keyId, memql.VendorKeyCredit, "credit balance is too low")
+	d.clock = d.clock.Add(2 * noticeRetryEvery)
+	again := d.tell()
+	require.Zero(t, count(t, again, "owed"), "the pass said %v", again)
+	require.Len(t, out.all(), 1, "the owner was mailed twice about one empty account")
+}
+
 // The pass is the cluster's. Nobody runs it by hand, an owner included, and
 // no other automation runs it.
 func TestOnlyTheClustersOwnPassTellsOwners(t *testing.T) {
-	d := newDesk(t, "noticegate")
+	d := newNoticeDesk(t, "noticegate")
 	owner := d.member("olive", auth.RoleOwner)
 	dana := d.member("dana", auth.RoleDeveloper)
 	out := &outbox{}
@@ -365,7 +416,7 @@ func TestOnlyTheClustersOwnPassTellsOwners(t *testing.T) {
 // A pass tells at most its limit, the longest-standing falls first, and the
 // rest wait for the next one.
 func TestAPassTellsTheOldestFallsFirstUpToItsLimit(t *testing.T) {
-	d := newDesk(t, "noticelimit")
+	d := newNoticeDesk(t, "noticelimit")
 	dana := d.member("dana", auth.RoleDeveloper)
 	out := &outbox{}
 	d.store.SetNotifier(out.notify)
@@ -388,7 +439,7 @@ func TestAPassTellsTheOldestFallsFirstUpToItsLimit(t *testing.T) {
 // A node with no gate pool cannot coordinate with the others, so it tells
 // nobody: two of them would each tell the owner.
 func TestAPassWithoutAGatePoolTellsNobody(t *testing.T) {
-	d := newDesk(t, "noticenogate")
+	d := newNoticeDesk(t, "noticenogate")
 	dana := d.member("dana", auth.RoleDeveloper)
 	keyId := d.mustAdd(session(dana, auth.RoleDeveloper), "Personal")["id"].(string)
 	d.falls(keyId, memql.VendorKeyRefused, "invalid x-api-key")

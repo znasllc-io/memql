@@ -15,6 +15,7 @@ import (
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/worker"
+	"github.com/znasllc-io/memql/core/logger"
 )
 
 // store.go -- the graph seam for a person's API keys (design record
@@ -332,10 +333,17 @@ func (s *Store) owner(ctx context.Context, userId string) (name, email string, a
 // gate against writes that skip the executor looks for
 // (unguarded_concept_create_test.go), and this is not one.
 //
-// TWO WRITES, AND THE KEY FIRST. A key with no state row is a key nothing was
-// observed about, which reads as usable and is corrected by its first call or
-// check; a state row with no key would be a record of nothing. So a failure
-// between the two leaves the harmless half.
+// TWO WRITES, AND THE KEY FIRST: a state row with no key would be a record of
+// nothing. WHEN THE SECOND WRITE FAILS THE ADD FAILED, and the person is told
+// so, so the key the first write stored is taken out again (removed, one-way,
+// like any key). Left behind it would be active and paying for calls on the
+// strength of an add that reported failure.
+//
+// If taking it out fails as well, the key stays, active and with no record.
+// That is not harmless and is not left to chance: the first verdict about such
+// a key starts its record (observe.go), the daily check lists its models
+// before any other key's (sweep.go), and both failures are logged by the key's
+// id.
 func (s *Store) Add(ctx context.Context, owner string, key NewKey) error {
 	owned, ok := asOwner(ctx, owner)
 	if !ok {
@@ -369,7 +377,21 @@ func (s *Store) Add(ctx context.Context, owner string, key NewKey) error {
 		args["state"], args["goodAt"], args["checkedAt"] = StateGood, at, at
 	}
 	call, err = langparser.RenderCall("createVendorKeyState", args)
-	return s.write(owned, "the API key's state", call, err)
+	recorded := s.write(owned, "the API key's state", call, err)
+	if recorded == nil {
+		return nil
+	}
+	// The add failed. Take the key out, on a context the caller's cancellation
+	// does not reach: a cancelled request is one of the ways to get here.
+	undo, cancel := context.WithTimeout(context.WithoutCancel(ctx), undoAddTimeout)
+	defer cancel()
+	if err := s.Remove(undo, id, owner); err != nil {
+		s.logger.Error("vendorkeys: an API key was stored and its record was not, and the key could not be taken out again; it is active with no record until a call or the daily check starts one",
+			keySubject(id), "reason", "the engine did not complete the statement")
+	} else {
+		s.logger.Warn("vendorkeys: an API key's record could not be written, so the add failed and the key was taken out again", keySubject(id))
+	}
+	return recorded
 }
 
 // UpdateSettings writes the owner's settings on a key. The caller has checked
@@ -446,6 +468,34 @@ func (s *Store) read(ctx context.Context, what, call string, rendered error) ([]
 		return nil, fmt.Errorf("vendorkeys: read %s: %w", what, scrubbed(err))
 	}
 	return memql.MaterializeRows(res), nil
+}
+
+// undoAddTimeout bounds taking out a key whose record could not be written.
+const undoAddTimeout = 10 * time.Second
+
+// keySubject names a key on a log line.
+//
+// NOT AN ATTRIBUTE CALLED keyId. The production log handler replaces the value
+// of every attribute whose NAME contains "key" (core/logger/redact.go), so a
+// line that said `keyId=...` printed `keyId=<redacted>` and nobody could tell
+// which key could not be unsealed, checked or told about. A key's id is not a
+// secret: it is on every call record. logger.Subject is the seam between a log
+// line and the row it is about, and the Logs app narrows on it.
+func keySubject(keyId string) slog.Attr {
+	return logger.Subject(keyConcept, memql.BareShortId(keyId))
+}
+
+// startState starts the engine's record of a key that has none, as the key's
+// owner, as of `at`. See Add for how a key comes to have none.
+func (s *Store) startState(ctx context.Context, key Key, at time.Time) error {
+	owned, ok := asOwner(ctx, key.OwnerUserId)
+	if !ok {
+		return errors.New("vendorkeys: an API key with no owner cannot be given a record")
+	}
+	call, err := langparser.RenderCall("createVendorKeyState", map[string]any{
+		"keyId": key.Id, "vendor": key.Vendor, "state": StateUnchecked, "evidenceAt": at.UTC().Format(time.RFC3339Nano),
+	})
+	return s.write(owned, "the API key's state", call, err)
 }
 
 // statesPerRead is how many keys' states one statement asks for.

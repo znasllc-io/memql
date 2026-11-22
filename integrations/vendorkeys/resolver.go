@@ -209,7 +209,7 @@ func (r *Resolver) Secret(ctx context.Context, a memql.VendorAccount) (string, e
 	if err != nil {
 		// The cause can be the master key's absence, which an operator fixes,
 		// and it never contains the value. Its words stay in the log.
-		r.store.logger.Error("vendorkeys: an API key could not be unsealed", "keyId", memql.BareShortId(a.KeyId), "error", err)
+		r.store.logger.Error("vendorkeys: an API key could not be unsealed", keySubject(a.KeyId), "error", err)
 		return "", unusable(a.Vendor, "the API key could not be unsealed on this node")
 	}
 	return plain, nil

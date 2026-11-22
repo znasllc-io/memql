@@ -29,7 +29,7 @@ import (
 //
 // # No link, and this is a decision
 //
-// The message says where to go in words (Fleet, then API keys) and carries
+// The message says where to go in words (Settings, then API keys) and carries
 // nothing a mail client turns into a link. A message about a credential that
 // asks its reader to click is exactly what a forged one looks like, and the
 // reader of the real one should never have been taught to.
@@ -136,14 +136,14 @@ func vendorKeyNoticeWords(brand string, in VendorKeyNotice) vendorKeyNoticeCopy 
 	case "credit":
 		words.What = fmt.Sprintf("The account behind this key at %s is out of credit or at its spending limit.", vendor)
 		words.Next = fmt.Sprintf("Add credit or raise the limit at %[1]s. %[2]s tries the key again by itself about an hour after it last failed, "+
-			"so there is nothing to change in Fleet, under API keys, unless you want to remove the key.", vendor, brand)
+			"so there is nothing to change in Settings, under API keys, unless you want to remove the key.", vendor, brand)
 	case "refused":
 		words.What = fmt.Sprintf("%s refused the key.", vendor)
-		words.Next = fmt.Sprintf("If the key was revoked or replaced at %[1]s, remove it and add the new one: open Fleet in %[2]s and go to API keys. "+
+		words.Next = fmt.Sprintf("If the key was revoked or replaced at %[1]s, remove it and add the new one: open Settings in %[2]s and go to API keys. "+
 			"If it should still work, open the key there and choose Check now.", vendor, brand)
 	default:
 		words.What = fmt.Sprintf("%s is not accepting the key.", vendor)
-		words.Next = fmt.Sprintf("To see where it stands, open Fleet in %s and go to API keys.", brand)
+		words.Next = fmt.Sprintf("To see where it stands, open Settings in %s and go to API keys.", brand)
 	}
 	if said := vendorWords(in.Detail); said != "" {
 		words.What += fmt.Sprintf(" %s said: %q", vendor, said)

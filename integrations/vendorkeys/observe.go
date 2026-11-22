@@ -88,7 +88,7 @@ func (r *Resolver) Observe(ctx context.Context, a memql.VendorAccount, verdict m
 	}
 	if err := r.store.observe(ctx, keyId, verdict, at.UTC(), detail, false); err != nil {
 		r.store.logger.Warn("vendorkeys: what a call learned about an API key was not recorded",
-			"keyId", keyId, "verdict", string(verdict), "error", err)
+			keySubject(keyId), "verdict", string(verdict), "error", err)
 	}
 }
 
@@ -105,7 +105,7 @@ func (s *Store) observe(ctx context.Context, keyId string, verdict memql.VendorK
 		return err
 	}
 	if !ok {
-		s.logger.Debug("vendorkeys: this node has no gate pool; a verdict about an API key is not recorded here", "keyId", keyId)
+		s.logger.Debug("vendorkeys: this node has no gate pool; a verdict about an API key is not recorded here", keySubject(keyId))
 		return nil
 	}
 	defer release()
@@ -115,9 +115,28 @@ func (s *Store) observe(ctx context.Context, keyId string, verdict memql.VendorK
 		return err
 	}
 	if !found {
-		// No record to move. A key is created with its state; a verdict about
-		// an id with neither is about nothing this cluster holds.
-		return nil
+		// NO RECORD TO MOVE. Usually that is a verdict about an id this cluster
+		// does not hold, and it is dropped. But a key can exist with no record:
+		// an add writes two rows, and the second write can fail with the
+		// cleanup after it (Store.Add). Dropping the verdict then made a
+		// refused key one that every call tried for ever, that Check now could
+		// not change and whose owner was never told. So an ACTIVE key with no
+		// record is given one here, under the gate, and the verdict is applied
+		// to it like any other.
+		key, exists, err := s.Key(ctx, keyId)
+		if err != nil {
+			return err
+		}
+		if !exists || !key.Active() {
+			return nil
+		}
+		// Born just before this evidence, so this verdict is the newer one.
+		if err := s.startState(ctx, key, at.Add(-time.Nanosecond)); err != nil {
+			return err
+		}
+		if state, found, err = s.state(ctx, keyId); err != nil || !found {
+			return err
+		}
 	}
 	if !at.After(state.EvidenceAt) {
 		return nil
@@ -133,6 +152,19 @@ func (s *Store) observe(ctx context.Context, keyId string, verdict memql.VendorK
 	}
 	switch verdict {
 	case memql.VendorKeyGood:
+		if checked && state.State == StateCredit {
+			// A LISTING SAYS NOTHING ABOUT CREDIT. A vendor lists its models for
+			// a key whether or not the account behind it can pay, so a check
+			// that succeeds on a key held for credit proves the key and nothing
+			// about the account. It ends the hold, so the next real call tries
+			// the key and finds out, and it leaves the state and goodAt alone.
+			// Marking it good here showed "Working" for an empty account, and
+			// moved goodAt past notifiedAt, so that next failing call mailed
+			// the owner a second time about the same thing (notice.go). The
+			// daily pass skips such keys for the same reason (sweep.go).
+			fields["heldUntil"] = stamp
+			break
+		}
 		if !checked && state.State == StateGood && at.Sub(state.GoodAt) < goodStampEvery {
 			return nil
 		}
@@ -155,7 +187,7 @@ func (s *Store) observe(ctx context.Context, keyId string, verdict memql.VendorK
 		// state, which is what stops the key being spent.
 		if err := s.writeAudit(ctx, action, keyId, map[string]any{"vendor": state.Vendor, "state": next, "was": state.State}); err != nil {
 			s.logger.Warn("vendorkeys: the audit event for an API key's change of state was not written",
-				"keyId", keyId, "action", action, "error", err)
+				keySubject(keyId), "action", action, "error", err)
 		}
 	}
 	return nil

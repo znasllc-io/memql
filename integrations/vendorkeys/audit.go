@@ -41,7 +41,7 @@ func (i *Integration) audit(ctx context.Context, by caller, action, keyId string
 	detached, cancel := context.WithTimeout(context.WithoutCancel(ctx), auditWriteTimeout)
 	defer cancel()
 	if err := i.store.writePersonAudit(detached, by, action, keyId, detail); err != nil {
-		i.logger.Warn("vendorkeys: the audit event for an API key did not land", "action", action, "keyId", keyId, "reason", failureReason(err))
+		i.logger.Warn("vendorkeys: the audit event for an API key did not land", "action", action, keySubject(keyId), "reason", failureReason(err))
 	}
 }
 

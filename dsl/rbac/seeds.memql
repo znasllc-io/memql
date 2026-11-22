@@ -467,24 +467,6 @@ seed capability cap-owner-read-app-fleet-logs { roleSlug: "owner"  verb: "read" 
 @description("developer: read Fleet logs.")
 seed capability cap-developer-read-app-fleet-logs { roleSlug: "developer"  verb: "read"  resourceType: "app:fleet/logs"  predefined: true }
 
-// ---- app:fleet/keys -- add an API key of one's own (design record 2026-11-21-vendor-accounts-and-api-keys, K4) ----
-// A part of its own rather than a reading of `read app:fleet`: adding a key puts a credential that
-// spends a person's money on the cluster. Owner and developer, the people who can open Fleet and
-// who bring machines; anyone else needs a grant of the part and of Fleet. Changing, lending and
-// removing a key need no part: they are its owner's, whoever its owner is by then.
-//
-// `read` shows the section, Fleet > API keys, and is seeded on the same two roles: the people who
-// may add a key are the people who are shown where keys live. A person holding only `read` sees
-// the keys lent to them and no Add control.
-@description("owner: open Fleet > API keys.")
-seed capability cap-owner-read-app-fleet-keys { roleSlug: "owner"  verb: "read"  resourceType: "app:fleet/keys"  predefined: true }
-@description("developer: open Fleet > API keys.")
-seed capability cap-developer-read-app-fleet-keys { roleSlug: "developer"  verb: "read"  resourceType: "app:fleet/keys"  predefined: true }
-@description("owner: add an API key of one's own in Fleet.")
-seed capability cap-owner-execute-app-fleet-keys { roleSlug: "owner"  verb: "execute"  resourceType: "app:fleet/keys"  predefined: true }
-@description("developer: add an API key of one's own in Fleet.")
-seed capability cap-developer-execute-app-fleet-keys { roleSlug: "developer"  verb: "execute"  resourceType: "app:fleet/keys"  predefined: true }
-
 // ---- app:logs (registry floor: min admin) ----
 @description("owner: open the logs app -- reproduces the OS registry floor min admin (memql#5300).")
 seed capability cap-owner-read-app-logs { roleSlug: "owner"  verb: "read"  resourceType: "app:logs"  predefined: true }
@@ -681,6 +663,27 @@ seed capability cap-admin-read-app-settings-access { roleSlug: "admin"  verb: "r
 // decides whether this cluster runs anybody's CI at all.
 @description("owner: open the pipelines section of the settings app -- the optional Pipelines readiness item and its marker (memql#5498, D15).")
 seed capability cap-owner-read-app-settings-pipelines { roleSlug: "owner"  verb: "read"  resourceType: "app:settings/pipelines"  predefined: true }
+
+// ---- app:settings/apikeys -- add an API key of one's own (design record 2026-11-21-vendor-accounts-and-api-keys, K4 as amended 2026-11-22) ----
+// A named part, because adding a key puts a credential that spends a person's money on the
+// cluster, and an operator must be able to withhold that from a person or a group on its own.
+// EVERY PREDEFINED ROLE HOLDS IT, by the owner's decision: model access on this cluster is
+// bring-your-own for everybody, so any signed-in person adds a key of their own. Withholding it
+// is a deny in Users > Access.
+//
+// There is no `read` beside it. Settings > API keys carries no floor of its own, so it opens for
+// everybody who opens Settings, and a person sees, changes, lends and removes the keys they own
+// whatever their role holds. Those acts are their owner's and need no part.
+@description("owner: add an API key of one's own in Settings > API keys.")
+seed capability cap-owner-execute-app-settings-apikeys { roleSlug: "owner"  verb: "execute"  resourceType: "app:settings/apikeys"  predefined: true }
+@description("developer: add an API key of one's own in Settings > API keys.")
+seed capability cap-developer-execute-app-settings-apikeys { roleSlug: "developer"  verb: "execute"  resourceType: "app:settings/apikeys"  predefined: true }
+@description("admin: add an API key of one's own in Settings > API keys.")
+seed capability cap-admin-execute-app-settings-apikeys { roleSlug: "admin"  verb: "execute"  resourceType: "app:settings/apikeys"  predefined: true }
+@description("user: add an API key of one's own in Settings > API keys.")
+seed capability cap-user-execute-app-settings-apikeys { roleSlug: "user"  verb: "execute"  resourceType: "app:settings/apikeys"  predefined: true }
+@description("viewer: add an API key of one's own in Settings > API keys.")
+seed capability cap-viewer-execute-app-settings-apikeys { roleSlug: "viewer"  verb: "execute"  resourceType: "app:settings/apikeys"  predefined: true }
 
 // ---- app:bin (registry floor: no floor) ----
 @description("owner: open the bin app -- reproduces the OS registry floor no floor (memql#5300).")

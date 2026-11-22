@@ -268,21 +268,88 @@ func TestAddSavesAUseOnlyKey(t *testing.T) {
 	require.Equal(t, "good", d.state(card["id"].(string))["state"])
 }
 
-// K4 and S5: adding a key needs the part, and a person in their own session.
-func TestAddNeedsThePartAndThePersonsOwnSession(t *testing.T) {
+// K4 as the owner settled it on 2026-11-22: API keys are bring-your-own for
+// everybody. Every predefined role holds the part, so any signed-in person
+// adds a key of their own. It is still a part: a role that holds nothing is
+// refused by its name, and an operator's deny stops one person and nobody
+// else.
+func TestEveryRoleAddsAKeyAndADenyStopsOnePerson(t *testing.T) {
+	d := newDesk(t, "everyone")
+	registerForDispatch(t, d)
+	add := func(ctx context.Context) error {
+		call, err := langparser.RenderCall("vendorKeyAdd", map[string]any{"vendor": "anthropic", "label": "Personal", "key": deskAnthropicKey})
+		require.NoError(t, err)
+		res, err := d.eng.Execute(ctx, "builtin "+call)
+		if err != nil {
+			return err
+		}
+		rows := memql.MaterializeRows(res)
+		require.Len(t, rows, 1)
+		d.keys = append(d.keys, memql.BareShortId(fmt.Sprint(rows[0]["id"])))
+		return nil
+	}
+
+	for _, role := range []auth.Role{auth.RoleOwner, auth.RoleDeveloper, auth.RoleAdmin, auth.RoleWriter, auth.RoleReader} {
+		person := d.member("any"+string(role), role)
+		require.NoError(t, add(session(person, role)), "a signed-in %s could not add a key of their own", role)
+	}
+
+	// A role that holds nothing holds no part, this one included.
+	holdsNothing := auth.Role("vk-holds-nothing")
+	nina := d.member("nina", holdsNothing)
+	err := add(session(nina, holdsNothing))
+	require.Error(t, err, "a role that holds nothing added a key")
+	require.Contains(t, err.Error(), "app:settings/apikeys")
+
+	// THE OPERATOR'S DENY. Two writers; one is denied the part. A grant is read
+	// through the engine's grant source, which a node installs when it starts.
+	previousGrants, previousMembers := auth.InstalledGrantSource(), auth.InstalledMembershipSource()
+	d.eng.InstallGrantResolution()
+	t.Cleanup(func() { auth.SetGrantSource(previousGrants); auth.SetMembershipSource(previousMembers) })
+	wes, will := d.member("wes", auth.RoleWriter), d.member("will", auth.RoleWriter)
+	grant := fmt.Sprintf(`mutation writeGrant(grantId: %s, subjectKind: "user", subjectId: %s, verb: "execute", resourceType: "app:settings/apikeys", effect: "deny", grantedBy: "vendor-keys-seeder")`,
+		langparser.QuoteString(auth.GrantRowID(auth.SubjectKindUser, wes, auth.VerbExecute, "app:settings/apikeys")), langparser.QuoteString(wes))
+	_, err = d.eng.Execute(seedContext(), grant)
+	require.NoError(t, err)
+	err = add(session(wes, auth.RoleWriter))
+	require.Error(t, err, "a person denied the part added a key")
+	require.Contains(t, err.Error(), "app:settings/apikeys")
+	require.NoError(t, add(session(will, auth.RoleWriter)), "one person's deny stopped somebody else")
+}
+
+// THE OWNER'S WORDS, 2026-11-22: a key's owner uses and manages it whatever
+// their role. The part gates ADDING. Seeing, renaming, checking and removing a
+// key are its owner's, so a person whose role stops holding the part keeps
+// every one of them over the keys they already have.
+func TestAPersonManagesTheirOwnKeysWhateverTheirRole(t *testing.T) {
+	d := newDesk(t, "anyrole")
+	dana := d.member("dana", auth.RoleDeveloper)
+	card := d.mustAdd(session(dana, auth.RoleDeveloper), "Dana's")
+	id := card["id"].(string)
+
+	// Her role becomes one that holds nothing at all.
+	asDana := session(dana, auth.Role("vk-holds-nothing"))
+	mine, _, _ := d.list(asDana, false)
+	require.Equal(t, []string{id}, ids(mine), "a person whose role holds no part no longer sees the key they own")
+
+	_, err := d.in.handleUpdate(asDana, map[string]any{"keyId": id, "label": "Dana's, renamed"}, 0)
+	require.NoError(t, err, "she could not rename her own key")
+	_, err = d.in.handleCheck(asDana, map[string]any{"keyId": id}, 0)
+	require.NoError(t, err, "she could not check her own key")
+	_, err = d.in.handleRemove(asDana, map[string]any{"keyId": id}, 0)
+	require.NoError(t, err, "she could not remove her own key")
+	mine, _, _ = d.list(asDana, false)
+	require.Empty(t, mine)
+}
+
+// S5: adding a key is a person's act, in their own session.
+func TestAddNeedsThePersonsOwnSession(t *testing.T) {
 	d := newDesk(t, "gates")
 	owner := d.member("olga", auth.RoleOwner)
-	writer := d.member("wes", auth.RoleWriter)
 	registerForDispatch(t, d)
 
 	call, err := langparser.RenderCall("vendorKeyAdd", map[string]any{"vendor": "anthropic", "label": "Personal", "key": deskAnthropicKey})
 	require.NoError(t, err)
-
-	// THE PART, through the real dispatch: a writer holds no `execute` on it.
-	_, err = d.eng.Execute(session(writer, auth.RoleWriter), "builtin "+call)
-	require.Error(t, err, "a person without the part added a key")
-	require.Contains(t, err.Error(), "app:fleet/keys")
-	// The owner holds it, and the same call lands.
 	res, err := d.eng.Execute(session(owner, auth.RoleOwner), "builtin "+call)
 	require.NoError(t, err)
 	rows := memql.MaterializeRows(res)
@@ -638,11 +705,23 @@ func TestCheckRecordsWhatTheVendorSaid(t *testing.T) {
 	require.Equal(t, "credit", card["state"], "an unreachable vendor changed what is known about the key")
 	require.Contains(t, card["note"], "could not be reached")
 
+	// A listing is answered whether or not the account has credit. So a check
+	// that succeeds on a key held for credit lifts the hold, for the next real
+	// call to find out, and does not claim the key works.
 	d.clock = d.clock.Add(time.Minute)
 	d.answers(memql.VendorKeyProbeGood, "")
 	nodes, err = d.in.handleCheck(ctx, map[string]any{"keyId": keyId}, 0)
 	require.NoError(t, err)
-	require.Equal(t, "good", cardOf(t, nodes)["state"])
+	card = cardOf(t, nodes)
+	require.Equal(t, "credit", card["state"], "a listing was taken as proof that the account has credit again")
+	require.Contains(t, card["note"], "credit")
+	require.Len(t, d.keysFor(d.resolver, dev, true).usable, 1, "the hold was not lifted, so no call can find out")
+	require.Equal(t, []string{auditAdded, auditWentBad}, d.auditActions(keyId))
+
+	// The call that finds out is served, and only then has the key recovered.
+	d.clock = d.clock.Add(time.Minute)
+	require.NoError(t, d.store.observe(context.Background(), keyId, memql.VendorKeyGood, d.clock, "", false))
+	require.Equal(t, "good", d.state(keyId)["state"])
 	require.Equal(t, []string{auditAdded, auditWentBad, auditRecovered}, d.auditActions(keyId))
 }
 

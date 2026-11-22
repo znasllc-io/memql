@@ -33,17 +33,20 @@ import (
 // the store answers for anybody who reaches it (store.go). Each handler
 // therefore establishes who is asking before it reads or writes a row:
 //
-//   - ADD: the part (`execute app:fleet/keys`, enforced by the dispatch from the
-//     builtin's own annotation), and the person's own session.
+//   - ADD: the part (`execute app:settings/apikeys`, enforced by the dispatch
+//     from the builtin's own annotation), and the person's own session. Every
+//     predefined role holds the part (owner decision 2026-11-22: keys are
+//     bring-your-own for everybody); an operator withholds it with a deny.
 //   - UPDATE: the key's owner, in their own session. Nobody else may rename a
 //     key, make it the default or switch Auto on, a cluster owner included:
 //     that would be deciding how somebody else's money is spent.
 //   - CHECK and REMOVE: the key's owner, or a cluster owner, who must be able
 //     to stop a credential on their cluster. The owner removes in their own
 //     session.
-//   - LIST: anybody signed in. Their own keys need the part; the short cards of
-//     keys lent to them need nothing; every key on the cluster is a cluster
-//     owner's to ask for.
+//   - LIST: anybody signed in. Their own keys and the short cards of keys
+//     lent to them need nothing: a key's owner sees and manages it whatever
+//     their role holds, so a person who loses the part keeps the keys they
+//     have. Every key on the cluster is a cluster owner's to ask for.
 //
 // A CALLER WITH NO TIE TO A KEY IS TOLD WHAT AN UNKNOWN ID IS TOLD (S9). Every
 // act answers one sentence for a key that does not exist, a key that was
@@ -131,22 +134,8 @@ func callerOf(ctx context.Context) (caller, error) {
 	return caller{userId: userId, email: ac.PrimaryEmail, role: string(ac.Role), clusterOwner: ac.IsClusterOwner()}, nil
 }
 
-// holdsKeysPart reports whether the caller may open their own keys: a holder
-// of `read` on the part, or of `execute`, since a person who may add a key may
-// see the keys they added.
-func holdsKeysPart(ctx context.Context) bool {
-	subject, ok := auth.SubjectFromContext(ctx)
-	if !ok {
-		return false
-	}
-	return auth.CapableFor(ctx, subject, auth.VerbRead, keysPart) || auth.CapableFor(ctx, subject, auth.VerbExecute, keysPart)
-}
-
-// keysPart is the Fleet part that gates a person's own keys (K4).
-const keysPart = "app:fleet/keys"
-
 // keyInARun is why a run does not add or change a key.
-const keyInARun = "An API key is added and changed only by a person in Fleet. A run's journal keeps what a step was handed, and a key must not be kept there."
+const keyInARun = "An API key is added and changed only by a person, in Settings. A run's journal keeps what a step was handed, and a key must not be kept there."
 
 func refuseInARun(ctx context.Context) error {
 	if _, inRun := common.RunFromContext(ctx); inRun {
@@ -402,7 +391,7 @@ func (i *Integration) handleRemove(ctx context.Context, args map[string]any, _ i
 			}
 			on := true
 			if err := i.store.UpdateSettings(ctx, other.Id, Settings{IsDefault: &on}); err != nil {
-				i.logger.Warn("vendorkeys: a removed default was not replaced", "keyId", other.Id, "reason", failureReason(err))
+				i.logger.Warn("vendorkeys: a removed default was not replaced", keySubject(other.Id), "reason", failureReason(err))
 				break
 			}
 			i.audit(ctx, me, auditDefaultChanged, other.Id, map[string]any{"vendor": other.Vendor, "isDefault": true, "ownerUserId": other.OwnerUserId})
@@ -453,6 +442,13 @@ func (i *Integration) check(ctx context.Context, key Key) (checkResult, error) {
 	switch probe.Verdict {
 	case memql.VendorKeyProbeGood:
 		err = i.store.observe(ctx, key.Id, memql.VendorKeyGood, probe.At, "", true)
+		if err == nil {
+			// A key held for credit stays held in name: the listing lifted the
+			// hold and proved nothing about the account (observe.go).
+			if state, found, readErr := i.store.state(ctx, key.Id); readErr == nil && found && state.State == StateCredit {
+				result.note = creditCheckNote(key.Vendor)
+			}
+		}
 	case memql.VendorKeyProbeRefused:
 		err = i.store.observe(ctx, key.Id, memql.VendorKeyRefused, probe.At, probe.Detail, true)
 	case memql.VendorKeyProbeCredit:
@@ -474,6 +470,12 @@ func (i *Integration) check(ctx context.Context, key Key) (checkResult, error) {
 	return result, nil
 }
 
+// creditCheckNote is what a person is told when a check succeeds on a key whose
+// account was out of credit.
+func creditCheckNote(vendor string) string {
+	return fmt.Sprintf("%s accepts the key. Listing models does not say whether its account has credit again, so the key is no longer held and the next call it pays for will find out.", vendorName(vendor))
+}
+
 // handleForActor lists the keys the caller can see.
 func (i *Integration) handleForActor(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	me, err := callerOf(ctx)
@@ -491,16 +493,15 @@ func (i *Integration) handleForActor(ctx context.Context, args map[string]any, _
 		}
 		everything = append(everything, keys...)
 	}
-	mayOpenMine := holdsKeysPart(ctx)
 	var mine, lent, every []Key
 	paused := map[string]bool{}
 	for _, key := range everything {
 		tie := judge.tie(key)
 		switch tie {
 		case tieOwnDefault, tieOwnOther:
-			if mayOpenMine {
-				mine = append(mine, key)
-			}
+			// Whatever their role holds: a key's owner always sees it, or they
+			// could not manage or remove a key that still pays for their calls.
+			mine = append(mine, key)
 		case tieLent:
 			lent = append(lent, key)
 		case tieLentPaused:
@@ -660,7 +661,7 @@ func (i *Integration) failed(act, keyId string, err error) error {
 	if errors.As(err, &worded) {
 		return err
 	}
-	i.logger.Warn("vendorkeys: an act on an API key failed", "act", act, "keyId", keyId, "reason", failureReason(err))
+	i.logger.Warn("vendorkeys: an act on an API key failed", "act", act, keySubject(keyId), "reason", failureReason(err))
 	sentence := "That did not complete. Reload the list to see where it stands, and try again."
 	if errors.Is(err, memql.ErrWriteGateBusy) {
 		sentence = "Your keys are being changed from somewhere else at this moment. Try again."

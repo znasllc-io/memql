@@ -217,7 +217,6 @@ var appReadFloors = map[string][]Role{
 	"app:deployables/logs":       {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:fleet":                  {RoleOwner, RoleDeveloper},
 	"app:fleet/logs":             {RoleOwner, RoleDeveloper},
-	"app:fleet/keys":             {RoleOwner, RoleDeveloper},
 	"app:logs":                   {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:logs/stream":            {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:materializer":           {RoleOwner, RoleDeveloper, RoleAdmin, RoleWriter, RoleReader},
@@ -265,10 +264,11 @@ var appPartGrants = map[string][]Role{
 	"app:pipelines/requests":     {RoleOwner, RoleDeveloper},
 	"app:settings/connections":   {RoleOwner, RoleDeveloper},
 	// Adding an API key of one's own at a model vendor (design record
-	// 2026-11-21-vendor-accounts-and-api-keys, K4). Owner and developer, the
-	// people who can open Fleet. A part of its own because the act puts a
-	// credential that spends a person's money on the cluster.
-	"app:fleet/keys":          {RoleOwner, RoleDeveloper},
+	// 2026-11-21-vendor-accounts-and-api-keys, K4 as amended 2026-11-22). A
+	// part of its own because the act puts a credential that spends a person's
+	// money on the cluster, and every predefined role holds it: model access
+	// is bring-your-own for everybody. An operator withholds it with a deny.
+	"app:settings/apikeys":    {RoleOwner, RoleDeveloper, RoleAdmin, RoleWriter, RoleReader},
 	"app:deployables/deploy":  {RoleOwner, RoleDeveloper},
 	"app:deployables/publish": {RoleOwner, RoleDeveloper},
 	"app:deployables/retire":  {RoleOwner, RoleDeveloper},

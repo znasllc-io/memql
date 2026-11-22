@@ -59,7 +59,7 @@ func TestTheNoticeCarriesNoActionLinkAndNoKeyMaterial(t *testing.T) {
 		}
 		// What a reader needs: which key, at which vendor, what the vendor
 		// said, that it is not paying, and where to go.
-		for _, want := range []string{"Personal", "OpenAI", "Incorrect API key provided", "not using this key", "Fleet", "API keys"} {
+		for _, want := range []string{"Personal", "OpenAI", "Incorrect API key provided", "not using this key", "Settings", "API keys"} {
 			if !strings.Contains(body, want) {
 				t.Errorf("the %s body does not say %q:\n%s", name, want, body)
 			}

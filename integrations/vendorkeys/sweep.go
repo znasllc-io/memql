@@ -86,7 +86,7 @@ const (
 )
 
 // sweepRefusal is what anybody but the daily check is told.
-const sweepRefusal = "The daily check of API keys is run by the cluster, once a day. To check one key now, open it in Fleet and choose Check now."
+const sweepRefusal = "The daily check of API keys is run by the cluster, once a day. To check one key now, open it in Settings, under API keys, and choose Check now."
 
 // sweepCounts is what one run did.
 type sweepCounts struct {
@@ -162,7 +162,7 @@ func (i *Integration) sweep(ctx context.Context) (sweepCounts, error) {
 			if errors.As(err, &worded) {
 				reason = worded.sentence
 			}
-			i.logger.Warn("vendorkeys: the daily check could not check an API key", "keyId", d.key.Id, "reason", reason)
+			i.logger.Warn("vendorkeys: the daily check could not check an API key", keySubject(d.key.Id), "reason", reason)
 			counts.skipped++
 			continue
 		}
@@ -217,9 +217,15 @@ func (i *Integration) dueForCheck(ctx context.Context, now time.Time) ([]dueKey,
 		}
 		for _, key := range listed {
 			state, found := states[key.Id]
-			if !found || state.State == StateCredit {
-				// No record to move, or an account out of credit, which a
-				// listing cannot judge.
+			if !found {
+				// A key with no record (Store.Add says how). Nothing has ever
+				// been learned about it, so it is due, and first: its check is
+				// what starts its record (observe.go).
+				due = append(due, dueKey{key: key})
+				continue
+			}
+			if state.State == StateCredit {
+				// An account out of credit, which a listing cannot judge.
 				continue
 			}
 			if now.Sub(state.GoodAt) < sweepIdle || now.Sub(state.CheckedAt) < sweepIdle {
