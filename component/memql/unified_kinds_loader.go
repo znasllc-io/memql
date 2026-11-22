@@ -291,6 +291,21 @@ func registerParsedProvidersWithClients(logger *slog.Logger, registry *ProviderR
 		}
 		entry.Config.Auth = resolvedAuth
 		client, clientErr := newAIProvider(entry.Config)
+		// A RECORD THE CLUSTER CANNOT PAY FOR KEEPS ITS CLIENT (design record
+		// 2026-11-21, part 2). A vendor's text record builds on a cluster with
+		// no account at that vendor, because a person's API key can pay
+		// through it. It registers exactly as it did when it failed to build
+		// -- unavailable, with the same sentence -- so every reader of
+		// Available, the boot summary and the readiness model are unchanged;
+		// only the account path (vendor_account.go) uses the client it kept.
+		if clientErr == nil {
+			if accountless, ok := client.(clusterAccountless); ok {
+				if missing := accountless.ClusterAccountMissing(); missing != nil {
+					entry.Client = client
+					clientErr = missing
+				}
+			}
+		}
 		if clientErr != nil {
 			entry.err = clientErr
 			unavailable = append(unavailable, unavailableProvider{

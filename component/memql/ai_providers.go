@@ -347,6 +347,11 @@ type ProviderRegistry struct {
 	// this door, so there is no chain left to continue. See
 	// app_session_provider.go.
 	appSessions AppSessionDelegate
+	// vendorKeys is the API key seam (design record 2026-11-21, part 2):
+	// which of a person's keys can pay for a vendor call, and what a call
+	// learned about one. Nil on a node where nothing installed it, which
+	// means no call is ever paid by a key -- see vendor_account.go.
+	vendorKeys VendorKeys
 }
 
 // ProviderConfigEntry stores metadata + instantiated client for a provider.
@@ -1526,18 +1531,7 @@ func newOpenAIClientWithCredential(cfg ProviderConfig, httpClient *http.Client) 
 		return nil, nil, err
 	}
 	if path == credentialPathUnavailable {
-		// No credential is configured. This is the normal state of a fresh
-		// cloud cluster and of every local one (design D2/D6), so it is
-		// reported as an unavailable provider rather than as a fault -- the
-		// registry's own wording, which the readiness model reads as `ai`
-		// unconfigured.
-		return nil, nil, fmt.Errorf(
-			"provider %q has no OpenAI credential: workload identity federation is not configured on this cluster. "+
-				"Set %s, %s and %s, in Settings > Vendors or the overlay "+
-				"(docs/public/operate/auth/openai-federation.md, which has the steps for a local cluster too). "+
-				"The cluster has no API key to fall back to; until then it reaches models through a signed-in "+
-				"fleet machine or a local model",
-			cfg.Name, envOpenAIIdentityProviderID, envOpenAIServiceAccountID, envOpenAIIdentityTokenFile)
+		return nil, nil, openaiCredentialMissing(cfg)
 	}
 	if baseURL := strings.TrimSpace(cfg.Auth["baseURL"]); baseURL != "" {
 		opts = append(opts, option.WithBaseURL(baseURL))
@@ -1549,10 +1543,29 @@ func newOpenAIClientWithCredential(cfg ProviderConfig, httpClient *http.Client) 
 	return &client, source, nil
 }
 
+// openaiCredentialMissing is why the cluster's own account cannot pay for an
+// OpenAI record: nobody set OpenAI up here. It is the normal state of a fresh
+// cloud cluster and of every local one (design D2/D6), so it is reported as an
+// unavailable provider rather than as a fault -- the registry's own wording,
+// which the readiness model reads as `ai` unconfigured.
+func openaiCredentialMissing(cfg ProviderConfig) error {
+	return fmt.Errorf(
+		"provider %q has no OpenAI credential: workload identity federation is not configured on this cluster. "+
+			"Set %s, %s and %s, in Settings > Vendors or the overlay "+
+			"(docs/public/operate/auth/openai-federation.md, which has the steps for a local cluster too). "+
+			"The cluster has no API key to fall back to; until then it reaches models through a signed-in "+
+			"fleet machine or a local model",
+		cfg.Name, envOpenAIIdentityProviderID, envOpenAIServiceAccountID, envOpenAIIdentityTokenFile)
+}
+
 type openAIProvider struct {
 	client *openai.Client
 	model  string
 	params map[string]any
+	// clients builds this record's SDK client for an account: the cluster's
+	// (client above) or a person's key (vendor_account_middleware.go). Nil
+	// only for a provider a test built around a client of its own.
+	clients *openaiTextClients
 }
 
 // Compile-time interface assertions
@@ -1564,15 +1577,44 @@ var _ common.VisionAIProvider = (*openAIProvider)(nil)
 
 func newOpenAIProvider(cfg ProviderConfig) (AIProvider, error) {
 	// Route through the global LLM circuit breaker (memql#825).
-	client, err := newOpenAIClient(cfg, guardedHTTPClient(nil))
+	clients, err := newOpenAITextClients(cfg, guardedHTTPClient(nil))
 	if err != nil {
 		return nil, err
 	}
 	return &openAIProvider{
-		client: client,
-		model:  cfg.Model,
-		params: cfg.Params,
+		client:  clients.client(nil),
+		model:   cfg.Model,
+		params:  cfg.Params,
+		clients: clients,
 	}, nil
+}
+
+// WithVendorAccount returns this record paid by one of a person's keys. The
+// receiver keeps paying with the cluster's account.
+func (p *openAIProvider) WithVendorAccount(account VendorAccount, keys VendorKeys) any {
+	if p == nil || p.clients == nil {
+		return p
+	}
+	bound := *p
+	bound.client = p.clients.client(&vendorAccountBinding{account: account, keys: keys})
+	return &bound
+}
+
+// VendorOrigin is the address this record's client dials.
+func (p *openAIProvider) VendorOrigin() string {
+	if p == nil || p.clients == nil {
+		return ""
+	}
+	return p.clients.origin
+}
+
+// ClusterAccountMissing is why the cluster's account cannot pay for this
+// record, or nil when it can.
+func (p *openAIProvider) ClusterAccountMissing() error {
+	if p == nil || p.clients == nil {
+		return nil
+	}
+	return p.clients.missing
 }
 
 func (p *openAIProvider) Call(ctx context.Context, prompt string) (any, error) {
@@ -1901,20 +1943,47 @@ type openAIStreamProvider struct {
 	client *openai.Client
 	model  string
 	params map[string]any
+	// clients: see openAIProvider.
+	clients *openaiTextClients
 }
 
 func newOpenAIStreamProvider(cfg ProviderConfig) (AIProvider, error) {
 	// The streaming client is tuned for long-lived responses rather than the
 	// guarded client's request/response shape.
-	client, err := newOpenAIClient(cfg, streamingHTTPClient())
+	clients, err := newOpenAITextClients(cfg, streamingHTTPClient())
 	if err != nil {
 		return nil, err
 	}
 	return &openAIStreamProvider{
-		client: client,
-		model:  cfg.Model,
-		params: cfg.Params,
+		client:  clients.client(nil),
+		model:   cfg.Model,
+		params:  cfg.Params,
+		clients: clients,
 	}, nil
+}
+
+// WithVendorAccount, VendorOrigin and ClusterAccountMissing: see openAIProvider.
+func (p *openAIStreamProvider) WithVendorAccount(account VendorAccount, keys VendorKeys) any {
+	if p == nil || p.clients == nil {
+		return p
+	}
+	bound := *p
+	bound.client = p.clients.client(&vendorAccountBinding{account: account, keys: keys})
+	return &bound
+}
+
+func (p *openAIStreamProvider) VendorOrigin() string {
+	if p == nil || p.clients == nil {
+		return ""
+	}
+	return p.clients.origin
+}
+
+func (p *openAIStreamProvider) ClusterAccountMissing() error {
+	if p == nil || p.clients == nil {
+		return nil
+	}
+	return p.clients.missing
 }
 
 // Call implements AIProvider with non-streaming fallback for compatibility.
@@ -2366,6 +2435,8 @@ type anthropicProvider struct {
 	client anthropic.Client
 	model  string
 	params map[string]any
+	// clients: see openAIProvider.
+	clients *anthropicTextClients
 }
 
 // Compile-time interface assertions
@@ -2379,15 +2450,40 @@ func newAnthropicProvider(cfg ProviderConfig) (AIProvider, error) {
 	// short-lived bearer -- is anthropicCredential's decision, not this
 	// constructor's (memql#4334). The guarded http.Client (the global LLM
 	// circuit breaker, memql#825) is attached in every branch.
-	client, _, err := newAnthropicClient(cfg, guardedHTTPClient(nil))
+	clients, err := newAnthropicTextClients(cfg, guardedHTTPClient(nil))
 	if err != nil {
 		return nil, err
 	}
 	return &anthropicProvider{
-		client: client,
-		model:  cfg.Model,
-		params: cfg.Params,
+		client:  clients.client(nil),
+		model:   cfg.Model,
+		params:  cfg.Params,
+		clients: clients,
 	}, nil
+}
+
+// WithVendorAccount, VendorOrigin and ClusterAccountMissing: see openAIProvider.
+func (p *anthropicProvider) WithVendorAccount(account VendorAccount, keys VendorKeys) any {
+	if p == nil || p.clients == nil {
+		return p
+	}
+	bound := *p
+	bound.client = p.clients.client(&vendorAccountBinding{account: account, keys: keys})
+	return &bound
+}
+
+func (p *anthropicProvider) VendorOrigin() string {
+	if p == nil || p.clients == nil {
+		return ""
+	}
+	return p.clients.origin
+}
+
+func (p *anthropicProvider) ClusterAccountMissing() error {
+	if p == nil || p.clients == nil {
+		return nil
+	}
+	return p.clients.missing
 }
 
 func (p *anthropicProvider) Call(ctx context.Context, prompt string) (any, error) {
@@ -2590,6 +2686,8 @@ type anthropicStreamProvider struct {
 	name    string
 	pricing Pricing
 	params  map[string]any
+	// clients: see openAIProvider.
+	clients *anthropicTextClients
 }
 
 // Compile-time interface assertions
@@ -2602,17 +2700,42 @@ var _ common.ToolCallingChatAIProvider = (*anthropicStreamProvider)(nil)
 func newAnthropicStreamProvider(cfg ProviderConfig) (AIProvider, error) {
 	// Same credential decision as the non-streaming constructor, over the
 	// streaming-tuned (and still guarded) http.Client (memql#4334).
-	client, _, err := newAnthropicClient(cfg, streamingHTTPClient())
+	clients, err := newAnthropicTextClients(cfg, streamingHTTPClient())
 	if err != nil {
 		return nil, err
 	}
 	return &anthropicStreamProvider{
-		client:  client,
+		client:  clients.client(nil),
 		model:   cfg.Model,
 		name:    cfg.Name,
 		pricing: cfg.Pricing(),
 		params:  cfg.Params,
+		clients: clients,
 	}, nil
+}
+
+// WithVendorAccount, VendorOrigin and ClusterAccountMissing: see openAIProvider.
+func (p *anthropicStreamProvider) WithVendorAccount(account VendorAccount, keys VendorKeys) any {
+	if p == nil || p.clients == nil {
+		return p
+	}
+	bound := *p
+	bound.client = p.clients.client(&vendorAccountBinding{account: account, keys: keys})
+	return &bound
+}
+
+func (p *anthropicStreamProvider) VendorOrigin() string {
+	if p == nil || p.clients == nil {
+		return ""
+	}
+	return p.clients.origin
+}
+
+func (p *anthropicStreamProvider) ClusterAccountMissing() error {
+	if p == nil || p.clients == nil {
+		return nil
+	}
+	return p.clients.missing
 }
 
 func (p *anthropicStreamProvider) anthropicMaxTokens() int64 {
