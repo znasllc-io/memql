@@ -247,6 +247,10 @@
         "name": "Browse"
       },
       {
+        "id": "downloads",
+        "name": "Downloads"
+      },
+      {
         "id": "backups",
         "name": "Backups"
       },
