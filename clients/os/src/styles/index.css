@@ -15948,3 +15948,21 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
   .os-nexus-goalview > .os-head .os-settings-title { flex: 1; min-width: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
   .os-nexus-goalview > .os-head > .os-head-meta { flex-shrink: 0; }
 }
+
+/* Phones and tablets get this instead of the OS for now (src/chrome/DesktopOnly.tsx).
+   CENTRED, unlike .os-core-gate: it holds a fixed handful of lines that never
+   grow, so nothing can jump. It borrows the core gate's mark, heading, sentence
+   and note, so it reads in the same voice and the current theme. */
+.os-desktop-only {
+  min-height: calc(100dvh / var(--os-scale, 1));
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  text-align: center;
+  background: var(--os-ground);
+  color: var(--os-ink);
+}
