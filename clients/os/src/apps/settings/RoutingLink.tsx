@@ -21,6 +21,27 @@ export function RoutingIsInFleet({ tab }: { tab?: "routes" | "rules" | "machines
 }
 
 /**
+ * The one quiet link Settings > Vendors carries to a person's own API keys.
+ *
+ * Settings > Vendors is the cluster's own account at each vendor, and no key
+ * is entered there. A key of a person's own is added in Fleet (design record
+ * 2026-11-21-vendor-accounts-and-api-keys, U6), so the page says so once and
+ * takes them there. Drawn only for somebody who can open that section: a
+ * signpost to a place a person cannot go is not a signpost.
+ */
+export function ApiKeysAreInFleet() {
+  const fleet = useAppReach("fleet");
+  if (!fleet.sections.includes("keys")) return null;
+  if (!fleet.canOpenWindows) return <p className="os-caption">API keys are in Fleet.</p>;
+  return (
+    <button type="button" className="fleet-reading-link os-routing-link" onClick={() => fleet.open("keys")}>
+      API keys are in Fleet
+      <ArrowUpRight size={14} aria-hidden />
+    </button>
+  );
+}
+
+/**
  * Where Settings > Rules and Settings > Decisions used to be.
  *
  * The two sections are drill-downs now, off the rail (registry.tsx says why

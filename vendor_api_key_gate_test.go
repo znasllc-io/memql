@@ -9,22 +9,30 @@ import (
 	"testing"
 )
 
-// TestNoVendorApiKeyEntryPoint: a manually entered vendor API key has no way
-// back into the product (epic memql#5088, design D5).
+// TestNoVendorApiKeyEntryPoint: the CLUSTER has no vendor API key, and none of
+// the ways one used to be entered comes back (epic memql#5088, design D5; design
+// record docs/superpowers/specs/2026-11-21-vendor-accounts-and-api-keys-design.md,
+// decisions O2 and K19).
 //
-// The engine reaches both cloud vendors by workload identity federation. There
-// is no key field in MemQL OS, no `providerKeySet` builtin, no `apiKey` entry
-// on either base provider, no key variable in the env registry, no key step in
-// the install graph, and no sentence in the docs offering one. This gate is
-// what keeps that list at zero, because every item on it was individually easy
-// to re-add and none of them would have failed anything.
+// The cluster reaches both cloud vendors by workload identity federation, as
+// itself. It holds no key of its own, and the work it runs as itself never
+// spends one. The names in `banned` below are how a key for the whole cluster
+// used to be entered: four environment variables and one builtin. Every one of
+// them was individually easy to re-add and none would have failed anything.
+// This gate is what keeps that list at zero.
 //
 // WHAT IS NOT BANNED, and why the list is names rather than concepts:
 //
+//   - A PERSON'S OWN API KEY. A person adds a key of their own in MemQL OS,
+//     under Fleet > API keys. It is checked with the vendor, sealed as that
+//     person's own row (v1:router:vendorKey), and pays only for calls made by
+//     that person or by somebody they lent it to. It is entered through none
+//     of the names below. That is the design, not a way around this gate: the
+//     cluster still has no key, and its own work still spends none
+//     (integrations/vendorkeys).
 //   - `vendor_api_key` as a globalSecret KIND is legitimate and still in use.
-//     The router's BYOK path seals a user's own model key under it, and the
-//     Shopify connector seals three store credentials under it. Those are
-//     credentials for vendors MemQL does not federate with, entered by the
+//     The Shopify connector seals three store credentials under it. Those are
+//     credentials for a vendor MemQL does not federate with, entered by the
 //     person they belong to. Banning the kind would have deleted a working
 //     feature to enforce a rule about a different one.
 //   - `MEMQL_AI_OPENAI_PROJECT_ID` is not a key. It names a project.
@@ -123,10 +131,14 @@ func TestNoVendorApiKeyEntryPoint(t *testing.T) {
 	})
 
 	var b strings.Builder
-	b.WriteString("a manually entered vendor API key has a way back into the product.\n\n")
-	b.WriteString("Every cloud vendor MemQL calls is reached by workload identity federation " +
-		"(docs/public/operate/auth/{anthropic,openai}-federation.md). There is no key field, " +
-		"no key variable, no key step and no key sentence, and this gate is what keeps it that way.\n\n")
+	b.WriteString("a vendor API key for the whole cluster has a way back into the product.\n\n")
+	b.WriteString("The cluster reaches every cloud vendor it calls by workload identity federation " +
+		"(docs/public/operate/auth/{anthropic,openai}-federation.md) and holds no key of its own. " +
+		"These names are how a key for the whole cluster used to be entered, and this gate keeps " +
+		"them out.\n\n" +
+		"A person's own API key is a different thing and is not what this gate is about: it is " +
+		"added in MemQL OS under Fleet > API keys, sealed as that person's row, and entered " +
+		"through none of these names (docs/public/operate/api-keys.md).\n\n")
 	for _, h := range hits {
 		text := h.text
 		if len(text) > 120 {

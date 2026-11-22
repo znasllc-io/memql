@@ -151,7 +151,7 @@ integrations/
 ├── openairealtime/    # Mints OpenAI Realtime ephemeral client secrets for the direct browser<->OpenAI WebRTC path
 ├── planner/           # Planner Agent loop, task fan-out, refresh cron, action substitution (planner build)
 ├── rbac/              # Relational governance rank arithmetic -- canCreatePrincipal, governPrincipal
-├── router/            # BYOK credential + budget admin -- setApiKey, listModels, listPolicies
+├── router/            # Router admin reads -- listModels, listPolicies, the nightly evidence fold
 ├── shopify/           # THE CONNECTOR: a complete generated mirror of a store,
 │                   # the push channel, and the compliance jobs. The reference
 │                   # implementation of the data-origins contract
@@ -159,6 +159,7 @@ integrations/
 ├── stt/               # Speech-to-text -- transcribe (batch capability + streaming session)
 ├── telephony/         # PSTN edge -- number provisioning, call control, E911, consent, DTMF
 ├── timeutil/          # Stateless time helpers; always-on core plug-in, every node type
+├── vendorkeys/        # A person's own API keys for Anthropic and OpenAI -- add, check, lend, remove, the daily check
 ├── voice/             # Canonical voice catalog builtins -- pickForGender, resolve
 └── workbench/         # Per-Plan sandboxed workspace -- dispatchHost, teardownDirectory
 

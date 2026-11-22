@@ -550,7 +550,7 @@ describe("which ids a draft is still missing", () => {
   });
 });
 
-describe("Settings -> Vendors: there is no key", () => {
+describe("Settings -> Vendors: no key is entered here", () => {
   it("offers no field, button or label that would take one", async () => {
     const { container } = await renderDoors();
     expect(screen.queryByLabelText(/api key/i)).toBeNull();
@@ -589,10 +589,20 @@ describe("Settings -> Vendors: there is no key", () => {
     expect(container.textContent).not.toMatch(/publishes no federation/i);
     expect(container.textContent).not.toMatch(/paste[^.]{0,20}key/i);
     // Both halves of the position, said standing on the page rather than
-    // behind a row: the ids come from the vendor's own console, and there is
-    // no key anywhere.
+    // behind a row: the ids come from the vendor's own console and are the
+    // cluster's own account, and no key is entered HERE. A person's own key
+    // has a place, and the page says where (design record
+    // 2026-11-21-vendor-accounts-and-api-keys, U6): it no longer says there is
+    // no key anywhere, which stopped being true.
     expect(container.textContent).toMatch(/vendor's own console/i);
-    expect(container.textContent).toMatch(/no API key to enter/i);
+    expect(container.textContent).toMatch(/No API key is entered here/i);
+    expect(container.textContent).toMatch(/A key of your own is added in Fleet/i);
+    expect(container.textContent).not.toMatch(/anywhere else/i);
+  });
+
+  it("says once where a person's own key goes, and takes them there", async () => {
+    await renderDoors();
+    expect(screen.getAllByRole("button", { name: "API keys are in Fleet" })).toHaveLength(1);
   });
 });
 

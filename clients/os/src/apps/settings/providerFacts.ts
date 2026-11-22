@@ -19,10 +19,16 @@ import { useOsConnection } from "../../live/connection";
 // independently, so two Refreshes can be answered by two nodes. That is why
 // Apply broadcasts rather than relying on repeated reads.
 //
-// THERE IS NO KEY HERE ANY MORE (epic memql#5088, D5). `saveKey` and the
-// key-sealing builtin it called are deleted, not disabled: federation is the
-// only door for a cloud vendor, and the fleet is the other door. What is left
-// on the write side is the federation id form, per vendor, and Apply.
+// NO KEY IS ENTERED HERE (epic memql#5088, D5). `saveKey` and the key-sealing
+// builtin it called are deleted, not disabled: this page is the CLUSTER'S OWN
+// account at each vendor, which is workload identity federation and nothing
+// else. What is left on the write side is the federation id form, per vendor,
+// and Apply.
+//
+// A PERSON'S OWN API KEY IS A DIFFERENT THING, AND IS NOT ON THIS PAGE. It is
+// added in Fleet > API keys, sealed as that person's row, and pays only for
+// calls a person makes (design record
+// 2026-11-21-vendor-accounts-and-api-keys). The cluster still has no key.
 
 export interface ProviderStatusRow {
   name: string;
