@@ -633,3 +633,33 @@ func TestInvalidateForcesASignInOnlyWithANewToken(t *testing.T) {
 		t.Fatalf("with a new identity token, bearer = %q, want bearer-2", got)
 	}
 }
+
+// A claim that is not a time a clock could hold reads as ABSENT, never as a
+// date. A bare int64(...) on an out-of-range float is implementation-defined
+// (memql#4779), and a made-up date here would call a fresh token replayed, or
+// promise a rotation at a time that never comes.
+func TestIdentityTokenTimesIgnoreANumberNoClockCouldHold(t *testing.T) {
+	token := func(iat, exp any) string {
+		payload, err := json.Marshal(map[string]any{"iat": iat, "exp": exp})
+		if err != nil {
+			t.Fatalf("marshal claims: %v", err)
+		}
+		return "e30." + base64.RawURLEncoding.EncodeToString(payload) + ".c2ln"
+	}
+
+	for name, v := range map[string]float64{"too large": 1e300, "too small": -1e300} {
+		iat, exp := identityTokenTimes(token(v, v))
+		if !iat.IsZero() || !exp.IsZero() {
+			t.Errorf("%s (%g): read as iat=%s exp=%s, want both absent", name, v, iat, exp)
+		}
+		if due := nextIdentityTokenDue(token(v, v)); !due.IsZero() {
+			t.Errorf("%s (%g): a rotation was promised for %s out of a time no clock holds", name, v, due)
+		}
+	}
+
+	// A fractional time is legal (RFC 7519's NumericDate) and reads to the second.
+	iat, exp := identityTokenTimes(token(1700000000.75, 1700000600))
+	if iat.Unix() != 1700000000 || exp.Unix() != 1700000600 {
+		t.Errorf("fractional iat read as %d and exp as %d, want 1700000000 and 1700000600", iat.Unix(), exp.Unix())
+	}
+}

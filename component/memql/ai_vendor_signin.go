@@ -8,12 +8,15 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // The one sign-in a process keeps per vendor (design record
@@ -446,21 +449,27 @@ func (s *vendorSignIn) acceptedPresentation() ([sha256.Size]byte, time.Time, boo
 }
 
 // identityTokenTimes reads iat and exp out of a token, zero when absent.
+//
+// A claim is whole seconds, or a fraction of one (RFC 7519's NumericDate),
+// which reads to the second. A number an int64 cannot hold reads as ABSENT:
+// both callers treat a zero time as "the token does not say", and a made-up
+// date would call a fresh token replayed or promise a rotation that never
+// comes. num.WholeInt64 is the bound (memql#4779).
 func identityTokenTimes(token string) (iat, exp time.Time) {
 	claims, err := parseJWTClaims(token)
 	if err != nil {
 		return time.Time{}, time.Time{}
 	}
 	read := func(key string) time.Time {
-		switch v := claims[key].(type) {
-		case float64:
-			return time.Unix(int64(v), 0).UTC()
-		case json.Number:
-			if n, err := v.Int64(); err == nil {
-				return time.Unix(n, 0).UTC()
-			}
+		seconds, ok := claims[key].(float64)
+		if !ok {
+			return time.Time{}
 		}
-		return time.Time{}
+		whole, ok := num.WholeInt64(math.Trunc(seconds))
+		if !ok {
+			return time.Time{}
+		}
+		return time.Unix(whole, 0).UTC()
 	}
 	return read("iat"), read("exp")
 }
