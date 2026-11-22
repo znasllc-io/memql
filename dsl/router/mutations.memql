@@ -194,6 +194,10 @@ mutation vendorKey createVendorKey {
     fingerprint     string!
     isDefault       bool
     checkedBy       enum("list", "use")!
+    /// When the key was added, from the integration's clock. Among keys lent to a
+    /// person the one added earliest is tried first, so the order is a fact the
+    /// writer states once rather than a side effect of when a row landed.
+    addedAt         datetime!
   }
   insert {
     id:             args.keyId
@@ -206,7 +210,7 @@ mutation vendorKey createVendorKey {
     autoUse:        false
     checkedBy:      args.checkedBy
     status:         "active"
-    addedAt:        now
+    addedAt:        args.addedAt
     sharing: {
       mode: "owner",
       paused: false,

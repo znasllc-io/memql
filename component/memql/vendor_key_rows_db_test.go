@@ -63,6 +63,7 @@ func (ids vendorKeyRowIDs) createArgs() map[string]any {
 	return map[string]any{
 		"keyId": ids.key, "vendor": "anthropic", "label": ids.label,
 		"encryptedValue": ids.sealed, "fingerprint": ids.fingerprint, "checkedBy": "list",
+		"addedAt": time.Now().UTC().Format(time.RFC3339),
 	}
 }
 

@@ -235,7 +235,7 @@ concept vendorKey {
   autoUse         bool     @description("True once the key's owner switched on 'Let Auto use this key'. False for a new key. A call nobody chose a route for is paid by a key only when this is true; choosing the API route, a route of one's own, or pinning a vendor model is the telling, and Auto is not.")
   checkedBy       enum("list", "use")  @description("How the key is checked. `list` is the default: its vendor's models are listed with it, which sends no prompt and costs no tokens. `use` is a key that may not list models (a restricted key): it is checked only by the real calls it pays for, and the daily check skips it.")
   status          enum("active", "removed")!  @description("`active` pays; `removed` never pays again and is never unsealed again. One-way: a removed key is not restored, a new one is added.")
-  addedAt         datetime!  @description("When the key was added, stamped from the clock. Among keys lent to a person, the one added earliest is tried first.")
+  addedAt         datetime!  @description("When the key was added, from the integration's clock at the moment it stored the key. Among keys lent to a person, the one added earliest is tried first.")
   removedAt       datetime   @description("When the key was removed, or empty.")
   removedBy       string     @description("The v1:identity:user who removed it: its owner, or a cluster owner stopping a key on their cluster. Supplied by the integration from the authenticated caller.")
 
