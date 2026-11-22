@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { Cpu, Gauge, Route, Terminal } from "lucide-react";
+import { Cloud, Cpu, Gauge, Route, Terminal } from "lucide-react";
 
 import { AddButton } from "../../../kit/AddButton";
 import { ContentSkeleton } from "../../../kit/ContentSkeleton";
@@ -35,7 +35,8 @@ import { useAutoBalance, useBoundEmbedder, useMyBudget, useRouteModes, useRouteW
 
 type Page = { kind: "list" } | { kind: "route"; id: string } | { kind: "new" };
 
-const ICONS: Record<RouteMode["kind"], typeof Gauge> = { auto: Gauge, local: Cpu, apps: Terminal, custom: Route };
+// API takes the vendor source's own glyph (SourceGlyph): the route is that source for every job.
+const ICONS: Record<RouteMode["kind"], typeof Gauge> = { auto: Gauge, local: Cpu, apps: Terminal, api: Cloud, custom: Route };
 
 /**
  * A route's readiness in a few words. The engine's own answer when it gave
@@ -66,7 +67,7 @@ export function RoutesTab({
 }: {
   header: (actions: ReactNode, meta?: ReactNode) => ReactNode;
   facts: RoutingFacts;
-  /** Owner or developer: may change Local, Apps and Auto's balance. */
+  /** Owner or developer: may change Local, Apps, API and Auto's balance. */
   composes: boolean;
   /** Another surface asking for a route's page (Ask's "Manage routes"). */
   request?: { id: string; n: number } | null;
@@ -211,7 +212,7 @@ export function RoutesTab({
         <>
           <PageHelp title="Routes">
             <p>A route decides which source serves each job: quick tasks, main work, deep reasoning, and search and memory. You pick a route for each message in Ask.</p>
-            <p>Auto chooses for every call. Local keeps everything on local models; Apps uses Claude Code or Codex. Routes you make are yours alone. Search and memory always uses the cluster's embedding model.</p>
+            <p>Auto chooses for every call. Local keeps everything on local models; Apps uses Claude Code or Codex; API uses vendor models, paid by an API key or the cluster's account. Routes you make are yours alone. Search and memory always uses the cluster's embedding model.</p>
           </PageHelp>
           <AutoRefresh busy={modes.loading} onRefresh={rereadAll} />
         </>,

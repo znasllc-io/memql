@@ -373,7 +373,12 @@ function DoorsPanel({
               }
             />
             <DoorState
-              name="Federation"
+              // NAMED FOR WHAT IT IS, vendors, and not for one way an account
+              // is set up (design record 2026-11-21-vendor-accounts-and-api-keys,
+              // U7). A person's API key opens this line too, and to somebody
+              // who only has a key "Federation" named something they do not
+              // have. The engine's door keeps its id, `federation`.
+              name="Vendors"
               // Open when an account can pay for a vendor's models for this
               // reader: the cluster's federation where it pays for them, or
               // an API key of theirs.
@@ -406,7 +411,10 @@ function DoorsPanel({
                       // warning about clusters that are fine. Restore one and
                       // you owe this sentence an edit.
                       "a cloud provider is callable but not through federation"
-                    : "not configured"
+                    : // Neither account can serve: say where each is set up.
+                      // A key is the reader's own to add; the cluster's
+                      // account is its owner's, in Settings under Vendors.
+                      "no account yet: add an API key in Settings, or connect the cluster's account under Vendors"
               }
             />
           </div>

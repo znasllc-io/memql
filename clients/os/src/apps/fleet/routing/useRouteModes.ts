@@ -13,6 +13,7 @@ import {
   routeModeFrom,
   routeModesFrom,
   shippedRouteModes,
+  type EditableBuiltIn,
   type AutoBalance,
   type Balance,
   type Budget,
@@ -169,7 +170,7 @@ export interface RouteWrites {
   balanceSupported: boolean;
   saveRoute: (input: { id?: string; name?: string; jobs: JobSources; revision?: number }) => Promise<RouteMode | null>;
   deleteRoute: (id: string) => Promise<void>;
-  resetRoute: (id: "local" | "apps", revision: number) => Promise<void>;
+  resetRoute: (id: EditableBuiltIn, revision: number) => Promise<void>;
   saveBalance: (balance: Balance, revision: number) => Promise<void>;
   resetBalance: (revision: number) => Promise<void>;
 }

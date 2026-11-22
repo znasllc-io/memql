@@ -11,8 +11,11 @@ import {
   billingWords,
   consideredSentence,
   levelWords,
+  paidByWords,
   useDecisions,
+  usePayerKeys,
   type DecisionRow,
+  type PayerKeys,
 } from "../../settings/decisionFacts";
 import { LEVELS } from "../../settings/routingFacts";
 import type { RuleRow, RulesState } from "../../settings/rulesFacts";
@@ -39,6 +42,11 @@ import { engineWords, levelTitle, promptWords, routeTitle, sourceLabel, whenWord
 //
 // FILTERED SERVER-SIDE: the query is keyset-paged at ten, so a facet filtered
 // in the browser would narrow the page rather than the search.
+//
+// WHO PAID is said for a vendor call, in the call's detail: the cluster's
+// account, or an API key. A key is named only where the reader can list it,
+// their own or one lent to them (decisionFacts `paidByWords`); a call no
+// account paid for, a local model's or an app's, has no such line.
 
 const SOURCE_WORD: Record<string, string> = {
   local: "your machines",
@@ -61,6 +69,7 @@ export function HistoryTab({
   const [open, setOpen] = useState("");
   const [search, setSearch] = useState("");
   const decisions = useDecisions(true, { ...NO_FILTERS, level, door: source, outcome, rule, search });
+  const payerKeys = usePayerKeys(decisions.supported);
   const byName = useMemo(() => new Map(rules.rules.map((r) => [r.name, r] as const)), [rules.rules]);
   // Rules the decisions name that the cluster no longer has: still a facet.
   const removed = useMemo(
@@ -130,7 +139,7 @@ export function HistoryTab({
         <RecordList as="ul" label="Recent routed calls">
           {rows.map((row) => {
             const key = row.id || row.requestId;
-            return <DecisionLine key={key} row={row} byName={byName} open={open === key} onOpen={() => setOpen(open === key ? "" : key)} />;
+            return <DecisionLine key={key} row={row} byName={byName} payerKeys={payerKeys} open={open === key} onOpen={() => setOpen(open === key ? "" : key)} />;
           })}
         </RecordList>
       )}
@@ -166,10 +175,12 @@ function clockOf(value: string): string {
 function routeWords(id: string): string {
   if (id === "local") return "the Local route";
   if (id === "apps") return "the Apps route";
+  if (id === "api") return "the API route";
   return "a route of the person's own";
 }
 
-function DecisionLine({ row, byName, open, onOpen }: { row: DecisionRow; byName: ReadonlyMap<string, RuleRow>; open: boolean; onOpen: () => void }) {
+function DecisionLine({ row, byName, payerKeys, open, onOpen }: { row: DecisionRow; byName: ReadonlyMap<string, RuleRow>; payerKeys: PayerKeys; open: boolean; onOpen: () => void }) {
+  const paidBy = paidByWords(row, payerKeys);
   const level = levelWords(row);
   const where = SOURCE_WORD[row.door] ?? row.door;
   const prompt = row.promptName === "" ? "" : promptWords(row.promptName);
@@ -193,6 +204,7 @@ function DecisionLine({ row, byName, open, onOpen }: { row: DecisionRow; byName:
         <div className="os-decision-detail">
           {row.cacheKind ? null : <CostEstimate estimate={row.billing === "local" ? row.electricityEstimate : row.apiEquivalent} label={row.billing === "local" ? "Electricity estimate" : "API-equivalent estimate"} />}
           {row.route === "" ? null : <p className="os-decision-detail-line">Sent on {routeWords(row.route)}.</p>}
+          {paidBy === "" ? null : <p className="os-decision-detail-line">{paidBy}</p>}
           <p className="os-decision-detail-line">
             {row.rule === "" ? "No rule was recorded for this call." : `Decided by ${ruleWords(row.rule, byName)}, which takes ${row.policy ? routeTitle(row.policy) : "no chain"}.`}
           </p>

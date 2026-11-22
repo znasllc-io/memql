@@ -1,5 +1,5 @@
 import { costEstimateFrom, type CostEstimateData } from "../../kit/CostEstimate";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { usePagedCollection, type PagedCollectionHandle } from "../../live/useLiveCollection";
 import { useDebouncedValue } from "../../logs/useDebouncedValue";
 import { promptSearchNames } from "../fleet/routing/vocabulary";
@@ -81,6 +81,36 @@ export interface DecisionRow {
   outcome: string;
   billing: string;
   executionSurface: string;
+  /**
+   * Which account paid for a vendor call: "cluster" (the cluster's own
+   * account) or "key" (a person's API key). EMPTY for a call no account paid
+   * for, a local model's or an app's, and for every row written before a call
+   * recorded its account.
+   */
+  accountKind: string;
+  /** The id of the key that paid, when one did. Never shown: a key is named only where the reader can list it. */
+  accountKeyId: string;
+}
+
+/** The reader's own API keys and the ones lent to them, by id: the keys History may name. */
+export type PayerKeys = ReadonlyMap<string, { label: string; relation: "mine" | "lent" }>;
+
+const bareId = (id: string) => id.slice(id.lastIndexOf(":") + 1).trim();
+
+/**
+ * Who paid for a call, as History says it: "" for a call no account paid for.
+ *
+ * A KEY IS NAMED ONLY WHERE THE READER CAN LIST IT, their own or one lent to
+ * them (`vendorKeysForActor`). History is read by an owner, a developer and an
+ * admin across everybody's calls, and a key's name is its owner's: any other
+ * key is "an API key", and its id is never drawn.
+ */
+export function paidByWords(row: Pick<DecisionRow, "accountKind" | "accountKeyId">, keys: PayerKeys): string {
+  if (row.accountKind === "cluster") return "Paid by the cluster's account.";
+  if (row.accountKind !== "key") return "";
+  const key = row.accountKeyId === "" ? undefined : keys.get(bareId(row.accountKeyId));
+  if (key === undefined) return "Paid by an API key.";
+  return key.relation === "mine" ? `Paid by your API key ${key.label}.` : `Paid by ${key.label}, an API key lent to you.`;
 }
 
 function str(row: Record<string, unknown>, key: string): string {
@@ -134,6 +164,8 @@ export function decisionFromRow(raw: Row): DecisionRow {
     outcome: str(r, "outcome"),
     billing: str(r, "billing"),
     executionSurface: str(r, "executionSurface"),
+    accountKind: str(r, "accountKind"),
+    accountKeyId: str(r, "accountKeyId"),
   };
 }
 
@@ -248,6 +280,49 @@ export function useDecisions(enabled: boolean, filters: DecisionFilters): Decisi
     progress: feed.progress, scope: feed.scope, enabled: feed.enabled,
     fetchedAt, reload: feed.reseed, loadMore: feed.loadMore, hasMore: feed.hasMore,
     loadingMore: feed.loadingMore, loadMoreError: feed.loadMoreError };
+}
+
+const NO_PAYER_KEYS: PayerKeys = new Map();
+
+/**
+ * The keys History may name, read once when it opens.
+ *
+ * A NICETY, NEVER A FAILURE. A cluster with no such read, a read that is
+ * refused and a read that has not landed all answer the same: no key is named,
+ * and a call a key paid for says "an API key". History never waits on it and
+ * never shows an error for it.
+ */
+export function usePayerKeys(enabled: boolean): PayerKeys {
+  const connection = useOsConnection();
+  const [keys, setKeys] = useState<PayerKeys>(NO_PAYER_KEYS);
+  useEffect(() => {
+    const read = connection?.query.vendorKeysForActor;
+    if (!enabled || connection === null || typeof read !== "function") return;
+    const abort = new AbortController();
+    read.call(connection.query, {}, { signal: abort.signal, priority: "background" })
+      .then((result) => {
+        const first = result.rows()[0];
+        const lists = first === undefined ? null : flatten(first as Record<string, unknown>);
+        if (lists === null || abort.signal.aborted) return;
+        const named = new Map<string, { label: string; relation: "mine" | "lent" }>();
+        for (const relation of ["mine", "lent"] as const) {
+          const cards = Array.isArray(lists[relation]) ? (lists[relation] as unknown[]) : [];
+          for (const raw of cards) {
+            if (raw === null || typeof raw !== "object") continue;
+            const card = flatten(raw as Record<string, unknown>);
+            const id = bareId(str(card, "id"));
+            const label = str(card, "label").trim();
+            if (id !== "" && label !== "") named.set(id, { label, relation });
+          }
+        }
+        setKeys(named);
+      })
+      .catch(() => {
+        // Left unnamed: see above.
+      });
+    return () => abort.abort();
+  }, [enabled, connection]);
+  return keys;
 }
 
 /** A cost figure that is deliberately not a number for a free call. */

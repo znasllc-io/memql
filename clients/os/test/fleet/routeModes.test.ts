@@ -387,3 +387,70 @@ describe("fleet capacity", () => {
     expect(readSource("fleet:strongest", facts({ machines: [box], capacity: roomy })).serves).toBe("qwen3.5:9b");
   });
 });
+
+describe("API, the built-in route of vendor models", () => {
+  const api = (over: Record<string, unknown> = {}) =>
+    summary({ id: "api", name: "API", kind: "api", scope: "cluster", description: "Vendor models, paid by an API key", ...over });
+
+  it("is read as a built-in and listed after Apps, before a person's own", () => {
+    const read = routeModesFrom([
+      {
+        id: "routes",
+        routes: [
+          summary({ id: "r2", name: "Emergency", kind: "custom", scope: "personal" }),
+          api(),
+          summary({ id: "apps", name: "Apps", kind: "apps", scope: "cluster" }),
+          summary({ id: "auto", name: "Auto", kind: "auto", scope: "cluster" }),
+          summary({ id: "local", name: "Local", kind: "local", scope: "cluster" }),
+        ],
+        revision: 3,
+      },
+    ]);
+    expect(read.routes.map((r) => r.id)).toEqual(["auto", "local", "apps", "api", "r2"]);
+    const route = read.routes.find((r) => r.id === "api")!;
+    expect([route.kind, route.scope, route.name, route.description]).toEqual(["api", "cluster", "API", "Vendor models, paid by an API key"]);
+  });
+
+  it("is named API, never Api, when the engine sends no name", () => {
+    expect(routeModeFrom(summary({ id: "api", kind: "api" }))?.name).toBe("API");
+    // An engine that names the route but not its kind is still read as API.
+    expect(routeModeFrom(summary({ id: "api" }))?.kind).toBe("api");
+  });
+
+  it("is not drawn on a cluster that predates routes: that engine has no such route", () => {
+    expect(shippedRouteModes().map((r) => r.id)).toEqual(["auto", "local", "apps"]);
+  });
+
+  it("is the cluster's to change: an owner or a developer, and nobody else", () => {
+    expect(canEditRoute({ kind: "api", scope: "cluster" }, true)).toBe(true);
+    expect(canEditRoute({ kind: "api", scope: "cluster" }, false)).toBe(false);
+  });
+
+  it("cannot be the name of a route of yours", () => {
+    for (const name of ["API", "api", " Api "]) expect(routeNameProblem(name, [])).toBe("That name is a built-in route");
+  });
+
+  it("takes vendor sources only, and says so of anything else", () => {
+    const here = facts({ vendor: "ready" });
+    expect(jobPlacementProblem("federation:strongest", [], here, undefined, true)).toBe("");
+    expect(jobPlacementProblem("federation:cheapest", ["federation:strongest"], here, undefined, true)).toBe("");
+    expect(jobPlacementProblem("fleet:strongest", [], here, undefined, true)).toBe("API lists vendor models only");
+    expect(jobPlacementProblem("app:*", [], here, undefined, true)).toBe("API lists vendor models only");
+    // Every other route takes them as before.
+    expect(jobPlacementProblem("app:*", [], here)).toBe("");
+  });
+
+  it("says what serves a vendor job in the cluster's words, the model and the account that pays", () => {
+    const here = facts({ vendor: "ready" });
+    const list = ["federation:strongest"];
+    // The cluster reported this job, with these sources.
+    expect(jobStatus(list, here, { sources: list, servesNow: "claude-opus-5-5, paid by your API key", ready: true })).toEqual({ text: "Serves with claude-opus-5-5, paid by your API key", ready: true });
+    // The cluster says no model can serve this job for the reader, though a
+    // vendor is reachable in general: the page must not say it serves.
+    expect(jobStatus(list, here, { sources: list, servesNow: "", ready: false })).toEqual({ text: "No vendor model here has an account for this job", ready: false });
+    // A job edited since the read is judged from the facts, as before.
+    expect(jobStatus(["federation:cheapest"], here, { sources: list, servesNow: "claude-opus-5-5, paid by your API key", ready: true }).text).toBe("Serves with Cheapest vendor");
+    // A local source that serves is still named from the machines.
+    expect(jobStatus(list, here).text).toBe("Serves with Strongest vendor");
+  });
+});
