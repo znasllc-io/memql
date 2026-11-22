@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 
 import { App } from "./app/App";
 import { applyStoredTheme } from "./app/theme";
+import { applyRememberedThemePack } from "./themes/bootHint";
 import { captureConceptOpen } from "./apps/concepts/openConcept";
 import { captureRunOpen } from "./apps/deployables/pipelines/openRun";
 import { captureShopifyReturn } from "./apps/deployables/store/connectReturn";
@@ -11,6 +12,8 @@ import { captureConnectReturn } from "./apps/deployables/sources/connectReturn";
 import "./styles/index.css";
 
 applyStoredTheme();
+// The last theme this browser showed, from the first frame (themes/bootHint.ts).
+applyRememberedThemePack();
 
 // The GitHub-connect return, read and scrubbed BEFORE anything renders (epic
 // memql#4915). Module scope is what makes it strictly earlier than
