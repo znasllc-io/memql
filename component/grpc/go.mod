@@ -28,6 +28,7 @@ require (
 	github.com/znasllc-io/memql/component/node v0.0.0
 	github.com/znasllc-io/memql/component/node/gen v0.0.0
 	github.com/znasllc-io/memql/component/provenance v0.0.0
+	github.com/znasllc-io/memql/component/router v0.0.0
 	github.com/znasllc-io/memql/component/secret v0.0.0
 	github.com/znasllc-io/memql/component/server v0.0.0
 	github.com/znasllc-io/memql/component/work v0.0.0
@@ -177,3 +178,5 @@ replace github.com/znasllc-io/memql/component/work => ../work
 replace github.com/znasllc-io/memql/integrations => ../../integrations
 
 replace github.com/znasllc-io/memql/component/calls => ../calls
+
+replace github.com/znasllc-io/memql/component/router => ../router
