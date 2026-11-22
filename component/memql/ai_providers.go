@@ -1369,6 +1369,30 @@ func resolveAuthPlaceholdersWith(values map[string]string, lookup func(envKey st
 	return resolved, nil
 }
 
+// streamRequestRefused turns a streaming request the vendor refused into the
+// CALL'S OWN error (design record 2026-11-21, K10).
+//
+// Both SDKs send a streaming request inside NewStreaming and keep its failure
+// on the stream they hand back, so the refusal is known before any event is
+// read. A provider that returned its channel without asking delivered a 401 as
+// the stream's first chunk. The router acts on the error a call RETURNS: it
+// moves to the next account for the same model, or to the next model. An error
+// that arrives as a chunk reaches the person instead, with a key that would
+// have worked sitting unused.
+//
+// It reads the request's result and nothing else. It does not wait for a first
+// event, so a model that thinks for a minute before its first token does not
+// hold the caller here for that minute.
+//
+// Regression tests: vendor_stream_preflight_test.go.
+func streamRequestRefused(vendor string, requestErr error, closeStream func() error) error {
+	if requestErr == nil {
+		return nil
+	}
+	_ = closeStream()
+	return fmt.Errorf("%s stream pre-flight: %w", vendor, requestErr)
+}
+
 // streamingHTTPClient returns an HTTP client tuned for AI streaming
 // providers. We deliberately do NOT set http.Client.Timeout because
 // streams are intentionally long-running; that field aborts the entire
@@ -2249,12 +2273,15 @@ func (p *openAIStreamProvider) CallStream(ctx context.Context, prompt string) (<
 		req.MaxCompletionTokens = openai.Int(int64(maxTokens))
 	}
 
-	// NewStreaming returns no error: the request failure surfaces on the first
-	// Next()/Err() instead. That is why the error arm below is inside the
-	// goroutine rather than beside the call -- a failed stream is delivered as
-	// a chunk carrying the error, exactly as a mid-stream failure was.
+	// NewStreaming returns no error: a request the vendor refused is on the
+	// stream it hands back, and is returned here as the call's own error
+	// (streamRequestRefused). The error arm inside the goroutine is for a
+	// failure after the stream began.
 	req.StreamOptions = openai.ChatCompletionStreamOptionsParam{IncludeUsage: openai.Bool(true)}
 	stream := p.client.Chat.Completions.NewStreaming(ctx, req)
+	if err := streamRequestRefused("openai", stream.Err(), stream.Close); err != nil {
+		return nil, err
+	}
 
 	chunks := make(chan StreamChunk, 100)
 
@@ -2310,6 +2337,9 @@ func (p *openAIStreamProvider) CallChatStream(ctx context.Context, messages []co
 
 	req.StreamOptions = openai.ChatCompletionStreamOptionsParam{IncludeUsage: openai.Bool(true)}
 	stream := p.client.Chat.Completions.NewStreaming(ctx, req)
+	if err := streamRequestRefused("openai", stream.Err(), stream.Close); err != nil {
+		return nil, err
+	}
 
 	chunks := make(chan common.StreamChunk, 100)
 
@@ -2378,6 +2408,9 @@ func (p *openAIStreamProvider) CallChatStreamWithTools(ctx context.Context, mess
 
 	req.StreamOptions = openai.ChatCompletionStreamOptionsParam{IncludeUsage: openai.Bool(true)}
 	stream := p.client.Chat.Completions.NewStreaming(ctx, req)
+	if err := streamRequestRefused("openai", stream.Err(), stream.Close); err != nil {
+		return nil, err
+	}
 
 	chunks := make(chan common.StreamToolChunk, 100)
 
@@ -2910,6 +2943,9 @@ func (p *anthropicStreamProvider) CallStream(ctx context.Context, prompt string)
 		params.Temperature = anthropic.Float(numberParam(p.params["temperature"], 1.0))
 	}
 	stream := p.client.Messages.NewStreaming(ctx, params)
+	if err := streamRequestRefused("anthropic", stream.Err(), stream.Close); err != nil {
+		return nil, err
+	}
 	chunks := make(chan StreamChunk, 100)
 	go func() {
 		defer close(chunks)
@@ -2996,6 +3032,9 @@ func (p *anthropicStreamProvider) CallChatStream(ctx context.Context, messages [
 		params.Temperature = anthropic.Float(numberParam(p.params["temperature"], 1.0))
 	}
 	stream := p.client.Messages.NewStreaming(ctx, params)
+	if err := streamRequestRefused("anthropic", stream.Err(), stream.Close); err != nil {
+		return nil, err
+	}
 	chunks := make(chan common.StreamChunk, 100)
 	go func() {
 		defer close(chunks)

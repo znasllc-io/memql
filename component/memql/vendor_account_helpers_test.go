@@ -33,6 +33,8 @@ type accountVendorRequest struct {
 type accountVendorAnswer struct {
 	Status int
 	Body   string
+	// ContentType is application/json unless a test answers with a stream.
+	ContentType string
 }
 
 const anthropicOKBody = `{"id":"msg_1","type":"message","role":"assistant","model":"claude-test","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`
@@ -76,7 +78,11 @@ func (v *accountVendor) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	v.mu.Unlock()
 
-	w.Header().Set("Content-Type", "application/json")
+	contentType := answer.ContentType
+	if contentType == "" {
+		contentType = "application/json"
+	}
+	w.Header().Set("Content-Type", contentType)
 	if answer.Status != http.StatusOK {
 		w.WriteHeader(answer.Status)
 		_, _ = w.Write([]byte(answer.Body))
