@@ -7358,6 +7358,10 @@ a.os-button {
 /* A backup row's second line while its machine is away (owner's pick 8A). */
 .os-backup-offline { color: var(--os-warn); }
 .os-backups-add { padding-top: 8px; }
+/* A Downloads row (owner's pick 1A): a failed transfer's line, and the thin
+ * bar under a moving one's. */
+.os-transfer-failed { color: var(--os-warn); }
+.os-transfer-bar { margin-top: 4px; }
 
 /* The link and the row's actions share one line: the link takes a bounded
  * measure on the left and the buttons take the space that is left. An

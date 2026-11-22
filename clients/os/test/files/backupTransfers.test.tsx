@@ -1,11 +1,15 @@
 import { scrollNextPage } from "../scrollNextPage";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 vi.mock("../../src/live/connection", () => ({ useOsConnection: () => h.connection }));
 import { ArchiveTransfers, DownloadSetup } from "../../src/apps/files/backups/ArchiveTransfers";
 import { StorageAllowance } from "../../src/apps/files/backups/StorageAllowance";
-import { formatStorageBytes, transferActions, validArchive, absoluteBackupPath, type BackupTransfer } from "../../src/apps/files/backups/transfers";
+import { formatStorageBytes, transferActions, transferLine, validArchive, absoluteBackupPath, type BackupTransfer } from "../../src/apps/files/backups/transfers";
+import { uploadLine } from "../../src/apps/files/backups/ArchiveTransfers";
+import { FILES_SECTIONS } from "../../src/apps/files/settings";
+import type { UploadTask } from "../../src/apps/files/useUploadTasks";
+import { formatBytes } from "../../src/kit";
 import { fakeConnection } from "./harness";
 import { machineFromRow } from "../../src/apps/fleet/rows";
 import { readTheBar, useFakeDate } from "../readTheBar";
@@ -33,9 +37,11 @@ describe("resumable backup controls", () => {
     expect(download.mock.calls[0]![0].id).toBe("backup-002");
   });
   it("pauses the folder before cancelling one unfinished sync file", async () => {
-    const connection = fakeConnection({ transfers: [{ ...job, kind: "sync_file", metadata: { watchId: "watch-001" } } as never], refuse: { libraryBackupControl: "Try again" } }); h.connection = connection;
+    // Cancel sits beside Resume once the transfer is stopped (one button per
+    // moving row, owner's pick 1A).
+    const connection = fakeConnection({ transfers: [{ ...job, kind: "sync_file", state: "paused", desiredState: "paused", metadata: { watchId: "watch-001" } } as never], refuse: { libraryBackupControl: "Try again" } }); h.connection = connection;
     render(<ArchiveTransfers machines={machines} refresh={0} onDownload={vi.fn()} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Cancel transfer" })); await readTheBar();
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" })); await readTheBar();
     fireEvent.click(screen.getAllByRole("button", { name: "Cancel transfer" }).at(-1)!);
     await screen.findByText("Try again");
     const pause = connection.calls.findIndex(c => c.includes("setLibraryWatchedFolderStatus("));
@@ -86,4 +92,44 @@ it("loads one transfer page at a time, restores it, and searches older archives"
  fireEvent.change(screen.getByRole("textbox",{name:"Search transfers"}),{target:{value:"archive-24"}});
  await screen.findByText("archive-24.zip");expect(connection.callsNamed("libraryBackupList").at(-1)).toContain('search: "archive-24"');
  view.unmount();
+});
+
+// THE DOWNLOADS TAB (owner's pick 1A): every transfer one row, in the Backups
+// row's look, with only the figures the transfer carries.
+describe("downloads tab", () => {
+  it("sits between Browse and Backups", () => {
+    expect(FILES_SECTIONS.map(s => s.name).slice(0, 3)).toEqual(["Browse", "Downloads", "Backups"]);
+  });
+
+  it("says each transfer's state in one muted line, with no speed or time left", () => {
+    const b = (n: number) => `${n} B`;
+    expect(transferLine(job, "Laptop", b)).toEqual({ text: "Backup from Laptop · Uploading · 4 B of 12 B", warn: false, progress: 4 / 12, backup: true });
+    expect(transferLine({ ...job, kind: "download", state: "downloading" }, "Laptop", b)).toMatchObject({ text: "Downloading to Laptop · 4 B of 12 B", backup: false });
+    expect(transferLine({ ...job, state: "complete", committedBytes: 12 }, "Laptop", b)).toMatchObject({ text: "Backup from Laptop · up to date · 12 B", progress: null });
+    expect(transferLine({ ...job, state: "error", failure: "connection lost" }, "Laptop", b)).toMatchObject({ text: "Upload failed · connection lost · progress is kept", warn: true, progress: null });
+    expect(transferLine({ ...job, state: "paused", desiredState: "paused" }, "Laptop", b)).toMatchObject({ text: "Backup from Laptop · Paused · 4 B of 12 B", progress: null });
+    const task = { id: "up-1", label: "a.bin", kind: "file", sentBytes: 5, totalBytes: 10, doneFiles: 0, totalFiles: 1, state: "sending", error: "", failures: [], retry: null, abort: vi.fn(), dismiss: vi.fn() } as UploadTask;
+    expect(uploadLine(task, b)).toEqual({ text: "Uploading · 5 B of 10 B", warn: false, progress: 0.5 });
+    expect(uploadLine({ ...task, state: "failed", error: "Over quota" }, b)).toMatchObject({ text: "Upload failed · Over quota", warn: true });
+    expect(uploadLine({ ...task, kind: "tree", doneFiles: 2, totalFiles: 3 }, b).text).toBe("Uploading · 2 of 3 files · 5 B of 10 B");
+  });
+
+  it("draws one row per transfer with a Backup pill, a bar and one button while moving", async () => {
+    h.connection = fakeConnection({ transfers: [job as never, { ...job, id: "backup-002", name: "photos.zip", state: "error", failure: "connection lost" } as never] });
+    const retry = vi.fn();
+    const failed = { id: "up-1", label: "photo-shoot.zip", kind: "file", sentBytes: 6, totalBytes: 10, doneFiles: 0, totalFiles: 1, state: "failed", error: "connection lost", failures: [], retry, abort: vi.fn(), dismiss: vi.fn() } as UploadTask;
+    render(<ArchiveTransfers machines={machines} refresh={0} onDownload={vi.fn()} uploads={[failed]} />);
+    const row = (await screen.findByText("backup.zip")).closest("article")!;
+    expect(row.textContent).toContain(`Backup from Laptop · Uploading · ${formatBytes(4)} of ${formatBytes(12)}`);
+    expect(row.textContent).toContain("Backup");
+    expect(row.querySelector('[role="progressbar"]')?.getAttribute("aria-valuenow")).toBe("33");
+    expect([...row.querySelectorAll("button")].map(b => b.textContent)).toEqual(["Pause"]);
+    const broken = screen.getByText("photos.zip").closest("article")!;
+    expect(broken.querySelector(".os-transfer-failed")?.textContent).toBe("Upload failed · connection lost · progress is kept");
+    expect([...broken.querySelectorAll("button")].map(b => b.textContent)).toEqual(["Retry", "Cancel"]);
+    const upload = screen.getByText("photo-shoot.zip").closest("article")!;
+    expect(upload.querySelector(".os-transfer-failed")?.textContent).toBe("Upload failed · connection lost");
+    fireEvent.click(within(upload).getByRole("button", { name: "Retry" }));
+    expect(retry).toHaveBeenCalled();
+  });
 });

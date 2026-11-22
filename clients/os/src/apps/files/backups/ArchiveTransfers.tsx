@@ -1,12 +1,13 @@
 import { useId, useContext, useEffect, useRef, useState } from "react";
 import { newShortId } from "@znasllc-io/memql-sdk-core/client";
-import { Download } from "lucide-react";
-import { Button, Caption, Field, Input, Notice, RecordList, RecordRow, Select, Subhead, Refine, AutoRefresh, RecordListSkeleton, formatBytes } from "../../../kit";
+import { Download, File } from "lucide-react";
+import { Button, Caption, Field, Input, Notice, RecordList, RecordRow, Select, Refine, AutoRefresh, RecordListSkeleton, formatBytes } from "../../../kit";
 import { InPlaceAsk } from "../../../kit/pressHold";
 import { useOsConnection } from "../../../live/connection";
 import { Wizard } from "../../../kit/Wizard";
 import { machineName, type MachineRow } from "../../fleet/rows";
-import { absoluteBackupPath, transferActions, transferLabel, type BackupTransfer, type TransferAction } from "./transfers";
+import { absoluteBackupPath, transferActions, transferLabel, transferLine, transferMoving, type BackupTransfer, type TransferAction } from "./transfers";
+import type { UploadTask } from "../useUploadTasks";
 
 import { usePagedCollection } from "../../../live/useLiveCollection";
 import { LiveReadVisibility } from "../../../live/useGraphRevision";
@@ -14,8 +15,22 @@ import { LoadMore } from "../../../kit/LoadMore";
 import { flatten } from "../../../kit/rows";
 import { useDebouncedValue } from "../../../logs/useDebouncedValue";
 
-const actionLabel: Record<TransferAction, string> = { pause: "Pause", resume: "Resume", cancel: "Cancel transfer", trash: "Delete", restore: "Restore", purge: "Purge" };
-export function ArchiveTransfers({ machines, refresh, onDownload }: { machines: readonly MachineRow[]; refresh: number; onDownload: (source: BackupTransfer) => void }) {
+const actionLabel: Record<TransferAction, string> = { pause: "Pause", resume: "Resume", cancel: "Cancel", trash: "Delete", restore: "Restore", purge: "Purge" };
+
+// THE DOWNLOADS LIST (owner's pick 1A, José: "like Steam"): every transfer is
+// one row in the Backups row's look -- a file glyph, the name, one muted line
+// with the status and the figures the transfer actually carries, and a thin
+// bar while bytes move. Neither source reports a speed or a time left, so the
+// line shows neither. This browser's own uploads (useUploadTasks) come first;
+// they drop off on their own once landed (DONE_LINGER_MS). Engine transfers
+// keep the engine's rule: listed until removed, ten per page.
+//
+// ONE BUTTON PER ROW while bytes move (Pause, or Cancel for a browser upload,
+// which has no pause). A stopped row shows its legal pair -- Resume or Retry
+// beside Cancel, Restore beside Purge, Download beside Delete -- because
+// hiding the second action there would make Cancel, Purge or Delete
+// unreachable, not merely quieter.
+export function ArchiveTransfers({ machines, refresh, onDownload, uploads = [] }: { machines: readonly MachineRow[]; refresh: number; onDownload: (source: BackupTransfer) => void; uploads?: readonly UploadTask[] }) {
   const connection = useOsConnection();
   const visible = useContext(LiveReadVisibility);
   const [search, setSearch] = useState("");
@@ -32,7 +47,11 @@ export function ArchiveTransfers({ machines, refresh, onDownload }: { machines: 
   }));
   const rows = feed.snapshot.rows;
   const error = feed.snapshot.error;
-  const previousRefresh = useRef({connection,refresh});
+  // Starts from 0, not the mount's value: the list lives in its own tab now,
+  // so a transfer started elsewhere (Backups, the download wizard) bumps the
+  // counter while this is unmounted, and the next mount must re-read rather
+  // than show the cached page. A counter still at 0 keeps the cached pages.
+  const previousRefresh = useRef({connection,refresh:0});
   useEffect(() => { const previous = previousRefresh.current; previousRefresh.current = {connection,refresh}; if(previous.connection === connection && previous.refresh !== refresh) feed.reseed(); }, [connection, refresh, feed.reseed]);
   const [busy, setBusy] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -47,32 +66,66 @@ export function ArchiveTransfers({ machines, refresh, onDownload }: { machines: 
       const r = await connection.query.libraryBackupControl({ id: job.id, action }); if (!r.rows()[0]) throw new Error("The transfer update returned no result."); setConfirm(""); feed.reseed(); }
     catch (e) { setActionError(e instanceof Error ? e.message : String(e)); } finally { setBusy(""); }
   };
-  return <section aria-label="Backup transfers and downloads">
-    <Subhead>Transfers and downloads</Subhead>
+  const machineLabel = (id: string) => { const m = machines.find(machine => machine.id === id); return m ? machineName(m) : id; };
+  return <section aria-label="Transfers">
     <AutoRefresh resume={false} onRefresh={feed.reseed} enabled={visible && connection !== null} busy={feed.snapshot.state === "seeding" || feed.loadingMore} intervalMs={rows.some(row => !["complete", "bin", "cancelled", "deleted"].includes(row.state)) ? 3000 : 15000} />
     <Refine search={search} onSearch={setSearch} label="Search transfers" placeholder="Search transfers" />
-    {feed.snapshot.state === "seeding" && !rows.length ? <RecordListSkeleton label="Loading transfers" rows={3} /> : null}
-    {rows.length === 0 && !error && feed.snapshot.state !== "seeding" && <Caption>{needle ? "No transfers match." : "No transfers yet."}</Caption>}
-    <RecordList>
-    {rows.map(job => <article key={job.id}>
-      <RecordRow name={job.name} secondary={`${machines.find(m => m.id === job.workerId) ? machineName(machines.find(m => m.id === job.workerId)!) : job.workerId} · ${job.path}`} state={transferLabel(job)}
+    {feed.snapshot.state === "seeding" && !rows.length && !uploads.length ? <RecordListSkeleton label="Loading transfers" rows={3} /> : null}
+    {rows.length === 0 && (needle || uploads.length === 0) && !error && feed.snapshot.state !== "seeding" && <Caption>{needle ? "No transfers match." : "No transfers yet."}</Caption>}
+    <RecordList label="Transfers">
+    {needle ? null : uploads.map(task => <UploadLine key={task.id} task={task} />)}
+    {rows.map(job => {
+      const line = transferLine(job, machineLabel(job.workerId), formatBytes);
+      const actions = transferActions(job).filter(action => !(action === "cancel" && transferMoving(job)));
+      const word = (action: TransferAction) => action === "resume" && line.warn ? "Retry" : actionLabel[action];
+      return <article key={job.id} className="os-backup">
+      <RecordRow icon={<File size={15} aria-hidden />} name={job.name}
+        secondary={<TransferSecondary {...line} />}
+        state={line.backup ? "Backup" : undefined} tone="accent" stateTitle={line.backup ? `A backup from ${machineLabel(job.workerId)}: ${transferLabel(job)}` : undefined}
+        dim={!transferMoving(job) && job.state !== "complete"}
         actions={<>
           {job.state === "complete" && job.kind !== "download" && <Button onClick={() => onDownload(job)}>Download</Button>}
-          {transferActions(job).map(action => <Button key={action} busy={busy === job.id} onClick={() => { if (action === "purge" || action === "cancel") setConfirm(`${job.id}:${action}`); else void act(job, action); }}>{actionLabel[action]}</Button>)}
-        </>}>
-        <Caption>{formatBytes(job.committedBytes)} of {formatBytes(job.size)}{job.kind === "download" ? " saved on the machine" : " stored"}</Caption>
-      </RecordRow>
-      {job.failure && <Notice tone="warn" sentence="Progress is kept." detail={job.failure} />}
+          {actions.map(action => <Button key={action} tone={word(action) === "Retry" ? "primary" : undefined} busy={busy === job.id} onClick={() => { if (action === "purge" || action === "cancel") setConfirm(`${job.id}:${action}`); else void act(job, action); }}>{word(action)}</Button>)}
+        </>} />
       {confirm.startsWith(`${job.id}:`) && <InPlaceAsk>
         <Caption>{confirm.endsWith(":purge") ? "Permanently remove this archive? It cannot be recovered afterwards." : job.kind === "sync_file" ? "Pause this folder sync and cancel this unfinished file? Resume the folder when you are ready to try again." : "Cancel this transfer and remove its unfinished copy?"}</Caption>
         <Button onClick={() => setConfirm("")}>Keep it</Button><Button tone="danger" busy={busy === job.id} onClick={() => act(job, confirm.endsWith(":purge") ? "purge" : "cancel")}>{confirm.endsWith(":purge") ? "Permanently purge" : "Cancel transfer"}</Button>
       </InPlaceAsk>}
-    </article>)}
+    </article>; })}
     </RecordList>
     <LoadMore feed={feed} />
     {actionError && <Notice tone="error" sentence="The transfer was not changed." detail={actionError} />}
     {error && <Notice tone="error" sentence="Transfers could not be updated." detail={error} />}
   </section>;
+}
+
+/** The row's muted line, in the warning colour when it failed, with the thin
+ *  bar under it while bytes move. */
+function TransferSecondary({ text, warn, progress }: { text: string; warn: boolean; progress: number | null }) {
+  return <>
+    {warn ? <span className="os-transfer-failed">{text}</span> : text}
+    {progress !== null ? <span className="os-progress-track os-transfer-bar" role="progressbar" aria-label="Progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)}><span className="os-progress-bar" style={{ width: `${progress * 100}%` }} /></span> : null}
+  </>;
+}
+
+/** This browser's own upload, in the same row. A tree drop's per-file retries
+ *  and the resume note stay on the Browse placeholder where the files land. */
+export function uploadLine(task: UploadTask, bytes: (n: number) => string): { text: string; warn: boolean; progress: number | null } {
+  if (task.state === "failed") return { text: `Upload failed · ${task.error}`, warn: true, progress: null };
+  if (task.state === "done") return { text: `Uploaded · ${bytes(task.totalBytes)}`, warn: false, progress: null };
+  const files = task.kind === "tree" ? `${task.doneFiles} of ${task.totalFiles} files · ` : "";
+  return { text: `Uploading · ${files}${bytes(task.sentBytes)} of ${bytes(task.totalBytes)}`, warn: false, progress: task.totalBytes > 0 ? Math.min(1, task.sentBytes / task.totalBytes) : 0 };
+}
+
+function UploadLine({ task }: { task: UploadTask }) {
+  const line = uploadLine(task, formatBytes);
+  return <article className="os-backup">
+    <RecordRow icon={<File size={15} aria-hidden />} name={task.label}
+      secondary={<TransferSecondary {...line} />}
+      actions={task.state === "sending" ? <Button onClick={task.abort}>Cancel</Button>
+        : task.state === "failed" ? (task.retry ? <Button tone="primary" onClick={task.retry}>Retry</Button> : <Button onClick={task.dismiss}>Dismiss</Button>)
+        : undefined} />
+  </article>;
 }
 
 export function DownloadSetup({ source, machines, onCancel, onStarted }: { source: BackupTransfer; machines: readonly MachineRow[]; onCancel: () => void; onStarted: () => void }) {
@@ -86,7 +139,7 @@ export function DownloadSetup({ source, machines, onCancel, onStarted }: { sourc
     try { await connection.query.libraryBackupCreate({ id, workerId, path: path.trim(), kind: "download", metadata: { sourceTransferId: source.id } }); onStarted(); }
     catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };
-  return <Wizard icon={<Download />} title="Download backup" label="Download destination" open="destination" onOpen={() => {}} back={{ label: "Backups", onSelect: onCancel }}
+  return <Wizard icon={<Download />} title="Download backup" label="Download destination" open="destination" onOpen={() => {}} back={{ label: "Downloads", onSelect: onCancel }}
     steps={[{ id: "destination", name: "Save on a machine", sentence: "Where the copy is saved", state: "open", body: <>
       <Caption>{source.name} · {formatBytes(source.size)}</Caption>
       <Field label="Machine"><Select id={`${ids}-machine`} label="Machine" value={workerId} onChange={setWorkerId}>{machines.map(m => <option key={m.id} value={m.id}>{machineName(m)}</option>)}</Select></Field>
