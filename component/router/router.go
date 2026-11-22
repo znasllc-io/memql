@@ -930,6 +930,16 @@ func (r *Router) walkChain(
 				report.note(cand.Name, why)
 				continue
 			}
+			// A vendor surface that takes no key of a person's is the cluster's
+			// account or nothing, and that account is not a pool for everybody
+			// (accounts.go, clusterAccountGated). Asked here, beside WHO PAYS,
+			// after every gate that stands in front of a vendor.
+			if cand.Door == DoorFederation && !paidByAccount && clusterAccountGated(mod) {
+				if closed := r.providers.ClusterAccountClosedTo(ctx, req.UserId); closed != "" {
+					report.note(cand.Name, closed)
+					continue
+				}
+			}
 			// WHO PAYS, asked last: after the run's no-paid-providers ceiling,
 			// the cost ceiling, the context floor and the modality check, each
 			// exactly where it was (design record R7). A key is a paid

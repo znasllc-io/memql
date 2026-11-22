@@ -352,6 +352,11 @@ type ProviderRegistry struct {
 	// learned about one. Nil on a node where nothing installed it, which
 	// means no call is ever paid by a key -- see vendor_account.go.
 	vendorKeys VendorKeys
+	// clusterGate answers whether the cluster's own vendor account may pay
+	// for a call made for one person (owner decision 2026-11-22). The engine
+	// installs its own when it starts. Nil means it pays for no person's
+	// call, only for the cluster's own work -- see vendor_account_cluster.go.
+	clusterGate ClusterAccountGate
 }
 
 // ProviderConfigEntry stores metadata + instantiated client for a provider.

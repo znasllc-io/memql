@@ -792,8 +792,8 @@ serving.
   synthetic actor: the cluster's account only. A person's authority borrowed
   for a visitor: never a key. A route or pin the acting person chose
   THEMSELVES: their default key, then keys lent to them (earliest added
-  first), then the cluster's. Auto and everything else: the same order,
-  counting only keys whose owner switched Auto on. **"Themselves" is the
+  first), then the cluster's WHEN IT PAYS FOR THEM. Auto and everything else:
+  the same order, counting only keys whose owner switched Auto on. **"Themselves" is the
   credential, not the subject** (`auth.ChoiceIsThePersons`): a choice made
   through an app session, a badge, delegated access or server code acting for
   the person is attributed to them and counts as no choice
@@ -804,13 +804,31 @@ serving.
   (`<record>@key:<id>`, then `<record>@cluster`). A rate limit or an outage is
   not about the account, and neither is the cost guard's own 402
   (`guardStopErrorType`). A request that carries a key follows no redirect.
-- **Text surfaces only.** Vision, embeddings, speech, transcription and images
-  stay on the cluster's account.
+- **THE CLUSTER'S ACCOUNT IS NOT A POOL FOR EVERYBODY** (owner decision
+  2026-11-22; `component/memql/vendor_account_cluster.go`). Model access is
+  bring-your-own. The cluster's account pays for the cluster's own work
+  (`auth.ActsForNoPerson`) and for a person's calls only when that person
+  holds `execute app:settings/clusteraccount`, seeded on the OWNER role alone
+  and given to others in Users > Access. The person judged is the one the call
+  is FOR, from their stored role, groups and grants
+  (`MemQLEngine.clusterAccountOpenTo`): borrowed authority carries a stand-in
+  role, and a visitor's call is judged by the person it borrows from. Asked
+  only where the cluster has an account for the record, once per vendor per
+  resolution, and again when `<record>@cluster` resolves at the call. A
+  registry with no gate installed gives the account to no person; the engine
+  installs its own at bootstrap, and a test says who may use it.
+- **Text surfaces only take a key.** Vision, speech, transcription and images
+  are the cluster's account or nothing, so the router asks the same gate for
+  them (`clusterAccountGated`). EMBEDDINGS ARE NEVER ASKED: the memory space is
+  the cluster's, one model for everybody.
 - **A key's spend is METERED.** Every ceiling and loop cap counts it; there is
   no exemption and no cap per key.
 - **Readiness is per person** (`ProviderRegistry.VendorDoorFor`):
-  `inferenceStatus.federationConfigured` is the cluster's own account,
-  `keyAccount` is whether the READER holds a key that can pay.
+  `inferenceStatus.federationConfigured` is whether the cluster's own account
+  is SET UP (the same for everybody), `clusterAccountOpen` is whether it pays
+  for the READER, and `keyAccount` is whether the reader holds a key that can
+  pay. `eligible` and `doorsOpen` count a vendor only when one of the last two
+  holds.
 - **Two engine-only passes, each on one bff replica behind a lease**:
   `vendorKeysDailyCheck` (04:40, lists models with keys idle for a day) and
   `vendorKeysOwnerNotices` (every ten minutes: one email per fall to the key's

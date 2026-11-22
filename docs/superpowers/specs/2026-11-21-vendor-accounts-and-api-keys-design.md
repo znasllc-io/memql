@@ -484,8 +484,12 @@ above, the answer is what the code does, and the row above is the history.
    person's calls only when that person is allowed.** The owner's rule is
    bring-your-own for everything: a connected cluster account is not a free
    pool for everybody on the cluster. The cluster owner is allowed from the
-   start and can allow others. This narrows K8's last fallback and is built
-   after part 2 lands and before the API route.
+   start and can allow others. This narrows K8's last fallback. The
+   permission is `execute app:settings/clusteraccount`, seeded on the owner
+   role alone; the person judged is the one a call is for, from their stored
+   role and grants; pictures, speech, transcription and images follow the same
+   rule, and embeddings do not, because the memory space is the cluster's
+   (`component/memql/vendor_account_cluster.go`).
 3. **API keys live in Settings, and anybody signed in may add one** (changes K4
    and U1). His words: a key's owner uses it whatever their role, and must be
    able to manage it. Fleet opens for owners and developers only. So the

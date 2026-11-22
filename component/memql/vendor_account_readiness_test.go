@@ -87,6 +87,9 @@ func TestAPersonWithAKeyAndNoFederationCanBeServed(t *testing.T) {
 // on any route, with no key anywhere.
 func TestFederationAloneServesEveryone(t *testing.T) {
 	reg := newProviderRegistry()
+	// Everyone who may use the cluster's account, which here is everybody.
+	// Who may is vendor_account_cluster_test.go's subject.
+	openToEverybody(reg)
 	reg.setEntry(federatedOpenAI(vendorRecord("gpt", VendorOpenAI, true, "")))
 	reg.SetVendorKeys(noKeys())
 
@@ -291,9 +294,19 @@ func TestInferenceStatusTellsAKeyFromTheClustersAccount(t *testing.T) {
 	federated := newProviderRegistry()
 	federated.setEntry(federatedOpenAI(vendorRecord("gpt", VendorOpenAI, true, "")))
 	federated.SetVendorKeys(noKeys())
-	everyone := status(federated, personContext("ben"))
-	if everyone["federationConfigured"] != true || everyone["keyAccount"] != false || everyone["eligible"] != true {
-		t.Fatalf("status = %v, want the cluster's account and no key", everyone)
+	federated.SetClusterAccountGate(openTo("ben").gate)
+	allowed := status(federated, personContext("ben"))
+	if allowed["federationConfigured"] != true || allowed["clusterAccountOpen"] != true || allowed["keyAccount"] != false || allowed["eligible"] != true {
+		t.Fatalf("status = %v, want the cluster's account, open to him, and no key", allowed)
+	}
+	// The same cluster, asked by a person its account is closed to: it is set
+	// up, it is not theirs to spend, and with no key they have no vendor.
+	closed := status(federated, personContext("ana"))
+	if closed["federationConfigured"] != true || closed["clusterAccountOpen"] != false || closed["eligible"] != false {
+		t.Fatalf("status = %v, want a cluster account that is set up and closed to her, and nothing open", closed)
+	}
+	if doors, _ := closed["doorsOpen"].([]any); len(doors) != 0 {
+		t.Fatalf("doorsOpen = %v for a person the cluster's account is closed to", closed["doorsOpen"])
 	}
 }
 

@@ -97,6 +97,7 @@ func TestInferenceStatusStreamingFederationRequiresAvailablePlainStream(t *testi
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := newProviderRegistry()
+			openToEverybody(r)
 			entry := &ProviderConfigEntry{Config: ProviderConfig{Name: "vendor", Type: "openai"}, Client: tc.client, Available: tc.available}
 			if tc.federated {
 				entry.Config.Auth = map[string]string{authKeyIdentityProviderID: "test-provider", authKeyOpenAIServiceAccountID: "test-account", authKeyOpenAITokenFile: "/not-read-by-readiness"}

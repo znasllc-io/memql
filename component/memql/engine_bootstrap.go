@@ -424,6 +424,11 @@ func (e *MemQLEngine) initFromTree(concepts concept.Registry, tree fs.FS, publis
 
 	e.prompts = promptRegistry
 	e.providers = providerRegistry
+	// The cluster's own vendor account pays for a person only when they may
+	// use it, and that is a question about rows the registry cannot read
+	// (vendor_account_cluster.go). Installed here, on the one registry every
+	// call resolves through, so no node hands the account to everybody.
+	e.providers.SetClusterAccountGate(e.clusterAccountOpenTo)
 	e.policies = policyRegistry
 	policyRegistry.AttachStore(databasePolicyStore{database: e.database})
 	e.rules = ruleRegistry

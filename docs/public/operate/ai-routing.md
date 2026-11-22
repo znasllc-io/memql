@@ -557,14 +557,16 @@ empty / `fast` / `strong` / `reasoning`, refuses the turn with gRPC
 
 Everything above chooses a **model**. For a text model at Anthropic or OpenAI
 one step follows: which **account** pays. There are two kinds. The **cluster's
-account** is the cluster's own sign-in with the vendor. An
-[**API key**](api-keys.md) is a person's.
+account** is the cluster's own sign-in with the vendor; it pays for the
+cluster's own work, and for a person only when that person may use it
+([who the cluster's account pays for](api-keys.md#who-the-clusters-account-pays-for)).
+An [**API key**](api-keys.md) is a person's.
 
 | The call | Accounts, in order |
 |---|---|
 | Has no person behind it (a schedule, a sweep, a seed, a synthetic identity) | the cluster's account only |
-| Runs under a person's authority borrowed for a visitor (a shopper form, an access-code call) | the cluster's account only. Never a key |
-| Was made on a route its person chose, or a source they pinned themselves | their default key at the vendor, then keys lent to them (the key added earliest first), then the cluster's account |
+| Runs under a person's authority borrowed for a visitor (a shopper form, an access-code call) | the cluster's account, when the person whose authority is borrowed may use it. Never a key |
+| Was made on a route its person chose, or a source they pinned themselves | their default key at the vendor, then keys lent to them (the key added earliest first), then the cluster's account when they may use it |
 | Anything else: Auto, and every call nobody chose a route for | the same order, counting only keys whose owner turned on **Let Auto use this key** |
 
 A choice is the acting person's own or it is not a choice: an agent's stored
@@ -595,8 +597,19 @@ paused or refused since the resolution is not spent, and a reference to a key
 the acting person may not use resolves nothing, exactly as a made-up one does.
 
 **Text surfaces only**: chat, streaming chat, both tool surfaces and structured
-output. Vision, embeddings, speech, transcription and images stay on the
-cluster's account.
+output. Vision, embeddings, speech, transcription and images take no key: they
+are the cluster's account or nothing. So for a person the cluster's account
+does not pay for, a picture, speech, transcription or an image at a vendor is
+passed over like a shut door, with that reason in `considered`. Embeddings are
+paid by the cluster's account for every caller: the memory space is the
+cluster's, one model for everybody.
+
+**The cluster's account is judged per person, from rows.** Whether it pays is
+`execute app:settings/clusteraccount` for the person the call is for (their
+stored role, their groups and their grants; never the stand-in role work
+continued on a person's behalf runs under). It is asked only where the cluster
+has an account for the record, once per vendor in one resolution, and again
+when `<record>@cluster` is resolved at the call.
 
 [API keys](api-keys.md) has the rest: who may add one, lending, checks, what a
 key's owner is told when it stops working, and what a cluster owner can do.

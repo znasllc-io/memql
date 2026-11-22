@@ -304,6 +304,17 @@ organization for any change of either binding, clearing included, so the deny
 holds there too. The two named mutations ask for the part on every call,
 clearing included.
 
+**Settings carries one part only the owner role holds,
+`app:settings/clusteraccount`** (owner decision 2026-11-22). `execute
+app:settings/clusteraccount` has the cluster's own vendor account pay for a
+person's model calls. That account bills the organization the cluster owner
+connected and is not a pool for everybody, so the part is seeded on owner
+alone, and the owner gives it to a person or a group. It is not a door to
+anything: no section is behind it. The engine asks it for the person a call is
+FOR, from their stored role, groups and grants, never from the stand-in role
+that work continued on a person's behalf runs under
+([who the cluster's account pays for](../api-keys.md#who-the-clusters-account-pays-for)).
+
 **Settings carries one part that every predefined role holds,
 `app:settings/apikeys`** (vendor accounts design, K4 as amended 2026-11-22).
 `execute app:settings/apikeys` adds an API key and is seeded on owner,

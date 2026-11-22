@@ -685,6 +685,16 @@ seed capability cap-user-execute-app-settings-apikeys { roleSlug: "user"  verb: 
 @description("viewer: add an API key of one's own in Settings > API keys.")
 seed capability cap-viewer-execute-app-settings-apikeys { roleSlug: "viewer"  verb: "execute"  resourceType: "app:settings/apikeys"  predefined: true }
 
+// ---- app:settings/clusteraccount -- have the cluster's own vendor account pay for one's calls (owner decision 2026-11-22) ----
+// The cluster's account at a vendor bills the organization its owner connected, and it is not a
+// pool for everybody: model access here is bring-your-own. It pays for the cluster's own work, and
+// for a person's calls only when that person holds this part. OWNER ONLY, by decision: the owner
+// has it from the start and gives it to a person or a group in Users > Access. Everybody else pays
+// with an API key, a machine or an app of their own. The engine judges the person a call is FOR,
+// from their stored role and grants (component/memql vendor_account_cluster.go).
+@description("owner: have the cluster's own vendor account pay for one's model calls.")
+seed capability cap-owner-execute-app-settings-clusteraccount { roleSlug: "owner"  verb: "execute"  resourceType: "app:settings/clusteraccount"  predefined: true }
+
 // ---- app:bin (registry floor: no floor) ----
 @description("owner: open the bin app -- reproduces the OS registry floor no floor (memql#5300).")
 seed capability cap-owner-read-app-bin { roleSlug: "owner"  verb: "read"  resourceType: "app:bin"  predefined: true }

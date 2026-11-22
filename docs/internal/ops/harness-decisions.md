@@ -2181,6 +2181,43 @@ store) is not on either list and still moves; it carries no credential and was
 not part of the decision. Tests: `TestAPersonsSourceAccessNeverChangesHands`,
 `TestTransferLeavesAPersonsSourceAccessWhereItIs`.
 
+**The cluster's own vendor account is not a pool for everybody (owner
+decision, 2026-11-22).** The first build offered it to every person as the
+last account of every vendor call (K8). The owner's rule is bring-your-own for
+everything a person does with a model, and a connected cluster account bills
+his organization. Trigger: a vendor record the cluster can pay for is about to
+be served for a call. Evidence: who the call is for (`ResolveRequest.UserId`,
+stamped from the caller when empty) and the rows about that person. Path: no
+person behind the call (`auth.ActsForNoPerson`) is the cluster's own work and
+is paid without asking; a person is paid only when they hold `execute
+app:settings/clusteraccount` (`MemQLEngine.clusterAccountOpenTo`, installed on
+the provider registry at bootstrap as `ClusterAccountGate`). The part is seeded
+on the owner role alone, by his decision, and given to others in Users >
+Access. The person is judged from the principal table (`personSubject`): work
+continued on a person's behalf carries a stand-in role, so the context's role
+decides only for a person's own session. Alternatives refused: leaving it open
+(his decision), and judging the context's role (an owner's own run would lose
+the account). Fallback: a registry with no gate installed gives the account to
+no person, the narrowing direction, and a test names who may use it instead of
+a permissive default. Asked in the composition of a record's accounts
+(`VendorAccountsWith`, lazily and once per answer, so a cluster with no vendor
+account reads nothing), again at the call for `<record>@cluster`
+(`VendorAccountUsable`), in readiness (`VendorDoorFor`: `ClusterSetUp` is the
+old meaning, `Cluster` is "pays for this person"), and by the router for the
+vendor surfaces that take no key: vision, speech, transcription and images
+(`clusterAccountGated`). Embeddings are never asked: the memory space is the
+cluster's, one model for everybody. A visitor's call is judged by the person
+whose authority it borrows. Invariant: no person spends the cluster's vendor
+account unless its owner said so. Known limit: an operator who sets
+`MEMQL_STT_PROVIDER` to a direct OpenAI transcription path dials OpenAI with
+the cluster's bearer outside the router, for every caller; that variable is
+the operator's own choice and is not gated. Not verified against a real
+vendor. Tests: `vendor_account_cluster_test.go`,
+`cluster_account_gate_db_test.go`, and in `component/router/accounts_test.go`
+`TestTheClustersAccountDoesNotPayForAPersonItIsClosedTo`,
+`TestTheVendorSurfacesWithNoKeyAskTheSameGate` and
+`TestEmbeddingsStayOnTheClustersAccountForEverybody`.
+
 **The record of a key-paid call that failed keeps the router's words, not the
 vendor's (owner decision, 2026-11-22).** `v1:router:call` is readable by every
 signed-in person, and its `errorMessage` held the error as the vendor wrote

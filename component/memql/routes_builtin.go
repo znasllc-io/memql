@@ -563,6 +563,12 @@ func (r routeReadiness) unreadyReason(sources []string, job string) string {
 	case allFleet:
 		return "No local model reachable"
 	case allVendors:
+		// The cluster HAS an account and it does not pay for this person
+		// (vendor_account_cluster.go). "A vendor account" is then nothing
+		// they can add; a key is.
+		if r.doors.ClusterFederation && !r.doors.ClusterAccountOpen {
+			return "Needs an API key. The cluster's vendor account is not open to you"
+		}
 		return "Needs an API key or a vendor account"
 	}
 	return job + ": nothing can serve it now"
