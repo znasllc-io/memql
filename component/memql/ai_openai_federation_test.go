@@ -207,11 +207,12 @@ func TestOpenAICredentialRefusesOneOrTwo(t *testing.T) {
 	tokenFile := validOpenAIIdentityToken(t)
 	full := openaiFederatedAuth(tokenFile)
 
-	// Every proper non-empty subset must refuse, and must name both halves.
+	// Every proper non-empty subset must refuse, and must name both halves,
+	// EXCEPT the token file on its own, which is not a configuration at all
+	// (TestOpenAITokenFileAloneIsNotAConfiguration).
 	subsets := [][]string{
 		{authKeyIdentityProviderID},
 		{authKeyOpenAIServiceAccountID},
-		{authKeyOpenAITokenFile},
 		{authKeyIdentityProviderID, authKeyOpenAIServiceAccountID},
 		{authKeyIdentityProviderID, authKeyOpenAITokenFile},
 		{authKeyOpenAIServiceAccountID, authKeyOpenAITokenFile},
@@ -243,6 +244,42 @@ func TestOpenAICredentialRefusesOneOrTwo(t *testing.T) {
 				t.Errorf("subset %v: error does not name the PRESENT %s: %v", subset, envName, err)
 			}
 		}
+	}
+}
+
+// The token file's path is set by every Deployment on every cluster, so it is
+// not something an operator configured: see
+// TestAnthropicTokenFileAloneIsNotAConfiguration for what counting it cost.
+func TestOpenAITokenFileAloneIsNotAConfiguration(t *testing.T) {
+	cfg := ProviderConfig{Name: "openaiTest", Auth: map[string]string{
+		authKeyOpenAITokenFile: validOpenAIIdentityToken(t),
+	}}
+	opts, source, path, err := openaiCredential(cfg, guardedHTTPClient(nil))
+	if err != nil {
+		t.Fatalf("a pod with the token file and no ids was refused as misconfigured: %v", err)
+	}
+	if path != credentialPathUnavailable || source != nil || len(opts) != 0 {
+		t.Fatalf("credential path = %q, want %q and no credential", path, credentialPathUnavailable)
+	}
+
+	_, err = newOpenAIClient(cfg, guardedHTTPClient(nil))
+	if err == nil {
+		t.Fatal("a client was built with no credential")
+	}
+	if strings.Contains(err.Error(), "HALF-CONFIGURED") {
+		t.Errorf("a cluster nobody set up is told it is half-configured: %v", err)
+	}
+}
+
+func TestOpenAIIdsWithoutATokenFileRefuse(t *testing.T) {
+	auth := openaiFederatedAuth(validOpenAIIdentityToken(t))
+	delete(auth, authKeyOpenAITokenFile)
+	_, _, _, err := openaiCredential(ProviderConfig{Name: "openaiTest", Auth: auth}, guardedHTTPClient(nil))
+	if err == nil {
+		t.Fatal("ids with no token file were accepted")
+	}
+	if !strings.Contains(err.Error(), "HALF-CONFIGURED") || !strings.Contains(err.Error(), envOpenAIIdentityTokenFile) {
+		t.Errorf("the refusal does not name the missing token file: %v", err)
 	}
 }
 

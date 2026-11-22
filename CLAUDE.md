@@ -756,7 +756,9 @@ is why it is refused at load when it names a policy.
 **Both vendor credentials are workload identity federation, everywhere, and
 there is no manually entered API key left in the product** (epics memql#4333,
 memql#5088): the engine presents the pod's projected Kubernetes token and
-exchanges it for a short-lived bearer; a partial config REFUSES BOOT.
+exchanges it for a short-lived bearer; a partial set of ids REFUSES THAT VENDOR,
+naming both halves (the token file's path, which every Deployment sets, does not
+count on its own).
 `TestNoVendorApiKeyEntryPoint` (`vendor_api_key_gate_test.go`) fails the build
 if any retired key env var or the retired key-setting builtin reappears in a
 tracked source file. **Read that file rather than restating its list here --

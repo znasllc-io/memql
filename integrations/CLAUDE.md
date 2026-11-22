@@ -545,7 +545,8 @@ subscription missing; API keys absent; cache hit rate (visible in the logs).
 There is no vendor API key (epic memql#5088). Both cloud vendors are reached by
 workload identity federation: the pod presents the OIDC token Kubernetes
 projects for it and the engine exchanges that for a short-lived bearer. All the
-ids or none -- a partial set refuses boot.
+ids or none -- a partial set of ids refuses that vendor, naming both halves.
+The token file's path is set by every Deployment and does not count on its own.
 
 ```bash
 # OpenAI -- all three, or none

@@ -121,17 +121,22 @@ func TestAnthropicCredentialRefusesPartialFederation(t *testing.T) {
 	tokenFile := validIdentityToken(t)
 	full := federatedAuth(tokenFile)
 
-	// Every proper non-empty subset of the four required keys must refuse.
-	// Enumerated rather than sampled: the whole point is that no partial
-	// combination has a working path, and a spot-check would leave the one
-	// that does undiscovered.
+	// Every proper non-empty subset of the four required keys must refuse,
+	// EXCEPT the token file on its own, which is not a configuration at all
+	// (TestAnthropicTokenFileAloneIsNotAConfiguration). Enumerated rather than
+	// sampled: the whole point is that no partial combination has a working
+	// path, and a spot-check would leave the one that does undiscovered.
 	keys := []string{
 		authKeyFederationRuleID,
 		authKeyOrganizationID,
 		authKeyServiceAccountID,
 		authKeyIdentityTokenFile,
 	}
+	const tokenFileOnly = 1 << 3
 	for mask := 1; mask < (1<<len(keys))-1; mask++ {
+		if mask == tokenFileOnly {
+			continue
+		}
 		auth := map[string]string{}
 		var set []string
 		for i, k := range keys {
@@ -168,6 +173,52 @@ func TestAnthropicCredentialRefusesPartialFederation(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// THE TOKEN FILE'S PATH IS PLUMBING, NOT CONFIGURATION. Every Deployment in
+// deploy/k8s/base sets MEMQL_AI_ANTHROPIC_IDENTITY_TOKEN_FILE and mounts the
+// projected token, on every cluster, set up or not. Counting it as one of four
+// values an operator filled in made every pod of a cluster nobody had set up
+// read as HALF-CONFIGURED: the door report said so on every refused call, and
+// `memql provider-auth check` printed FAILED and exited 1 on a cluster that
+// was exactly as it was installed, and on one whose ids had been applied
+// through Settings (found on the local cluster, 2026-11-22). The ids decide.
+func TestAnthropicTokenFileAloneIsNotAConfiguration(t *testing.T) {
+	cfg := ProviderConfig{Name: "claudeTest", Auth: map[string]string{
+		authKeyIdentityTokenFile: validIdentityToken(t),
+	}}
+	opts, path, err := anthropicCredential(cfg, guardedHTTPClient(nil))
+	if err != nil {
+		t.Fatalf("a pod with the token file and no ids was refused as misconfigured: %v", err)
+	}
+	if path != credentialPathUnavailable || len(opts) != 0 {
+		t.Fatalf("credential path = %q with %d options, want %q and none", path, len(opts), credentialPathUnavailable)
+	}
+
+	_, _, err = newAnthropicClient(cfg, guardedHTTPClient(nil))
+	if err == nil {
+		t.Fatal("a client was built with no credential")
+	}
+	if strings.Contains(err.Error(), "HALF-CONFIGURED") {
+		t.Errorf("a cluster nobody set up is told it is half-configured: %v", err)
+	}
+	if !strings.Contains(err.Error(), "is not configured on this cluster") {
+		t.Errorf("the error does not say the vendor is simply not set up: %v", err)
+	}
+}
+
+// And the other direction: every id set and no token file IS a
+// misconfiguration, and the refusal names the file.
+func TestAnthropicIdsWithoutATokenFileRefuse(t *testing.T) {
+	auth := federatedAuth(validIdentityToken(t))
+	delete(auth, authKeyIdentityTokenFile)
+	_, _, err := anthropicCredential(ProviderConfig{Name: "claudeTest", Auth: auth}, guardedHTTPClient(nil))
+	if err == nil {
+		t.Fatal("ids with no token file were accepted")
+	}
+	if !strings.Contains(err.Error(), "HALF-CONFIGURED") || !strings.Contains(err.Error(), envAnthropicIdentityTokenFile) {
+		t.Errorf("the refusal does not name the missing token file: %v", err)
 	}
 }
 

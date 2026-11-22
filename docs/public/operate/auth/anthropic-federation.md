@@ -103,14 +103,21 @@ answers `workspace_id_required` when it genuinely needs to be told.
 
 ## The rule that decides everything: all four, or none
 
-The engine reads the four required values -- rule, organization, service
-account, token file -- as a set:
+The engine needs four values to federate: rule, organization, service account
+and token file. The three ids decide whether Anthropic is configured at all:
 
 | What is set | What the engine does |
 |---|---|
-| all four | federates |
-| none | leaves the Anthropic providers registered as unavailable |
-| one, two or three | **refuses to boot**, naming which are missing |
+| all three ids and the token file | federates |
+| no id | leaves the Anthropic providers registered as unavailable |
+| one or two ids, or every id with no token file | **refuses the vendor**: every Anthropic provider registers as unavailable, with a message naming what is set and what is missing |
+
+**The token file's path is not yours to set, and does not count on its own.**
+Every Deployment sets `MEMQL_AI_ANTHROPIC_IDENTITY_TOKEN_FILE` and mounts the
+projected token, on every cluster, so it is present on a cluster nobody has set
+up. With no id the vendor is simply not configured. The engine used to count
+the path as one of four values somebody had filled in, which made every pod of
+an untouched cluster report itself half-configured.
 
 **THERE IS NO KEY ARM ANY MORE** (epic memql#5088). This table used to have a
 fourth row -- "none: uses the API key, as before" -- and a fifth for a cluster
@@ -122,8 +129,9 @@ needs no model, and reports `ai` as unconfigured.
 The last row is deliberate, and it is the reason the key arm could go without
 anyone noticing a gap. Falling back on a half-configured federation would work
 in every test, boot every node, and stop working the hour you finished step 3
-of this runbook -- on whichever node nobody was watching. A refusal at boot is
-loud, immediate and attributable.
+of this runbook -- on whichever node nobody was watching. A refusal that names
+both halves, on every call that would have used the vendor and in
+`memql provider-auth check`, is loud, immediate and attributable.
 
 ---
 

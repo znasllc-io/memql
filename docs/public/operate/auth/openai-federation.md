@@ -133,14 +133,19 @@ by `deploy/k8s/base` on every engine Deployment; you do not fill it in.
 
 ## The rule that decides everything: all three, or none
 
-The engine reads the three values -- identity provider, service account, token
-file -- as a set:
+The engine needs three values to federate: identity provider, service account
+and token file. The two ids decide whether OpenAI is configured at all:
 
 | What is set | What the engine does |
 |---|---|
-| all three | federates |
-| none | leaves the OpenAI providers registered as unavailable |
-| one or two | **refuses to boot**, naming which are missing |
+| both ids and the token file | federates |
+| no id | leaves the OpenAI providers registered as unavailable |
+| one id, or both ids with no token file | **refuses the vendor**: every OpenAI provider registers as unavailable, with a message naming what is set and what is missing |
+
+**The token file's path is not yours to set, and does not count on its own.**
+Every Deployment sets `MEMQL_AI_OPENAI_IDENTITY_TOKEN_FILE` and mounts the
+projected token, on every cluster. With no id the vendor is simply not
+configured.
 
 The middle row is not an error. A cluster with no federated vendor boots,
 serves everything that needs no model, and reports `ai` as unconfigured; that
@@ -151,7 +156,9 @@ still has a "none" arm because a cluster may reasonably federate one vendor and
 not the other; neither switch has a KEY arm any more. A half-configured
 federation that quietly fell back to something would work in every test, boot
 every node, and stop working the hour you finished step 3 -- on whichever node
-nobody was watching. A refusal at boot is loud, immediate and attributable.
+nobody was watching. A refusal that names both halves, on every call that would
+have used the vendor and in `memql provider-auth check`, is loud, immediate and
+attributable.
 
 ---
 

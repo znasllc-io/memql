@@ -96,11 +96,18 @@ type anthropicFederation struct {
 	TokenFile        string
 }
 
-// requiredFederationFields is the set that decides the branch: all four
-// present means federate, none means the key, anything between refuses. The
-// workspace id is deliberately NOT in it -- Anthropic requires it only when a
-// rule spans more than one workspace, and demanding it here would make the
-// common single-workspace install carry a value it does not need.
+// requiredFederationFields is the set federation needs: all four present
+// means federate. The workspace id is deliberately NOT in it -- Anthropic
+// requires it only when a rule spans more than one workspace, and demanding it
+// here would make the common single-workspace install carry a value it does
+// not need.
+//
+// WHETHER THE VENDOR IS CONFIGURED AT ALL IS ASKED OF THE IDS ALONE (anyIdSet).
+// The token file's path is the fourth value and is not an operator's: every
+// Deployment in deploy/k8s/base sets it and mounts the projected token, on
+// every cluster. Counting it made a cluster nobody had set up read as
+// half-configured on every pod. With no id set the vendor is not configured,
+// whatever the token file says; with any id set, all four are required.
 //
 // The order is the order the missing-key error names them in, which is the
 // order the runbook creates them in.
@@ -129,6 +136,12 @@ func (f anthropicFederation) present() []string {
 		}
 	}
 	return out
+}
+
+// anyIdSet reports whether an operator set any of the three ids. The token
+// file is not asked: see requiredFederationFields.
+func (f anthropicFederation) anyIdSet() bool {
+	return f.RuleID != "" || f.OrganizationID != "" || f.ServiceAccountID != ""
 }
 
 func (f anthropicFederation) missing() []string {
@@ -214,22 +227,22 @@ func anthropicCredential(cfg ProviderConfig, httpClient *http.Client) ([]option.
 // some are.
 func anthropicSignInFor(cfg ProviderConfig) (*vendorSignIn, error) {
 	fed := anthropicFederationFrom(cfg.Auth)
-	present, missing := fed.present(), fed.missing()
-	switch {
-	case len(missing) == 0:
-	case len(present) > 0:
-		// One to three set: refuse. Naming both halves is deliberate -- the
-		// operator is mid-cutover and needs to know which of the four they
-		// have, not only which they lack.
+	if !fed.anyIdSet() {
+		// No id: nobody set this vendor up here. The token file's path is set
+		// by the Deployment on every pod and is not a configuration on its own.
+		return nil, nil
+	}
+	if present, missing := fed.present(), fed.missing(); len(missing) > 0 {
+		// Some of the four and not all: refuse. Naming both halves is
+		// deliberate -- the operator is mid-cutover and needs to know which
+		// they have, not only which they lack.
 		return nil, fmt.Errorf(
 			"provider %q is HALF-CONFIGURED for Anthropic workload identity federation: %s set, %s missing. "+
-				"Set all four, or none to leave the Anthropic providers unavailable. A partial federation "+
-				"config is refused rather than quietly read as 'not configured', because an operator halfway "+
-				"through the runbook believes they are ENABLING Anthropic, not disabling it. "+
+				"Set all four, or clear the ids to leave the Anthropic providers unavailable. A partial "+
+				"federation config is refused rather than quietly read as 'not configured', because an operator "+
+				"halfway through the runbook believes they are ENABLING Anthropic, not disabling it. "+
 				"Runbook: docs/public/operate/auth/anthropic-federation.md",
 			cfg.Name, strings.Join(present, ", "), strings.Join(missing, ", "))
-	default:
-		return nil, nil
 	}
 
 	if err := preflightIdentityToken(fed.TokenFile, anthropicAudience, envAnthropicIdentityTokenFile); err != nil {

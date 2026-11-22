@@ -629,6 +629,55 @@ func TestCheckProviderAuthReportsIdsAppliedThroughSettings(t *testing.T) {
 	}
 }
 
+// A REAL POD ALWAYS CARRIES THE TOKEN FILE'S PATH: every Deployment sets it.
+// The two tests above clear it, which no pod does, and that is how the command
+// came to print FAILED: HALF-CONFIGURED on a local cluster that was set up
+// through Settings and signed in. These are the same two answers in a pod's
+// real environment.
+func podEnvironmentWithNoIds(t *testing.T, f *fakeAnthropic) {
+	t.Helper()
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
+	t.Setenv("ANTHROPIC_BASE_URL", f.srv.URL)
+	for _, name := range []string{
+		envAnthropicFederationRuleID, envAnthropicOrganizationID,
+		envAnthropicServiceAccountID, envAnthropicWorkspaceID,
+	} {
+		t.Setenv(name, "")
+	}
+	t.Setenv(envAnthropicIdentityTokenFile, validIdentityToken(t))
+}
+
+func TestCheckProviderAuthInAPodSetUpThroughSettings(t *testing.T) {
+	f := newFakeAnthropic(t)
+	podEnvironmentWithNoIds(t, f)
+	engineRecorded(t, vendorSignInRecord{Outcome: "ok", ExpiresAt: time.Now().Add(time.Hour), ModelsListed: 3})
+
+	report, err := CheckProviderAuth(context.Background(), nil, "anthropic")
+	if err != nil {
+		t.Fatalf("a pod whose engine signed in was reported as failing: %v", err)
+	}
+	if report.CredentialPath != string(credentialPathFederation) || report.FederationRuleID != "fdrl_engine" || !report.Recorded {
+		t.Fatalf("report = %+v, want the engine's federation record", report)
+	}
+	if got := f.requestCount(); got != 0 {
+		t.Fatalf("the check sent %d requests to the vendor; it must send none", got)
+	}
+}
+
+func TestCheckProviderAuthInAPodNobodySetUp(t *testing.T) {
+	f := newFakeAnthropic(t)
+	podEnvironmentWithNoIds(t, f)
+
+	report, err := CheckProviderAuth(context.Background(), nil, "anthropic")
+	if err != nil {
+		t.Fatalf("a cluster exactly as it was installed was reported as failing: %v", err)
+	}
+	if report.CredentialPath != string(credentialPathUnavailable) || report.Recorded {
+		t.Fatalf("report = %+v, want the unavailable answer and nothing recorded", report)
+	}
+}
+
 // TestCheckProviderAuthReportsUnavailableWithNoFederation replaces
 // TestCheckProviderAuthReportsTheKeyPath, which asserted the pre-cutover state
 // the runbook's step 5 was told to stop seeing.

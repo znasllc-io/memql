@@ -98,8 +98,11 @@ type openaiFederation struct {
 	TokenEndpoint string
 }
 
-// requiredFederationFields is the set that decides the branch: all three
-// present means federate, none means unavailable, anything between refuses.
+// requiredFederationFields is the set federation needs: all three present
+// means federate. Whether the vendor is configured at all is asked of the two
+// ids alone (anyIdSet): the token file's path is set by every Deployment on
+// every cluster and is not a configuration on its own (the Anthropic twin of
+// this function says what counting it cost).
 //
 // The order is the order the missing-field error names them in, which is the
 // order the runbook creates them in.
@@ -125,6 +128,12 @@ func (f openaiFederation) present() []string {
 		}
 	}
 	return out
+}
+
+// anyIdSet reports whether an operator set either id. The token file is not
+// asked: see requiredFederationFields.
+func (f openaiFederation) anyIdSet() bool {
+	return f.IdentityProviderID != "" || f.ServiceAccountID != ""
 }
 
 func (f openaiFederation) missing() []string {
@@ -339,6 +348,13 @@ func openaiCredential(cfg ProviderConfig, httpClient *http.Client) ([]option.Req
 	present, missing := fed.present(), fed.missing()
 
 	switch {
+	case !fed.anyIdSet():
+		// No id. NOT AN ERROR: nobody set OpenAI up on this cluster. The token
+		// file's path is set by the Deployment on every pod and is not a
+		// configuration on its own. The provider registers as unavailable and
+		// the readiness model reports `ai` unconfigured.
+		return nil, nil, credentialPathUnavailable, nil
+
 	case len(missing) == 0:
 		if err := preflightIdentityToken(fed.TokenFile, openaiAudience, envOpenAIIdentityTokenFile); err != nil {
 			return nil, nil, "", fmt.Errorf("provider %q openai federation preflight: %w", cfg.Name, err)
@@ -369,24 +385,17 @@ func openaiCredential(cfg ProviderConfig, httpClient *http.Client) ([]option.Req
 		}
 		return opts, source, credentialPathFederation, nil
 
-	case len(present) > 0:
-		// One or two set: refuse. Naming both halves is deliberate -- the
-		// operator is mid-runbook and needs to know which of the three they
-		// have, not only which they lack.
+	default:
+		// An id set and something missing: refuse. Naming both halves is
+		// deliberate -- the operator is mid-runbook and needs to know which of
+		// the three they have, not only which they lack.
 		return nil, nil, "", fmt.Errorf(
 			"provider %q is HALF-CONFIGURED for OpenAI workload identity federation: %s set, %s missing. "+
-				"Set all three, or none to leave the OpenAI providers unavailable. A partial federation config "+
-				"is refused rather than quietly read as 'not configured', because an operator halfway through "+
-				"the runbook believes they are ENABLING OpenAI, not disabling it. "+
+				"Set all three, or clear the ids to leave the OpenAI providers unavailable. A partial federation "+
+				"config is refused rather than quietly read as 'not configured', because an operator halfway "+
+				"through the runbook believes they are ENABLING OpenAI, not disabling it. "+
 				"Runbook: docs/public/operate/auth/openai-federation.md",
 			cfg.Name, strings.Join(present, ", "), strings.Join(missing, ", "))
-
-	default:
-		// None set. NOT AN ERROR: this is a fresh cloud cluster and every local
-		// cluster, and after key removal there is nothing else it could mean.
-		// The provider registers as unavailable and the readiness model reports
-		// `ai` unconfigured.
-		return nil, nil, credentialPathUnavailable, nil
 	}
 }
 
