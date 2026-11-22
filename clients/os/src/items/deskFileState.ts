@@ -23,7 +23,7 @@
 // so they are tested without a browser; `useDeskFileStates` only runs them as
 // the holds change and keeps the Ready timers.
 
-import { useEffect, useReducer, useRef } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 
 import { deriveProvenance, type MachinePresence } from "./provenance";
 import type { FileEntry } from "../system/desktop";
@@ -173,4 +173,58 @@ export function useDeskFileStates(holds: ReadonlyMap<string, Hold>, release: (id
       if (step.now) releaseNow.current(id, wait);
     },
   };
+}
+
+/** How long a file that just arrived glows. */
+export const GLOW_MS = 10_000;
+
+/**
+ * A file that lands on the desk while the person is looking glows for
+ * GLOW_MS, or until it is opened (Jesus picked 6B, Nov 22 2026). Icons already
+ * there when the desk first draws do not. An upload glows once it has landed,
+ * not while it is dim. Memory only: nothing is stored or acknowledged.
+ */
+export function useArrivalGlow(holds: ReadonlyMap<string, Hold>) {
+  const seen = useRef(new Set(holds.keys()));
+  const fresh = useRef(new Set<string>());
+  const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const [glowing, setGlowing] = useState<ReadonlySet<string>>(new Set());
+  const clear = (id: string) => {
+    clearTimeout(timers.current.get(id));
+    timers.current.delete(id);
+    fresh.current.delete(id);
+    setGlowing((g) => {
+      if (!g.has(id)) return g;
+      const next = new Set(g);
+      next.delete(id);
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    for (const id of holds.keys()) {
+      if (!seen.current.has(id)) {
+        seen.current.add(id);
+        fresh.current.add(id);
+      }
+    }
+    for (const id of [...fresh.current]) {
+      const hold = holds.get(id);
+      if (hold === undefined || hold === "failed") fresh.current.delete(id);
+      else if (hold === null) {
+        fresh.current.delete(id);
+        setGlowing((g) => new Set(g).add(id));
+        timers.current.set(id, setTimeout(() => clear(id), GLOW_MS));
+      }
+    }
+    // `clear` only touches refs and a stable setter.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [holds]);
+
+  useEffect(() => {
+    const pending = timers.current;
+    return () => pending.forEach(clearTimeout);
+  }, []);
+
+  return { glowing: (id: string) => glowing.has(id), clear };
 }

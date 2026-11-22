@@ -291,6 +291,17 @@ button:not(:disabled):active {
   filter: grayscale(1);
 }
 
+/* A file that just landed: a soft accent glow round the tile, fading over its
+ * last seconds (Jesus's pick 6B, Nov 22 2026). The timer removes it; reduced
+ * motion shows it plainly until then. */
+.os-file[data-new] .os-file-glyph {
+  border-radius: var(--os-selection-radius);
+  box-shadow: 0 0 0 4px var(--os-accent-soft), 0 0 18px color-mix(in srgb, var(--os-accent) 45%, transparent);
+  animation: os-file-glow 10s linear forwards;
+}
+@keyframes os-file-glow { 0%, 60% { opacity: 1; } 100% { opacity: 0.3; } }
+@media (prefers-reduced-motion: reduce) { .os-file[data-new] .os-file-glyph { animation: none; } }
+
 .os-file-title {
   font-size: var(--os-text-xs);
   line-height: 1.25;
