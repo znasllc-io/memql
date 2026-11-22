@@ -64,15 +64,6 @@ export function VersionHistory({
         <p className="os-caption">No versions to show for this file.</p>
       ) : null}
 
-      {history.total === 1 && history.entries.length === 1 ? (
-        // The invitation. A file with one version is the normal case, and the
-        // panel's job there is to teach what the action does rather than to
-        // render a list of one.
-        <p className="os-files-versions-only">
-          Previous versions stay available when this file changes.
-        </p>
-      ) : null}
-
       {history.entries.length > 0 ? (
         <ol className="os-file-version-list">
           {history.entries.map((entry) => {

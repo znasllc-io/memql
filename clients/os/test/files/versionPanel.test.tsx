@@ -82,7 +82,7 @@ describe("the version history panel", () => {
     expect(within(history).getAllByText("--").length).toBeGreaterThan(0);
   });
 
-  it("invites the action on a file with one version instead of listing one row", async () => {
+  it("lists a file's only version with no note about future ones (Nov 20 call)", async () => {
     h.connection = fakeConnection({
       artifacts: [artifactRow({ id: "a-1", title: "only.txt", sourceConceptRef: "v1:library:file:f-1" })],
       files: [fileRow({ id: "f-1", name: "only.txt", versionNumber: 1 })],
@@ -91,7 +91,8 @@ describe("the version history panel", () => {
     await renderFiles();
     const inspector = await openInspector("only\\.txt");
     const history = within(inspector).getByRole("region", { name: "Version history" });
-    expect(within(history).getByText(/Previous versions stay available/)).toBeTruthy();
+    expect(within(history).queryByText(/Previous versions stay available/)).toBeNull();
+    expect(within(history).getByText("v1")).toBeTruthy();
   });
 
   it("updates history when another session changes the file head, without a second subscription", async () => {

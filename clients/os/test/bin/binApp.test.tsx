@@ -43,10 +43,11 @@ describe("what the Bin holds", () => {
     expect(screen.getAllByTitle("Was filed in Old campaign").length).toBeGreaterThan(0);
   });
 
-  it("states the invariant on the page, not only in settings", async () => {
+  it("carries no lede and no note under the list (Nov 20 call: slim the descriptions)", async () => {
     h.connection = fakeConnection({ archived: [] });
     await renderBin();
-    expect(screen.getByText(/Nothing here is gone for good/)).toBeTruthy();
+    expect(screen.queryByText(/Nothing here is gone for good/)).toBeNull();
+    expect(screen.queryByText(/an archive re-writes the row/)).toBeNull();
   });
 
   it("says what an empty Bin means rather than only that it is empty", async () => {

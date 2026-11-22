@@ -206,14 +206,10 @@ export function BinApp({
         />
       </Head>
 
-      {/* THE INVARIANT, ON THE PAGE. Not a tooltip and not a settings note:
-          it is the one thing about this surface that differs from every
-          trash can the reader has used, and a person who never opens
-          settings still has to know it. */}
-      <p className="os-bin-lede">
-        Nothing here is gone for good. Deleted items keep their bytes, their whole version history
-        and everywhere they came from, and stay until you restore them.
-      </p>
+      {/* No lede and no note under the list (Nov 20 2026 call: Jesús, "I
+          don't like these descriptions on stuff ... the worst offender of it
+          is the bin"; José, "we can slim down a lot on this"). The empty
+          state still says what the Bin keeps. */}
 
       <div className="os-bin-body">
         <div className="os-bin-list">
@@ -244,10 +240,6 @@ export function BinApp({
             )}
           />
           <LoadMore feed={pagination} />
-          <Caption>
-            Newest first -- an archive re-writes the row, so for most items this is the order they
-            were archived in.
-          </Caption>
         </div>
 
         {selected === null ? null : (
