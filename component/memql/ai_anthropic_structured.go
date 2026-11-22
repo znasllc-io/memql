@@ -13,11 +13,40 @@ package memql
 // schema rides as the forced tool's input_schema, the model must emit exactly
 // one tool_use block, and the returned JSON is that block's input verbatim --
 // no prose, no fences, nothing to strip.
+//
+// TWO WAYS TO ASK, AND THE RECORD SAYS WHICH (design record 2026-11-21, R3).
+// The models current on 2026-11-22 -- Claude Opus 5.5, Sonnet 5.5 and the
+// Fable 5 line -- answer a forced tool choice with a 400 ("tool_choice: type
+// tool and any are not supported for this model"). For them the vendor's
+// structured outputs are the documented way to extract JSON: the schema rides
+// `output_config.format` and the reply's text IS the JSON. A record opts in
+// with
+//
+//	params { structuredOutput "format" }
+//
+// and a record that says nothing keeps the forced tool it always sent, so no
+// older model's request changes. The param is checked when the record is
+// loaded (validateAnthropicStructuredParam).
+//
+// The format accepts a SUBSET of JSON Schema: every object closed
+// (additionalProperties false), and a short list of keywords (no numeric,
+// string-length or array-size limits, no pattern). The engine's schemas were
+// written for the tool path, so the schema is made to fit on the way out
+// (anthropicFormatSchema): only the keywords the vendor lists are kept, and
+// what was removed stays in the field's description, where the model still
+// reads it. The cost is that a removed limit is asked for, not enforced: a
+// caller that depended on the vendor enforcing `maximum` now depends on the
+// model honouring a sentence.
+//
+// READ FROM THE VENDOR'S DOCUMENTATION, NOT RUN AGAINST IT. Nothing here was
+// exercised with a real account. If the format request is wrong in a detail,
+// the call fails as a vendor error and the route's next source serves.
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -80,6 +109,21 @@ func anthropicCallStructured(ctx context.Context, client anthropic.Client, model
 		Model:        string(resp.Model),
 		Reported:     true,
 	}
+	if anthropicStructuredMode(params) == anthropicStructuredByFormat {
+		texts := make([]string, 0, len(resp.Content))
+		for _, block := range resp.Content {
+			if block.Type == "text" {
+				texts = append(texts, block.Text)
+			}
+		}
+		if reply, ok := anthropicFormatReply(texts); ok {
+			return reply, usage, nil
+		}
+		// A refusal, or an output limit reached while the model was still
+		// thinking: the stop reason is the only evidence.
+		return "", usage, fmt.Errorf("anthropic structured (%s): the reply held no JSON; the model stopped with %q",
+			schema.Name, resp.StopReason)
+	}
 	for _, block := range resp.Content {
 		if block.Type == "tool_use" && strings.TrimSpace(block.Name) == anthropicStructuredToolName(schema) {
 			return strings.TrimSpace(string(block.Input)), usage, nil
@@ -97,6 +141,9 @@ func anthropicCallStructured(ctx context.Context, client anthropic.Client, model
 // FORCED to it. Split from the call so the assembly is testable without a
 // live client.
 func anthropicStructuredParams(model string, params map[string]any, messages []common.ChatMessage, schema common.StructuredSchema) (anthropic.MessageNewParams, error) {
+	if anthropicStructuredMode(params) == anthropicStructuredByFormat {
+		return anthropicFormatParams(model, params, messages, schema)
+	}
 	anthropicMessages, systemBlocks := toAnthropicMessages(messages)
 
 	inputSchema := anthropic.ToolInputSchemaParam{Properties: map[string]any{}}
@@ -187,4 +234,221 @@ func anthropicStructuredToolName(schema common.StructuredSchema) string {
 		cleaned = cleaned[:64]
 	}
 	return string(cleaned)
+}
+
+// The two ways a record asks for structured output.
+const (
+	anthropicStructuredParam = "structuredOutput"
+	// anthropicStructuredByTool forces one tool whose input is the schema.
+	// The default, and what every record sent before the param existed.
+	anthropicStructuredByTool = "tool"
+	// anthropicStructuredByFormat sends the schema as output_config.format.
+	// For the models that refuse a forced tool choice.
+	anthropicStructuredByFormat = "format"
+)
+
+// anthropicStructuredMode is how this record asks for structured output.
+func anthropicStructuredMode(params map[string]any) string {
+	if v, ok := params[anthropicStructuredParam].(string); ok &&
+		strings.EqualFold(strings.TrimSpace(v), anthropicStructuredByFormat) {
+		return anthropicStructuredByFormat
+	}
+	return anthropicStructuredByTool
+}
+
+// validateAnthropicStructuredParam refuses a `structuredOutput` the provider
+// would not act on: a value that is neither word, or the param on a record
+// that is not an Anthropic text model. A misspelled value would otherwise fall
+// back to the forced tool, which the models this param exists for refuse.
+func validateAnthropicStructuredParam(cfg ProviderConfig) error {
+	raw, declared := cfg.Params[anthropicStructuredParam]
+	if !declared {
+		return nil
+	}
+	if !isVendorTextRecord(cfg) || vendorOfType(cfg.Type) != VendorAnthropic {
+		return fmt.Errorf("provider %q: params.%s is set on a record that is not a text model of Anthropic, which is the only kind that reads it. Remove it",
+			cfg.Name, anthropicStructuredParam)
+	}
+	word, _ := raw.(string)
+	switch strings.ToLower(strings.TrimSpace(word)) {
+	case anthropicStructuredByTool, anthropicStructuredByFormat:
+		return nil
+	}
+	return fmt.Errorf("provider %q: params.%s must be %q or %q", cfg.Name, anthropicStructuredParam,
+		anthropicStructuredByTool, anthropicStructuredByFormat)
+}
+
+// anthropicFormatParams assembles a structured request the vendor's way: the
+// conversation, and the schema as the format of the reply. No tool and no
+// tool choice ride it.
+func anthropicFormatParams(model string, params map[string]any, messages []common.ChatMessage, schema common.StructuredSchema) (anthropic.MessageNewParams, error) {
+	fitted, err := anthropicFormatSchema(schema.Schema)
+	if err != nil {
+		return anthropic.MessageNewParams{}, fmt.Errorf("anthropic structured (%s): %w", schema.Name, err)
+	}
+	anthropicMessages, systemBlocks := toAnthropicMessages(messages)
+
+	maxTokens := int64(4096)
+	if mt, ok := intParam(params["maxTokens"]); ok {
+		maxTokens = int64(mt)
+	} else if mt, ok := intParam(params["maxCompletionTokens"]); ok {
+		maxTokens = int64(mt)
+	}
+	reqParams := anthropic.MessageNewParams{
+		Model:        anthropic.Model(model),
+		MaxTokens:    maxTokens,
+		Messages:     anthropicMessages,
+		OutputConfig: anthropic.OutputConfigParam{Format: anthropic.JSONOutputFormatParam{Schema: fitted}},
+	}
+	if len(systemBlocks) > 0 {
+		if boolParam(params["enablePromptCache"]) {
+			last := len(systemBlocks) - 1
+			systemBlocks[last].CacheControl = anthropic.NewCacheControlEphemeralParam()
+		}
+		reqParams.System = systemBlocks
+	}
+	if _, ok := params["temperature"]; ok {
+		reqParams.Temperature = anthropic.Float(numberParam(params["temperature"], 1.0))
+	}
+	return reqParams, nil
+}
+
+// anthropicFormatReply picks the structured answer out of a reply's text
+// blocks: the first that holds anything.
+func anthropicFormatReply(texts []string) (string, bool) {
+	for _, text := range texts {
+		if trimmed := strings.TrimSpace(text); trimmed != "" {
+			return trimmed, true
+		}
+	}
+	return "", false
+}
+
+// formatKept are the schema keywords the vendor's structured outputs document
+// as accepted. The fit is a list of what is KEPT, not of what is refused: the
+// vendor's page names what it accepts, and a keyword nobody listed is a 400
+// waiting for the first schema that uses it. Everything else is removed and
+// kept in the field's description, where the model still reads it.
+//
+// `additionalProperties` is not here because it is not carried: every object
+// is closed. `oneOf` is not here because it is carried as `anyOf`, which is
+// what the vendor's own SDKs do with it.
+var formatKept = map[string]bool{
+	"$defs": true, "$ref": true, "allOf": true, "anyOf": true, "const": true,
+	"definitions": true, "description": true, "enum": true, "items": true,
+	"properties": true, "required": true, "title": true, "type": true,
+}
+
+// formatStringFormats are the string formats the vendor accepts.
+var formatStringFormats = map[string]bool{
+	"date-time": true, "time": true, "date": true, "duration": true, "email": true,
+	"hostname": true, "uri": true, "ipv4": true, "ipv6": true, "uuid": true,
+}
+
+// anthropicFormatSchema returns a copy of a schema made to fit what the
+// vendor's structured outputs accept: every object closed, and only the
+// keywords the vendor lists. The caller's schema is not touched.
+//
+// NOT FIXED HERE: a schema that refers to itself. The vendor refuses a
+// recursive schema and there is no equivalent to send in its place, so such a
+// call fails as a vendor error and the route's next source serves.
+func anthropicFormatSchema(raw json.RawMessage) (map[string]any, error) {
+	schema := map[string]any{"type": "object", "properties": map[string]any{}}
+	if len(raw) > 0 {
+		schema = map[string]any{}
+		if err := json.Unmarshal(raw, &schema); err != nil {
+			return nil, fmt.Errorf("schema is not a JSON object: %w", err)
+		}
+	}
+	fitFormatSchema(schema)
+	return schema, nil
+}
+
+func fitFormatSchema(node map[string]any) {
+	if branches, ok := node["oneOf"].([]any); ok {
+		if _, taken := node["anyOf"]; !taken {
+			node["anyOf"] = branches
+			delete(node, "oneOf")
+		}
+	}
+
+	var removed []string
+	for keyword, value := range node {
+		switch {
+		case formatKept[keyword]:
+			continue
+		case keyword == "additionalProperties":
+			// Replaced below, never described: it is the engine's own default
+			// and says nothing the model needs.
+			delete(node, keyword)
+			continue
+		case keyword == "format":
+			if word, _ := value.(string); formatStringFormats[word] {
+				continue
+			}
+		case keyword == "minItems":
+			if n, ok := value.(float64); ok && (n == 0 || n == 1) {
+				continue
+			}
+		}
+		delete(node, keyword)
+		removed = append(removed, fmt.Sprintf("%s %s", keyword, formatValue(value)))
+	}
+	if len(removed) > 0 {
+		sort.Strings(removed)
+		note := strings.Join(removed, ", ")
+		if desc, _ := node["description"].(string); strings.TrimSpace(desc) != "" {
+			node["description"] = strings.TrimSpace(desc) + " (" + note + ")"
+		} else {
+			node["description"] = note
+		}
+	}
+
+	_, hasProperties := node["properties"].(map[string]any)
+	if node["type"] == "object" || hasProperties {
+		node["additionalProperties"] = false
+	}
+	if props, ok := node["properties"].(map[string]any); ok {
+		for _, child := range props {
+			if m, ok := child.(map[string]any); ok {
+				fitFormatSchema(m)
+			}
+		}
+	}
+	if items, ok := node["items"].(map[string]any); ok {
+		fitFormatSchema(items)
+	}
+	for _, keyword := range []string{"anyOf", "allOf"} {
+		if list, ok := node[keyword].([]any); ok {
+			for _, child := range list {
+				if m, ok := child.(map[string]any); ok {
+					fitFormatSchema(m)
+				}
+			}
+		}
+	}
+	for _, keyword := range []string{"$defs", "definitions"} {
+		if defs, ok := node[keyword].(map[string]any); ok {
+			for _, child := range defs {
+				if m, ok := child.(map[string]any); ok {
+					fitFormatSchema(m)
+				}
+			}
+		}
+	}
+}
+
+// formatValue writes a removed keyword's value the way a person would read it
+// in a description: a word or a number bare, anything larger as JSON.
+func formatValue(value any) string {
+	switch v := value.(type) {
+	case string:
+		return v
+	case float64, bool, nil:
+		return fmt.Sprint(v)
+	}
+	if b, err := json.Marshal(value); err == nil {
+		return string(b)
+	}
+	return fmt.Sprint(value)
 }

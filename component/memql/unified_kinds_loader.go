@@ -303,6 +303,12 @@ func registerParsedProvidersWithClients(logger *slog.Logger, registry *ProviderR
 			refuse(p, err)
 			continue
 		}
+		// So is how an Anthropic record asks for structured output: a word
+		// the provider would not act on is a request the model refuses.
+		if err := validateAnthropicStructuredParam(entry.Config); err != nil {
+			refuse(p, err)
+			continue
+		}
 		// Analysis checks definitions, never resolves live secrets or constructs clients.
 		if !connect {
 			registry.setEntry(entry)
