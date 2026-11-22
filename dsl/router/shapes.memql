@@ -214,4 +214,5 @@ shape vendorKeyState vendorKeyStateFull {
   goodAt
   lastUsedAt
   notifiedAt
+  noticeTriedAt
 }

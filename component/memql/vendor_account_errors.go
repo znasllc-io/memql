@@ -247,3 +247,8 @@ var keyShape = regexp.MustCompile(`\bsk-[A-Za-z0-9_*.\-]{6,}`)
 func scrubKeyShapes(text string) string {
 	return keyShape.ReplaceAllString(text, "sk-[removed]")
 }
+
+// ScrubVendorKeyShapes removes anything that reads as a vendor key, or a masked
+// part of one, from text. Exported for the key integration, which stores and
+// mails a vendor's words and must not keep one in them whoever handed it over.
+func ScrubVendorKeyShapes(text string) string { return scrubKeyShapes(text) }

@@ -122,6 +122,9 @@ func (k Key) Active() bool { return k.Status == statusActive }
 type State struct {
 	KeyId, Vendor, State, Detail                                     string
 	EvidenceAt, HeldUntil, CheckedAt, GoodAt, LastUsedAt, NotifiedAt time.Time
+	// NoticeTriedAt is when the cluster last started telling the owner that
+	// the key stopped working (notice.go).
+	NoticeTriedAt time.Time
 }
 
 // NewKey is a key about to be stored, already checked and already sealed.
@@ -148,6 +151,9 @@ type Store struct {
 	gate   func() *sql.DB
 	logger *slog.Logger
 	now    func() time.Time
+	// notify tells a key's owner when it stops working (notice.go). Installed
+	// by app/, which is where a mail sender can be reached.
+	notify notifierHolder
 }
 
 // NewStore wraps an engine. gate is PluginContext.GateDB.
@@ -300,6 +306,22 @@ func (s *Store) UserIsActive(ctx context.Context, userId string) (bool, error) {
 		return false, err
 	}
 	return len(rows) > 0, nil
+}
+
+// owner reads a person's name and address, as the cluster acting, for the one
+// notice a key's owner is sent (notice.go). active is false for somebody who
+// is no longer an active user of this cluster.
+func (s *Store) owner(ctx context.Context, userId string) (name, email string, active bool, err error) {
+	userId = memql.BareShortId(userId)
+	if userId == "" || auth.NamesNoPerson(userId) {
+		return "", "", false, nil
+	}
+	call, err := langparser.RenderCall("userByIdSystem", map[string]any{"userId": userId})
+	rows, err := s.read(ctx, "a key owner's address", call, err)
+	if err != nil || len(rows) == 0 {
+		return "", "", false, err
+	}
+	return rowString(rows[0], "displayName"), rowString(rows[0], "primaryEmail"), true, nil
 }
 
 // Create stores a new key and starts the engine's record of it, as the owner.
@@ -589,6 +611,8 @@ func stateFromRow(row map[string]any) State {
 		GoodAt:     rowTime(row, "goodAt"),
 		LastUsedAt: rowTime(row, "lastUsedAt"),
 		NotifiedAt: rowTime(row, "notifiedAt"),
+
+		NoticeTriedAt: rowTime(row, "noticeTriedAt"),
 	}
 }
 

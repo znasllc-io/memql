@@ -209,6 +209,10 @@ func (s *Store) writeAudit(ctx context.Context, action, keyId string, detail map
 }
 
 func bounded(detail string) string {
+	// Whatever a caller handed over, nothing shaped like a key is kept on a
+	// row, shown on a card or mailed. The request path removes it before it
+	// reports (component/memql); this is the last place it could be caught.
+	detail = memql.ScrubVendorKeyShapes(detail)
 	if r := []rune(detail); len(r) > maxDetail {
 		return string(r[:maxDetail])
 	}

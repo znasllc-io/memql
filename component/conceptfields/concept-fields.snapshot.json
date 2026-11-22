@@ -6737,6 +6737,7 @@
         "heldUntil",
         "keyId",
         "lastUsedAt",
+        "noticeTriedAt",
         "notifiedAt",
         "ownerUserId",
         "state",

@@ -353,8 +353,9 @@ mutation vendorKeyState createVendorKeyState {
 }
 
 /// Record what the engine observed about a key: a verdict with the time of its evidence, a hold, a
-/// check, a use, a notice sent. Each field is optional and an absent one is left as it was. The
-/// writer compares `evidenceAt` with the stored one first and drops an older verdict.
+/// check, a use, a notice to its owner tried or sent. Each field is optional and an absent one is
+/// left as it was. The writer compares `evidenceAt` with the stored one first and drops an older
+/// verdict.
 ///
 /// @serverOnly, and actor.userId scoping is not the fix: the verdict arrives on whichever replica
 /// made the call the key paid for, which is often a borrower's call and never the owner's write, so
@@ -364,18 +365,19 @@ mutation vendorKeyState createVendorKeyState {
 @serverOnly
 mutation vendorKeyState updateVendorKeyState {
   args {
-    keyId       string!
-    state       enum("good", "refused", "credit", "unchecked")
-    evidenceAt  datetime
-    detail      string  @maxLength(300)
-    heldUntil   datetime
-    checkedAt   datetime
-    goodAt      datetime
-    lastUsedAt  datetime
-    notifiedAt  datetime
+    keyId          string!
+    state          enum("good", "refused", "credit", "unchecked")
+    evidenceAt     datetime
+    detail         string  @maxLength(300)
+    heldUntil      datetime
+    checkedAt      datetime
+    goodAt         datetime
+    lastUsedAt     datetime
+    notifiedAt     datetime
+    noticeTriedAt  datetime
   }
   update {
-    accept { state, evidenceAt, detail, heldUntil, checkedAt, goodAt, lastUsedAt, notifiedAt }
+    accept { state, evidenceAt, detail, heldUntil, checkedAt, goodAt, lastUsedAt, notifiedAt, noticeTriedAt }
     stamp {
       id: args.keyId
     }

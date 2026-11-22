@@ -264,3 +264,15 @@ builtin vendorKeyActivity {
 /// skipped counts the keys that were due and got no verdict in this run.
 @executor("integration.vendorkeys.sweep")
 builtin vendorKeysSweep { }
+
+/// Tell the owner of each API key that stopped working: one email per fall, to the key's owner and
+/// nobody else, naming the key by its label and vendor and saying what the vendor answered. A key
+/// that works again before its owner was told owes nothing; a notice that could not be sent is
+/// tried again half an hour later.
+///
+/// Only the engine's own scheduled automation vendorKeysOwnerNotices may run it. A person is
+/// refused, a cluster owner included, and so is any other automation. One row: {owed, sent, failed,
+/// waiting, nobody}: the keys that owed a notice when the pass began, and how many of them were
+/// told, could not be told, are waiting for a later pass, or had nobody to tell.
+@executor("integration.vendorkeys.tellOwners")
+builtin vendorKeysTellOwners { }

@@ -165,5 +165,11 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"Answers only to the engine's own vendorKeysDailyCheck automation.",
 			Handler: i.handleSweep,
 		},
+		{
+			Name: "tellOwners",
+			Description: "Tell the owner of each active key that stopped working, once per fall, by the notifier app/ installed. " +
+				"Answers only to the engine's own vendorKeysOwnerNotices automation.",
+			Handler: i.handleTellOwners,
+		},
 	}
 }

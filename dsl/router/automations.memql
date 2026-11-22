@@ -75,6 +75,44 @@ automation vendorKeysDailyCheck {
 }
 
 
+// vendorKeysOwnerNotices
+// ======================
+//
+// Tell a key's owner when it stops working (design record
+// 2026-11-21-vendor-accounts-and-api-keys, decision K13, mesh rule M4).
+//
+// A key that stops working does not stop anybody's work: the call moves to
+// the next account that can pay, which is somebody else's key or the
+// cluster's own account. That is also why a dead key is silent. So its owner
+// is mailed, once per fall.
+//
+// A PASS, AND NOT THE NODE THAT SAW THE FALL. A fall is recorded by whichever
+// replica made the call, an agent or a planner as often as a bff, in the
+// middle of somebody's request. Mail is slow, can fail, and has to be tried
+// again, none of which belongs there. The fall is already on the key's state
+// row; this pass reads the rows and does the telling.
+//
+// Every ten minutes, at second 30 so it does not start with the passes that
+// run on the minute. Ten minutes is how long an owner may go without knowing,
+// and a pass that finds nothing owed costs four small reads.
+//
+// ON ONE BFF REPLICA, behind its own lease: the bff is the node that already
+// sends invitations, so it is known to reach the mail sender. The lease is a
+// placement and not the guarantee. What keeps two replicas from each telling
+// an owner is the key's own write gate, under which a pass records that it is
+// trying before it sends (integrations/vendorkeys/notice.go).
+//
+// The builtin answers to this automation and to nothing else, by the mark the
+// engine puts on its own automations.
+
+/// Every ten minutes: mail the owner of each API key that stopped working since it last worked,
+/// once per fall. Sends no prompt and spends nothing.
+@trigger(schedule="30 */10 * * * *", node="bff", lease="vendor-keys-notices")
+automation vendorKeysOwnerNotices {
+  told := builtin vendorKeysTellOwners()
+}
+
+
 /// Compose a routing policy draft; the engine validates the returned proposal and exact revision.
 @template
 automation routingPolicyProposalWorkflow {
