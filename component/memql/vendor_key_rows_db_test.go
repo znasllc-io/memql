@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/uptrace/bun"
 
 	"github.com/znasllc-io/memql/component/auth"
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -57,6 +58,19 @@ func newVendorKeyRowIDs(name string) vendorKeyRowIDs {
 		label:       "Label " + suffix,
 		fingerprint: "...w" + suffix[len(suffix)-3:],
 	}
+}
+
+// leavesNoKeyBehind deletes this fixture's key and its state when the test
+// ends. The database is shared with every other package's tests, and a key
+// left active here is a key the cluster's own passes count: the notice pass in
+// integrations/vendorkeys reported one of these as owing its owner a notice.
+func (ids vendorKeyRowIDs) leavesNoKeyBehind(t *testing.T, db *bun.DB) {
+	t.Helper()
+	t.Cleanup(func() {
+		_, _ = db.NewDelete().TableExpr(`"MemoryNodes"`).
+			Where("concept IN (?, ?)", vendorKeyConcept, vendorKeyStateConcept).
+			Where("id LIKE ?", "%:"+ids.key).Exec(context.Background())
+	})
 }
 
 func (ids vendorKeyRowIDs) createArgs() map[string]any {
@@ -118,6 +132,7 @@ func seedVendorKey(t *testing.T, eng *MemQLEngine, ids vendorKeyRowIDs) (keyStor
 func TestVendorKeyRowsRefuseAWriteWithoutInternalOrigin(t *testing.T) {
 	eng, db, ctx := sharedReadMergeEngine(t)
 	ids := newVendorKeyRowIDs("write")
+	ids.leavesNoKeyBehind(t, db)
 	for _, c := range ids.callers() {
 		seedPrincipal(t, eng, c.userID, c.role)
 	}
@@ -244,8 +259,9 @@ func TestVendorKeyRowsRefuseAWriteWithoutInternalOrigin(t *testing.T) {
 }
 
 func TestVendorKeyRowsAreUnreadableByAClient(t *testing.T) {
-	eng, _, _ := sharedReadMergeEngine(t)
+	eng, db, _ := sharedReadMergeEngine(t)
 	ids := newVendorKeyRowIDs("read")
+	ids.leavesNoKeyBehind(t, db)
 	keyStored, stateStored := seedVendorKey(t, eng, ids)
 	_, err := eng.Execute(ids.asKeyOwner(), siteAccessCall(t, "mutation", "setVendorKeySharing", map[string]any{
 		"keyId": ids.key, "mode": "people", "userIds": []string{ids.borrower},
@@ -348,7 +364,7 @@ func TestVendorKeyRowsAreUnreadableByAClient(t *testing.T) {
 // per-row admission a stream's subscription passes through denies both
 // concepts to everyone.
 func TestVendorKeyEventsReachNoStream(t *testing.T) {
-	eng, _, _ := sharedReadMergeEngine(t)
+	eng, db, _ := sharedReadMergeEngine(t)
 	previous := eng.EventBus()
 	bus := events.NewBus()
 	eng.SetEventBus(bus)
@@ -357,6 +373,7 @@ func TestVendorKeyEventsReachNoStream(t *testing.T) {
 	t.Cleanup(bus.Subscribe("#", recorder.record))
 
 	ids := newVendorKeyRowIDs("events")
+	ids.leavesNoKeyBehind(t, db)
 	keyStored, stateStored := seedVendorKey(t, eng, ids)
 	owner := ids.asKeyOwner()
 	for _, call := range []string{
@@ -417,4 +434,57 @@ func TestVendorKeyEventsReachNoStream(t *testing.T) {
 		require.Equal(t, SubscriptionDeny,
 			AdmitSubscriptionRow(eng.SubscriptionRankContext(context.Background()), nil, row.concept, row.id, raw))
 	}
+}
+
+// A KEY'S OWNER NEVER CHANGES, WHOEVER WRITES (design record
+// 2026-11-21-vendor-accounts-and-api-keys, K5 and K16).
+//
+// The write below is the one integrations/identity's ownership transfer makes:
+// a raw insert naming only the owner field, as a cluster owner, with internal
+// origin stamped. @serverWritten admits it, and so does the row tier's
+// cluster-owner arm. After it the resolver would treat the new owner as the
+// key's owner: it would pay for their calls, and they could lend it.
+func TestAVendorKeysOwnerNeverChanges(t *testing.T) {
+	eng, db, _ := sharedReadMergeEngine(t)
+	ids := newVendorKeyRowIDs("ownerstays")
+	ids.leavesNoKeyBehind(t, db)
+	keyStored, stateStored := seedVendorKey(t, eng, ids)
+	asAnOwnerWithInternalOrigin := auth.ContextWithInternalOrigin(rankActorCtx(ids.operator, auth.RoleOwner))
+
+	ownerOf := func(stored string) string {
+		var node concept.MemoryNode
+		require.NoError(t, db.NewSelect().Model(&node).Where("id = ?", stored).Order("createdAt DESC").Limit(1).Scan(context.Background()))
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal(node.Payload, &payload))
+		owner, _ := payload["ownerUserId"].(string)
+		return owner
+	}
+	for concept, stored := range map[string]string{"v1:router:vendorKey": keyStored, "v1:router:vendorKeyState": stateStored} {
+		before := ownerOf(stored)
+		require.NotEmpty(t, before)
+		for name, to := range map[string]string{"another person": ids.operator, "nobody": ""} {
+			payload, err := json.Marshal(map[string]any{"ownerUserId": to})
+			require.NoError(t, err)
+			_, err = eng.Execute(asAnOwnerWithInternalOrigin, fmt.Sprintf("insert(%q, id=%q, payload=%s)", concept, stored, payload))
+			require.Error(t, err, "%s's owner was changed to %s", concept, name)
+			require.Contains(t, err.Error(), "owner never changes")
+			require.Equal(t, before, ownerOf(stored), "%s's owner was changed to %s", concept, name)
+		}
+		// Naming the SAME owner again is not a change. A read-merge carries the
+		// field through every ordinary write, and that must keep working.
+		payload, err := json.Marshal(map[string]any{"ownerUserId": before})
+		require.NoError(t, err)
+		_, err = eng.Execute(asAnOwnerWithInternalOrigin, fmt.Sprintf("insert(%q, id=%q, payload=%s)", concept, stored, payload))
+		require.NoError(t, err, "a write that leaves %s's owner where it was is refused", concept)
+	}
+
+	// The integration's own writes still land after all of that.
+	_, err := eng.Execute(ids.asKeyOwner(), siteAccessCall(t, "mutation", "updateVendorKey", map[string]any{"keyId": ids.key, "label": ids.label + " renamed"}))
+	require.NoError(t, err)
+	_, err = eng.Execute(auth.ContextWithInternalOrigin(auth.ContextWithSystemActor(context.Background(), "vendor-keys")),
+		siteAccessCall(t, "mutation", "updateVendorKeyState", map[string]any{
+			"keyId": ids.key, "state": "refused", "evidenceAt": time.Now().UTC().Add(time.Minute).Format(time.RFC3339), "detail": "the vendor refused it",
+		}))
+	require.NoError(t, err)
+	require.Equal(t, ownerOf(keyStored), ownerOf(stateStored))
 }

@@ -27,7 +27,7 @@ func (e *MemQLEngine) validateSourceConnectionWrite(ctx context.Context, concept
 		}
 		return nil
 	}
-	if concept == "v1:platform:sourceConnection" {
+	if concept == conceptPlatformSourceConnection {
 		if auth.OriginFromContext(ctx) != auth.OriginInternal {
 			return fmt.Errorf("source connections must be changed through their verified source actions")
 		}
