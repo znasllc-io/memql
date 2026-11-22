@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -364,11 +365,17 @@ func (s *vendorSignIn) bearerValid(now time.Time) bool {
 	return s.bearer != "" && s.expiresAt.After(now)
 }
 
-// Invalidate drops the bearer: the vendor answered an API call made with it
-// with 401. The next Bearer signs in if a token may be presented.
-func (s *vendorSignIn) Invalidate() {
+// Invalidate drops a bearer the vendor answered an API call with 401 for. The
+// next Bearer signs in if a token may be presented.
+//
+// It names the bearer that failed, and drops the one in hand only if it is that
+// one: a call that started with the previous bearer must not throw away the
+// one a newer sign-in has just bought.
+func (s *vendorSignIn) Invalidate(bearer string) {
 	s.mu.Lock()
-	s.bearer, s.expiresAt = "", time.Time{}
+	if bearer != "" && s.bearer == bearer {
+		s.bearer, s.expiresAt = "", time.Time{}
+	}
 	s.mu.Unlock()
 }
 
@@ -538,10 +545,23 @@ func vendorSignInStatusPath(vendor string) string {
 
 var vendorSignInStatusWarned sync.Once
 
+// vendorSignInStatusFile says whether this process writes status files. Off by
+// default and switched on by the RUNNING ENGINE only: the check command loads
+// the same providers in a second process, and so does every test, and neither
+// may overwrite the record of the engine whose sign-in it is.
+var vendorSignInStatusFile atomic.Bool
+
+// enableVendorSignInStatusFile makes this process the one that records its
+// sign-ins where `memql provider-auth check` reads them.
+func enableVendorSignInStatusFile() { vendorSignInStatusFile.Store(true) }
+
 // writeVendorSignInStatus replaces the status file with rec. A failure is
 // logged once per process and changes nothing else: the file is how a person
 // reads the sign-in, never part of signing in.
 func writeVendorSignInStatus(rec vendorSignInRecord) {
+	if !vendorSignInStatusFile.Load() {
+		return
+	}
 	path := vendorSignInStatusPath(rec.Vendor)
 	err := func() error {
 		raw, err := json.MarshalIndent(rec, "", "  ")

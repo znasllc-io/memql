@@ -47,9 +47,8 @@ var signInEpoch = time.Date(2026, 11, 22, 10, 0, 0, 0, time.UTC)
 
 func newSignInHarness(t *testing.T) *signInHarness {
 	t.Helper()
-	t.Setenv("TMPDIR", t.TempDir())
-	resetVendorSignInsForTest()
-	t.Cleanup(resetVendorSignInsForTest)
+	isolateVendorSignIns(t)
+	vendorSignInStatusFile.Store(true)
 	return &signInHarness{
 		t:         t,
 		tokenFile: filepath.Join(t.TempDir(), "token"),
@@ -100,6 +99,21 @@ func resetVendorSignInsForTest() {
 	vendorSignInsMu.Lock()
 	vendorSignIns = map[string]*vendorSignIn{}
 	vendorSignInsMu.Unlock()
+}
+
+// isolateVendorSignIns gives a test a process with no sign-in in it and a
+// temporary directory of its own, and leaves status files switched off unless
+// the test turns them on. Every test that builds a federated provider calls
+// it: the sign-ins are process state, and a test must not inherit one.
+func isolateVendorSignIns(t *testing.T) {
+	t.Helper()
+	t.Setenv("TMPDIR", t.TempDir())
+	resetVendorSignInsForTest()
+	vendorSignInStatusFile.Store(false)
+	t.Cleanup(func() {
+		resetVendorSignInsForTest()
+		vendorSignInStatusFile.Store(false)
+	})
 }
 
 func (h *signInHarness) clock() time.Time {
@@ -599,8 +613,14 @@ func TestInvalidateForcesASignInOnlyWithANewToken(t *testing.T) {
 	s := h.signIn(true)
 	mustBearer(t, s)
 
+	// A stale bearer is named: the one in hand is kept.
+	s.Invalidate("some-earlier-bearer")
+	if got := mustBearer(t, s); got != "bearer-1" {
+		t.Fatalf("invalidating another bearer dropped the current one: %q", got)
+	}
+
 	// The vendor answered an API call with 401: the bearer is no good.
-	s.Invalidate()
+	s.Invalidate("bearer-1")
 	if bearer, _, err := s.Bearer(context.Background()); err == nil {
 		t.Fatalf("an invalidated bearer was handed out again: %q", bearer)
 	}

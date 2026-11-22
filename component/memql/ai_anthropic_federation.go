@@ -1,16 +1,25 @@
 package memql
 
 import (
+	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/config"
 	"github.com/anthropics/anthropic-sdk-go/option"
+
+	"github.com/znasllc-io/memql/component/metrics"
 )
 
 // Anthropic workload identity federation (epic memql#4333).
@@ -147,89 +156,206 @@ func anthropicFederationFrom(auth map[string]string) anthropicFederation {
 // anthropicCredential decides how one Anthropic client authenticates and
 // returns the request options that do it, plus which path it chose.
 //
-// The four-way switch is D3 of the design, and the middle case is the one
+// The three-way switch is D3 of the design, and the middle case is the one
 // worth defending. A half-configured federation is a MISCONFIGURATION, and
-// the alternative -- silently falling back to a key that the cutover is about
-// to delete -- is exactly the failure this change exists to remove: it would
-// work in every test, work at boot, and stop working the hour an operator
-// finished the runbook, on a node nobody was looking at.
+// the alternative -- silently treating it as "not configured" -- is exactly
+// the failure this refusal exists to remove: an operator halfway through the
+// runbook believes they are ENABLING Anthropic, not disabling it.
 //
-// httpClient is the guarded client (the LLM circuit breaker); it is attached
-// in EVERY branch, federation included, because the federation exchange rides
-// the same client and the exchange observer lives on that transport.
+// EVERY CLIENT OF THIS VENDOR SHARES ONE SIGN-IN (design record
+// 2026-11-21-vendor-accounts-and-api-keys, A1). This used to hand each client
+// option.WithFederationTokenProvider, which builds a token cache per client:
+// four Claude records made four sign-ins with one identity token, and
+// Anthropic accepts a token once. The bearer now comes from the process's
+// vendorSignIn through anthropicBearerMiddleware, so the number of clients no
+// longer decides the number of sign-ins. TestAnthropicClientsShareOneSignIn
+// holds it against a vendor that refuses a repeated token.
+//
+// httpClient is the caller's guarded client and fronts the API calls. The
+// sign-in itself does NOT ride it: it uses a guarded client of its own, so a
+// streaming client's timeouts never apply to an exchange, and the exchange
+// observer on the guarded transport still sees every one.
 func anthropicCredential(cfg ProviderConfig, httpClient *http.Client) ([]option.RequestOption, credentialPath, error) {
+	signIn, err := anthropicSignInFor(cfg)
+	if err != nil {
+		return nil, "", err
+	}
+	if signIn == nil {
+		// None set. NOT AN ERROR, and this arm is where the key used to be
+		// (epic memql#5088, design D2). "No federation ids" means the vendor's
+		// cluster account is not configured, which is the normal state of a
+		// fresh cluster. The provider registers as unavailable and the
+		// readiness model reports `ai` unconfigured; nothing falls back to
+		// anything.
+		return nil, credentialPathUnavailable, nil
+	}
+	opts := []option.RequestOption{
+		option.WithHTTPClient(httpClient),
+		option.WithMiddleware(anthropicBearerMiddleware(signIn)),
+		// AMBIENT CREDENTIALS ARE CLEARED, and this is load-bearing.
+		// anthropic.NewClient prepends DefaultClientOptions, which walks the
+		// SDK's own credential chain: a bare ANTHROPIC_API_KEY or
+		// ANTHROPIC_AUTH_TOKEN in the process environment becomes a persistent
+		// X-Api-Key / authorization header on the request config. A stray env
+		// var would silently return the cluster to a long-lived key while every
+		// log line still said "federation". Deleting the config headers is the
+		// SDK's own documented recipe for it; the middleware sets Authorization
+		// per request and removes X-Api-Key from the request itself, so nothing
+		// legitimate is lost. TestFederationSurvivesAnAmbientAnthropicKey.
+		option.WithHeaderDel("X-Api-Key"),
+		option.WithHeaderDel("Authorization"),
+	}
+	return opts, credentialPathFederation, nil
+}
+
+// anthropicSignInFor returns the process's sign-in for the cluster's Anthropic
+// account, built from a provider's resolved auth map. It returns nil and no
+// error when no federation id is set, and the half-configured refusal when
+// some are.
+func anthropicSignInFor(cfg ProviderConfig) (*vendorSignIn, error) {
 	fed := anthropicFederationFrom(cfg.Auth)
 	present, missing := fed.present(), fed.missing()
-
 	switch {
 	case len(missing) == 0:
-		if err := preflightIdentityToken(fed.TokenFile, anthropicAudience, envAnthropicIdentityTokenFile); err != nil {
-			return nil, "", fmt.Errorf("provider %q anthropic federation preflight: %w", cfg.Name, err)
-		}
-		opts := []option.RequestOption{
-			// ORDER IS LOAD-BEARING: the http.Client goes on FIRST.
-			// WithFederationTokenProvider builds its TokenCache around
-			// `r.HTTPClient.Do` AT THE MOMENT THE OPTION IS APPLIED
-			// (SDK internal/auth/middleware.go:140-146), and options apply in
-			// slice order. Listed after it, our guarded client would front
-			// every Messages call while the token exchange quietly used the
-			// SDK's default client instead -- so the exchange would work,
-			// traffic would flow, and the exchange observer would see nothing
-			// at all. A zero on memql_ai_federation_exchanges_total reads as
-			// "federation is not in use", which is the most misleading answer
-			// available. TestFederationExchangeHappyPath holds this order.
-			option.WithHTTPClient(httpClient),
-			option.WithFederationTokenProvider(
-				option.IdentityTokenFile(fed.TokenFile),
-				option.FederationOptions{
-					FederationRuleID: fed.RuleID,
-					OrganizationID:   fed.OrganizationID,
-					ServiceAccountID: fed.ServiceAccountID,
-					WorkspaceID:      fed.WorkspaceID,
-				},
-			),
-			// AMBIENT CREDENTIALS ARE CLEARED, and this is load-bearing.
-			// anthropic.NewClient prepends DefaultClientOptions, which walks
-			// the SDK's own credential chain: a bare ANTHROPIC_API_KEY or
-			// ANTHROPIC_AUTH_TOKEN in the process environment becomes a
-			// persistent X-Api-Key / authorization header on the request
-			// config. The federation middleware then sees a request that
-			// already carries a static auth header and SKIPS ITSELF
-			// (SDK internal/auth/middleware.go:34-36) -- so a stray env var
-			// would silently return the cluster to a long-lived key while
-			// every log line and this constructor still said "federation".
-			// That is precisely the failure D3 refuses to allow, in the one
-			// form no configuration of ours controls. Deleting the config
-			// headers is the SDK's own documented recipe for it
-			// (betasessiontoolrunner.go:98-104); the middleware sets
-			// Authorization per request, so nothing legitimate is lost.
-			option.WithHeaderDel("X-Api-Key"),
-			option.WithHeaderDel("Authorization"),
-		}
-		return opts, credentialPathFederation, nil
-
 	case len(present) > 0:
 		// One to three set: refuse. Naming both halves is deliberate -- the
 		// operator is mid-cutover and needs to know which of the four they
 		// have, not only which they lack.
-		return nil, "", fmt.Errorf(
+		return nil, fmt.Errorf(
 			"provider %q is HALF-CONFIGURED for Anthropic workload identity federation: %s set, %s missing. "+
 				"Set all four, or none to leave the Anthropic providers unavailable. A partial federation "+
 				"config is refused rather than quietly read as 'not configured', because an operator halfway "+
 				"through the runbook believes they are ENABLING Anthropic, not disabling it. "+
 				"Runbook: docs/public/operate/auth/anthropic-federation.md",
 			cfg.Name, strings.Join(present, ", "), strings.Join(missing, ", "))
-
 	default:
-		// None set. NOT AN ERROR, and this arm is where the key used to be
-		// (epic memql#5088, design D2). There is no static Anthropic key any
-		// more -- not in the engine, not in the OS, not in the install graph --
-		// so "no federation ids" can only mean the vendor is not configured on
-		// this cluster, which is the normal state of a fresh cloud cluster and
-		// of every local one. The provider registers as unavailable and the
-		// readiness model reports `ai` unconfigured; nothing falls back to
-		// anything.
-		return nil, credentialPathUnavailable, nil
+		return nil, nil
+	}
+
+	if err := preflightIdentityToken(fed.TokenFile, anthropicAudience, envAnthropicIdentityTokenFile); err != nil {
+		return nil, fmt.Errorf("provider %q anthropic federation preflight: %w", cfg.Name, err)
+	}
+
+	ids := map[string]string{
+		authKeyFederationRuleID: fed.RuleID,
+		authKeyOrganizationID:   fed.OrganizationID,
+		authKeyServiceAccountID: fed.ServiceAccountID,
+	}
+	if fed.WorkspaceID != "" {
+		ids[authKeyWorkspaceID] = fed.WorkspaceID
+	}
+	exchangeClient := guardedHTTPClient(nil)
+	return processVendorSignIn(vendorSignInConfig{
+		Vendor: metrics.FederationVendorAnthropic,
+		Fingerprint: signInFingerprint(metrics.FederationVendorAnthropic,
+			fed.RuleID, fed.OrganizationID, fed.ServiceAccountID, fed.WorkspaceID, fed.TokenFile),
+		TokenFile: fed.TokenFile,
+		// Anthropic documents that an identity token carrying a jti is accepted
+		// once. A Kubernetes projected token carries one.
+		ReplayProtected: true,
+		Ids:             ids,
+		Exchange: func(ctx context.Context, identityToken string) (string, time.Time, error) {
+			// The SDK's own public exchange, so the wire contract (the body's
+			// field names, the two beta values, the redirect policy) stays the
+			// SDK's to keep right. BaseURL is the address the calling client
+			// talks to; empty means the SDK's default.
+			base, _ := ctx.Value(anthropicExchangeBaseKey{}).(string)
+			creds, err := config.ExchangeFederationAssertion(ctx, config.FederationExchangeParams{
+				Assertion:        identityToken,
+				FederationRuleID: fed.RuleID,
+				OrganizationID:   fed.OrganizationID,
+				ServiceAccountID: fed.ServiceAccountID,
+				WorkspaceID:      fed.WorkspaceID,
+				BaseURL:          base,
+				HTTPClient:       exchangeClient,
+				UserAgent:        "memql-engine",
+			})
+			if err != nil {
+				var refused *config.FederationExchangeError
+				if errors.As(err, &refused) && refused.StatusCode >= 400 && refused.StatusCode < 500 {
+					return "", time.Time{}, &vendorExchangeRefused{
+						Status: refused.StatusCode,
+						Body:   truncateForLog(config.RedactOAuthErrorBody(refused.Body), maxFederationBodyNote),
+					}
+				}
+				return "", time.Time{}, err
+			}
+			var expiresAt time.Time
+			if creds.ExpiresAt != nil {
+				expiresAt = *creds.ExpiresAt
+			}
+			return creds.AccessToken, expiresAt, nil
+		},
+	}), nil
+}
+
+// signInFingerprint identifies one vendor configuration: two provider records
+// with the same ids and token file are the same sign-in.
+func signInFingerprint(vendor string, parts ...string) string {
+	h := sha256.New()
+	h.Write([]byte(vendor))
+	for _, part := range parts {
+		h.Write([]byte{0})
+		h.Write([]byte(part))
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// anthropicExchangeBaseKey carries the address a client talks to into the
+// sign-in's exchange.
+type anthropicExchangeBaseKey struct{}
+
+// anthropicBearerMiddleware puts the process's federated bearer on every
+// request a client sends to its own vendor address.
+//
+// PER REQUEST, not once at construction: the bearer expires within the hour.
+//
+// ONLY TO THE CLIENT'S OWN ADDRESS. The address of the client's first request
+// is pinned, and a request to any other host is passed through with no
+// credential and without an identity token being sent anywhere for it. The
+// SDK's own middleware keeps the same rule against a request path that is an
+// absolute URL for some other host.
+func anthropicBearerMiddleware(signIn *vendorSignIn) option.Middleware {
+	var (
+		mu     sync.Mutex
+		pinned string
+	)
+	return func(req *http.Request, next option.MiddlewareNext) (*http.Response, error) {
+		origin := req.URL.Scheme + "://" + req.URL.Host
+		mu.Lock()
+		if pinned == "" {
+			pinned = origin
+		}
+		base := pinned
+		mu.Unlock()
+		if !strings.EqualFold(origin, base) {
+			return next(req)
+		}
+
+		bearer, _, err := signIn.Bearer(context.WithValue(req.Context(), anthropicExchangeBaseKey{}, base))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Del("X-Api-Key")
+		req.Header.Set("Authorization", "Bearer "+bearer)
+		// A federated bearer is an OAuth bearer, and the API requires this beta
+		// value beside one. Merged, never replaced: a call may carry betas of
+		// its own.
+		if existing := req.Header.Get("anthropic-beta"); existing == "" {
+			req.Header.Set("anthropic-beta", config.OAuthAPIBetaHeader)
+		} else if !strings.Contains(existing, config.OAuthAPIBetaHeader) {
+			req.Header.Set("anthropic-beta", existing+","+config.OAuthAPIBetaHeader)
+		}
+
+		resp, err := next(req)
+		if err == nil && resp != nil && resp.StatusCode == http.StatusUnauthorized {
+			// The vendor no longer accepts this bearer. It is dropped, and the
+			// next call signs in if there is an identity token that may be
+			// presented. The 401 goes back to the caller as it is: retrying
+			// here would need a second sign-in with a token already used.
+			signIn.Invalidate(bearer)
+		}
+		return resp, err
 	}
 }
 

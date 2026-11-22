@@ -33,11 +33,20 @@ type fakeAnthropic struct {
 	// tokenStatus / tokenBody let a test make the exchange fail.
 	tokenStatus int
 	tokenBody   string
+
+	// refuseRepeats makes the token endpoint behave as Anthropic documents: an
+	// identity token is accepted once and a second presentation is a 401.
+	refuseRepeats bool
+	seen          map[string]bool
+
+	// messageStatusOnce answers the next Messages call with this status.
+	messageStatusOnce int
 }
 
 func newFakeAnthropic(t *testing.T) *fakeAnthropic {
 	t.Helper()
-	f := &fakeAnthropic{tokenStatus: http.StatusOK}
+	isolateVendorSignIns(t)
+	f := &fakeAnthropic{tokenStatus: http.StatusOK, seen: map[string]bool{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/oauth/token", func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
@@ -46,6 +55,12 @@ func newFakeAnthropic(t *testing.T) *fakeAnthropic {
 		f.exchangeRequests = append(f.exchangeRequests, body)
 		f.exchangeHeaders = append(f.exchangeHeaders, r.Header.Clone())
 		status, custom := f.tokenStatus, f.tokenBody
+		if assertion, _ := body["assertion"].(string); f.refuseRepeats && status == http.StatusOK {
+			if f.seen[assertion] {
+				status, custom = http.StatusUnauthorized, `{"error":{"type":"authentication_error","message":"jti_reused"}}`
+			}
+			f.seen[assertion] = true
+		}
 		f.mu.Unlock()
 
 		w.Header().Set("Content-Type", "application/json")
@@ -62,8 +77,15 @@ func newFakeAnthropic(t *testing.T) *fakeAnthropic {
 	mux.HandleFunc("/v1/messages", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		f.messageHeaders = append(f.messageHeaders, r.Header.Clone())
+		once := f.messageStatusOnce
+		f.messageStatusOnce = 0
 		f.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
+		if once != 0 {
+			w.WriteHeader(once)
+			_, _ = w.Write([]byte(`{"type":"error","error":{"type":"authentication_error","message":"invalid bearer"}}`))
+			return
+		}
 		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-test",` +
 			`"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn",` +
 			`"usage":{"input_tokens":1,"output_tokens":1}}`))
@@ -113,6 +135,104 @@ func callMessages(ctx context.Context, p *anthropicProvider) error {
 		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("hi"))},
 	})
 	return err
+}
+
+// TestAnthropicClientsShareOneSignIn is the regression test for the failure the
+// shared sign-in exists to remove (design 2026-11-21, A1): one identity token
+// was presented once per provider record, and a vendor that accepts a token
+// once refused all but the first.
+func TestAnthropicClientsShareOneSignIn(t *testing.T) {
+	f := newFakeAnthropic(t)
+	f.refuseRepeats = true
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
+	t.Setenv("ANTHROPIC_BASE_URL", f.srv.URL)
+
+	// One pod, one token file, four records: two chat and two streaming, which
+	// is the shape of the shipped Claude catalog.
+	auth := federatedAuth(validIdentityToken(t))
+	var clients []*anthropic.Client
+	for _, name := range []string{"claudeA", "claudeB"} {
+		p, err := newAnthropicProvider(ProviderConfig{Name: name, Model: "claude-test", Auth: auth})
+		if err != nil {
+			t.Fatalf("newAnthropicProvider(%s): %v", name, err)
+		}
+		clients = append(clients, &p.(*anthropicProvider).client)
+	}
+	for _, name := range []string{"streamA", "streamB"} {
+		p, err := newAnthropicStreamProvider(ProviderConfig{Name: name, Model: "claude-test", Auth: auth})
+		if err != nil {
+			t.Fatalf("newAnthropicStreamProvider(%s): %v", name, err)
+		}
+		clients = append(clients, &p.(*anthropicStreamProvider).client)
+	}
+
+	for i, client := range clients {
+		_, err := client.Messages.New(context.Background(), anthropic.MessageNewParams{
+			Model:     anthropic.Model("claude-test"),
+			MaxTokens: 16,
+			Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("hi"))},
+		})
+		if err != nil {
+			t.Fatalf("client %d: Messages.New: %v", i, err)
+		}
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.exchangeRequests) != 1 {
+		t.Fatalf("four clients made %d sign-ins with one identity token, want 1", len(f.exchangeRequests))
+	}
+	if len(f.messageHeaders) != 4 {
+		t.Fatalf("message calls = %d, want 4", len(f.messageHeaders))
+	}
+	for i, h := range f.messageHeaders {
+		if got := h.Get("Authorization"); got != "Bearer sk-ant-oat01-fake" {
+			t.Fatalf("call %d: Authorization = %q, want the one federated bearer", i, got)
+		}
+		if got := h.Get("anthropic-beta"); !strings.Contains(got, "oauth-2025-04-20") {
+			t.Fatalf("call %d: anthropic-beta = %q, want it to carry oauth-2025-04-20", i, got)
+		}
+		if got := h.Get("x-api-key"); got != "" {
+			t.Fatalf("call %d carried x-api-key %q", i, got)
+		}
+	}
+}
+
+// A 401 on an API call means the bearer is dead. The engine drops it, and does
+// not present the identity token it has already used a second time.
+func TestAnthropicApi401InvalidatesWithoutASecondExchange(t *testing.T) {
+	f := newFakeAnthropic(t)
+	f.refuseRepeats = true
+	p := federatedProviderAgainst(t, f)
+
+	if err := callMessages(context.Background(), p); err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	f.mu.Lock()
+	f.messageStatusOnce = http.StatusUnauthorized
+	f.mu.Unlock()
+	if err := callMessages(context.Background(), p); err == nil {
+		t.Fatal("a 401 from the vendor reached the caller as success")
+	}
+	if err := callMessages(context.Background(), p); err == nil {
+		t.Fatal("a call was made with a bearer the vendor had just refused")
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.exchangeRequests) != 1 {
+		t.Fatalf("the used identity token was presented %d times, want 1", len(f.exchangeRequests))
+	}
+	sent := 0
+	for _, h := range f.messageHeaders {
+		if h.Get("Authorization") != "" {
+			sent++
+		}
+	}
+	if sent != 2 {
+		t.Fatalf("%d Messages calls reached the vendor, want 2: the third had no bearer to send", sent)
+	}
 }
 
 func TestFederationExchangeHappyPath(t *testing.T) {
