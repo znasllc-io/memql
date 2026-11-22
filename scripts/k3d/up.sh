@@ -452,6 +452,80 @@ function check_requirements() {
     cap_fail 3 "This computer does not meet the minimum requirements for MemQL. ${shortfalls} See ${REQ_DOCS_URL} To create the cluster anyway: make up ALLOW_BELOW_MINIMUM=1"
 }
 
+#=============================================================================
+# THE CLUSTER'S TOKEN SIGNING KEY
+#=============================================================================
+#
+# A LOCAL CLUSTER KEEPS ITS SIGNING KEY ACROSS RECREATION (design record
+# docs/superpowers/specs/2026-11-21-vendor-accounts-and-api-keys-design.md, A7).
+#
+# A vendor federates with a local cluster by being GIVEN the cluster's public
+# keys (`make federation-keys`), because a local issuer cannot be fetched from.
+# `make up-refresh` deletes the cluster and creates it again, and a new cluster
+# signs with a new key: every pasted key is stale and every sign-in is refused
+# until somebody pastes again. So the key lives in a file here and is mounted
+# where k3s looks for its own. The recreated cluster is then the same issuer
+# with the same keys. Proven on a throwaway cluster on k3s v1.32.13, with one
+# server and with two: the published keys were identical across delete and
+# create. No apiserver argument is needed.
+#
+# THE FILE IS A SECRET. Whoever holds it can mint tokens a vendor accepts for
+# this cluster's rule. It is outside the repository, readable by its owner
+# only, never printed, and `make down PURGE=1` deletes it. A plain `make down`
+# keeps it, which is the point.
+#
+# NO KEY IS NOT A FAILURE. Without openssl the cluster is created as it always
+# was, with a key k3s generates and loses on recreation; the bring-up says so.
+# An existing cluster is not touched: the mount takes effect when a cluster is
+# next created.
+#
+# Tests: up_signing_key_test.go, down_signing_key_test.go.
+
+# Where k3s reads its service-account signing key from.
+SIGNING_KEY_MOUNT="/var/lib/rancher/k3s/server/tls/service.key"
+
+# signing_key_file -- where this cluster's signing key is kept. down.sh spells
+# the same path.
+function signing_key_file() {
+    printf '%s/.memql/k3d/%s/service-account.key' "${HOME}" "${CLUSTER_NAME}"
+}
+
+# ensure_signing_key -- print the path of this cluster's signing key, making the
+# key on first use. Returns 1, printing nothing, when there is none and none can
+# be made. An existing key is never replaced.
+function ensure_signing_key() {
+    local key dir tmp
+    key="$(signing_key_file)"
+    dir="$(dirname "${key}")"
+    if [[ -s "${key}" ]]; then
+        chmod 600 "${key}" 2>/dev/null || true
+        printf '%s' "${key}"
+        return 0
+    fi
+    command -v openssl >/dev/null 2>&1 || return 1
+    mkdir -p "${dir}" 2>/dev/null || return 1
+    chmod 700 "${dir}" 2>/dev/null || return 1
+
+    # PKCS#1, which is what k3s writes for itself and what was proven. OpenSSL 3
+    # needs -traditional for it; LibreSSL and OpenSSL 1.1 write it by default
+    # and do not know the flag.
+    tmp="${key}.new"
+    if ! ( umask 077
+           openssl genrsa -traditional -out "${tmp}" 2048 >/dev/null 2>&1 \
+               || openssl genrsa -out "${tmp}" 2048 >/dev/null 2>&1 ); then
+        rm -f "${tmp}"
+        return 1
+    fi
+    local first_line=""
+    IFS= read -r first_line < "${tmp}" 2>/dev/null || true
+    if [[ "${first_line}" != "-----BEGIN RSA PRIVATE KEY-----" ]]; then
+        rm -f "${tmp}"
+        return 1
+    fi
+    chmod 600 "${tmp}" 2>/dev/null && mv "${tmp}" "${key}" 2>/dev/null || { rm -f "${tmp}"; return 1; }
+    printf '%s' "${key}"
+}
+
 function create_cluster() {
     section "Creating k3d cluster '${CLUSTER_NAME}'"
     cap_progress "Creating the cluster"
@@ -522,11 +596,27 @@ function create_cluster() {
 
     warn_occupied_ports "${port_args[@]}"
 
+    # The signing key, mounted on EVERY server so a recreated cluster is the
+    # same issuer (see ensure_signing_key). Never printed: only its path is.
+    local signing_key=""
+    local -a signing_key_args=()
+    if signing_key="$(ensure_signing_key)"; then
+        signing_key_args=(--volume "${signing_key}:${SIGNING_KEY_MOUNT}@server:*")
+        info "Token signing key: ${signing_key} (a secret; kept across recreation so keys given to a vendor stay good)."
+    else
+        warn "This cluster has no persistent token signing key (openssl is needed to make one)."
+        warn "  It works as before. If it federates with a vendor, recreating it changes its keys,"
+        warn "  and 'make federation-keys' has to be run and pasted again."
+    fi
+
+    # ${arr[@]+...}: an empty array under `set -u` is an unbound variable on
+    # the bash macOS ships.
     k3d cluster create "${CLUSTER_NAME}" \
         --image "rancher/k3s:${K3S_VERSION}" \
         --servers "${K3D_SERVERS}" \
         --agents "${K3D_AGENTS}" \
         "${port_args[@]}" \
+        ${signing_key_args[@]+"${signing_key_args[@]}"} \
         --wait \
         --timeout "120s" >&2
 

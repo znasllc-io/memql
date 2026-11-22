@@ -140,6 +140,36 @@ function remove_kubeconfig() {
     fi
 }
 
+# remove_signing_key <cluster> <purge> -- delete the cluster's token signing key
+# on a purge, and only then.
+#
+# `make up` keeps a local cluster's signing key in a file so that a recreated
+# cluster is the same issuer and the public keys given to a vendor stay good
+# (up.sh, ensure_signing_key; design record
+# 2026-11-21-vendor-accounts-and-api-keys, A7). A PLAIN TEARDOWN MUST KEEP IT:
+# `make up-refresh` begins with one, and deleting the key here would make every
+# refresh a new issuer. A purge is the operator saying the cluster is gone for
+# good, and the key is a secret that should not outlive it.
+#
+# One file and its own directory, by exact path: never a recursive removal.
+SIGNING_KEY_REMOVED=false
+function remove_signing_key() {
+    local cluster="$1" purge="$2" key
+    key="${HOME}/.memql/k3d/${cluster}/service-account.key"
+    if [[ ! -e "${key}" ]]; then
+        return 0
+    fi
+    if [[ -z "$purge" ]]; then
+        cap_info "Token signing key kept at ${key}: the next 'make up' is the same issuer (set --purge to delete it)."
+        return 0
+    fi
+    rm -f "${key}"
+    rmdir "$(dirname "${key}")" 2>/dev/null || true
+    SIGNING_KEY_REMOVED=true
+    cap_changed
+    cap_info "Token signing key deleted. A vendor that was given this cluster's public keys must be given the next cluster's."
+}
+
 #=============================================================================
 # ENTRY POINT
 #=============================================================================
@@ -165,10 +195,12 @@ function main() {
         cap_changed
     fi
     remove_kubeconfig "$cluster" "$purge"
+    remove_signing_key "$cluster" "$purge"
 
     cap_result_set     cluster "$cluster"
     cap_result_set_raw deleted "$deleted"
     cap_result_set_raw purged  "$( [[ -n "$purge" ]] && echo true || echo false )"
+    cap_result_set_raw signingKeyRemoved "$SIGNING_KEY_REMOVED"
     cap_result_set     mediaServer "$MEDIA_STATE"
     cap_result_set     mediaServerDetail "$MEDIA_DETAIL"
     if [[ "$MEDIA_STATE" == "failed" ]]; then
