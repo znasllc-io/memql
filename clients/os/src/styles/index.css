@@ -4659,7 +4659,14 @@ a.os-button {
 .os-files-main[hidden] { display: none; }
 .os-files-share { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .os-files-share-body { display: flex; flex-direction: column; gap: 8px; min-width: 0; container: machine-details / inline-size; }
-.os-files-share-file { display: inline-flex; align-items: center; gap: 6px; }
+/* The Share page's header (option 2A, Nov 22): the file's glyph on a small tile, the name large beside it, one muted line under it, and a little room above. */
+.os-files-share-file { display: flex; align-items: center; gap: 14px; min-width: 0; margin-top: 6px; }
+.os-files-share-preview { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; width: 56px; height: 56px; border: 1px solid var(--os-line); border-radius: var(--os-radius-xs); background: var(--os-plate); color: var(--os-rail); }
+.os-files-share-preview .os-files-sheet { width: 28px; height: 35px; }
+.os-files-share-preview .os-files-sheet b { left: 3px; bottom: 4px; font-size: 7px; }
+.os-files-share-name, .os-files-share-name .os-head { min-width: 0; }
+.os-files-share-name .os-settings-title { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.os-files-share-facts { margin: 2px 0 0; font-size: var(--os-text-sm); color: var(--os-muted); }
 .os-files-share-expiry { position: relative; display: flex; align-items: center; gap: 12px; min-width: 0; }
 .os-files-share-expiry .os-select { min-width: 9rem; }
 /* One compact menu, as drawn (page 8, Draft B picked): the kit's select-wrap

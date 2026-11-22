@@ -1,9 +1,9 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
-import { Check, Ellipsis, FileText, User, Users } from "lucide-react";
-import { sameEntityId } from "@znasllc-io/memql-sdk-core/client";
+import { Check, Ellipsis, User, Users } from "lucide-react";
+import { rowNumber, rowString, sameEntityId, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { ContextMenu } from "../../chrome/ContextMenu";
-import { Caption, Head, NextPage, Notice, Select, Button } from "../../kit";
+import { Caption, Head, NextPage, Notice, Select, Button, formatBytes } from "../../kit";
 import { AnchoredPicker } from "../../kit/AnchoredPicker";
 import { CalendarMonth, addDays, dayOf, type CalendarDay } from "../../kit/CalendarMonth";
 import { CardCollectionSearch, CardCollectionSkeleton } from "../../kit/CardCollectionEditor";
@@ -11,8 +11,12 @@ import { listScrollTop } from "../../kit/controls";
 import { IconButton } from "../../kit/IconButton";
 import { useNow } from "../../kit/useNow";
 import { useOsConnection } from "../../live/connection";
+import { useLiveCollection } from "../../live/useLiveCollection";
+import { FILE_CONCEPT } from "./concepts";
 import { groupSize, matchesQuery, subjectKey, type SubjectKind } from "../fleet/machines/sharing";
+import { fileKindOf, type FileKind } from "./filters";
 import { artifactName, type ArtifactRow } from "./rows";
+import { FileGlyph, typeLabel } from "./Tiles";
 import { shareFileCall, timeLeftLabel, useFileShares, useShareDirectory, type FileShare, type ShareEnd } from "./useSharing";
 
 // THE SHARE VIEW (Jesús's picks for item 6 of José's Nov 19 call, Nov 20 2026).
@@ -59,6 +63,18 @@ import { shareFileCall, timeLeftLabel, useFileShares, useShareDirectory, type Fi
 // and for a group reaches the people who joined since and drops those who
 // left (integrations/library/share.go).
 
+// THE HEADER (option 2A of the Nov 22 list; José did not like "Share · icon ·
+// file name" at the top). A small tile with the file's glyph -- the same
+// FileGlyph its Library tile draws; Files keeps no image thumbnails to show
+// instead -- beside the file name, large, and one muted line under it:
+// kind · size · where. The trail row still says "<place> › Share", so the
+// page does not repeat the word.
+
+/** One file of a kind, in the words of the Type menu's plurals (filters.ts FILE_TYPES). */
+const KIND_WORD: Record<FileKind, string> = {
+  documents: "Document", images: "Image", media: "Media", sheets: "Sheet", archives: "Archive", misc: "File",
+};
+
 const LENGTHS = [1, 7, 30] as const;
 /** Cards shown at first, and revealed per step: three rows of two. */
 const CARDS_PER_STEP = 6;
@@ -84,6 +100,18 @@ function shareKey(share: FileShare): string {
 export function ShareView({ file, backLabel, onBack }: { file: ArtifactRow; backLabel: string; onBack: () => void }) {
   const connection = useOsConnection();
   const name = artifactName(file);
+  // The size comes off the backing file row, read by id under the same key
+  // the Inspector uses (Inspector.tsx), so the two share one collection. A
+  // note has no file row; until one answers, the line leaves the size out.
+  const fileId = file.kind === "file" ? (file.sourceConceptRef.split(":").pop() ?? "") : "";
+  const head = useLiveCollection<Row>(fileId ? `files:head:${fileId}` : null, (connection) => ({
+    concept: FILE_CONCEPT, paged: false,
+    eventInScope: (id) => id === fileId,
+    inScope: (row) => rowString(row, "id") === fileId,
+    seed: async (_cursor, signal) => ({ rows: (await connection.query.libraryFileById({ fileId }, { signal })).rows(), nextCursor: "" }),
+  }));
+  const headRow = head.snapshot.rows[0];
+  const size = headRow ? rowNumber(headRow, "size") : undefined;
   const now = useNow(60_000);
 
   // ---- Expires ------------------------------------------------------------
@@ -292,13 +320,20 @@ export function ShareView({ file, backLabel, onBack }: { file: ArtifactRow; back
 
   return (
     <section className="os-files-share" aria-label={`Share ${name}`}>
-      <Head
-        navigationKey={`share:${file.id}`}
-        title="Share"
-        meta={<span className="os-files-share-file"><FileText size={14} aria-hidden /> {name}</span>}
-        breadcrumbs={[{ label: backLabel, onSelect: onBack }, { label: "Share" }]}
-        back={{ label: backLabel, onSelect: onBack }}
-      />
+      <div className="os-files-share-file">
+        <span className="os-files-share-preview" aria-hidden="true"><FileGlyph label={typeLabel(name, file.format)} /></span>
+        <div className="os-files-share-name">
+          <Head
+            navigationKey={`share:${file.id}`}
+            title={name}
+            breadcrumbs={[{ label: backLabel, onSelect: onBack }, { label: "Share" }]}
+            back={{ label: backLabel, onSelect: onBack }}
+          />
+          <p className="os-files-share-facts">
+            {[KIND_WORD[fileKindOf(file)], size === undefined ? "" : formatBytes(size), `in ${backLabel}`].filter(Boolean).join(" · ")}
+          </p>
+        </div>
+      </div>
       <div className="os-files-share-body">
         <section className="fleet-machine-setting" aria-label="Expires">
           <span className="fleet-machine-setting-name">Expires</span>
