@@ -53,6 +53,13 @@ case "$*" in
   *"--raw /openid/v1/jwks"*)
     echo '{"keys":[{"use":"sig","kty":"RSA","kid":"kid-1","alg":"RS256","n":"abc","e":"AQAB"}]}' ;;
   *"get deployments"*)
+    if [ "${FAKE_DEPLOYMENTS_FAIL:-}" = "1" ]; then
+      echo 'Error from server (Forbidden): deployments.apps is forbidden' >&2
+      exit 1
+    fi
+    if [ "${FAKE_NO_DEPLOYMENTS:-}" = "1" ]; then
+      exit 0
+    fi
     printf 'memql-engine\nmemql-engine\nmemql-engine-workbench\nmemql-engine\n\n' ;;
   *)
     echo "unexpected kubectl call: $*" >&2
@@ -198,7 +205,7 @@ func TestFederationKeysSpecNamesItsParams(t *testing.T) {
 }
 
 func TestFederationKeysFailsHonestlyWhenTheClusterCannotBeRead(t *testing.T) {
-	stdout, _, _, code := runFederationKeys(t, []string{"FAKE_KUBECTL_FAIL=1"})
+	stdout, stderr, _, code := runFederationKeys(t, []string{"FAKE_KUBECTL_FAIL=1"})
 	if code != 5 {
 		t.Fatalf("an unreadable cluster exited %d, want 5\nstdout: %s", code, stdout)
 	}
@@ -208,5 +215,61 @@ func TestFederationKeysFailsHonestlyWhenTheClusterCannotBeRead(t *testing.T) {
 	}
 	if env.OK || env.Error == nil || env.Error.Code != 5 {
 		t.Fatalf("want ok=false error.code=5, got: %s", stdout)
+	}
+	// THE REASON, not only the code. The read used to fail inside a command
+	// substitution, where the envelope that carried the reason was captured
+	// and thrown away: the run ended "aborted (exit 5) without an explicit
+	// result" with nothing on stderr.
+	for _, want := range []string{"could not read the issuer document", "was refused"} {
+		if !strings.Contains(env.Error.Message, want) {
+			t.Errorf("the failure does not say %q: %q", want, env.Error.Message)
+		}
+	}
+	if strings.Contains(env.Error.Message, "without an explicit result") {
+		t.Errorf("the failure is the capability runtime's own abort, not the script's reason: %q", env.Error.Message)
+	}
+	if strings.TrimSpace(stderr) == "" {
+		t.Error("a failed run said nothing to the person watching it")
+	}
+}
+
+// The Deployments read can fail on its own, after the keys were read (a role
+// that may read the public documents and not the namespace). It has to say so.
+func TestFederationKeysSaysWhenTheDeploymentsCannotBeRead(t *testing.T) {
+	stdout, _, _, code := runFederationKeys(t, []string{"FAKE_DEPLOYMENTS_FAIL=1"})
+	if code != 5 {
+		t.Fatalf("exit %d, want 5\nstdout: %s", code, stdout)
+	}
+	var env federationKeysEnvelope
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatalf("stdout is not one JSON envelope: %v\n%s", err, stdout)
+	}
+	if env.Error == nil || !strings.Contains(env.Error.Message, "could not read the engine Deployments") ||
+		!strings.Contains(env.Error.Message, "Forbidden") {
+		t.Fatalf("the failure does not say what could not be read and why: %s", stdout)
+	}
+}
+
+// A namespace with no engine Deployment is not a failure: the issuer and the
+// keys are still right, and they are what gets pasted. The run used to abort
+// with exit 1 here (a grep that matched nothing, under pipefail), so the keys
+// it had already read were never printed.
+func TestFederationKeysWithNoEngineDeploymentStillPrintsTheKeys(t *testing.T) {
+	stdout, stderr, _, code := runFederationKeys(t, []string{"FAKE_NO_DEPLOYMENTS=1"})
+	if code != 0 {
+		t.Fatalf("exit %d, want 0\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	var env federationKeysEnvelope
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatalf("stdout is not one JSON envelope: %v\n%s", err, stdout)
+	}
+	if !env.OK || env.Result.Issuer == "" || len(env.Result.Jwks.Keys) != 1 {
+		t.Fatalf("the issuer and keys were not printed: %s", stdout)
+	}
+	if len(env.Result.Subjects) != 0 {
+		t.Errorf("subjects = %v, want none", env.Result.Subjects)
+	}
+	if !strings.Contains(stderr, "No engine Deployment was found") {
+		t.Errorf("the run did not say why no subject is listed:\n%s", stderr)
 	}
 }

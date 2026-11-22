@@ -102,13 +102,31 @@ function check_prerequisites() {
     fi
 }
 
-# read_raw <path> <what> -- one public document from the API server.
+# read_raw <path> -- one public document from the API server, into RAW_DOC.
+# On failure the status is non-zero and RAW_DOC holds what kubectl said.
+#
+# IT SETS A VARIABLE AND ITS CALLER REPORTS THE FAILURE. It used to print the
+# document and call cap_fail itself, from inside a $(...): the envelope that
+# carried the reason was then written into the substitution, captured and
+# thrown away, and the run ended "aborted (exit 5) without an explicit result"
+# with nothing on stderr. capability.sh says the same beside cap_bool.
+RAW_DOC=""
 function read_raw() {
-    local path="$1" what="$2" out=""
-    if ! out="$(kc get --raw "${path}" 2>&1)"; then
-        cap_fail 5 "could not read ${what} (${path}) from the cluster: $(printf '%s' "${out}" | tr '\n' ' ' | cut -c1-300)"
-    fi
-    printf '%s' "${out}"
+    local path="$1" rc=0
+    RAW_DOC="$(kc get --raw "${path}" 2>&1)" || rc=$?
+    return "${rc}"
+}
+
+# one_line <text> -- kubectl's words, fit for an error message.
+function one_line() {
+    printf '%s' "$1" | tr '\n' ' ' | cut -c1-300
+}
+
+# fail_run <message> -- the run could not do its job. The reason goes to the
+# person watching (stderr) as well as into the result (stdout).
+function fail_run() {
+    cap_error "$1"
+    cap_fail 5 "$1"
 }
 
 # issuer_of <openid-configuration json> -- the issuer string.
@@ -147,19 +165,36 @@ print(json.dumps(doc, separators=(",", ":"), sort_keys=True))
 # NOT THE IDENTITY NODE. It runs under a service account of its own, never
 # calls a model, and does not sign in to a vendor (app/build_identity.go). A
 # vendor's rule must not admit it, so its subject is not offered for pasting.
+# engine_subjects -- the subjects into ENGINE_SUBJECTS, one a line. On failure
+# the status is non-zero and ENGINE_SUBJECTS_ERR holds what kubectl said. It
+# sets variables for read_raw's reason.
+#
+# NO DEPLOYMENT IS AN EMPTY LIST, NOT A FAILURE. The names used to be filtered
+# through a grep in a pipeline, and a grep that matches nothing exits 1: under
+# pipefail that ended the whole run, after the issuer and the keys had been
+# read and before they were printed.
+ENGINE_SUBJECTS=""
+ENGINE_SUBJECTS_ERR=""
 function engine_subjects() {
-    local accounts="" node
+    local accounts="" node account
     local -a model_nodes=()
     for node in "${ENGINE_NODE_TYPES[@]}"; do
         [[ "${node}" == "identity" ]] || model_nodes+=("${node}")
     done
+    ENGINE_SUBJECTS=""
+    ENGINE_SUBJECTS_ERR=""
     if ! accounts="$(kc get deployments "${model_nodes[@]}" -n "${NAMESPACE}" --ignore-not-found \
             -o jsonpath='{range .items[*]}{.spec.template.spec.serviceAccountName}{"\n"}{end}' 2>&1)"; then
-        cap_fail 5 "could not read the engine Deployments in namespace '${NAMESPACE}': $(printf '%s' "${accounts}" | tr '\n' ' ' | cut -c1-300)"
+        ENGINE_SUBJECTS_ERR="$(one_line "${accounts}")"
+        return 1
     fi
-    printf '%s\n' "${accounts}" | grep -E '^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$' | sort -u | while read -r account; do
-        printf 'system:serviceaccount:%s:%s\n' "${NAMESPACE}" "${account}"
-    done
+    while IFS= read -r account; do
+        if [[ "${account}" =~ ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$ ]]; then
+            ENGINE_SUBJECTS+="system:serviceaccount:${NAMESPACE}:${account}"$'\n'
+        fi
+    done < <(printf '%s\n' "${accounts}" | sort -u)
+    ENGINE_SUBJECTS="${ENGINE_SUBJECTS%$'\n'}"
+    return 0
 }
 
 # json_string_array -- stdin lines as a JSON array of strings.
@@ -179,7 +214,9 @@ function explain() {
     info "Issuer:    ${issuer}"
     info "Subjects:"
     printf '%s\n' "${subjects}" | while read -r subject; do
-        [[ -n "${subject}" ]] && info "  ${subject}"
+        if [[ -n "${subject}" ]]; then
+            info "  ${subject}"
+        fi
     done
     info "Audiences: Anthropic ${ANTHROPIC_AUDIENCE}   OpenAI ${OPENAI_AUDIENCE}"
     info ""
@@ -210,17 +247,26 @@ function main() {
     check_prerequisites
 
     local configuration issuer jwks_raw jwks subjects subjects_json
-    configuration="$(read_raw /.well-known/openid-configuration "the issuer document")"
+    if ! read_raw /.well-known/openid-configuration; then
+        fail_run "could not read the issuer document (/.well-known/openid-configuration) from the cluster: $(one_line "${RAW_DOC}")"
+    fi
+    configuration="${RAW_DOC}"
     if ! issuer="$(issuer_of "${configuration}")"; then
-        cap_fail 5 "the cluster's issuer document names no issuer"
+        fail_run "the cluster's issuer document names no issuer"
     fi
 
-    jwks_raw="$(read_raw /openid/v1/jwks "the public keys")"
+    if ! read_raw /openid/v1/jwks; then
+        fail_run "could not read the public keys (/openid/v1/jwks) from the cluster: $(one_line "${RAW_DOC}")"
+    fi
+    jwks_raw="${RAW_DOC}"
     if ! jwks="$(public_jwks "${jwks_raw}")"; then
-        cap_fail 5 "the cluster's key document is not a set of PUBLIC keys (it is empty, malformed, or carries a private member); nothing was printed"
+        fail_run "the cluster's key document is not a set of PUBLIC keys (it is empty, malformed, or carries a private member); nothing was printed"
     fi
 
-    subjects="$(engine_subjects)"
+    if ! engine_subjects; then
+        fail_run "could not read the engine Deployments in namespace '${NAMESPACE}': ${ENGINE_SUBJECTS_ERR}"
+    fi
+    subjects="${ENGINE_SUBJECTS}"
     if [[ -z "${subjects}" ]]; then
         warn "No engine Deployment was found in namespace '${NAMESPACE}', so no subject is listed. The keys and the issuer are still right."
     fi
