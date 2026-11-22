@@ -446,7 +446,7 @@ export function adoptDocument(s: OsState, doc: DesktopDocument, origin: "hydrate
     // theme out from under somebody mid-hover.
     previewPack: s.previewPack,
     deskResolved: true,
-    deskHydrations: s.deskHydrations + (origin === "hydrate" ? 1 : 0),
+    deskHydrations: s.deskHydrations,
     // Selection survives adoption only while its item does: the arriving
     // desktop is a statement about ITEMS, and a selection of one it no
     // longer carries would highlight nothing.
@@ -558,7 +558,11 @@ export function OsProvider({
         setNotice({ kind: "stale" });
         return;
       }
-      setState((s) => adoptDocument(s, event.document, event.origin));
+      // Counted here, not in adoptDocument, which must stay idempotent.
+      setState((s) => {
+        const next = adoptDocument(s, event.document, event.origin);
+        return event.origin === "hydrate" ? { ...next, deskHydrations: s.deskHydrations + 1 } : next;
+      });
       // `hydrate` is the desktop resolving for the first time, which is not
       // news -- it is what the person expected to see. Only a document that
       // arrived AFTER that means somebody else's machine saved.
