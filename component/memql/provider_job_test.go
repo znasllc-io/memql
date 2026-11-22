@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -58,6 +59,37 @@ func TestProviderLevelsAndRankAreRead(t *testing.T) {
 	// A rank written as a whole number of either kind a loader can hand over.
 	if got := textRecord(map[string]any{"rank": 7}).Rank(); got != 7 {
 		t.Errorf("Rank() = %d for an int param, want 7", got)
+	}
+}
+
+// A rank too large for an int stays too large: it is refused as out of range,
+// and read on its own it never turns into a negative number. A bare conversion
+// of 1e30 is the platform's indefinite value, the most negative int there is.
+func TestARankTooLargeForAnIntIsRefusedAsTooLarge(t *testing.T) {
+	for name, value := range map[string]any{
+		"a float far past an int": 1e30,
+		"the largest int64":       int64(math.MaxInt64),
+		"a negative far past it":  -1e30,
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := textRecord(map[string]any{"levels": "strong", "rank": value})
+			err := validateProviderJob(cfg)
+			if err == nil || !strings.Contains(err.Error(), "rank") || !strings.Contains(err.Error(), "1 to 1000") {
+				t.Fatalf("err = %v, want the rank refused as outside 1 to 1000", err)
+			}
+			got := cfg.Rank()
+			if positive := name != "a negative far past it"; positive && got <= 0 {
+				t.Fatalf("Rank() = %d for %v: a rank too large read as not positive", got, value)
+			} else if !positive && got >= 0 {
+				t.Fatalf("Rank() = %d for %v: a rank too small read as not negative", got, value)
+			}
+		})
+	}
+	// A fraction, an infinity and a NaN are not whole numbers at all.
+	for _, value := range []any{2.5, math.Inf(1), math.NaN()} {
+		if err := validateProviderJob(textRecord(map[string]any{"levels": "strong", "rank": value})); err == nil {
+			t.Errorf("rank %v was accepted", value)
+		}
 	}
 }
 

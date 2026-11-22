@@ -39,6 +39,7 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/core/airoute"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 const (
@@ -91,18 +92,26 @@ func (c ProviderConfig) Rank() int {
 	return rank
 }
 
-// wholeParam reads a param that must be a whole number.
+// wholeParam reads a param that must be a whole number. A fraction, an
+// infinity and a NaN are not one.
+//
+// narrowing: SATURATE -- a rank is an ORDERING, and its one validator
+// (validateProviderJob) refuses anything outside 1 to 1000. A number too large
+// for an int must therefore stay too large and be refused for what it is; a
+// bare conversion would hand back the platform's indefinite value, a huge
+// negative, and the record would be refused as "below 1" or, read by Rank
+// alone, sorted last for a reason nobody wrote.
 func wholeParam(v any) (int, bool) {
 	switch x := v.(type) {
 	case int:
 		return x, true
 	case int64:
-		return int(x), true
+		return num.ClampInt64(x), true
 	case float64:
-		if x != math.Trunc(x) || math.IsInf(x, 0) || math.IsNaN(x) || math.Abs(x) > 1<<31 {
+		if x != math.Trunc(x) || math.IsInf(x, 0) || math.IsNaN(x) {
 			return 0, false
 		}
-		return int(x), true
+		return num.ClampFloat64(x), true
 	}
 	return 0, false
 }
