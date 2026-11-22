@@ -2560,6 +2560,9 @@ func (p *anthropicProvider) Call(ctx context.Context, prompt string) (any, error
 		return nil, err
 	}
 	reportAnthropicUsage(ctx, resp.RawJSON())
+	if err := anthropicDeclined(string(resp.StopReason)); err != nil {
+		return nil, err
+	}
 
 	text := extractAnthropicText(resp)
 	if text == "" {
@@ -2608,6 +2611,9 @@ func (p *anthropicProvider) CallChat(ctx context.Context, messages []common.Chat
 		return "", err
 	}
 	reportAnthropicUsage(ctx, resp.RawJSON())
+	if err := anthropicDeclined(string(resp.StopReason)); err != nil {
+		return "", err
+	}
 
 	return extractAnthropicText(resp), nil
 }
@@ -2668,6 +2674,9 @@ func (p *anthropicProvider) CallChatWithTools(ctx context.Context, messages []co
 		return nil, err
 	}
 	reportAnthropicUsage(ctx, resp.RawJSON())
+	if err := anthropicDeclined(string(resp.StopReason)); err != nil {
+		return nil, err
+	}
 
 	result := &common.ToolCallingChatResult{
 		AssistantText: extractAnthropicText(resp),
@@ -2717,6 +2726,9 @@ func (p *anthropicProvider) CallVision(ctx context.Context, prompt string, image
 		return "", fmt.Errorf("vision api: %w", err)
 	}
 	reportAnthropicUsage(ctx, resp.RawJSON())
+	if err := anthropicDeclined(string(resp.StopReason)); err != nil {
+		return "", err
+	}
 	return strings.TrimSpace(extractAnthropicText(resp)), nil
 }
 
@@ -2889,6 +2901,9 @@ func (p *anthropicStreamProvider) CallChat(ctx context.Context, messages []commo
 		return "", err
 	}
 	reportAnthropicUsage(ctx, resp.RawJSON())
+	if err := anthropicDeclined(string(resp.StopReason)); err != nil {
+		return "", err
+	}
 	return extractAnthropicText(resp), nil
 }
 
@@ -2924,6 +2939,9 @@ func (p *anthropicStreamProvider) CallChatWithTools(ctx context.Context, message
 		return nil, err
 	}
 	reportAnthropicUsage(ctx, resp.RawJSON())
+	if err := anthropicDeclined(string(resp.StopReason)); err != nil {
+		return nil, err
+	}
 	result := &common.ToolCallingChatResult{
 		AssistantText: extractAnthropicText(resp),
 	}
@@ -2971,6 +2989,9 @@ func (p *anthropicStreamProvider) CallStream(ctx context.Context, prompt string)
 			usageCacheCreation int64
 			usageCacheRead     int64
 			usageOutput        int64
+			// stopReason is how the vendor said the reply ended; a decline
+			// ends the stream in an error (ai_anthropic_declined.go).
+			stopReason string
 		)
 		for stream.Next() {
 			event := stream.Current()
@@ -2982,6 +3003,9 @@ func (p *anthropicStreamProvider) CallStream(ctx context.Context, prompt string)
 				usageCacheCreation = u.CacheCreationInputTokens
 				usageCacheRead = u.CacheReadInputTokens
 			case "message_delta":
+				if reason := string(event.Delta.StopReason); reason != "" {
+					stopReason = reason
+				}
 				u := event.Usage
 				usageOutput = u.OutputTokens
 				if u.CacheCreationInputTokens > 0 {
@@ -3018,6 +3042,10 @@ func (p *anthropicStreamProvider) CallStream(ctx context.Context, prompt string)
 			chunks <- StreamChunk{Error: err, Done: true}
 			return
 		}
+		if err := anthropicDeclined(stopReason); err != nil {
+			chunks <- StreamChunk{Error: err, Done: true}
+			return
+		}
 		chunks <- StreamChunk{Done: true}
 	}()
 	return chunks, nil
@@ -3049,14 +3077,24 @@ func (p *anthropicStreamProvider) CallChatStream(ctx context.Context, messages [
 	chunks := make(chan common.StreamChunk, 100)
 	go func() {
 		defer close(chunks)
+		stopReason := ""
 		for stream.Next() {
 			event := stream.Current()
 			reportAnthropicUsage(ctx, event.RawJSON())
 			if event.Type == "content_block_delta" && event.Delta.Type == "text_delta" {
 				chunks <- common.StreamChunk{Content: event.Delta.Text}
 			}
+			if event.Type == "message_delta" && event.Delta.StopReason != "" {
+				stopReason = string(event.Delta.StopReason)
+			}
 		}
 		if err := stream.Err(); err != nil {
+			chunks <- common.StreamChunk{Error: err, Done: true}
+			return
+		}
+		// A decline ends the stream in an error, never in a clean Done
+		// (ai_anthropic_declined.go).
+		if err := anthropicDeclined(stopReason); err != nil {
 			chunks <- common.StreamChunk{Error: err, Done: true}
 			return
 		}
@@ -3142,6 +3180,9 @@ func (p *anthropicStreamProvider) CallChatStreamWithTools(ctx context.Context, m
 			usageCacheCreation int64
 			usageCacheRead     int64
 			usageOutput        int64
+			// stopReason is how the vendor said the reply ended; a decline
+			// ends the stream in an error (ai_anthropic_declined.go).
+			stopReason string
 		)
 
 		// Process the first event we peeked at outside the goroutine,
@@ -3158,6 +3199,9 @@ func (p *anthropicStreamProvider) CallChatStreamWithTools(ctx context.Context, m
 				usageCacheCreation = u.CacheCreationInputTokens
 				usageCacheRead = u.CacheReadInputTokens
 			case "message_delta":
+				if reason := string(event.Delta.StopReason); reason != "" {
+					stopReason = reason
+				}
 				u := event.Usage
 				usageOutput = u.OutputTokens
 				if u.CacheCreationInputTokens > 0 {
@@ -3220,6 +3264,10 @@ func (p *anthropicStreamProvider) CallChatStreamWithTools(ctx context.Context, m
 		)
 
 		if err := stream.Err(); err != nil {
+			chunks <- common.StreamToolChunk{Error: err, Done: true}
+			return
+		}
+		if err := anthropicDeclined(stopReason); err != nil {
 			chunks <- common.StreamToolChunk{Error: err, Done: true}
 			return
 		}

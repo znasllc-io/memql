@@ -44,6 +44,9 @@ const failedWhenCalledPrefix = "failed when called: "
 // account_unavailable.
 const accountFailureCodePrefix = "account_"
 
+// modelDeclinedCode is the code of a request the model declined to answer.
+const modelDeclinedCode = "model_declined"
+
 // failureWords is what each stable code means, in the decision record's
 // words. A code with no entry is printed alone: a code is still an answer.
 //
@@ -82,6 +85,11 @@ var failureWords = map[string]string{
 	accountFailureCodePrefix + "credit":      "the account that paid is out of credit or at its spend limit",
 	accountFailureCodePrefix + "permission":  "the account that paid may not make this call",
 	accountFailureCodePrefix + "unavailable": "the account that paid could not be used",
+
+	// A request the model, or a classifier in front of it, declined
+	// (memql.ErrModelDeclined). The source worked and the account was fine;
+	// the next source is tried.
+	modelDeclinedCode: "the model declined the request",
 
 	// The router's own refusals, in the words its error leads with
 	// (InferenceUnavailable.Error). Without them a refusal read as "other".
@@ -166,6 +174,11 @@ func failureCode(err error) string {
 	// not at fault, the account was.
 	if kind, aboutAccount := memql.VendorAccountFailure(err); aboutAccount {
 		return accountFailureCodePrefix + kind
+	}
+	// A declined request is an ordinary error with no code of its own. Named
+	// here, before the ledger's categories, which would call it `other`.
+	if errors.Is(err, memql.ErrModelDeclined) {
+		return modelDeclinedCode
 	}
 	return CategorizeError(err)
 }
