@@ -2117,7 +2117,7 @@ one goal or several, split off a new request, ask which goal is meant, or offer
 to stop a goal. With no active
 goal there is no call and intake runs as before. A message with attachments, or
 over 4,000 characters, goes to intake too. The call runs under the person's own
-route (Auto, Local, Apps or theirs) and appears in Activity as "Routing
+route (Auto, Local, Apps, API or theirs) and appears in Activity as "Routing
 message". If routing is unavailable, or its answer is invalid twice, the
 message goes to intake and Activity records the fallback. Retrying a turn id
 returns its saved outcome and never routes or delivers a second time.

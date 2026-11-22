@@ -833,6 +833,14 @@ serving.
   `vendorKeysDailyCheck` (04:40, lists models with keys idle for a day) and
   `vendorKeysOwnerNotices` (every ten minutes: one email per fall to the key's
   owner, claimed under the key's gate before it is sent, no link in it).
+- **API is the fourth built-in route** (`route:api`, `component/memql/routes.go`):
+  the strongest vendor model at every job, edited and restored like Local and
+  Apps, and it lists `federation:` sources ONLY
+  (`ValidateBuiltinRouteJobs`, asked in `SaveRouteOverride`). A route's vendor
+  job is ready for a person when a record the selector offers at THAT level
+  has an account for them (`vendorServesNow`, read from `VendorDoor.Payers`),
+  and "serves now" names the model and the KIND of account, never a key. A
+  route cannot name which account pays (R5 of the design, not built).
 
 **A LOCAL cluster federates by pasted keys** (design record
 [2026-11-21](docs/superpowers/specs/2026-11-21-vendor-accounts-and-api-keys-design.md)).
@@ -1252,6 +1260,12 @@ the first** (epic memql#5127; [ai-routing.md](docs/public/operate/ai-routing.md)
   provider name; `fleet:strongest` / `fleet:fastest` / `fleet:<modelId>`;
   `app:*` / `app:<id>` / `app:<id>:<model>`; `federation:cheapest` /
   `federation:strongest` / `federation:<providerName>`; `policy:<name>`.
+  **The two vendor selectors choose among the records that DECLARE the call's
+  level** (`params { levels "strong reasoning"  rank 900 }`,
+  `component/memql/provider_job.go`): strongest is highest `rank` first,
+  cheapest is lowest input plus output price first, ties by name. A record
+  that declares no level resolves by name and both selectors pass it over; a
+  bad `levels` or `rank` refuses the record at load.
   `fleet:*` is retired and refuses load. An app id is held to the engine's
   closed runnable set at LOAD (`core/airoute/apps.go`); `app:*:<model>` is
   REFUSED. `policy:<name>` is expanded at load and a cycle refuses load. The
@@ -1712,13 +1726,26 @@ provider openai {
 @model("gpt-5.4-mini")
 provider chat54Mini {
   params {
-    contextWindow        128000
+    levels               "fast"
+    rank                 340
+    contextWindow        272000
     maxCompletionTokens  16384
-    inputCostPerMillion  0.15
-    outputCostPerMillion 0.60
+    inputCostPerMillion  0.75
+    outputCostPerMillion 4.50
   }
 }
 ```
+
+**A vendor text record says what it is FOR**, and the file's own header says
+how its numbers are kept (read from the vendors' pages on a named day, never
+from memory): `levels`, `rank`, the price, and a `contextWindow` that is the
+prompt size the one price is true for. **A record name is never removed**
+(bundles pin names): a model its vendor shut down is repointed and declares no
+level. A Claude record for a current model says `structuredOutput "format"`,
+because Claude Opus 5.5 and Sonnet 5.5 refuse the forced tool choice the older
+records use (`component/memql/ai_anthropic_structured.go`), and keeps
+`maxTokens` under 21,333, above which the vendor's SDK refuses a call that
+does not stream.
 
 **`@disabled`** (the lifecycle flag shared by functions / builtins / prompts /
 specs / seeds) skips the provider at load -- not registered, no auth

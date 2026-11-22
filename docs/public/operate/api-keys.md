@@ -190,6 +190,20 @@ and it is never recorded against a key.
 key: they are the cluster's account or nothing. Embeddings bind the cluster's
 shared memory search to one model and must not follow a person's key.
 
+## The API route
+
+Ask offers **API** beside Auto, Local and Apps: vendor models for every job,
+paid by the accounts above. It is the route to pick when you want your key to
+answer. Auto is not: Auto spends a key only once its owner turned on
+**Let Auto use this key**.
+
+API is ready for you when, for each job, some vendor model that serves that
+job has an account that can pay for you. With one key at one vendor it is
+ready; the jobs are served by that vendor's models. While it is not ready, Ask
+shows it with the reason and does not let it be chosen, and Fleet > Routing >
+Routes says the same. [AI routing](ai-routing.md#routes-a-person-picks-in-ask)
+has the route's rules, and how a model is chosen for a job.
+
 ## Who the cluster's account pays for
 
 Model access on a cluster is bring-your-own: a machine, an app, a key. The

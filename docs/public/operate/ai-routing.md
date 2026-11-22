@@ -86,9 +86,9 @@ fleet:qwen3.8:27b           one local model by id
 app:*                       any signed-in app on one of the caller's machines
 app:claude-code             one app by id
 app:claude-code:claude-opus-5   one app by id, with its model pinned
-federation:cheapest         the cheapest vendor record that qualifies
-federation:strongest        the strongest vendor record that qualifies
-federation:streamClaudeSonnet   one vendor record by name
+federation:cheapest         the cheapest vendor model that serves the call's level
+federation:strongest        the strongest vendor model that serves the call's level
+federation:claudeSonnet55   one vendor record by name
 policy:localFirst           another policy, expanded at load
 ```
 
@@ -131,6 +131,82 @@ Fast selection does not consult the owner's strongest-model preference.
 **`federation:cheapest` sorts a record with no cost figures LAST**, and the
 decision record says so. Sorting it first would make a price nobody filled in the
 cheapest thing in your catalog.
+
+### What a vendor record declares
+
+"The strongest vendor model" means something only because every vendor text
+record in `dsl/providers/providers.memql` says what it is for:
+
+```memql
+@extends("anthropic")
+@model("claude-opus-5-5")
+provider claudeOpus55 {
+  params {
+    streaming                  true
+    levels                     "strong reasoning"
+    rank                       900
+    structuredOutput           "format"
+    contextWindow              1000000
+    maxTokens                  20000
+    inputCostPerMillion        4.00
+    outputCostPerMillion       20.00
+    cachedInputCostPerMillion  0.20
+  }
+}
+```
+
+| Param | What it says | Checked at load |
+|---|---|---|
+| `levels` | The jobs the model is for: one to three of `fast`, `strong`, `reasoning` | Any other word, a repeated word or `embeddings` refuses the record |
+| `rank` | Its place among the records of a level, 1 to 1000, higher first | A value outside the range refuses the record |
+| `inputCostPerMillion`, `outputCostPerMillion` | The vendor's standard rate | Both or neither |
+| `contextWindow` | The largest prompt the record is offered | -- |
+| `structuredOutput` | How a Claude record asks for structured output: `tool` (the default) or `format` | Any other word, or the param on a record that is not a Claude text model, refuses the record |
+
+**The two vendor selectors read only those.** For a call at a level:
+
+- `federation:strongest` is the records that declare the level, highest
+  `rank` first.
+- `federation:cheapest` is the same records, lowest input plus output price
+  first, a record with no price last.
+
+Ties are broken by name, so two replicas answer alike. A record that declares
+no level still resolves by name and is passed over by both selectors, with
+that reason in `considered`. The walk then asks each candidate, in order,
+whether it holds the call's context floor, serves its modality, and has an
+[account that can pay](#which-account-pays-for-a-vendor-call) for the person.
+The first that does serves.
+
+Before records declared a level, `federation:strongest` was name order and
+neither selector read the level: with Anthropic set up, Claude Haiku answered a
+reasoning call ahead of Claude Opus.
+
+**`contextWindow` is the prompt size the record's one price is true for.**
+OpenAI charges more past 272,000 prompt tokens and Claude Haiku 5.5 past
+100,000, so those records declare that size, not the model's whole window.
+Every call states a floor estimated from its prompt, so a larger prompt goes
+to the next record that holds it at a true price.
+
+**A current Claude model refuses things an older record sends.** Claude Opus
+5.5 and Sonnet 5.5 answer a forced tool choice with an error, which is how the
+engine asked Claude for structured output. A record that says
+`structuredOutput "format"` sends the schema as the vendor's own output
+format, fitted to the schema keywords the vendor accepts; a limit it does not
+accept (a maximum, a length, a pattern) is kept in the field's description
+and is not enforced. Those records also declare no sampling parameter and no
+thinking budget, and keep `maxTokens` under 21,333: above it the vendor's SDK
+refuses a call that does not stream.
+
+**A record name is never removed.** A product bundle pins record names, so a
+record whose vendor shut its model down is repointed to the replacement the
+vendor names, and declares no level. `chat53Latest`, `codex51Max` and
+`reasoning4Mini` are such names.
+
+The catalog was brought to both vendors' current text models on 2026-11-22,
+from their own models, pricing and deprecations pages. **Nothing was run
+against either vendor**: the first call through a new record is its first real
+check. Claude Fable 5.2 and OpenAI's GPT-6 family are not in it; the file says
+why.
 
 **A policy may name a policy.** `policy:<name>` is expanded at load, cycles refuse
 to load and name the loop, and the router only ever walks a chain with no
@@ -357,41 +433,61 @@ every decision record, and the cost ceiling still governs it.
 ## Routes a person picks in Ask
 
 A **route** decides which source does each job for one message. Ask offers
-four kinds, and the turn carries the choice as its source, `route:<id>`:
+five kinds, and the turn carries the choice as its source, `route:<id>`:
 
 | Route | Quick tasks (`fast`) | Main work (`strong`) | Deep reasoning (`reasoning`) |
 |---|---|---|---|
 | **Auto** (`route:auto`, or no source) | the rules decide, ranked | the rules decide, ranked | the rules decide, ranked |
 | **Local** (`route:local`) | `fleet:fastest` | `fleet:strongest` | `fleet:strongest` |
 | **Apps** (`route:apps`) | `app:*` | `app:*` | `app:*` |
+| **API** (`route:api`) | `federation:strongest` | `federation:strongest` | `federation:strongest` |
 | **Your own** (`route:<id>`) | your sources | your sources | your sources |
+
+**API is vendor models, and nothing else.** Its jobs take the strongest vendor
+model that [declares the job's level](#what-a-vendor-record-declares): a quick
+task gets the strongest quick model, not the strongest model there is. It is
+paid by an API key of the person's, a key lent to them, or the cluster's
+account where that [pays for them](#which-account-pays-for-a-vendor-call).
+Saving it with a local model or an app in any job is refused
+(`API lists vendor models only`), because a route named API that listed one
+would say something untrue.
 
 **Search and memory is never a route's.** Every route serves embeddings from
 the cluster's bound embedder: the index holds vectors from exactly one model.
 Vision, speech, transcription and image generation follow the rules in every
 route.
 
-**A route never falls through.** A call made under Local, Apps or one of your
-own walks that route's sources for its level and nothing else. When they are
+**A route never falls through.** A call made under Local, Apps, API or one of
+your own walks that route's sources for its level and nothing else. When they are
 exhausted it degrades inside the route (`reasoning` to `strong` to `fast`,
 through the route's own lists) and then refuses with `every_door_shut`, naming
 the route. It never reaches a rule's chain or cloud consent. The decision
 record carries the route in `route`.
 
-**Local and Apps can be changed for the whole cluster** by an owner or a
+**Local, Apps and API can be changed for the whole cluster** by an owner or a
 developer: each job holds one to four sources (`fleet:`, `app:` or
-`federation:`). The change is an override in the routing document, beside the
-policy and rule overrides and under the same revision; Restore default removes
-it. **Your own routes** are `v1:router:route` rows: named by you, private to
+`federation:`; on API, `federation:` only). The change is an override in the
+routing document, beside the policy and rule overrides and under the same
+revision; Restore default removes it. **Your own routes** are `v1:router:route` rows: named by you, private to
 you, made from a copy of Local, Apps or nothing.
 
 A turn naming a route you do not have is refused with `route_policy_unknown`;
 one whose route cannot serve every job for you right now is refused with
 `route_not_ready` and the reason ("Needs an embedding model", "No signed-in app
 on your machines", "Needs an API key or a vendor account"), before any goal
-exists. Whether a vendor can serve is asked **for the person**: the cluster's
-own account counts for everybody, and a key counts for the people it can pay
-for.
+exists.
+
+**Whether a vendor source can serve is asked for the person, job by job.** A
+vendor selector's answer is the first record, in its order at the job's level,
+that has an account for them on a route they choose; a source that names one
+record asks that record. This is the answer the walk reaches for a call, so a
+person whose only key is at one vendor is not told a job naming the other
+vendor's model is ready. Each job's "serves now" names the model and the kind
+of account that pays (`claude-opus-5-5, paid by your API key`; a key is never
+named). A job only vendors serve says what is missing: an API key or a vendor
+account; an API key, where the cluster's account is not open to the person; or
+a vendor model their account can pay for, when they have an account and no
+model for that job.
 
 ### App selection on a machine
 

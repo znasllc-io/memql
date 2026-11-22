@@ -2259,6 +2259,106 @@ call record a person wrote naming somebody's key changes no figure. The owner
 notice is at-least-once: a mail that went, and whose record then failed to
 write, goes again.
 
+## A vendor model is chosen for a job, and API is a route of them (2026-11-22)
+
+The third part of the [vendor accounts design](../../superpowers/specs/2026-11-21-vendor-accounts-and-api-keys-design.md)
+(R1 to R7). [AI routing](../../public/operate/ai-routing.md#what-a-vendor-record-declares)
+is the operator's page.
+
+**A record says what it is for, and the selectors read only that**
+(`validateProviderJob`, `VendorRecordsFor`, `component/memql/provider_job.go`;
+`jobCandidates`, `component/router/selectors.go`). Trigger: a chain entry
+`federation:strongest` or `federation:cheapest`, at the call's level.
+Evidence: each vendor text record's declared `levels`, `rank` and price,
+nothing measured. Chosen path: the records that declare the level, by rank or
+by price, ties by name; the walk then filters by context floor, modality and
+account. The alternative was the old behaviour, name order with no level, under
+which the first record by name answered every job. A record with no level is
+passed over and says so in `considered`; it still resolves by name, so a pinned
+name keeps working. Speech, transcription, image and embedding calls are not
+ordered by this rule: their records are of other kinds and may not declare a
+level. Tests: `TestProviderJobRefusals`,
+`TestALoadRefusesARecordWithABadJobAndKeepsItsNeighbours`,
+`TestTheStrongestVendorIsTheHighestRankAtTheCallsLevel`,
+`TestTwoReplicasOrderAlike`.
+
+**The catalog's numbers are a reading of the vendors' pages on a day, not a
+measurement** (`dsl/providers/providers.memql`, refreshed 2026-11-22). The file
+says how a refresh is done and what each record declares. Three decisions are
+not obvious from the numbers. A record's `contextWindow` is the prompt size
+its one price is true for, which is smaller than the model's window where the
+vendor charges more above a size; the cost is that the model is passed over
+for a prompt it could have held. A name whose model the vendor shut down is
+repointed to the stated replacement and declares no level, so a selector never
+offers one model under two names. And ranks across vendors are an order, the
+cheaper of two models of one tier first, not a claim about quality. Tests:
+`TestEveryShippedVendorTextRecordDeclaresAJob`,
+`TestEveryLevelHasARecordAtBothVendors`, `TestNoTwoRecordsOfALevelShareARank`,
+`TestEveryRecordNameShippedBeforeTheRefreshStillResolves`,
+`TestNoShippedRecordCallsAModelItsVendorShutDown`,
+`TestProvidersForOneModelAgreeOnItsPrice`.
+
+**A current Claude model is asked for structured output by format**
+(`anthropicStructuredMode`, `anthropicFormatSchema`,
+`component/memql/ai_anthropic_structured.go`). Trigger: a record whose params
+say `structuredOutput "format"`. Why: Claude Opus 5.5 and Sonnet 5.5 answer a
+forced tool choice with a 400, and a forced tool was the engine's only way to
+ask Claude for JSON. Chosen path: the schema rides `output_config.format`,
+fitted by a list of KEPT keywords, because the vendor documents what it
+accepts and a keyword nobody listed is a refusal waiting for the first schema
+that uses it. What is removed (a maximum, a length, a pattern) is written into
+the field's description. The tradeoff: such a limit is asked for and not
+enforced on these records. A record that says nothing sends the forced tool it
+always sent. Not fixed: a schema that refers to itself, which the vendor
+refuses; the call fails as a vendor error and the route's next source serves.
+The same records keep `maxTokens` under 21,333, the line above which the
+vendor's SDK refuses a call that does not stream. Tests:
+`TestACurrentClaudeRecordSendsOnlyWhatItsModelAccepts`,
+`TestOnlyTheKeywordsTheFormatAcceptsRideTheSchema`,
+`TestNoClaudeRecordDeclaresAnOutputLimitTheSdkRefusesWithoutStreaming`,
+`TestARecordThatAsksForStructuredOutputAWayNobodyReadsIsRefused`.
+
+**API is a built-in route that lists vendor sources only**
+(`ValidateBuiltinRouteJobs`, `component/memql/routes.go`). It is edited,
+saved under the routing document's revision and restored exactly as Local and
+Apps are; the one rule it adds is asked in `SaveRouteOverride`, the only
+writer of a cluster route, so it holds whichever caller reaches the document.
+A call under `route:api` walks its sources and nothing else, as every route
+does, and is refused naming the route. Tests:
+`TestSavingApiRefusesANonVendorSource`, `TestApiCanBeEditedAndRestored`,
+`TestACallUnderApiWalksVendorSourcesOnly`.
+
+**Whether a vendor source can serve is answered per record and per level, for
+the person** (`vendorServesNow`, `component/memql/routes_builtin.go`;
+`VendorDoor.Payers`, `component/memql/vendor_account.go`). Before, one flag
+answered every job as soon as any account could pay at any record, so a person
+with a key at one vendor was told a job naming the other vendor's model was
+ready. Evidence: the selector's own order at the job's level, over the
+accounts `VendorDoorFor` already reads, at most once per vendor per read of
+the routes; the composition is the one a call uses, so the page and the call
+cannot disagree. Nothing is cached. Tests:
+`TestApiIsReadyWithAKeyAndNoVendorAccount`, `TestApiReadinessIsThePersons`,
+`TestApiReadinessAsksEachVendorsKeysOncePerRead`,
+`TestALevelWithNoRecordMakesApiNotReady`.
+
+**Auto is unchanged except for who pays** (`component/router/auto_rank.go`).
+It ranks the same three shipped chains; their vendor hop gains the selector
+rule above and the paying-account rule of the section before this one. Tests,
+over the shipped policies and catalog:
+`TestAutoStillRanksItsThreeShippedChains`,
+`TestEveryShippedChainsVendorHopFindsAModelAtEveryLevel`,
+`TestAutoSpendsAKeyOnlyWhenItsOwnerSwitchedThatOn`,
+`TestEveryGateIsAskedBeforeAnAccount`.
+
+**Limits.** Nothing was run against either vendor: the request a current
+Claude model is sent was read from the vendor's documentation and its SDK's
+source. A declined request (stop reason `refusal`) is still read as an empty
+answer on every Claude record. A personal route cannot name the account that
+pays for a vendor source (R5 of the design, not built), so a person's
+non-default key at a vendor is still never spent. The two OpenAI audio models
+the catalog names are deprecated by their vendor, with shutdown dates in early
+2027 noted beside them.
+
 ## First pipeline PR qualification keeps approval on one attempt (2026-10-28)
 
 Ordinary connect reads the default branch, so it cannot test a repository's
