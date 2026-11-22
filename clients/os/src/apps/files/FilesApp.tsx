@@ -7,9 +7,13 @@ import { Button, Check, ContentSkeleton, Head, Notice, Panel, SetupGroup } from 
 import { useOsConnection } from "../../live/connection";
 import { useLiveView } from "../../live/liveView";
 import { useOs } from "../../chrome/state";
+import { useMachines } from "../../live/machines";
+import { machineFromRow, isRevoked, type MachineRow } from "../fleet/rows";
 import { AppLogsSection } from "../../logs/AppLogsSection";
 import type { OsAppProps } from "../../system/registry";
+import { ArchiveTransfers, DownloadSetup } from "./backups/ArchiveTransfers";
 import { BackupsSection } from "./backups/BackupsSection";
+import type { BackupTransfer } from "./backups/transfers";
 import { backupFromRow, type BackupRow } from "./backups/rows";
 import { useBackupsFeed } from "./backups/useBackups";
 import { BrowseSection, type DeskFolderShortcut } from "./BrowseSection";
@@ -35,7 +39,7 @@ import {
   type FilesSettings,
   type FilesSettingsStore, FILES_REQUIRES, FILES_WANTS } from "./settings";
 import { useLibraryFeeds } from "./useLibrary";
-import { useUploadTasks } from "./useUploadTasks";
+import { useUploadTasks, type UploadTask } from "./useUploadTasks";
 import { useFileDestination } from "./useFileDestination";
 import { useSession } from "../../chrome/access";
 import { readEditorPreference, saveEditorPreference, type EditorPreference } from "../../items/editorPreference";
@@ -108,6 +112,11 @@ export function FilesApp({
     [connection],
   );
   const { tasks, uploadFiles, uploadTree } = useUploadTasks(provider, createFolder);
+  // Bumped when Backups starts an archive or Downloads starts a download, so
+  // the Downloads list re-reads on its next mount instead of showing its
+  // cached page (ArchiveTransfers reseeds when this differs from 0 on mount).
+  const [transferRefresh, setTransferRefresh] = useState(0);
+  const [downloading, setDownloading] = useState<BackupTransfer | null>(null);
 
   const [filter, setFilter] = useState<FilesFilter>(() => ({
     ...DEFAULT_FILTER,
@@ -154,7 +163,7 @@ export function FilesApp({
   }, [osState.shell.desks, osState.surfaces]);
 
   const { artifacts, folders, files, compositions, counts, labels, facetsError, effectiveFilter } = useLibraryFeeds(
-    filter, desk.membership, sectionId !== "settings" && sectionId !== "logs" && sectionId !== "backups", sectionId === "backups",
+    filter, desk.membership, sectionId !== "settings" && sectionId !== "logs" && sectionId !== "backups" && sectionId !== "downloads", sectionId === "backups",
   );
 
   // Loaded directory pages only. Exact counts/facets and archive membership
@@ -351,6 +360,18 @@ export function FilesApp({
         folders={folders.snapshot.rows}
         files={files.snapshot.rows}
         source={backups}
+        onTransferStarted={() => setTransferRefresh((n) => n + 1)}
+      />
+    );
+  }
+  if (sectionId === "downloads") {
+    return (
+      <DownloadsSection
+        tasks={tasks}
+        refresh={transferRefresh}
+        downloading={downloading}
+        setDownloading={setDownloading}
+        onStarted={() => { setDownloading(null); setTransferRefresh((n) => n + 1); }}
       />
     );
   }
@@ -401,6 +422,29 @@ export function FilesApp({
       uploadFiles={uploadFiles}
       uploadTree={uploadTree}
     />
+  );
+}
+
+/** Downloads: every transfer, one row each (owner's pick 1A). The machines
+ *  feed names where a backup came from and where a download is saved. */
+function DownloadsSection({ tasks, refresh, downloading, setDownloading, onStarted }: {
+  tasks: readonly UploadTask[];
+  refresh: number;
+  downloading: BackupTransfer | null;
+  setDownloading: (job: BackupTransfer | null) => void;
+  onStarted: () => void;
+}) {
+  const { collection } = useMachines();
+  const machines = useLiveView<Row, MachineRow>(collection, "downloads:machines", (rows) =>
+    rows.map(machineFromRow).filter((machine) => machine.id !== "" && !isRevoked(machine)),
+  );
+  const machineList = machines?.snapshot.rows ?? [];
+  if (downloading) return <DownloadSetup source={downloading} machines={machineList} onCancel={() => setDownloading(null)} onStarted={onStarted} />;
+  return (
+    <section className="os-app-section" aria-label="Downloads">
+      <Head title="Downloads" />
+      <ArchiveTransfers machines={machineList} refresh={refresh} onDownload={setDownloading} uploads={tasks} />
+    </section>
   );
 }
 

@@ -12,8 +12,6 @@ import { linkStateOf, LINK_LABEL, LINK_SENTENCE, type LinkState } from "../links
 import { folderFromRow, type FolderRow } from "../rows";
 import { BackupForm } from "./BackupForm";
 import { BackupSetup } from "./BackupSetup";
-import { ArchiveTransfers, DownloadSetup } from "./ArchiveTransfers";
-import type { BackupTransfer } from "./transfers";
 import { StorageAllowance } from "./StorageAllowance";
 import { useOsConnection } from "../../../live/connection";
 import {
@@ -45,22 +43,23 @@ export interface BackupsSectionProps {
   source: LiveListSource<BackupRow> | null;
   /** Injectable so tests drive the writes without a cluster. */
   writes?: BackupWrites;
+  /** An archive backup started: its transfer is listed in Downloads (owner's
+   *  pick 1A), which re-reads when it next opens. */
+  onTransferStarted?: () => void;
 }
 
-export function BackupsSection({ folders, files, source, writes }: BackupsSectionProps) {
+export function BackupsSection({ folders, files, source, writes, onTransferStarted }: BackupsSectionProps) {
   // ONE clock for the whole section (the Fleet rule): a `useNow` per row would
   // give every row its own timer and re-render them out of step.
   const now = useNow(15_000);
   const ownWrites = useBackupWrites();
   const write = writes ?? ownWrites;
 
-  const [downloading, setDownloading] = useState<BackupTransfer | null>(null);
   const [adding, setAdding] = useState(false);
   const connection = useOsConnection();
   const [archiveId, setArchiveId] = useState(newShortId);
   const [archiveBusy, setArchiveBusy] = useState(false);
   const [archiveError, setArchiveError] = useState("");
-  const [transferRefresh, setTransferRefresh] = useState(0);
   const [editingId, setEditingId] = useState("");
   const [confirmingId, setConfirmingId] = useState("");
 
@@ -102,12 +101,11 @@ export function BackupsSection({ folders, files, source, writes }: BackupsSectio
 
   const editing = editingId === "" ? null : (source?.snapshot.rows.find((row) => row.id === editingId) ?? null);
 
-  if (downloading) return <DownloadSetup source={downloading} machines={machineList} onCancel={() => setDownloading(null)} onStarted={() => { setDownloading(null); setTransferRefresh(n => n + 1); }} />;
   if (adding) return <BackupSetup machines={machineList} folders={folderRows} busy={archiveBusy || write.busyId === CREATE_BUSY_KEY} error={archiveError || (write.errorId === CREATE_BUSY_KEY ? write.actionError : "")}
     onCancel={() => { setAdding(false); write.clearError(); setArchiveError(""); }}
     onFolder={async spec => { if (await write.create(spec)) setAdding(false); }}
     onArchive={async (workerId, path) => { if (!connection) { setArchiveError("Connect to the cluster to start a backup."); return; } setArchiveBusy(true); setArchiveError("");
-      try { await connection.query.libraryBackupCreate({ id: archiveId, workerId, path, kind: "archive" }); setAdding(false); setTransferRefresh(n => n + 1); }
+      try { await connection.query.libraryBackupCreate({ id: archiveId, workerId, path, kind: "archive" }); setAdding(false); onTransferStarted?.(); }
       catch (e) { setArchiveError(e instanceof Error ? e.message : String(e)); } finally { setArchiveBusy(false); }
     }} />;
   return (
@@ -184,7 +182,6 @@ export function BackupsSection({ folders, files, source, writes }: BackupsSectio
           </Button>
         </div>
       ) : null}
-      {!editing && <ArchiveTransfers machines={machineList} refresh={transferRefresh} onDownload={setDownloading} />}
     </section>
   );
 }

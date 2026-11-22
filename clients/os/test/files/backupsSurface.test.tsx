@@ -339,3 +339,26 @@ describe("folder backup schedule",()=>{
   expect(screen.getByRole("button",{name:"Back up a folder"})).toBeTruthy();
  });
 });
+
+describe("the Downloads tab owns the transfers", () => {
+  const transfer = { id: "backup-001", workerId: "wkr-1", path: "/backup.zip", name: "backup.zip", kind: "archive", size: 12, committedBytes: 4, sha256: "a".repeat(64), state: "uploading", desiredState: "running", etag: "etag", failure: "", metadata: {} };
+  const machines = [{ id: "wkr-1", name: "laptop", capabilities: ["HEADLESS"], connectedNodeId: "bff-1" } as never];
+
+  it("lists only the backed-up folders under Backups", async () => {
+    h.connection = fakeConnection({ backups: [watchedFolderRow({ id: "w-1", localPath: "/Users/ana/Clients" })], machines, transfers: [transfer as never] });
+    await renderFiles({ section: "backups" });
+    expect(screen.getByText("/Users/ana/Clients")).toBeTruthy();
+    expect(screen.queryByText("backup.zip")).toBeNull();
+    expect(screen.queryByText("Transfers and downloads")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Search transfers" })).toBeNull();
+  });
+
+  it("lists every transfer under Downloads", async () => {
+    h.connection = fakeConnection({ machines, transfers: [transfer as never] });
+    await renderFiles({ section: "downloads" });
+    expect(screen.getByRole("heading", { name: "Downloads" })).toBeTruthy();
+    expect(await screen.findByText("backup.zip")).toBeTruthy();
+    expect(await screen.findByText(/Backup from laptop · Uploading/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Search transfers" })).toBeTruthy();
+  });
+});
