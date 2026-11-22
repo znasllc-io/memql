@@ -666,7 +666,8 @@ describe("desktop items (spec K bullet 4)", () => {
     fireEvent.drop(plate, { dataTransfer: { files: [file], types: ["Files"] } });
     expect(await screen.findByText("notes.txt")).toBeTruthy();
     expect(
-      await screen.findByRole("button", { name: "notes.txt -- open in VS Code" }),
+      // No cluster here, so the upload fails and the label is the failed one.
+      await screen.findByRole("button", { name: /^notes\.txt/ }),
     ).toBeTruthy();
   });
 

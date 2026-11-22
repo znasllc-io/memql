@@ -113,17 +113,55 @@ describe("a file uploading onto the desk", () => {
     expect(opened).toHaveBeenCalledOnce();
   });
 
-  it("offers the retry line when the upload fails; the retry that lands says Ready and opens nothing", async () => {
+  it("a failed upload is grey with a retry badge; opening it retries, and the retry that lands says Ready and opens nothing", async () => {
     const uploads = heldUploads();
-    const { button } = await dropOnDesk(uploads.provider);
+    const { button, icon } = await dropOnDesk(uploads.provider);
     fireEvent.keyDown(button, { key: "Enter" });
 
     await uploads.fail(0, "The cluster refused the upload.");
     expect(screen.getByRole("alert").textContent).toBe("The cluster refused the upload.");
+    const failed = screen.getByRole("button", { name: "report.pdf. Upload failed. Open to try again." });
+    expect(failed.getAttribute("title")).toBe("Upload failed. Open to try again.");
+    expect(icon.hasAttribute("data-dim")).toBe(true);
+    expect(icon.querySelector('.os-file-retry-badge[role="img"]')?.getAttribute("aria-label")).toBe("Upload failed");
+    expect(icon.querySelector(".os-file-title")?.textContent).toBe("report.pdf");
+    expect(icon.querySelector(".os-file-line, .os-file-retry")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Upload failed -- retry" }));
+    fireEvent.doubleClick(failed);
+    expect(icon.querySelector(".os-file-retry-badge")).toBeNull();
     await uploads.land(1);
     expect(screen.getByText("Ready")).toBeTruthy();
     expect(opened).not.toHaveBeenCalled();
+  });
+
+  it("Enter on a failed upload retries it too", async () => {
+    const uploads = heldUploads();
+    const { button } = await dropOnDesk(uploads.provider);
+    await uploads.fail(0, "The cluster refused the upload.");
+    fireEvent.keyDown(button, { key: "Enter" });
+    await uploads.land(1);
+    expect(screen.getByText("Ready")).toBeTruthy();
+  });
+
+  it("after a reload the bytes are gone: the badge stays and opening says to drop the file again", async () => {
+    const store = storage();
+    const uploads = heldUploads();
+    const ports = { store: new LocalDesktopStore(store), disableConnection: true, askTransport: new StubAskTransport(), askVoice: null, uploads: uploads.provider };
+    const { unmount } = render(<Shell layout="desktop" onSignOut={vi.fn()} access={OWNER} config={CONFIG} ports={ports} />);
+    await act(async () => {
+      fireEvent.drop(document.querySelector("[data-os-desk]")!, { dataTransfer: { files: [new File(["x"], "report.pdf")], items: [], types: ["Files"] } });
+    });
+    unmount();
+    // jsdom has no layout, so the drop cell saves as NaN (null) and the
+    // reload would drop the icon; give it a real cell, as a browser would.
+    const saved = store.getItem("memql-os-desktop-v1")!.replace(/\{"col":null,"row":null\}/g, '{"col":0,"row":1}');
+    store.setItem("memql-os-desktop-v1", saved);
+    expect(saved).toContain('"uploadState":"uploading"');
+
+    render(<Shell layout="desktop" onSignOut={vi.fn()} access={OWNER} config={CONFIG} ports={{ ...ports, store: new LocalDesktopStore(store) }} />);
+    const failed = await screen.findByRole("button", { name: "report.pdf. Upload failed. Open to try again." });
+    fireEvent.doubleClick(failed);
+    expect(screen.getByRole("alert").textContent).toMatch(/Drop the file on the desk again/);
+    expect(failed.closest(".os-file")?.querySelector(".os-file-retry-badge")).not.toBeNull();
   });
 });

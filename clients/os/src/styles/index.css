@@ -302,12 +302,30 @@ button:not(:disabled):active {
   word-break: break-word;
 }
 
-.os-file-retry {
-  border: 0;
-  background: none;
-  color: var(--os-warn);
-  font-size: var(--os-text-xs);
-  cursor: pointer;
+/* A failed upload (Nov 22, 5B): a small muted retry arrow on the glyph's
+ * corner, "not too bright"; the icon is dim like an upload in progress. */
+.os-file-glyph { position: relative; }
+.os-file-retry-badge {
+  position: absolute;
+  right: calc(50% - 26px);
+  bottom: -5px;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--os-plate);
+  border: 1.25px solid var(--os-muted);
+  color: var(--os-muted);
+}
+.os-file-retry-badge svg {
+  width: 11px;
+  height: 11px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 /* The one line where the retry line goes: "Ready" in the accent green,

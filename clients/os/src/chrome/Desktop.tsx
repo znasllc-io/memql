@@ -326,6 +326,19 @@ export function Desktop({
     [actions, uploads],
   );
 
+  // Opening a failed upload tries it again (José, Nov 22 2026: "the action
+  // of trying to open it will retry the upload"). The bytes live only in this
+  // tab's memory, so after a reload there is nothing to send again: the icon
+  // stays, and the desk's one error line says to drop the file again.
+  const retryUpload = useCallback(
+    (itemId: string) => {
+      const file = pendingFiles.current.get(itemId);
+      if (file) startUpload(file, { col: 0, row: 0 }, { existingItemId: itemId });
+      else setDeskError("This upload can't be tried again after the page reloaded. Drop the file on the desk again.");
+    },
+    [startUpload],
+  );
+
   // An upload thrown in the Bin before it landed: nothing of it is in the
   // Library, so there is nothing for the Bin to keep. The upload stops and
   // the icon goes; the file is still wherever it was dropped from.
@@ -590,14 +603,16 @@ export function Desktop({
   function itemMenuEntries(item: DesktopItem): MenuEntry[] {
     if (item.kind === "file") {
       return [
-        {
-          id: "open",
-          label: "Open in VS Code",
-          // Uploading, failed or offline: an open is refused, never queued
-          // (deskFileState.ts), so it is not offered.
-          disabled: (holds.get(item.id) ?? null) !== null,
-          onSelect: () => fileStates.ask(item.id, "open"),
-        },
+        holds.get(item.id) === "failed"
+          ? { id: "open", label: "Try upload again", onSelect: () => retryUpload(item.id) }
+          : {
+              id: "open",
+              label: "Open in VS Code",
+              // Uploading or offline: an open is refused, never queued
+              // (deskFileState.ts), so it is not offered.
+              disabled: (holds.get(item.id) ?? null) !== null,
+              onSelect: () => fileStates.ask(item.id, "open"),
+            },
         {
           id: "remove",
           label: "Remove from desk",
@@ -651,11 +666,7 @@ export function Desktop({
               onSelect={actions.selectSurfaceItem}
               onOpenFile={(item) => fileStates.ask(item.id, "open")}
               onOpenFolder={openFolderInFiles}
-              onRetryUpload={(itemId) => {
-                const file = pendingFiles.current.get(itemId);
-                if (file) startUpload(file, { col: 0, row: 0 }, { existingItemId: itemId });
-                else actions.removeSurfaceItem(itemId);
-              }}
+              onRetryUpload={retryUpload}
               onRenameFolder={renameDeskFolder}
               onRenameCancel={() => setRenamingItemId(null)}
               onFolderHostDrop={onFolderHostDrop}
