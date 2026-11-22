@@ -37,15 +37,22 @@ import (
 // of, and the answer can differ per node -- that is exactly what makes it
 // worth running per node.
 
+// The exit codes. `scripts/install/verify-provider-key.sh` branches on them, so
+// each means one thing and 0 means exactly one: VERIFIED. It used to also be
+// what a vendor nobody had set up exited with, and the installer read that as
+// "federation verified" (design record 2026-11-21, A5; the review of part 1).
 const (
-	// providerAuthCheckExitFail: the vendor refused the engine's sign-in.
-	// `scripts/install/verify-provider-key.sh` reads exactly this code as a
-	// refusal, so nothing else may use it.
+	// providerAuthCheckExitFail: refused. By the vendor (the sign-in), by the
+	// vendor's API (the bearer), or by the engine itself (ids it will not use).
 	providerAuthCheckExitFail = 1
-	// providerAuthCheckExitNotVerified: the check cannot say. Nothing is
-	// recorded yet, the engine is waiting for its next identity token, or the
-	// vendor never answered. The installer reads any code but 0 and 1 as "says
-	// nothing about the credential", which is what this is.
+	// providerAuthCheckExitNotSetUp: the engine holds no account at this vendor
+	// and says so: no federation ids on this node, or a node type that signs in
+	// to none. An answer, not a fault, and not "verified".
+	providerAuthCheckExitNotSetUp = 3
+	// providerAuthCheckExitNotVerified: the check cannot say yet. Nothing is
+	// recorded, the engine is waiting for its next identity token, the vendor
+	// never answered, or nothing has used the bearer. The installer reads it as
+	// "says nothing about the credential", which is what this is.
 	providerAuthCheckExitNotVerified = 4
 )
 
@@ -54,6 +61,8 @@ func providerAuthExitCode(err error) int {
 	switch {
 	case err == nil:
 		return 0
+	case errors.Is(err, memql.ErrVendorNotSetUp):
+		return providerAuthCheckExitNotSetUp
 	case errors.Is(err, memql.ErrSignInNotVerified):
 		return providerAuthCheckExitNotVerified
 	default:
@@ -91,11 +100,16 @@ Example (from an operator machine, against a running cluster):
   kubectl exec -n memql deploy/agent -- /app/memql provider-auth check
 
 Exit codes:
-  0  the vendor accepted the engine's sign-in
-  1  the vendor refused it; the vendor's reason is on stderr
+  0  verified: the vendor accepted the engine's sign-in and its API has taken
+     the bearer
+  1  refused: by the vendor, by its API, or by the engine itself (ids it will
+     not use). The reason is on stderr
   2  bad usage
+  3  not set up: no federation ids on this node, or a node type that signs in
+     to no vendor
   4  cannot say yet: nothing is recorded, the engine is waiting for its next
-     identity token, or the vendor did not answer. Run it again
+     identity token, the vendor did not answer, or nothing has used the bearer.
+     Run it again
 
 Run "memql provider-auth check --help" for flags.`)
 }
@@ -130,19 +144,28 @@ func runProviderAuthCheck(args []string) int {
 
 	report, err := memql.CheckProviderAuth(ctx, logger, *provider)
 	writeProviderAuthReport(os.Stdout, report)
+	return writeProviderAuthVerdict(os.Stderr, report, err)
+}
+
+// writeProviderAuthVerdict prints the last line of the check and returns the
+// exit code. Each answer has words of its own, and only a refusal names the
+// runbook: the other three are not something a runbook step fixes.
+func writeProviderAuthVerdict(w io.Writer, report memql.ProviderAuthReport, err error) int {
 	code := providerAuthExitCode(err)
 	switch code {
 	case 0:
-		fmt.Fprintln(os.Stderr, "\nprovider-auth check: OK")
+		fmt.Fprintln(w, "\nprovider-auth check: OK")
+	case providerAuthCheckExitNotSetUp:
+		fmt.Fprintf(w, "\nprovider-auth check: NOT SET UP: %v\n", err)
 	case providerAuthCheckExitNotVerified:
-		fmt.Fprintf(os.Stderr, "\nprovider-auth check: NOT VERIFIED YET: %v\n", err)
+		fmt.Fprintf(w, "\nprovider-auth check: NOT VERIFIED YET: %v\n", err)
 	default:
-		fmt.Fprintf(os.Stderr, "\nprovider-auth check: FAILED: %v\n", err)
+		fmt.Fprintf(w, "\nprovider-auth check: FAILED: %v\n", err)
 		runbook := "docs/public/operate/auth/anthropic-federation.md"
 		if report.Vendor == "openai" {
 			runbook = "docs/public/operate/auth/openai-federation.md"
 		}
-		fmt.Fprintln(os.Stderr, "Runbook: "+runbook)
+		fmt.Fprintln(w, "Runbook: "+runbook)
 	}
 	return code
 }
@@ -204,10 +227,21 @@ func writeProviderAuthReport(w io.Writer, r memql.ProviderAuthReport) {
 			line("signInAt", r.SignInAt.UTC().Format(time.RFC3339))
 		}
 		if !r.TokenExpiresAt.IsZero() {
-			line("tokenExpires", fmt.Sprintf("%s (in %s)",
-				r.TokenExpiresAt.UTC().Format(time.RFC3339), r.TokenExpiresIn.Round(time.Second)))
+			expires := r.TokenExpiresAt.UTC().Format(time.RFC3339)
+			if r.TokenExpiresIn > 0 {
+				line("tokenExpires", fmt.Sprintf("%s (in %s)", expires, r.TokenExpiresIn.Round(time.Second)))
+			} else {
+				// A node with no traffic lets its bearer run out: a renewal is
+				// made when a call needs one, never on a timer.
+				line("tokenExpires", expires+" (expired; the engine signs in again when a call needs it)")
+			}
 		}
-		line("vendorSaid", r.Detail)
+		if r.ExchangeOutcome == memql.SignInOutcomeMisconfigured {
+			// The engine's own refusal, made before any vendor was asked.
+			line("engineSaid", r.Detail)
+		} else {
+			line("vendorSaid", r.Detail)
+		}
 		if r.MayBeReplay {
 			line("note", "the identity token was issued before this engine process started, so the refusal "+
 				"may only mean an earlier process in this pod already used it")
@@ -215,10 +249,44 @@ func writeProviderAuthReport(w io.Writer, r memql.ProviderAuthReport) {
 		if !r.NextTokenDue.IsZero() {
 			line("nextTokenDue", r.NextTokenDue.UTC().Format(time.RFC3339))
 		}
+		if r.ExchangeOutcome != memql.SignInOutcomeOK {
+			break
+		}
+		// AN ACCEPTED SIGN-IN IS A BEARER. Whether the vendor's API takes it is
+		// a second answer, and the one that makes the vendor usable.
+		switch r.Proof {
+		case memql.SignInProofOK:
+			shown := ""
+			if !r.ProofAt.IsZero() {
+				shown = ", last shown " + r.ProofAt.UTC().Format(time.RFC3339)
+			}
+			line("api", "took the bearer"+shown)
+		case memql.SignInProofRefused:
+			line("api", fmt.Sprintf("refused the bearer (status %d): %s", r.ProofStatus, r.ProofDetail))
+		case memql.SignInProofError:
+			line("api", "gave no answer: "+r.ProofDetail)
+		default:
+			line("api", "nothing has used the bearer yet")
+		}
+		if !r.BearerDroppedAt.IsZero() {
+			line("bearerDropped", r.BearerDroppedAt.UTC().Format(time.RFC3339)+
+				" (the vendor's API answered 401 for it; the engine signs in again with the next identity token)")
+		}
 	case "unavailable":
-		line("note", "this node has NO credential for this vendor: federation is not configured. "+
-			"That is the normal state of a cluster nobody has set a vendor up on, local or cloud. "+
-			"The federation runbooks have the steps for both. The cluster has no API key to fall back to.")
+		switch {
+		case !r.Recorded:
+			// NOTHING IS CLAIMED. Ids applied through Settings are in the
+			// cluster's storage, which only the engine reads.
+			line("note", "this process sees no federation ids in its environment, and the engine in this pod "+
+				"has recorded nothing, so this command cannot say whether the vendor is set up: ids applied "+
+				"through Settings are the engine's to see.")
+		case r.ExchangeOutcome == memql.SignInOutcomeNotUsed:
+			line("note", r.Detail+". Run the check on a node that does, for example deploy/agent.")
+		default:
+			line("note", "this node has NO credential for this vendor: federation is not configured. "+
+				"That is the normal state of a cluster nobody has set a vendor up on, local or cloud. "+
+				"The federation runbooks have the steps for both. The cluster has no API key to fall back to.")
+		}
 	}
 
 	if r.ModelsListed > 0 {
@@ -227,9 +295,16 @@ func writeProviderAuthReport(w io.Writer, r memql.ProviderAuthReport) {
 	// Said every time, because the report otherwise reads as though this
 	// command had asked the vendor itself.
 	if r.Recorded {
-		fmt.Fprintln(w, "\nThis is the engine's own sign-in in this pod, as the engine recorded it. The ids")
-		fmt.Fprintln(w, "are the ones the engine used, including any applied through Settings. This command")
-		fmt.Fprintln(w, "contacts no vendor.")
+		switch r.ExchangeOutcome {
+		case memql.SignInOutcomeNotConfigured, memql.SignInOutcomeNotUsed, memql.SignInOutcomeMisconfigured:
+			// The engine made no sign-in, so there is none to describe.
+			fmt.Fprintln(w, "\nThis is what the engine in this pod recorded about the vendor, which includes ids")
+			fmt.Fprintln(w, "applied through Settings. This command contacts no vendor.")
+		default:
+			fmt.Fprintln(w, "\nThis is the engine's own sign-in in this pod, as the engine recorded it. The ids")
+			fmt.Fprintln(w, "are the ones the engine used, including any applied through Settings. This command")
+			fmt.Fprintln(w, "contacts no vendor.")
+		}
 		return
 	}
 	fmt.Fprintln(w, "\nThe ids above are read from the process environment only; values seeded into")

@@ -33,6 +33,8 @@ func TestProviderAuthReportFederationPath(t *testing.T) {
 		SignInAt:          expires.Add(-time.Hour),
 		TokenExpiresAt:    expires,
 		TokenExpiresIn:    time.Hour,
+		Proof:             "ok",
+		ProofAt:           expires.Add(-59 * time.Minute),
 		ModelsListed:      12,
 	})
 	out := buf.String()
@@ -48,6 +50,9 @@ func TestProviderAuthReportFederationPath(t *testing.T) {
 		"https://api.anthropic.com",
 		"2026-08-23T18:04:11Z",
 		"12 models returned",
+		// The line that makes "accepted" mean "usable": the vendor's API took
+		// the bearer, and when.
+		"took the bearer", "2026-08-23T17:05:11Z",
 		// Said every time: the reader must know whose sign-in this is, and
 		// that running the command did not spend the pod's identity token.
 		"engine's own sign-in",
@@ -76,10 +81,13 @@ func TestProviderAuthReportFederationPath(t *testing.T) {
 func TestProviderAuthReportUnavailablePath(t *testing.T) {
 	var buf bytes.Buffer
 	writeProviderAuthReport(&buf, memql.ProviderAuthReport{
-		Provider:       "chat54Mini",
-		Vendor:         "openai",
-		Type:           "OpenAI",
-		CredentialPath: "unavailable",
+		Provider:        "chat54Mini",
+		Vendor:          "openai",
+		Type:            "OpenAI",
+		CredentialPath:  "unavailable",
+		Recorded:        true,
+		ExchangeOutcome: "notConfigured",
+		Detail:          "no federation ids are set for this vendor on this node",
 	})
 	out := buf.String()
 
@@ -141,6 +149,168 @@ func TestProviderAuthExitCodes(t *testing.T) {
 	if got := providerAuthExitCode(notYet); got != 4 {
 		t.Errorf("an unverified sign-in exits %d, want 4", got)
 	}
+	// A vendor nobody set up is not success: the installer read exit 0 as
+	// "federation verified". It is not a refusal either, and not "try again".
+	notSetUp := fmt.Errorf("%w: no federation ids are set for this vendor on this node", memql.ErrVendorNotSetUp)
+	if got := providerAuthExitCode(notSetUp); got != 3 {
+		t.Errorf("a vendor nobody set up exits %d, want 3", got)
+	}
+}
+
+// The last line is what an operator reads first, and what a person skimming a
+// terminal takes away. Each answer has words of its own.
+func TestProviderAuthVerdictLine(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err      error
+		wantCode int
+		want     string
+		absent   string
+	}{
+		"verified":     {nil, 0, "provider-auth check: OK", "FAILED"},
+		"refused":      {errors.New("the vendor refused the engine's sign-in (status 401): match_subject_prefix"), 1, "FAILED: the vendor refused", "NOT"},
+		"not set up":   {fmt.Errorf("%w: no federation ids are set for this vendor on this node", memql.ErrVendorNotSetUp), 3, "NOT SET UP", "FAILED"},
+		"not verified": {fmt.Errorf("%w: nothing recorded", memql.ErrSignInNotVerified), 4, "NOT VERIFIED YET", "FAILED"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			code := writeProviderAuthVerdict(&buf, memql.ProviderAuthReport{Vendor: "openai"}, tc.err)
+			out := buf.String()
+			if code != tc.wantCode {
+				t.Errorf("exit code %d, want %d", code, tc.wantCode)
+			}
+			if !strings.Contains(out, tc.want) {
+				t.Errorf("the verdict does not say %q:\n%s", tc.want, out)
+			}
+			if strings.Contains(out, tc.absent) {
+				t.Errorf("the verdict says %q:\n%s", tc.absent, out)
+			}
+			// Only a refusal sends the reader to the runbook, and to the right one.
+			if gotRunbook := strings.Contains(out, "openai-federation.md"); gotRunbook != (tc.wantCode == 1) {
+				t.Errorf("runbook named = %v for exit code %d:\n%s", gotRunbook, tc.wantCode, out)
+			}
+		})
+	}
+}
+
+// An accepted sign-in is a bearer. The report says, on a line of its own,
+// whether the vendor's API has taken it.
+func TestProviderAuthReportSaysWhetherTheApiTookTheBearer(t *testing.T) {
+	base := memql.ProviderAuthReport{
+		Provider: "claudeSonnet", Vendor: "anthropic", CredentialPath: "federation",
+		Recorded: true, ExchangeOutcome: "ok",
+	}
+	dropped := time.Date(2026, 11, 22, 10, 30, 0, 0, time.UTC)
+	for name, tc := range map[string]struct {
+		mutate func(*memql.ProviderAuthReport)
+		want   []string
+	}{
+		"refused": {func(r *memql.ProviderAuthReport) {
+			r.Proof, r.ProofStatus, r.ProofDetail = "refused", 403, "permission_error"
+		}, []string{"refused the bearer", "403", "permission_error"}},
+		"no answer": {func(r *memql.ProviderAuthReport) {
+			r.Proof, r.ProofDetail = "error", "context deadline exceeded"
+		}, []string{"gave no answer", "context deadline exceeded"}},
+		"not used yet": {func(*memql.ProviderAuthReport) {}, []string{"nothing has used the bearer yet"}},
+		"dropped": {func(r *memql.ProviderAuthReport) {
+			r.Proof, r.BearerDroppedAt = "ok", dropped
+		}, []string{"bearerDropped", "2026-11-22T10:30:00Z"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			report := base
+			tc.mutate(&report)
+			var buf bytes.Buffer
+			writeProviderAuthReport(&buf, report)
+			out := buf.String()
+			for _, want := range tc.want {
+				if !strings.Contains(out, want) {
+					t.Errorf("the report does not mention %q:\n%s", want, out)
+				}
+			}
+		})
+	}
+}
+
+// A bearer on a node with no traffic expires and is not renewed until a call
+// needs it. The report says that, not "in -37m0s".
+func TestProviderAuthReportDoesNotCountDownAnExpiredBearer(t *testing.T) {
+	var buf bytes.Buffer
+	expired := time.Date(2026, 11, 22, 9, 0, 0, 0, time.UTC)
+	writeProviderAuthReport(&buf, memql.ProviderAuthReport{
+		Provider: "claudeSonnet", Vendor: "anthropic", CredentialPath: "federation",
+		Recorded: true, ExchangeOutcome: "ok", Proof: "ok",
+		TokenExpiresAt: expired, TokenExpiresIn: -37 * time.Minute,
+	})
+	out := buf.String()
+	if strings.Contains(out, "in -") {
+		t.Errorf("the report counts down a bearer that has expired:\n%s", out)
+	}
+	if !strings.Contains(out, "expired") || !strings.Contains(out, "signs in again") {
+		t.Errorf("the report does not say the bearer expired and what happens next:\n%s", out)
+	}
+}
+
+// With nothing recorded and no ids in this process's environment, the command
+// does not know whether the vendor is set up: ids applied through Settings are
+// the engine's to see. It must not print the "nobody set this up" sentence.
+func TestProviderAuthReportClaimsNothingWithoutARecord(t *testing.T) {
+	var buf bytes.Buffer
+	writeProviderAuthReport(&buf, memql.ProviderAuthReport{
+		Provider: "chat54Mini", Vendor: "openai", Type: "OpenAI", CredentialPath: "unavailable",
+	})
+	out := buf.String()
+	if strings.Contains(out, "federation is not configured") {
+		t.Errorf("with nothing recorded the report still claims the vendor is not configured:\n%s", out)
+	}
+	for _, want := range []string{"recorded nothing", "cannot say whether"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the report does not mention %q:\n%s", want, out)
+		}
+	}
+}
+
+// What the engine itself said about a vendor it holds no sign-in for is
+// printed in its own words: a node type that signs in to nothing, and ids the
+// engine refuses before any vendor is asked.
+func TestProviderAuthReportCarriesTheEnginesOwnReason(t *testing.T) {
+	t.Run("a node that signs in to nothing", func(t *testing.T) {
+		var buf bytes.Buffer
+		writeProviderAuthReport(&buf, memql.ProviderAuthReport{
+			Provider: "claudeSonnet", Vendor: "anthropic", CredentialPath: "unavailable",
+			Recorded: true, ExchangeOutcome: "notUsed",
+			Detail: "this node type calls no models and does not sign in to a vendor",
+		})
+		out := buf.String()
+		if !strings.Contains(out, "calls no models") {
+			t.Errorf("the report does not say why this node has no sign-in:\n%s", out)
+		}
+		if strings.Contains(out, "nobody has set a vendor up") {
+			t.Errorf("the report tells a node that signs in to nothing that nobody set the vendor up:\n%s", out)
+		}
+		// There is no sign-in to describe, and the report must not describe one.
+		if strings.Contains(out, "engine's own sign-in") {
+			t.Errorf("the report describes a sign-in this engine never made:\n%s", out)
+		}
+		if !strings.Contains(out, "what the engine in this pod recorded") || !strings.Contains(out, "contacts no vendor") {
+			t.Errorf("the report does not say whose words these are:\n%s", out)
+		}
+	})
+	t.Run("ids the engine refuses", func(t *testing.T) {
+		var buf bytes.Buffer
+		writeProviderAuthReport(&buf, memql.ProviderAuthReport{
+			Provider: "claudeSonnet", Vendor: "anthropic", CredentialPath: "federation",
+			Recorded: true, ExchangeOutcome: "misconfigured",
+			Detail: "HALF-CONFIGURED: MEMQL_AI_ANTHROPIC_FEDERATION_RULE_ID set, MEMQL_AI_ANTHROPIC_ORGANIZATION_ID missing",
+		})
+		out := buf.String()
+		for _, want := range []string{"engineSaid", "MEMQL_AI_ANTHROPIC_ORGANIZATION_ID missing"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("the report does not mention %q:\n%s", want, out)
+			}
+		}
+		if strings.Contains(out, "vendorSaid") {
+			t.Errorf("the engine's own refusal is printed as something the vendor said:\n%s", out)
+		}
+	})
 }
 
 // A report with no record says so, and still prints the configuration.
