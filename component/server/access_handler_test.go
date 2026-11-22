@@ -254,9 +254,12 @@ type accessFakeEngine struct {
 	// accounts holds auth.CallAccountFromContext for each call, and
 	// accessNoAccount for a call whose context stated none.
 	accounts []string
-	result   any
-	err      error
-	during   func()
+	// visitor is whether each call's context said its authority was borrowed
+	// for a visitor.
+	visitor []bool
+	result  any
+	err     error
+	during  func()
 }
 
 // accessNoAccount is what the fake engine notes for a call that stated no
@@ -271,6 +274,7 @@ func (e *accessFakeEngine) Execute(ctx context.Context, query string) (any, erro
 	}
 	e.actors = append(e.actors, actor)
 	e.origins = append(e.origins, auth.OriginFromContext(ctx))
+	e.visitor = append(e.visitor, auth.BorrowedForVisitor(ctx))
 	account, stated := auth.CallAccountFromContext(ctx)
 	if !stated {
 		account = accessNoAccount
@@ -1109,6 +1113,13 @@ func TestCallRunsTheDeclaredConstructUnderTheOwner(t *testing.T) {
 	// joined first.
 	if rig.engine.accounts[0] != accessTestAccount {
 		t.Fatalf("the construct acts in account %q, want the site's (%s)", rig.engine.accounts[0], accessTestAccount)
+	}
+	// AND MARKED AS A VISITOR'S. The owner's authority is lent, so everything
+	// downstream sees the owner acting; the one decision that must tell them
+	// apart is which account pays for a model call, and a person's API key
+	// never pays for a stranger's click (design record 2026-11-21, K8).
+	if !rig.engine.visitor[0] {
+		t.Fatal("the construct ran as the owner's own work, with nothing to say a visitor asked for it")
 	}
 }
 

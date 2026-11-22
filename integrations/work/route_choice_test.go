@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
 )
@@ -75,6 +76,50 @@ func TestHumanAPISourcePinsBothRowsAndChildCannotReplaceIt(t *testing.T) {
 	}
 	if got := eng.summary(); got != "(none)" {
 		t.Fatalf("wrote before refusal: %s", got)
+	}
+}
+
+// A goal a visitor's request opens (a shopper form, an access-code call) is
+// written as its owner's, because the owner's authority was borrowed for it.
+// It is still a stranger's click, and a person's API key never pays for one
+// (design record 2026-11-21-vendor-accounts-and-api-keys, K8 line 2). The run
+// executes later, on a node that never saw the request, so the mark rides the
+// rows, and a goal that run opens inherits it.
+func TestAGoalOpenedByAVisitorsRequestStaysAVisitors(t *testing.T) {
+	i, eng := newTestIntegration(t)
+	ctx := auth.ContextWithVisitorBorrow(callerContext("u-merchant"))
+	if _, err := i.handleCreateGoal(ctx, map[string]any{"statement": "answer the shopper"}, 0); err != nil {
+		t.Fatalf("createGoal: %v", err)
+	}
+	want := map[string]any{"by": "u-merchant", "forVisitor": true}
+	for _, name := range []string{"createWorkGoal", "createWorkRun"} {
+		if got := eng.callTo(t, name).Args(t)["routing"]; !reflect.DeepEqual(got, want) {
+			t.Errorf("%s routing = %v, want %v", name, got, want)
+		}
+	}
+
+	// A goal the visitor's run opens is the same stranger's work.
+	i, eng = newTestIntegration(t)
+	child := common.ContextWithRun(callerContext("u-merchant"), common.RunContext{
+		RunId: "run-parent", GoalId: "goal-parent", OwnerUserId: "u-merchant", StepKey: "reason",
+		Routing: common.RouteChoice{By: "u-merchant", ForVisitor: true},
+	})
+	if _, err := i.handleCreateGoal(child, map[string]any{"statement": "look it up"}, 0); err != nil {
+		t.Fatalf("child createGoal: %v", err)
+	}
+	for _, name := range []string{"createWorkGoal", "createWorkRun"} {
+		if got := eng.callTo(t, name).Args(t)["routing"]; !reflect.DeepEqual(got, want) {
+			t.Errorf("child %s routing = %v, want %v", name, got, want)
+		}
+	}
+
+	// And no argument makes or clears it.
+	i, eng = newTestIntegration(t)
+	if _, err := i.handleCreateGoal(callerContext("u-merchant"), map[string]any{"statement": "hi", "forVisitor": true}, 0); err != nil {
+		t.Fatalf("createGoal: %v", err)
+	}
+	if got, present := eng.callTo(t, "createWorkGoal").Args(t)["routing"]; present {
+		t.Errorf("an argument marked the owner's own goal as a visitor's: %v", got)
 	}
 }
 

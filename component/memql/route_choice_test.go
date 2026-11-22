@@ -107,6 +107,57 @@ func TestARouteReplacesTheRulesChainAndClearsAnAuthorsPin(t *testing.T) {
 	}
 }
 
+// Which account pays depends on WHO CHOSE (design record
+// 2026-11-21-vendor-accounts-and-api-keys, K8 lines 4 and 5): a route the
+// acting person chose, or a model they pinned, may be paid by their key; Auto
+// counts only keys switched on for it. The request therefore says who chose.
+func TestApplyRunRoutingNamesWhoChose(t *testing.T) {
+	req := airoute.ResolveRequest{Level: airoute.LevelStrong, Modality: airoute.ModalityChat}
+	for name, tc := range map[string]struct {
+		choice            common.RouteChoice
+		routeBy, pinnedBy string
+	}{
+		"a person's route": {common.RouteChoice{Source: "route:apps", By: "alice"}, "alice", ""},
+		"a policy route":   {common.RouteChoice{Source: "policy:localFirst", By: "alice"}, "alice", ""},
+		"a pinned source":  {common.RouteChoice{Source: "federation:strongest", By: "alice"}, "", "alice"},
+		"auto":             {common.RouteChoice{Level: "strong", By: "alice"}, "", ""},
+	} {
+		got, err := ApplyRunRouting(stepOf("reason", tc.choice, nil), req)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got.RouteBy != tc.routeBy || got.PinnedBy != tc.pinnedBy {
+			t.Errorf("%s: route chosen by %q, pinned by %q; want %q and %q", name, got.RouteBy, got.PinnedBy, tc.routeBy, tc.pinnedBy)
+		}
+	}
+	// A run nobody chose for names nobody.
+	got, err := ApplyRunRouting(stepOf("reason", common.RouteChoice{}, nil), req)
+	if err != nil || got.RouteBy != "" || got.PinnedBy != "" {
+		t.Fatalf("a run nobody chose for: route by %q, pinned by %q, err %v", got.RouteBy, got.PinnedBy, err)
+	}
+}
+
+// A goal a visitor's request opened runs later, as its owner's own run, on a
+// node that never saw the request. The mark is on the run's routing, and every
+// model call of the run carries it, whatever its modality.
+func TestApplyRunRoutingCarriesAVisitorsMark(t *testing.T) {
+	marked := common.RouteChoice{By: "alice", ForVisitor: true}
+	for _, mod := range []airoute.Modality{airoute.ModalityChat, airoute.ModalityStreamingTools, airoute.ModalityStructured, airoute.ModalityEmbedding} {
+		got, err := ApplyRunRouting(stepOf("reason", marked, nil), airoute.ResolveRequest{Level: airoute.LevelFast, Modality: mod})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !got.ForVisitor {
+			t.Errorf("%s: a visitor's run reached the router as the owner's own work", mod)
+		}
+	}
+	got, err := ApplyRunRouting(stepOf("reason", common.RouteChoice{Source: "route:apps", By: "alice"}, nil),
+		airoute.ResolveRequest{Level: airoute.LevelFast, Modality: airoute.ModalityChat})
+	if err != nil || got.ForVisitor {
+		t.Fatalf("a person's own run was marked as a visitor's (err %v)", err)
+	}
+}
+
 // Triage and compile run while the run is COMPILING, on the planner, with no
 // step; the failure classifier runs on the run's own context, with no step.
 // They keep their own level and still go where the person said.

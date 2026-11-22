@@ -38,6 +38,36 @@ func TestRouteChoiceSurvivesItsRowForm(t *testing.T) {
 	}
 }
 
+// A goal a visitor's request opened is marked on its rows (design record
+// 2026-11-21-vendor-accounts-and-api-keys, K8 line 2), and the mark is a choice
+// of nobody's: it must survive the row form alone, with no source and no level.
+func TestRouteChoiceCarriesTheVisitorMarkAlone(t *testing.T) {
+	choice := RouteChoice{By: "u-merchant", ForVisitor: true}
+	if choice.IsZero() {
+		t.Fatal("a visitor's mark alone reads as no choice, so it would never be written to the row")
+	}
+	raw, err := json.Marshal(choice.Map())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != `{"by":"u-merchant","forVisitor":true}` {
+		t.Fatalf("row form = %s", raw)
+	}
+	var decoded any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if got := RouteChoiceFrom(decoded); got != choice {
+		t.Fatalf("round trip = %+v, want %+v", got, choice)
+	}
+	// Only the literal true is the mark.
+	for _, not := range []any{map[string]any{"forVisitor": "true"}, map[string]any{"forVisitor": 1}} {
+		if got := RouteChoiceFrom(not); got.ForVisitor {
+			t.Fatalf("RouteChoiceFrom(%#v) read a visitor's mark", not)
+		}
+	}
+}
+
 // The choice is part of the run a context names, so the one value a step's
 // context carries is the one every model call it makes reads.
 func TestTheRunContextCarriesTheRouteChoice(t *testing.T) {

@@ -300,6 +300,11 @@ func ApplyRunRouting(ctx context.Context, req airoute.ResolveRequest) (airoute.R
 	if routing.NoPaidProviders {
 		req.NoPaidProviders = true
 	}
+	// A run a visitor's request opened is a visitor's work on every call it
+	// makes, of every modality, and nothing below can clear it.
+	if routing.ForVisitor {
+		req.ForVisitor = true
+	}
 	if routing.IsZero() || !routedByChoice(req) {
 		return req, nil
 	}
@@ -328,17 +333,20 @@ func ApplyRunRouting(ctx context.Context, req airoute.ResolveRequest) (airoute.R
 			// read for the person who chose it and nobody else.
 			req.PersonRoute = id
 			req.PersonRouteOwner = strings.TrimSpace(routing.By)
+			// WHO CHOSE, for the account rule (airoute.ResolveRequest.RouteBy).
+			req.RouteBy = strings.TrimSpace(routing.By)
 			req.Route = ""
 			req.ExplicitProvider, req.PinnedBy = "", ""
 		} else if name, isRoute := routePolicyName(choice.Source); isRoute {
 			req.Route = name
+			req.RouteBy = strings.TrimSpace(routing.By)
 			// The person's route overrules an author's pin, and a cleared pin
 			// is nobody's.
 			req.ExplicitProvider, req.PinnedBy = "", ""
 		} else {
 			req.ExplicitProvider = choice.Source
 			req.PinnedBy = strings.TrimSpace(routing.By)
-			req.Route = ""
+			req.Route, req.RouteBy = "", ""
 		}
 	}
 	if choice.Level != "" && strings.TrimSpace(rc.StepKey) != "" && (ov == nil || strings.TrimSpace(ov.Level) == "") {

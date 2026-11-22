@@ -177,6 +177,24 @@ type ResolveRequest struct {
 	// it.
 	PersonRouteOwner string
 
+	// RouteBy is the PERSON who chose Route or PersonRoute, stamped by the
+	// server off the run row (RouteChoice.By). EMPTY under Auto, and when the
+	// call is pinned instead (PinnedBy says who pinned).
+	//
+	// NOTHING ROUTES ON IT. It decides one thing: which ACCOUNT may pay at a
+	// vendor (design record 2026-11-21-vendor-accounts-and-api-keys, K8). A
+	// route the acting person chose, or a model they pinned, may be paid by
+	// their API key; under Auto a key pays only when its owner switched that
+	// on. Choosing a route is the telling, and Auto is not.
+	RouteBy string
+
+	// ForVisitor says this call serves a VISITOR, under a person's borrowed
+	// authority: a shopper form, an access-code call, a deployed workflow's
+	// deployer, or a run such a request opened. A person's API key never pays
+	// for one (K8 line 2). DERIVED by the router from the context and the run
+	// row; nothing a caller sets makes or clears it.
+	ForVisitor bool
+
 	// Effort is a PERSON'S explicit reasoning effort for this one call (epic
 	// memql#5414, design D20): low, medium, high, xhigh or max, from a step
 	// re-run or branched with a different effort. EMPTY MEANS THE LEVEL

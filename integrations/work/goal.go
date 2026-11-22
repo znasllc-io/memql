@@ -324,6 +324,19 @@ func validRequestedVia(v string) error {
 // trusted to be a choice the picker could have made.
 func goalRouting(ctx context.Context, owner string) (common.RouteChoice, error) {
 	routing := memql.GoalRouteChoice(ctx, owner)
+	// A GOAL A VISITOR'S REQUEST OPENS STAYS A VISITOR'S WORK (design record
+	// 2026-11-21-vendor-accounts-and-api-keys, K8 line 2). A shopper form or
+	// an access-code call runs under the site owner's borrowed authority, so
+	// the goal is written as the owner's and its run executes later as the
+	// owner's own, on a node that never saw this context. The mark is copied
+	// onto the rows here, because nothing else would still say a stranger's
+	// click started it, and a person's API key never pays for one. A goal such
+	// a run opens inherits it through the run's routing, which is what
+	// GoalRouteChoice read above. No argument reaches it.
+	if auth.BorrowedForVisitor(ctx) {
+		routing.ForVisitor = true
+		routing.By = owner
+	}
 	if routing.IsZero() {
 		return common.RouteChoice{}, nil
 	}
@@ -333,6 +346,7 @@ func goalRouting(ctx context.Context, owner string) (common.RouteChoice, error) 
 	}
 	parsed.By = routing.By
 	parsed.NoPaidProviders = routing.NoPaidProviders
+	parsed.ForVisitor = routing.ForVisitor
 	parsed.Destination, err = memql.ParseExecutionDestination(routing.Destination)
 	if err != nil {
 		return common.RouteChoice{}, err
