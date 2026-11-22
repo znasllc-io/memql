@@ -217,6 +217,7 @@ var appReadFloors = map[string][]Role{
 	"app:deployables/logs":       {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:fleet":                  {RoleOwner, RoleDeveloper},
 	"app:fleet/logs":             {RoleOwner, RoleDeveloper},
+	"app:fleet/keys":             {RoleOwner, RoleDeveloper},
 	"app:logs":                   {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:logs/stream":            {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:materializer":           {RoleOwner, RoleDeveloper, RoleAdmin, RoleWriter, RoleReader},

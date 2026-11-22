@@ -91,6 +91,9 @@ describe("the Fleet manifest", () => {
       "overview",
       "machines",
       "routing",
+      // A person's own API keys, behind the part an owner and a developer hold
+      // (design record 2026-11-21-vendor-accounts-and-api-keys, U1 and K4).
+      "keys",
       "models",
       "apps",
       "workbenches",

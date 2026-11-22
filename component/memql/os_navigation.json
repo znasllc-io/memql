@@ -376,6 +376,11 @@
         "name": "Routing"
       },
       {
+        "id": "keys",
+        "name": "API keys",
+        "requires": "app:fleet/keys"
+      },
+      {
         "id": "models",
         "name": "Model library"
       },

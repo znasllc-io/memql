@@ -472,6 +472,14 @@ seed capability cap-developer-read-app-fleet-logs { roleSlug: "developer"  verb:
 // spends a person's money on the cluster. Owner and developer, the people who can open Fleet and
 // who bring machines; anyone else needs a grant of the part and of Fleet. Changing, lending and
 // removing a key need no part: they are its owner's, whoever its owner is by then.
+//
+// `read` shows the section, Fleet > API keys, and is seeded on the same two roles: the people who
+// may add a key are the people who are shown where keys live. A person holding only `read` sees
+// the keys lent to them and no Add control.
+@description("owner: open Fleet > API keys.")
+seed capability cap-owner-read-app-fleet-keys { roleSlug: "owner"  verb: "read"  resourceType: "app:fleet/keys"  predefined: true }
+@description("developer: open Fleet > API keys.")
+seed capability cap-developer-read-app-fleet-keys { roleSlug: "developer"  verb: "read"  resourceType: "app:fleet/keys"  predefined: true }
 @description("owner: add an API key of one's own in Fleet.")
 seed capability cap-owner-execute-app-fleet-keys { roleSlug: "owner"  verb: "execute"  resourceType: "app:fleet/keys"  predefined: true }
 @description("developer: add an API key of one's own in Fleet.")
