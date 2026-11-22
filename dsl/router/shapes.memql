@@ -151,6 +151,18 @@ shape call routerCallSpend {
   row.createdAt
 }
 
+/// What a key's activity reads off one call it paid for: whose call it was and what it cost.
+/// Nothing about the call itself, for routerCallLedger's reason: the owner of a key is entitled to
+/// know it is being used and by whom, and not to read what it was used for.
+@row
+shape call routerCallPaidBy {
+  row.id
+  userId
+  totalCost
+  pricingConfigured
+  row.createdAt
+}
+
 // ---- API keys (design record 2026-11-21-vendor-accounts-and-api-keys) ----
 
 /// Everything about an API key BUT ITS SEALED VALUE, for the reads integrations/vendorkeys makes

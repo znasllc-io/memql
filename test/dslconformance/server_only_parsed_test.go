@@ -2255,6 +2255,14 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "router/queries.memql", Name: "vendorKeysActiveAtVendor"}: true,
 		{Path: "router/queries.memql", Name: "vendorKeyStateById"}:       true,
 		{Path: "router/queries.memql", Name: "vendorKeyStatesForKeys"}:   true,
+		// What one key paid for this month, for its owner (vendorKeyActivity).
+		// The rows are attributed to the people the key is LENT to, so a read
+		// scoped to the caller would count only the owner's own calls and report
+		// a lent key as unused; the builtin establishes that the caller owns the
+		// key, and then reads as the cluster acting. The call concept declares
+		// the public tier, so a client-reachable version would also be a way to
+		// read who used whose key. It keeps only rows the router itself wrote.
+		{Path: "router/queries.memql", Name: "routerCallsPaidByKey"}: true,
 	}
 	for k := range want {
 		if !set[k] {

@@ -8922,6 +8922,28 @@ QueryClient.prototype.trainingChunksBrowse = function (this: QueryClient, args: 
   return this.executeNamed("trainingChunksBrowse", buildTrainingChunksBrowse(args), opts);
 };
 
+/** What one of your keys paid for this month, from the call records: how many calls and their estimated cost, in total and for each person who used it. One row: {month, calls, estimatedCost, priced, people}. The cost is this cluster's estimate from each model's listed price, not your vendor's invoice; `priced` is false when a model that was called has no price listed here, and the total then leaves those calls out. Only the key's owner may ask. */
+export interface VendorKeyActivityArgs {
+  /** One of your own keys. */
+  keyId: string;
+}
+
+export function buildVendorKeyActivity(args: VendorKeyActivityArgs): string {
+  const parts: string[] = [];
+  parts.push("keyId: " + renderMemQLValue(args.keyId));
+  return "builtin vendorKeyActivity(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    vendorKeyActivity(args: VendorKeyActivityArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.vendorKeyActivity = function (this: QueryClient, args: VendorKeyActivityArgs = {} as VendorKeyActivityArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("vendorKeyActivity", buildVendorKeyActivity(args), opts);
+};
+
 /** Add an API key for Anthropic or OpenAI, as yours. The key is checked first, by listing the vendor's models with it, which sends no prompt and costs nothing; a key the vendor refuses is not saved. Then it is sealed and stored. Your first key at a vendor is your default there. One row: the key's card, which never carries the key. */
 export interface VendorKeyAddArgs {
   /** The vendor the key is for. */
@@ -8993,6 +9015,69 @@ declare module "./query.js" {
 
 QueryClient.prototype.vendorKeyRemove = function (this: QueryClient, args: VendorKeyRemoveArgs = {} as VendorKeyRemoveArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("vendorKeyRemove", buildVendorKeyRemove(args), opts);
+};
+
+/** Lend one of your keys to named people and groups, or take it back. A person it is lent to pays with it for their own calls, after their own key and before the cluster's account; Auto spends it only if you switched that on for the key. There is no way to lend a key to everyone. Each person and group can be paused without being removed, and the whole list can be. Save the whole audience every time: what you leave out is no longer lent to. Only the key's owner may, in their own session; a cluster owner cannot lend somebody else's key. One row: the key's card. */
+export interface VendorKeySetSharingArgs {
+  /** One of your own keys. */
+  keyId: string;
+  /** owner keeps the key to you and clears the list. people lends it to the users and groups named. */
+  // Enum: owner | people
+  mode: string;
+  /** Pause everybody at once while keeping the list. Left out, the pause stays as it was. */
+  paused?: boolean;
+  /** Under people: the users the key is lent to. */
+  userIds?: string[];
+  /** Under people: the groups whose active members may use the key. */
+  groupIds?: string[];
+  /** Users on the list whose own grant is paused. */
+  pausedUserIds?: string[];
+  /** Groups on the list whose grant is paused. */
+  pausedGroupIds?: string[];
+}
+
+export function buildVendorKeySetSharing(args: VendorKeySetSharingArgs): string {
+  const parts: string[] = [];
+  parts.push("keyId: " + renderMemQLValue(args.keyId));
+  parts.push("mode: " + renderMemQLValue(args.mode));
+  if (args.paused !== undefined) parts.push("paused: " + renderMemQLValue(args.paused));
+  if (args.userIds !== undefined) parts.push("userIds: " + renderMemQLValue(args.userIds));
+  if (args.groupIds !== undefined) parts.push("groupIds: " + renderMemQLValue(args.groupIds));
+  if (args.pausedUserIds !== undefined) parts.push("pausedUserIds: " + renderMemQLValue(args.pausedUserIds));
+  if (args.pausedGroupIds !== undefined) parts.push("pausedGroupIds: " + renderMemQLValue(args.pausedGroupIds));
+  return "builtin vendorKeySetSharing(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    vendorKeySetSharing(args: VendorKeySetSharingArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.vendorKeySetSharing = function (this: QueryClient, args: VendorKeySetSharingArgs = {} as VendorKeySetSharingArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("vendorKeySetSharing", buildVendorKeySetSharing(args), opts);
+};
+
+/** Who you can lend one of your keys to, and who it is lent to now. One row: {people, groups, currentPeople, currentGroups, everyone, sharing}. The people and groups offered are the ones a machine of yours could be lent to: the groups you are in and the people in them, or everyone when you may already read every person on the cluster. Somebody already on the list is named even when they are no longer offered, so you can see who has the key and take them off. Only the key's owner may ask. */
+export interface VendorKeyShareDirectoryArgs {
+  /** One of your own keys. */
+  keyId: string;
+}
+
+export function buildVendorKeyShareDirectory(args: VendorKeyShareDirectoryArgs): string {
+  const parts: string[] = [];
+  parts.push("keyId: " + renderMemQLValue(args.keyId));
+  return "builtin vendorKeyShareDirectory(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    vendorKeyShareDirectory(args: VendorKeyShareDirectoryArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.vendorKeyShareDirectory = function (this: QueryClient, args: VendorKeyShareDirectoryArgs = {} as VendorKeyShareDirectoryArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("vendorKeyShareDirectory", buildVendorKeyShareDirectory(args), opts);
 };
 
 /** Change one of your keys: its name, whether it is your default at its vendor, and whether Auto may use it. Leave out what you are not changing. Only the key's owner may: a cluster owner can check and remove a key and cannot change one. One row: the key's card. */

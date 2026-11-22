@@ -11562,6 +11562,27 @@ func TrainingChunksBrowseBuild(args TrainingChunksBrowseArgs) string {
 	return b.String()
 }
 
+// VendorKeyActivity -- What one of your keys paid for this month, from the call records: how many calls and their estimated cost, in total and for each person who used it. One row: {month, calls, estimatedCost, priced, people}. The cost is this cluster's estimate from each model's listed price, not your vendor's invoice; `priced` is false when a model that was called has no price listed here, and the total then leaves those calls out. Only the key's owner may ask.
+type VendorKeyActivityArgs struct {
+	// One of your own keys.
+	KeyId string
+}
+
+// VendorKeyActivity calls the engine builtin vendorKeyActivity.
+func (qc *QueryClient) VendorKeyActivity(ctx context.Context, args VendorKeyActivityArgs) (*Result, error) {
+	call := VendorKeyActivityBuild(args)
+	return qc.executeNamed(ctx, "vendorKeyActivity", call)
+}
+
+func VendorKeyActivityBuild(args VendorKeyActivityArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin vendorKeyActivity(")
+	b.WriteString("keyId: ")
+	b.WriteString(quoteMemQL(args.KeyId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // VendorKeyAdd -- Add an API key for Anthropic or OpenAI, as yours. The key is checked first, by listing the vendor's models with it, which sends no prompt and costs nothing; a key the vendor refuses is not saved. Then it is sealed and stored. Your first key at a vendor is your default there. One row: the key's card, which never carries the key.
 type VendorKeyAddArgs struct {
 	// The vendor the key is for.
@@ -11634,6 +11655,102 @@ func (qc *QueryClient) VendorKeyRemove(ctx context.Context, args VendorKeyRemove
 func VendorKeyRemoveBuild(args VendorKeyRemoveArgs) string {
 	var b strings.Builder
 	b.WriteString("builtin vendorKeyRemove(")
+	b.WriteString("keyId: ")
+	b.WriteString(quoteMemQL(args.KeyId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// VendorKeySetSharing -- Lend one of your keys to named people and groups, or take it back. A person it is lent to pays with it for their own calls, after their own key and before the cluster's account; Auto spends it only if you switched that on for the key. There is no way to lend a key to everyone. Each person and group can be paused without being removed, and the whole list can be. Save the whole audience every time: what you leave out is no longer lent to. Only the key's owner may, in their own session; a cluster owner cannot lend somebody else's key. One row: the key's card.
+type VendorKeySetSharingArgs struct {
+	// One of your own keys.
+	KeyId string
+	// owner keeps the key to you and clears the list. people lends it to the users and groups named.
+	// Enum: owner | people
+	Mode string
+	// Pause everybody at once while keeping the list. Left out, the pause stays as it was.
+	Paused    bool
+	PausedSet bool // set true to send paused; required because zero-value bool is ambiguous
+	// Under people: the users the key is lent to.
+	UserIds []string
+	// Under people: the groups whose active members may use the key.
+	GroupIds []string
+	// Users on the list whose own grant is paused.
+	PausedUserIds []string
+	// Groups on the list whose grant is paused.
+	PausedGroupIds []string
+}
+
+// VendorKeySetSharing calls the engine builtin vendorKeySetSharing.
+func (qc *QueryClient) VendorKeySetSharing(ctx context.Context, args VendorKeySetSharingArgs) (*Result, error) {
+	call := VendorKeySetSharingBuild(args)
+	return qc.executeNamed(ctx, "vendorKeySetSharing", call)
+}
+
+func VendorKeySetSharingBuild(args VendorKeySetSharingArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin vendorKeySetSharing(")
+	b.WriteString("keyId: ")
+	b.WriteString(quoteMemQL(args.KeyId))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("mode: ")
+	b.WriteString(quoteMemQL(args.Mode))
+	if args.PausedSet {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("paused: ")
+		b.WriteString(fmt.Sprintf("%v", args.Paused))
+	}
+	if args.UserIds != nil {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("userIds: ")
+		b.WriteString(renderMemQLValue(args.UserIds))
+	}
+	if args.GroupIds != nil {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("groupIds: ")
+		b.WriteString(renderMemQLValue(args.GroupIds))
+	}
+	if args.PausedUserIds != nil {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("pausedUserIds: ")
+		b.WriteString(renderMemQLValue(args.PausedUserIds))
+	}
+	if args.PausedGroupIds != nil {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("pausedGroupIds: ")
+		b.WriteString(renderMemQLValue(args.PausedGroupIds))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// VendorKeyShareDirectory -- Who you can lend one of your keys to, and who it is lent to now. One row: {people, groups, currentPeople, currentGroups, everyone, sharing}. The people and groups offered are the ones a machine of yours could be lent to: the groups you are in and the people in them, or everyone when you may already read every person on the cluster. Somebody already on the list is named even when they are no longer offered, so you can see who has the key and take them off. Only the key's owner may ask.
+type VendorKeyShareDirectoryArgs struct {
+	// One of your own keys.
+	KeyId string
+}
+
+// VendorKeyShareDirectory calls the engine builtin vendorKeyShareDirectory.
+func (qc *QueryClient) VendorKeyShareDirectory(ctx context.Context, args VendorKeyShareDirectoryArgs) (*Result, error) {
+	call := VendorKeyShareDirectoryBuild(args)
+	return qc.executeNamed(ctx, "vendorKeyShareDirectory", call)
+}
+
+func VendorKeyShareDirectoryBuild(args VendorKeyShareDirectoryArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin vendorKeyShareDirectory(")
 	b.WriteString("keyId: ")
 	b.WriteString(quoteMemQL(args.KeyId))
 	b.WriteString(")")

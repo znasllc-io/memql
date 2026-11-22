@@ -41,7 +41,11 @@ func init() {
 		if pctx.Providers != nil {
 			pctx.Providers.SetVendorKeys(resolver)
 		}
-		return NewIntegration(store, resolver, pctx.Providers, pctx.Logger), nil
+		// The engine answers who a person may lend something of their own to.
+		// It is asked for by the one method this package needs of it; an
+		// engine without it lends to nobody new.
+		directory, _ := pctx.Engine.(ShareDirectory)
+		return NewIntegration(store, resolver, pctx.Providers, directory, pctx.Logger), nil
 	})
 }
 

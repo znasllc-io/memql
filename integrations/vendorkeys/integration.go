@@ -33,6 +33,12 @@ import (
 // reads and writes this cluster's own graph. (The check that asks a vendor
 // whether it accepts a key is component/memql's ProbeVendorKey.)
 
+// ShareDirectory is the engine's answer to who a person may lend something of
+// their own to. *memql.MemQLEngine satisfies it.
+type ShareDirectory interface {
+	ShareDirectoryFor(ctx context.Context) (memql.ShareDirectoryView, error)
+}
+
 // Integration exposes the key capabilities.
 type Integration struct {
 	store    *Store
@@ -42,17 +48,29 @@ type Integration struct {
 	// (memql.ProviderRegistry.ProbeVendorKey). A field so a test can stand a
 	// vendor in without a server.
 	probe func(ctx context.Context, vendor, key string) memql.VendorKeyProbe
+	// directory answers who the caller may lend something of their own to
+	// (memql.MemQLEngine.ShareDirectoryFor): the people and groups a machine of
+	// theirs could be lent to.
+	directory func(ctx context.Context) (memql.ShareDirectoryView, error)
 }
 
 // NewIntegration builds the integration over a store and its resolver.
 // providers is the node's provider registry, which knows where this cluster
 // sends each vendor's calls and makes the check; with none, every check
 // answers that the vendor could not be reached, and no key is saved.
-func NewIntegration(store *Store, resolver *Resolver, providers *memql.ProviderRegistry, logger *slog.Logger) *Integration {
+func NewIntegration(store *Store, resolver *Resolver, providers *memql.ProviderRegistry, directory ShareDirectory, logger *slog.Logger) *Integration {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	i := &Integration{store: store, resolver: resolver, logger: logger}
+	i.directory = func(ctx context.Context) (memql.ShareDirectoryView, error) {
+		if directory == nil {
+			// Nobody is offered, so nobody new can be lent to: the narrowing
+			// direction for a node that cannot read who is on the cluster.
+			return memql.ShareDirectoryView{}, nil
+		}
+		return directory.ShareDirectoryFor(ctx)
+	}
 	i.probe = func(ctx context.Context, vendor, key string) memql.VendorKeyProbe {
 		if providers == nil {
 			return memql.VendorKeyProbe{
@@ -112,6 +130,32 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Description: "Remove a key. It stops paying at once and is never used again; the record stays. The key's owner or a cluster owner may.",
 			Handler:     i.handleRemove,
 			ArgsSchema:  map[string]string{"keyId": "string (required) -- the key to remove."},
+		},
+		{
+			Name:        "shareDirectory",
+			Description: "Who one of the caller's keys can be lent to, and who it is lent to now.",
+			Handler:     i.handleShareDirectory,
+			ArgsSchema:  map[string]string{"keyId": "string (required) -- one of the caller's own keys."},
+		},
+		{
+			Name:        "setSharing",
+			Description: "Lend one of the caller's keys to named people and groups, pause them, or take the key back. There is no cluster-wide mode.",
+			Handler:     i.handleSetSharing,
+			ArgsSchema: map[string]string{
+				"keyId":          "string (required) -- one of the caller's own keys.",
+				"mode":           "string (required) -- owner or people.",
+				"paused":         "boolean (optional) -- pause everybody at once.",
+				"userIds":        "[]string (optional) -- under people, the users it is lent to.",
+				"groupIds":       "[]string (optional) -- under people, the groups it is lent to.",
+				"pausedUserIds":  "[]string (optional) -- listed users whose grant is paused.",
+				"pausedGroupIds": "[]string (optional) -- listed groups whose grant is paused.",
+			},
+		},
+		{
+			Name:        "activity",
+			Description: "What one of the caller's keys paid for this month: calls and estimated cost, in total and per person.",
+			Handler:     i.handleActivity,
+			ArgsSchema:  map[string]string{"keyId": "string (required) -- one of the caller's own keys."},
 		},
 	}
 }

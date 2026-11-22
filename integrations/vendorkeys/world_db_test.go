@@ -109,10 +109,16 @@ func (w *world) person(name string) string {
 	return user
 }
 
-func (w *world) writeUser(user string, active bool) {
+// writeUser writes a version of a user's row. name is their display name, and
+// their id when a test does not care.
+func (w *world) writeUser(user string, active bool, name ...string) {
 	w.t.Helper()
+	display := user
+	if len(name) > 0 {
+		display = name[0]
+	}
 	payload, err := json.Marshal(map[string]any{
-		"displayName": user, "primaryEmail": user + "@example.test", "role": string(auth.RoleWriter), "active": active,
+		"displayName": display, "primaryEmail": user + "@example.test", "role": string(auth.RoleWriter), "active": active,
 	})
 	require.NoError(w.t, err)
 	_, err = w.eng.Execute(seedContext(), fmt.Sprintf(`insert(%s, id=%s, payload=%s)`,

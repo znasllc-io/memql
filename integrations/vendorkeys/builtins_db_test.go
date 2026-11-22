@@ -56,7 +56,7 @@ func newDesk(t *testing.T, name string) *desk {
 	}
 	logger := slog.New(slog.NewJSONHandler(d.logged, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	d.store.logger = logger
-	d.in = NewIntegration(d.store, d.resolver, nil, logger)
+	d.in = NewIntegration(d.store, d.resolver, nil, d.eng, logger)
 	d.in.probe = func(_ context.Context, vendor, key string) memql.VendorKeyProbe {
 		d.mu.Lock()
 		defer d.mu.Unlock()
