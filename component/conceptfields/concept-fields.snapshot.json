@@ -5834,6 +5834,7 @@
         "model",
         "name",
         "reason",
+        "signIn",
         "vendor"
       ],
       "required": [

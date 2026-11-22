@@ -35,9 +35,10 @@ import type { DoorId, InferenceReading } from "../../src/apps/settings/routingFa
 //     same cases pointed at the live function.
 //
 // THE SECTION HAS NO KEY FIELD, and this suite's first job is still to keep it
-// that way. Federation is the only door for a cloud vendor and the two free
-// doors are the others; the engine's key-sealing builtin is deleted, so a box
-// that posted to it would be a control whose only outcome is a refusal.
+// that way. This page is the CLUSTER'S OWN account at a vendor, which is
+// federation and nothing else; the engine's cluster-wide key-sealing builtin is
+// deleted, so a box that posted to it would be a control whose only outcome is
+// a refusal. A person's own API key is added in Fleet, never here.
 //
 // The planted key below is what the "no key anywhere" sweeps look for. It is
 // long and distinctive so a sweep over the rendered tree is not vacuous, and
@@ -107,7 +108,7 @@ const { roleOpens } = await import("../seededAccess");
 const { VENDORS_SECTION_RESOURCE, VENDOR_WORDS } = await import(
   "../../src/apps/settings/VendorsSection"
 );
-const { doorFor, localityOf, missingFederationFields, summarize } = await import(
+const { doorFor, localityOf, missingFederationFields, signInFor, signInSentence, summarize, toProviderRows } = await import(
   "../../src/apps/settings/providerFacts"
 );
 const { DOOR_ORDER, UNREAD_INFERENCE, doorReadings } = await import(
@@ -989,3 +990,107 @@ describe("Settings -> Vendors: the registry it can reach", () => {
     expect(screen.getByText(/can call 1 of 2 providers/)).toBeTruthy();
   });
 });
+
+// ===========================================================================
+// THE ANSWERING NODE'S OWN SIGN-IN (design record
+// 2026-11-21-vendor-accounts-and-api-keys, A5 and U6)
+// ===========================================================================
+// Each node signs in to a vendor for itself, so the page says what the node
+// that ANSWERED got, and names it as that node's.
+
+describe("a vendor's sign-in, as one sentence", () => {
+  // The times are written as they came, so the cases do not depend on a zone.
+  const say = (signIn: Record<string, unknown>) =>
+    signInSentence("Anthropic", toProviderRows([{ name: "p", vendor: "anthropic", signIn }])[0]!.signIn, (at) => at);
+
+  it("says an accepted sign-in whose bearer the vendor took", () => {
+    expect(say({ outcome: "ok", at: "10:00", proof: "ok", proofAt: "10:01" })).toBe(
+      "The node that answered signed in at 10:00 and Anthropic took its bearer.",
+    );
+  });
+
+  it("says an accepted sign-in nothing has used yet", () => {
+    expect(say({ outcome: "ok", at: "10:00" })).toBe("The node that answered signed in at 10:00; nothing has used the bearer yet.");
+  });
+
+  it("says when the vendor's API then refused the bearer, in its words", () => {
+    expect(say({ outcome: "ok", at: "10:00", proof: "refused", proofDetail: "the bearer was revoked." })).toBe(
+      "The node that answered signed in at 10:00, and Anthropic then refused its bearer: the bearer was revoked.",
+    );
+  });
+
+  it("says a refusal with the vendor's reason", () => {
+    expect(say({ outcome: "denied", at: "10:00", detail: "invalid_grant: the subject does not match" })).toBe(
+      "The node that answered was refused by Anthropic: invalid_grant: the subject does not match.",
+    );
+  });
+
+  it("says a refusal a used token alone explains, and when the next token is due", () => {
+    expect(say({ outcome: "denied", at: "10:00", detail: "invalid_grant", mayBeReplay: true, nextTokenDue: "10:09" })).toBe(
+      "The node that answered was refused by Anthropic in a way a used token alone explains; it tries again with the next token, due 10:09.",
+    );
+  });
+
+  it("says a wait for the next identity token", () => {
+    expect(say({ outcome: "waiting", at: "10:00", nextTokenDue: "10:06" })).toBe(
+      "The node that answered is waiting for its next identity token, due 10:06.",
+    );
+  });
+
+  it("says the vendor did not answer", () => {
+    expect(say({ outcome: "error", at: "10:00", detail: "connection reset" })).toBe("Anthropic did not answer the node that answered: connection reset.");
+  });
+
+  it("says nothing for a node that made no attempt, or for an outcome it does not know", () => {
+    expect(signInSentence("Anthropic", undefined, (at) => at)).toBe("");
+    expect(say({ outcome: "somethingNew" })).toBe("");
+  });
+
+  it("reads a vendor's sign-in off any of its rows, by the vendor's prefix", () => {
+    const rows = toProviderRows([
+      { name: "chat", vendor: "OpenAI", authSource: "federation", signIn: { outcome: "waiting", nextTokenDue: "10:06" } },
+      { name: "speech", vendor: "OpenAITTS", authSource: "federation", signIn: { outcome: "waiting", nextTokenDue: "10:06" } },
+      { name: "claude", vendor: "Anthropic", authSource: "federation" },
+    ]);
+    expect(signInFor("openai", rows)?.outcome).toBe("waiting");
+    expect(signInFor("anthropic", rows)).toBeUndefined();
+  });
+});
+
+describe("Settings -> Vendors: the answering node's sign-in", () => {
+  it("draws it on a vendor that is set up, and leaves an unset vendor's row as it was", async () => {
+    h.state.providers = [
+      { name: "chat54Mini", vendor: "openai", model: "gpt-5.4-mini", available: true, authSource: "federation", reason: "",
+        signIn: { outcome: "ok", at: "2026-11-22T10:00:00Z", proof: "ok", proofAt: "2026-11-22T10:00:02Z" } },
+      { name: "streamClaudeSonnet", vendor: "anthropic", model: "claude-sonnet-5", available: false, authSource: "unresolved", reason: "no credential configured" },
+    ];
+    await renderDoors();
+    expect(doorRow("openai").textContent).toMatch(/The node that answered signed in at .+ and OpenAI took its bearer\./);
+    expect(doorRow("anthropic").textContent).not.toMatch(/The node that answered/);
+    expect(doorRow("anthropic").textContent).toMatch(/normal state of a new cluster/i);
+  });
+
+  it("marks a vendor whose sign-in was refused, with the vendor's reason", async () => {
+    h.state.providers = [
+      { name: "chat54Mini", vendor: "openai", model: "gpt-5.4-mini", available: false, authSource: "federation", reason: "sign-in refused",
+        signIn: { outcome: "denied", at: "2026-11-22T10:00:00Z", detail: "invalid_grant: the subject does not match" } },
+    ];
+    await renderDoors();
+    const row = doorRow("openai");
+    expect(row.textContent).toMatch(/The node that answered was refused by OpenAI: invalid_grant: the subject does not match\./);
+    expect(row.querySelector(".os-record-status")?.getAttribute("data-tone")).toBe("warn");
+  });
+
+  it("carries no badge or icon for it, and no new control", async () => {
+    h.state.providers = [
+      { name: "chat54Mini", vendor: "openai", model: "gpt-5.4-mini", available: true, authSource: "federation", reason: "",
+        signIn: { outcome: "waiting", at: "2026-11-22T10:00:00Z", nextTokenDue: "2026-11-22T10:06:00Z" } },
+    ];
+    await renderDoors();
+    const row = doorRow("openai");
+    expect(row.textContent).toMatch(/waiting for its next identity token/);
+    expect(row.querySelector(".os-chip, .os-badge")).toBeNull();
+    expect(within(row).getAllByRole("button")).toHaveLength(1);
+  });
+});
+
