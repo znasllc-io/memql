@@ -3,8 +3,12 @@ package memql
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/core/common"
@@ -344,6 +348,112 @@ func TestKeyOutcomesAreObserved(t *testing.T) {
 			}
 		}
 	})
+}
+
+// EVIDENCE IS DATED WHEN THE CALL STARTED (mesh rule M3, Review Focus 5). The
+// vendor judges a key when a request arrives, and a non-streaming call answers
+// when generation ends, which can be minutes later. Dated on arrival of the
+// answer, a long call that began before a key was revoked would report "good"
+// with a time AFTER the refusal that another call recorded in between, and
+// undo it.
+func TestAVerdictIsDatedWhenItsCallStarted(t *testing.T) {
+	for name, answer := range map[string]accountVendorAnswer{
+		"a refusal":     {Status: 401, Body: anthropicBody("authentication_error", "invalid x-api-key"), Delay: 250 * time.Millisecond},
+		"a served call": {Status: http.StatusOK, Delay: 250 * time.Millisecond},
+	} {
+		t.Run(name, func(t *testing.T) {
+			v := newAccountVendor(t, VendorAnthropic)
+			v.answerNext(answer)
+			keys := newFakeVendorKeys()
+			keys.secrets["k1"] = standInKey
+			bound := boundTo(t, textProvider(t, v, false), keyAccount(VendorAnthropic, "k1", "ana"), keys)
+
+			asked := time.Now()
+			_, _ = bound.CallChat(context.Background(), hello())
+			verdict := keys.waitVerdicts(t, 1)[0]
+			arrived := v.seen()[0].At
+			if verdict.At.Before(asked) {
+				t.Fatalf("the verdict is dated %s, before the call was made at %s", verdict.At, asked)
+			}
+			if verdict.At.After(arrived) {
+				t.Errorf("the verdict is dated %s after the vendor received the call: evidence is the time the call STARTED, "+
+					"or a slow call that began before a revocation reports good later and undoes it", verdict.At.Sub(arrived))
+			}
+		})
+	}
+}
+
+// THE ENGINE'S OWN BUDGET STOP IS NOT THE VENDOR TALKING. The cost guard sits
+// beneath the SDK and answers a 402 of its own once the process budget is
+// spent. Read as Anthropic's 402 it would hold the key for an hour on every
+// replica, write an audit event, and mail the key's owner that their account
+// is out of credit, quoting this engine's own sentence as the vendor's.
+func TestTheEnginesOwnBudgetStopSaysNothingAboutAKey(t *testing.T) {
+	for _, vendor := range []string{VendorAnthropic, VendorOpenAI} {
+		t.Run(vendor, func(t *testing.T) {
+			v := newAccountVendor(t, vendor)
+			keys := newFakeVendorKeys()
+			keys.secrets["k1"] = standInKey
+			bound := boundTo(t, textProvider(t, v, false), keyAccount(vendor, "k1", "ana"), keys)
+
+			sharedLLMGuard.mu.Lock()
+			sharedLLMGuard.tripLocked("the test spent the process budget")
+			sharedLLMGuard.mu.Unlock()
+
+			_, err := bound.CallChat(context.Background(), hello())
+			if err == nil {
+				t.Fatal("a call past the process budget returned no error")
+			}
+			if len(v.seen()) != 0 {
+				t.Fatalf("the vendor was called past the budget: %+v", v.seen())
+			}
+			if kind, ok := VendorAccountFailure(err); ok {
+				t.Errorf("the engine's own budget stop is read as an account failure (%s), so the router would try the next account and word it as the vendor's", kind)
+			}
+			if got := keys.verdicts(); len(got) != 0 {
+				t.Errorf("the engine's own budget stop was recorded against the key: %+v", got)
+			}
+		})
+	}
+}
+
+// A KEY DOES NOT FOLLOW A REDIRECT (safety rule S5). Go keeps a custom header
+// such as X-Api-Key when a redirect leaves the host, so a redirect from the
+// vendor's address would carry a person's key to wherever it pointed. A key is
+// sent to the vendor's own address and nowhere else, by construction.
+func TestAKeyDoesNotFollowARedirect(t *testing.T) {
+	for _, vendor := range []string{VendorAnthropic, VendorOpenAI} {
+		t.Run(vendor, func(t *testing.T) {
+			var elsewhereSaw []http.Header
+			var mu sync.Mutex
+			elsewhere := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				elsewhereSaw = append(elsewhereSaw, r.Header.Clone())
+				mu.Unlock()
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(anthropicOKBody))
+			}))
+			t.Cleanup(elsewhere.Close)
+
+			v := newAccountVendor(t, vendor)
+			v.answerNext(accountVendorAnswer{Status: http.StatusTemporaryRedirect, Location: elsewhere.URL + "/v1/messages"})
+			keys := newFakeVendorKeys()
+			keys.secrets["k1"] = standInKey
+			bound := boundTo(t, textProvider(t, v, false), keyAccount(vendor, "k1", "ana"), keys)
+
+			if _, err := bound.CallChat(context.Background(), hello()); err == nil {
+				t.Error("a redirected call was reported as served")
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if len(elsewhereSaw) != 0 {
+				t.Fatalf("the call followed a redirect away from %s's address, carrying: %v", vendor, elsewhereSaw)
+			}
+			if got := keys.verdicts(); len(got) != 0 {
+				t.Errorf("a redirect was recorded against the key: %+v", got)
+			}
+		})
+	}
 }
 
 // --- which accounts can pay ------------------------------------------------

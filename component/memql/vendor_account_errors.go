@@ -185,6 +185,15 @@ func classifyVendorAnswer(vendor string, status int, body []byte) (kind, reason 
 	if len(reason) > maxAccountFailureReason {
 		reason = reason[:maxAccountFailureReason-3] + "..."
 	}
+	// THIS PROCESS'S OWN BUDGET STOP is not the vendor's answer. The cost guard
+	// sits beneath the SDK and answers a 402 of its own once the budget is
+	// spent (killSwitchResponse), and 402 is how Anthropic says an account is
+	// out of credit. Read as that, it would hold a person's key for an hour,
+	// mail them that their account is empty, and send the router to the next
+	// account for a call no account may make.
+	if parsed.Type == guardStopErrorType {
+		return "", reason
+	}
 
 	switch vendor {
 	case VendorAnthropic:
@@ -207,12 +216,10 @@ func classifyVendorAnswer(vendor string, status int, body []byte) (kind, reason 
 			}
 		}
 	case VendorOpenAI:
-		lower := strings.ToLower(parsed.Message)
-		missingPermission := strings.Contains(lower, "insufficient permissions") || strings.Contains(lower, "missing scopes")
 		switch status {
 		case 401:
 			kind = accountFailureRefused
-			if missingPermission {
+			if namesMissingPermission(parsed.Message) {
 				kind = accountFailurePermission
 			}
 		case 403:
@@ -224,6 +231,15 @@ func classifyVendorAnswer(vendor string, status int, body []byte) (kind, reason 
 		}
 	}
 	return kind, reason
+}
+
+// namesMissingPermission reports whether OpenAI's message says the key lacks a
+// permission: its words for a restricted key asked to do something outside its
+// scopes. OpenAI does not document the wording as stable, and it is the only
+// thing that tells such a key from any other refusal (K12).
+func namesMissingPermission(message string) bool {
+	lower := strings.ToLower(message)
+	return strings.Contains(lower, "insufficient permissions") || strings.Contains(lower, "missing scopes")
 }
 
 // vendorDisplayName is how a vendor is named to a person.

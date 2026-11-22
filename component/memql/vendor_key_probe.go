@@ -205,7 +205,9 @@ func probeVendorKey(ctx context.Context, vendor, key string, at time.Time) Vendo
 			req.Header.Del("OpenAI-Project")
 			req.Header.Del("OpenAI-Organization")
 		}
-		resp, err := next(req)
+		// The check carries a key somebody just typed: it follows no redirect
+		// (keyBoundRedirectPolicy).
+		resp, err := next(req.WithContext(withKeyBoundRequest(req.Context())))
 		if err != nil || resp == nil {
 			return resp, err
 		}
@@ -256,9 +258,17 @@ func probeVendorKey(ctx context.Context, vendor, key string, at time.Time) Vendo
 		probe.Verdict, probe.Detail = VendorKeyProbeRefused, reason
 	case kind == accountFailureCredit:
 		probe.Verdict, probe.Detail = VendorKeyProbeCredit, reason
-	case kind == accountFailurePermission && vendor == VendorOpenAI:
+	case kind == accountFailurePermission && vendor == VendorOpenAI && namesMissingPermission(reason):
 		// K12: valid, and not allowed to list models.
 		probe.Verdict, probe.Detail = VendorKeyProbeUseOnly, reason
+	case kind == accountFailurePermission && vendor == VendorOpenAI:
+		// K12, the other half: "any other refusal means the key is not saved".
+		// A 403 that names no missing permission (a region OpenAI does not
+		// serve, a project that was archived) verifies nothing about the key,
+		// so it is neither stored as checked by use nor recorded against a key
+		// that is already stored.
+		probe.Verdict = VendorKeyProbeUnreachable
+		probe.Detail = fmt.Sprintf("%s answered %d and did not say the key is missing a permission, so nothing about the key was learned: %s", name, status, reason)
 	case kind == accountFailurePermission:
 		probe.Verdict, probe.Detail = VendorKeyProbeRefused, reason
 	case answered:

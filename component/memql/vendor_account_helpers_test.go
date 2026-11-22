@@ -28,6 +28,8 @@ type accountVendorRequest struct {
 	Method string
 	Path   string
 	Header http.Header
+	// At is when the stand-in received the request.
+	At time.Time
 }
 
 type accountVendorAnswer struct {
@@ -35,6 +37,10 @@ type accountVendorAnswer struct {
 	Body   string
 	// ContentType is application/json unless a test answers with a stream.
 	ContentType string
+	// Delay is how long the stand-in holds the request before it answers.
+	Delay time.Duration
+	// Location, with a 3xx Status, sends the caller somewhere else.
+	Location string
 }
 
 const anthropicOKBody = `{"id":"msg_1","type":"message","role":"assistant","model":"claude-test","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`
@@ -71,12 +77,19 @@ func newAccountVendor(t *testing.T, vendor string) *accountVendor {
 
 func (v *accountVendor) serve(w http.ResponseWriter, r *http.Request) {
 	v.mu.Lock()
-	v.requests = append(v.requests, accountVendorRequest{Method: r.Method, Path: r.URL.Path, Header: r.Header.Clone()})
+	v.requests = append(v.requests, accountVendorRequest{Method: r.Method, Path: r.URL.Path, Header: r.Header.Clone(), At: time.Now()})
 	answer := accountVendorAnswer{Status: http.StatusOK}
 	if len(v.next) > 0 {
 		answer, v.next = v.next[0], v.next[1:]
 	}
 	v.mu.Unlock()
+	if answer.Delay > 0 {
+		time.Sleep(answer.Delay)
+	}
+	if answer.Location != "" {
+		http.Redirect(w, r, answer.Location, answer.Status)
+		return
+	}
 
 	contentType := answer.ContentType
 	if contentType == "" {
@@ -146,10 +159,10 @@ type fakeVendorKeys struct {
 	autoUsable *[]VendorAccount
 	// holder, when set, is the one acting person the keys are offered to.
 	// Anybody else who asks has none. Empty offers them to whoever asks.
-	holder string
-	keysErr    error
-	secrets    map[string]string
-	secretErr  error
+	holder    string
+	keysErr   error
+	secrets   map[string]string
+	secretErr error
 
 	queries    []VendorAccountQuery
 	secretAsks []string

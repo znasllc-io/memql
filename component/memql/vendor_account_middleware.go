@@ -37,6 +37,21 @@ package memql
 //     it. A rate limit or an outage says nothing about the key, and neither
 //     does a missing permission: the key is good and may not do this.
 //
+// TWO THINGS THE ORDER ABOVE DOES NOT SAY, each of which was wrong once:
+//
+//   - THE VERDICT IS DATED WHEN THE REQUEST WAS SENT, not when the answer
+//     arrived. The vendor judges a key when a request reaches it, and a
+//     non-streaming call answers when generation ends, minutes later. Dated on
+//     arrival, a long call that began before a key was revoked reports "good"
+//     with a time after the refusal another call recorded in between, and the
+//     state's evidence order (mesh rule M3) would let it undo that refusal.
+//   - A REQUEST THAT CARRIES A KEY FOLLOWS NO REDIRECT (S5). Go drops
+//     Authorization when a redirect leaves the host and keeps every custom
+//     header, X-Api-Key among them, so a redirect from the vendor's address
+//     would carry an Anthropic key to wherever it pointed. The request is
+//     marked, and the guarded client hands the 3xx back as the answer
+//     (keyBoundRedirectPolicy).
+//
 // Regression tests: vendor_account_test.go.
 
 import (
@@ -117,12 +132,13 @@ func (b *vendorAccountBinding) roundTrip(vendor string, req *http.Request, next 
 		req.Header.Del("OpenAI-Organization")
 	}
 
-	resp, err := next(req)
+	// The time of the evidence: when the vendor was asked. See the header.
+	at := time.Now()
+	resp, err := next(req.WithContext(withKeyBoundRequest(req.Context())))
 	if err != nil || resp == nil {
 		// No answer is not a verdict on the key.
 		return resp, err
 	}
-	at := time.Now()
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		b.observeGood(req.Context(), at)
 		return resp, nil
@@ -136,6 +152,39 @@ func (b *vendorAccountBinding) roundTrip(vendor string, req *http.Request, next 
 		b.observe(req.Context(), VendorKeyCredit, at, reason)
 	}
 	return resp, nil
+}
+
+// keyBoundRequestMark marks the context of a request that carries a person's
+// API key.
+type keyBoundRequestMark struct{}
+
+func withKeyBoundRequest(ctx context.Context) context.Context {
+	return context.WithValue(ctx, keyBoundRequestMark{}, true)
+}
+
+// maxVendorRedirects is net/http's own limit, kept for every other request.
+const maxVendorRedirects = 10
+
+// keyBoundRedirectPolicy is the guarded client's redirect policy: a request
+// that carries a person's key follows none, and every other request keeps the
+// policy it had (prior, or net/http's default).
+//
+// A redirect inherits its original request's context, which is how the mark
+// reaches here. http.ErrUseLastResponse hands the 3xx back as the answer, so
+// the SDK reports it as a failed call and nothing is sent anywhere else.
+func keyBoundRedirectPolicy(prior func(*http.Request, []*http.Request) error) func(*http.Request, []*http.Request) error {
+	return func(req *http.Request, via []*http.Request) error {
+		if marked, _ := req.Context().Value(keyBoundRequestMark{}).(bool); marked {
+			return http.ErrUseLastResponse
+		}
+		if prior != nil {
+			return prior(req, via)
+		}
+		if len(via) >= maxVendorRedirects {
+			return fmt.Errorf("stopped after %d redirects", maxVendorRedirects)
+		}
+		return nil
+	}
 }
 
 // scrubAnswerBody reads the head of a refusal's body, removes anything shaped

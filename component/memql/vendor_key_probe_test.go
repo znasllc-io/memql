@@ -3,7 +3,9 @@ package memql
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -102,6 +104,15 @@ func TestProbeVerdicts(t *testing.T) {
 		{"an OpenAI key restricted from listing models is checked by use", VendorOpenAI,
 			accountVendorAnswer{Status: 401, Body: openaiBody("invalid_request_error", "", "You have insufficient permissions for this operation. Missing scopes: api.model.read.")},
 			VendorKeyProbeUseOnly, "Missing scopes"},
+		{"an OpenAI key restricted from listing models may answer 403 as well", VendorOpenAI,
+			accountVendorAnswer{Status: 403, Body: openaiBody("invalid_request_error", "", "You have insufficient permissions for this operation. Missing scopes: api.model.read.")},
+			VendorKeyProbeUseOnly, "Missing scopes"},
+		// K12: only a refusal that NAMES a missing permission saves a key as
+		// checked by use. Any other 403 says nothing about the key, and a value
+		// nothing verified is not stored.
+		{"an OpenAI 403 that names no missing permission verifies nothing", VendorOpenAI,
+			accountVendorAnswer{Status: 403, Body: openaiBody("request_forbidden", "unsupported_country_region_territory", "Country, region, or territory not supported")},
+			VendorKeyProbeUnreachable, "Country, region, or territory not supported"},
 		{"OpenAI's account is out of quota", VendorOpenAI,
 			accountVendorAnswer{Status: 429, Body: openaiBody("insufficient_quota", "insufficient_quota", "You exceeded your current quota")},
 			VendorKeyProbeCredit, "exceeded your current quota"},
@@ -142,6 +153,37 @@ func TestProbeVerdicts(t *testing.T) {
 			t.Errorf("the detail repeats the key or an address: %q", got.Detail)
 		}
 	})
+}
+
+// S5: the check does not follow a redirect either. It carries the key a
+// person just typed, before anything about it is known.
+func TestProbeDoesNotFollowARedirect(t *testing.T) {
+	for _, vendor := range []string{VendorAnthropic, VendorOpenAI} {
+		t.Run(vendor, func(t *testing.T) {
+			var mu sync.Mutex
+			var elsewhereSaw []http.Header
+			elsewhere := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				elsewhereSaw = append(elsewhereSaw, r.Header.Clone())
+				mu.Unlock()
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"object":"list","data":[],"has_more":false}`))
+			}))
+			t.Cleanup(elsewhere.Close)
+
+			stand := newAccountVendor(t, vendor)
+			stand.answerNext(accountVendorAnswer{Status: http.StatusTemporaryRedirect, Location: elsewhere.URL + "/v1/models"})
+			got := newProviderRegistry().ProbeVendorKey(context.Background(), vendor, probeKeyFor(vendor))
+			mu.Lock()
+			defer mu.Unlock()
+			if len(elsewhereSaw) != 0 {
+				t.Fatalf("the check followed a redirect away from %s's address, carrying: %v", vendor, elsewhereSaw)
+			}
+			if got.Verdict != VendorKeyProbeUnreachable {
+				t.Errorf("verdict = %q (%q), want unreachable: a redirect says nothing about the key", got.Verdict, got.Detail)
+			}
+		})
+	}
 }
 
 // K3: a key is sent to the vendor's own address and nowhere else. On a cluster
