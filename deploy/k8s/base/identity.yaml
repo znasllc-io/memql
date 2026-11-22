@@ -105,16 +105,20 @@ spec:
         # (memql#4336). audience is what makes this token non-interchangeable
         # with the default kube-api-access one: Anthropic verifies it against
         # the cluster's public OIDC JWKS and refuses a token minted for
-        # anything but itself. expirationSeconds bounds the blast radius of a
-        # leaked assertion to an hour, and kubelet re-projects the file in
-        # place -- the SDK re-reads it on every exchange, so rotation needs no
-        # restart. It costs nothing on a cluster that is not federating.
+        # anything but itself. expirationSeconds is 600, the lowest Kubernetes
+        # accepts, and kubelet replaces the file in place at 80 percent of it,
+        # about every 8 minutes. That period is how long a container restarted
+        # inside a living pod goes without Anthropic: Anthropic accepts an
+        # identity token once, and the new process reads the token the old one
+        # used (design record 2026-11-21-vendor-accounts-and-api-keys, A3 and
+        # A4). The engine re-reads the file on every sign-in, so rotation needs
+        # no restart. It costs nothing on a cluster that is not federating.
         - name: anthropic-identity
           projected:
             sources:
               - serviceAccountToken:
                   audience: https://api.anthropic.com
-                  expirationSeconds: 3600
+                  expirationSeconds: 600
                   path: token
         # The same identity again, minted for OpenAI (epic memql#5088). A
         # projected token carries ONE audience, so the Anthropic volume above

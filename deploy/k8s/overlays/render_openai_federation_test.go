@@ -93,6 +93,13 @@ func assertOpenAIIdentity(t *testing.T, overlay, name string, w workload) {
 			t.Errorf("%s/%s: projected token audience is %q, want %q -- an audience mismatch is the most common federation denial and it is invisible until the exchange",
 				overlay, name, src.Audience, openaiAudience)
 		}
+		// 3600, AND DELIBERATELY NOT THE 600 ANTHROPIC'S TOKEN NOW HAS (design
+		// record 2026-11-21-vendor-accounts-and-api-keys, A3). An OpenAI bearer
+		// never outlives the identity token it was minted from, so a 600 second
+		// token would force a sign-in every 8 minutes with about 90 seconds
+		// between kubelet's rotation and the bearer's expiry. OpenAI documents
+		// no rule against presenting a token twice, so the restart case that
+		// motivates 600 for Anthropic does not arise here.
 		if src.ExpirationSeconds != 3600 {
 			t.Errorf("%s/%s: projected token expirationSeconds is %d, want 3600 (the ceiling OpenAI's exchange honours)",
 				overlay, name, src.ExpirationSeconds)
