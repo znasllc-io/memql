@@ -257,9 +257,21 @@ func anthropicSignInFor(cfg ProviderConfig) (*vendorSignIn, error) {
 		Exchange: func(ctx context.Context, identityToken string) (string, time.Time, error) {
 			// The SDK's own public exchange, so the wire contract (the body's
 			// field names, the two beta values, the redirect policy) stays the
-			// SDK's to keep right. BaseURL is the address the calling client
-			// talks to; empty means the SDK's default.
+			// SDK's to keep right.
+			//
+			// BaseURL is the address the calling client talks to, and a sign-in
+			// with none is REFUSED rather than sent to the SDK's default. The
+			// identity token must go where the client's requests go: a cluster
+			// that points its Anthropic clients somewhere else would otherwise
+			// hand its token to api.anthropic.com for a rule that lives
+			// elsewhere, and a test would hand a fixture to the real vendor
+			// (which is how this was found). Every sign-in is therefore made
+			// through a client, whose middleware supplies it.
 			base, _ := ctx.Value(anthropicExchangeBaseKey{}).(string)
+			if base == "" {
+				return "", time.Time{}, errors.New(
+					"no vendor address for the sign-in: Anthropic is signed in to through a client's request, never directly")
+			}
 			creds, err := config.ExchangeFederationAssertion(ctx, config.FederationExchangeParams{
 				Assertion:        identityToken,
 				FederationRuleID: fed.RuleID,

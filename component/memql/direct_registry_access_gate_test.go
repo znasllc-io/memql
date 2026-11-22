@@ -120,6 +120,7 @@ var registryOwnFiles = map[string]string{
 	// between reaching a provider to USE it and reading one to describe it,
 	// and every entry below is the second.
 	"component/memql/ai_openai_federation.go":      "exchanges the pod's projected token for a vendor bearer; it reads the record's auth block, not a model",
+	"component/memql/ai_vendor_signin_boot.go":     "finds the record that carries a vendor's cluster account, to sign in at start and list that vendor's models (token-free); it reads the record's auth block and calls no model",
 	"component/memql/construct_catalog.go":         "lists what this cluster loaded, provider records included",
 	"component/memql/provider_auth_check.go":       "the provider-auth check command: proves a credential is accepted with one token-free models.list call",
 	"component/memql/provider_auth_status_read.go": "reads whether a record resolved its credential, for the readiness feed",

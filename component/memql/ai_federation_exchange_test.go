@@ -46,6 +46,13 @@ type fakeAnthropic struct {
 func newFakeAnthropic(t *testing.T) *fakeAnthropic {
 	t.Helper()
 	isolateVendorSignIns(t)
+	// A loop guard of this test's own, with the production limits. Every test
+	// here sends the same small Messages request, and the process-wide guard
+	// counts identical requests across tests: enough of them in one run trips
+	// its loop breaker in whichever test happens to come last.
+	prevGuard := sharedLLMGuard
+	sharedLLMGuard = newLLMGuardFromEnv()
+	t.Cleanup(func() { sharedLLMGuard = prevGuard })
 	f := &fakeAnthropic{tokenStatus: http.StatusOK, seen: map[string]bool{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/oauth/token", func(w http.ResponseWriter, r *http.Request) {
@@ -196,6 +203,31 @@ func TestAnthropicClientsShareOneSignIn(t *testing.T) {
 		if got := h.Get("x-api-key"); got != "" {
 			t.Fatalf("call %d carried x-api-key %q", i, got)
 		}
+	}
+}
+
+// A sign-in is made through a client, whose middleware names the address the
+// vendor is reached at. Asked for directly, with no address, it is REFUSED
+// rather than sent to the SDK's default: an identity token must never go to a
+// host other than the one the client's requests go to.
+func TestAnthropicSignInWithNoClientAddressIsRefused(t *testing.T) {
+	f := newFakeAnthropic(t)
+	t.Setenv("ANTHROPIC_BASE_URL", f.srv.URL)
+	signIn, err := anthropicSignInFor(ProviderConfig{
+		Name: "claudeTest", Model: "claude-test", Auth: federatedAuth(validIdentityToken(t)),
+	})
+	if err != nil || signIn == nil {
+		t.Fatalf("anthropicSignInFor: %v", err)
+	}
+
+	_, _, err = signIn.Bearer(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "no vendor address") {
+		t.Fatalf("a sign-in asked for with no client address: err = %v, want a refusal naming the missing address", err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.exchangeRequests) != 0 {
+		t.Fatalf("%d sign-ins reached the vendor with no client address", len(f.exchangeRequests))
 	}
 }
 

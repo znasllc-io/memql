@@ -383,6 +383,13 @@ func (e *MemQLEngine) ReloadAIProviders(ctx context.Context) (int, error) {
 	// for that reason; this reload has three uses of it, so it resolves once.
 	logger := e.safeLogger()
 
+	// A reload is a person's Apply, on this node or relayed from a peer. A
+	// sign-in the vendor refused may be tried once more because of it: the
+	// usual reason to press Apply is that the vendor's side was just fixed
+	// (design 2026-11-21, A2). An accepted identity token is never presented
+	// again whatever is pressed.
+	allowVendorRetry()
+
 	next := newProviderRegistry()
 	if _, err := LoadUnifiedProviders(logger, next); err != nil {
 		// The LIVE registry is untouched. A reload that cannot build a
@@ -416,6 +423,13 @@ func (e *MemQLEngine) ReloadAIProviders(ctx context.Context) (int, error) {
 			// for: a keyless node registers every provider and can call none.
 			"available", available)
 	}
+
+	// Sign in under whatever the reload resolved, in the background: with
+	// unchanged ids the bearer in hand is reused and only the model list is
+	// asked for; with new ids this is the first sign-in under them. Detached
+	// from the caller's cancellation, because the caller is an Apply that
+	// returns as soon as the registry has been swapped.
+	e.SignInToConfiguredVendors(context.WithoutCancel(ctx))
 	return available, nil
 }
 
