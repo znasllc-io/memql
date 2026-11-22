@@ -40,15 +40,16 @@ describe("what the link says", () => {
     // ever looked at.
     h.connection = fakeConnection({
       backups: [watchedFolderRow({ id: "w-1", localPath: "/Users/ana/Clients" })],
-      machines: [{ id: "wkr-1", name: "laptop", capabilities: ["HEADLESS"] } as never],
+      machines: [{ id: "wkr-1", name: "laptop", capabilities: ["HEADLESS"], connectedNodeId: "bff-1" } as never],
     });
     await renderFiles({ section: "backups" });
 
     expect(toneOf()).toBe("waiting");
-    expect(screen.getByText("Waiting for this machine")).toBeTruthy();
+    expect(screen.getByText("Waiting")).toBeTruthy();
     expect(screen.getByText(/no report yet/)).toBeTruthy();
     // The count is not invented either: nothing has counted the origin.
-    expect(screen.getByText(/not counted yet/)).toBeTruthy();
+    expect(screen.queryByText(/\d+ files?\b/)).toBeNull();
+    expect(screen.queryByText("Up to date")).toBeNull();
   });
 
   it("carries the state in its accessible name, so colour is never the only carrier", async () => {
@@ -62,13 +63,12 @@ describe("what the link says", () => {
           bytesSeen: 0,
         }),
       ],
-      machines: [{ id: "wkr-1", name: "laptop", capabilities: ["HEADLESS"] } as never],
+      machines: [{ id: "wkr-1", name: "laptop", capabilities: ["HEADLESS"], connectedNodeId: "bff-1" } as never],
     });
     await renderFiles({ section: "backups" });
 
     expect(toneOf()).toBe("refused");
-    const link = screen.getByRole("img", { name: /This machine said no/ });
-    expect(link).toBeTruthy();
+    expect(screen.getByText("This machine said no")).toBeTruthy();
     // And the repair is named, in the place the person is already looking.
     expect(screen.getByText(/policy\.yaml/)).toBeTruthy();
   });
@@ -128,14 +128,13 @@ describe("what the link says", () => {
           linkState: "origin_gone",
         }),
       ],
-      machines: [{ id: "wkr-1", name: "laptop", capabilities: ["HEADLESS"] } as never],
+      machines: [{ id: "wkr-1", name: "laptop", capabilities: ["HEADLESS"], connectedNodeId: "bff-1" } as never],
     });
     await renderFiles({ section: "backups" });
 
     expect(toneOf()).toBe("settled");
-    expect(screen.getByText("Backed up")).toBeTruthy();
-    // One file here, not two -- the arrived count is the backup's own.
-    expect(screen.getByText("1 file here")).toBeTruthy();
+    expect(screen.getByText("Up to date")).toBeTruthy();
+    expect(screen.getByText(/laptop · every 5 min · checked .* · 1 file$/)).toBeTruthy();
   });
 });
 
@@ -239,8 +238,8 @@ describe("the empty state", () => {
   it("invites the person to act rather than reporting an absence", async () => {
     h.connection = fakeConnection({ backups: [] });
     await renderFiles({ section: "backups" });
-    expect(screen.getByText(/No folder syncs yet/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Add backup" })).toBeTruthy();
+    expect(screen.getByText(/No folders are backed up yet/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Back up a folder" })).toBeTruthy();
   });
 });
 
@@ -322,7 +321,7 @@ describe("folder backup schedule",()=>{
  it("creates a scheduled directory backup and refuses an invalid interval",async()=>{
   const connection=fakeConnection({machines:[{id:"wkr-1",name:"laptop",capabilities:["HEADLESS"]} as never]}); h.connection=connection;
   await renderFiles({section:"backups"});
-  await click(screen.getByRole("button",{name:"Add backup"}));
+  await click(screen.getByRole("button",{name:"Back up a folder"}));
   fireEvent.change(screen.getByLabelText("Folder on that machine"),{target:{value:"/Users/ana/Reports"}});
   await readTheBar();
   await click(screen.getByRole("button",{name:"Continue"}));
@@ -337,6 +336,6 @@ describe("folder backup schedule",()=>{
   expect(connection.callsNamed("createLibraryWatchedFolder")[0]).toContain('mode: "sync"');
   expect(connection.callsNamed("createLibraryWatchedFolder")[0]).toContain('includeHidden: true');
   expect(connection.callsNamed("createLibraryWatchedFolder")[0]).toContain('localPath: "/Users/ana/Reports"');
-  expect(screen.getByRole("button",{name:"Add backup"})).toBeTruthy();
+  expect(screen.getByRole("button",{name:"Back up a folder"})).toBeTruthy();
  });
 });

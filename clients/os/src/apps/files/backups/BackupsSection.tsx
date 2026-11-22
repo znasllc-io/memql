@@ -1,8 +1,8 @@
-import { AddButton } from "../../../kit/AddButton";
+import { Folder, Plus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { newShortId, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { Button, Caption, Head, RecordRow, listCount, LiveList, Notice, formatBytes, formatFreshness, useLiveView, useNow, type LiveListSource } from "../../../kit";
+import { Button, Caption, Head, RecordRow, listCount, LiveList, Notice, formatFreshness, useLiveView, useNow, type LiveListSource } from "../../../kit";
 import { InPlaceAsk } from "../../../kit/pressHold";
 import { flatten } from "../../../kit/rows";
 import { useMachines } from "../../../live/machines";
@@ -18,12 +18,11 @@ import { StorageAllowance } from "./StorageAllowance";
 import { useOsConnection } from "../../../live/connection";
 import {
   backupFingerprint,
-  backupSchedule,
+  backupLine,
   fileBelongsToBackup,
   linkToneOf,
   isOriginFault,
   ORIGIN_SENTENCE,
-  TONE_LABEL,
   TONE_SENTENCE,
   worstFileState,
   type BackupRow,
@@ -117,15 +116,7 @@ export function BackupsSection({ folders, files, source, writes }: BackupsSectio
         title={editing ? "Edit backup" : "Backups"}
         back={editing ? {label: "Backups", onSelect: () => { setAdding(false); setEditingId(""); write.clearError(); }} : undefined}
         meta={!editing ? listCount(source?.snapshot) : undefined}
-      >
-        {!editing ? <AddButton label="Add backup"
-          onClick={() => {
-            setArchiveId(newShortId()); setArchiveError(""); setAdding(true);
-            setEditingId("");
-            write.clearError();
-          }}
-        /> : null}
-      </Head>
+      />
 
       {editing !== null ? (
         // KEYED ON THE ROW, so switching Edit from one backup to another
@@ -165,7 +156,7 @@ export function BackupsSection({ folders, files, source, writes }: BackupsSectio
         rowId={(backup) => backup.id}
         fingerprint={backupFingerprint}
         label="Backups"
-        emptyText="No folder syncs yet. Add a backup to get started."
+        emptyText="No folders are backed up yet."
         renderRow={(backup) => (
           <BackupLine
             backup={backup}
@@ -186,6 +177,13 @@ export function BackupsSection({ folders, files, source, writes }: BackupsSectio
           />
         )}
       /> : null}
+      {!editing ? (
+        <div className="os-backups-add">
+          <Button onClick={() => { setArchiveId(newShortId()); setArchiveError(""); setAdding(true); setEditingId(""); write.clearError(); }}>
+            <Plus size={14} aria-hidden /> Back up a folder
+          </Button>
+        </div>
+      ) : null}
       {!editing && <ArchiveTransfers machines={machineList} refresh={transferRefresh} onDownload={setDownloading} />}
     </section>
   );
@@ -227,16 +225,20 @@ function BackupLine({
   const busy = write.busyId === backup.id;
   const name = machine === undefined ? backup.workerId : machineName(machine);
   const online = machine !== undefined && isWorkerOnline(machine, now);
+  const changed = mine.filter((file) => file.state === "stale").length;
+  const view = backupLine(backup, tone, machine === undefined ? undefined : { name, online, lastSeenAt: machine.lastSeenAt }, changed, (iso) => formatFreshness(iso, now));
 
   return (
     <article className="os-backup" data-tone={tone}>
       <RecordRow
+        icon={<Folder size={15} aria-hidden />}
         name={backup.localPath}
-        secondary={`${name} · ${destination} · ${backup.mode === "sync" ? "Folder sync" : "Keep deleted originals"} · ${backupSchedule(backup.intervalMinutes)}`}
-        state={TONE_LABEL[tone]}
-        tone={tone === "settled" ? "accent" : tone === "paused" ? "muted" : "warn"}
+        secondary={view.offline ? <span className="os-backup-offline">{view.secondary}</span> : view.secondary}
+        state={view.state}
+        tone={view.tone}
+        stateTitle={`${name} to ${destination}: ${TONE_SENTENCE[tone]}`}
         current={online}
-        stateExtra={<span className="os-caption">{backup.lastSweepAt === "" ? "no report yet" : `checked ${formatFreshness(backup.lastSweepAt, now)}`}</span>}
+        dim={tone === "paused" || (machine !== undefined && !online)}
         actions={<>
           <Button onClick={() => write.setStatus(backup.id, backup.status === "paused" ? "active" : "paused")} busy={busy} ariaLabel={backup.status === "paused" ? `Resume backing up ${backup.localPath}` : `Pause backing up ${backup.localPath}`}>
             {backup.status === "paused" ? "Resume" : "Pause"}
@@ -244,31 +246,12 @@ function BackupLine({
           <Button onClick={onEdit} ariaExpanded={editing} ariaLabel={`Edit the backup of ${backup.localPath}`}>Edit</Button>
           <Button onClick={onConfirm} ariaLabel={`Stop backing up ${backup.localPath}`}>Stop</Button>
         </>}
-      >
-        <span role="img" aria-label={`${name} to ${destination}: ${TONE_LABEL[tone]}. ${TONE_SENTENCE[tone]}`}>
-          {backup.originState === "" ? "not counted yet" : `${backup.filesSeen.toLocaleString()} ${backup.filesSeen === 1 ? "file" : "files"} · ${formatBytes(backup.bytesSeen)}`}
-          {" → "}<span>{`${mine.length.toLocaleString()} ${mine.length === 1 ? "file" : "files"} here`}</span>
-        </span>
-      </RecordRow>
+      />
 
-      {/* SAY IT ONCE, and say the SPECIFIC one.
-          - A settled backup's label plus "checked N ago" already says
-            everything a sentence would, so healthy rows carry none. Repeating
-            it under every one of them is what makes the rows that DO need
-            reading hard to find.
-          - Where the origin is at fault, the origin's own sentence replaces
-            the tone's: it names what happened AND the repair, where the tone
-            can only say that something is wrong.
-          - Where a backup is PAUSED, the tone wins even over a fault, because
-            the fault is the last thing seen before the pause rather than
-            something happening now. */}
-      {tone === "settled" ? null : (
-        <Caption>
-          {tone !== "paused" && isOriginFault(backup.originState)
-            ? ORIGIN_SENTENCE[backup.originState]
-            : TONE_SENTENCE[tone]}
-        </Caption>
-      )}
+      {/* Only a FAULT gets a sentence, and the origin's own: it names what
+          happened and the repair. Waiting, copying and offline are said by the
+          row's second line already; a paused backup's old fault is not news. */}
+      {tone !== "paused" && isOriginFault(backup.originState) ? <Caption>{ORIGIN_SENTENCE[backup.originState]}</Caption> : null}
 
       {/* The machine's own words, verbatim and never paraphrased -- they name
           a path, a permission or an HTTP status somebody can act on, which is

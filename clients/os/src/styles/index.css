@@ -7355,6 +7355,9 @@ a.os-button {
  */
 
 .os-backup { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+/* A backup row's second line while its machine is away (owner's pick 8A). */
+.os-backup-offline { color: var(--os-warn); }
+.os-backups-add { padding-top: 8px; }
 
 /* The link and the row's actions share one line: the link takes a bounded
  * measure on the left and the buttons take the space that is left. An
