@@ -250,3 +250,15 @@ builtin vendorKeySetSharing {
 builtin vendorKeyActivity {
   keyId  string!  @description("One of your own keys.")
 }
+
+/// The daily check of API keys. It lists the vendor's models with every active key that has had no
+/// served call and no check for a day, refused keys included, and records what the vendor said. It
+/// sends no prompt and costs nothing. A key that may not list models and a key whose account is out
+/// of credit are left to the calls they pay for.
+///
+/// Only the engine's own scheduled automation vendorKeysDailyCheck may run it. A person is refused,
+/// a cluster owner included, and so is any other automation: to check one key now, a person uses
+/// vendorKeyCheck on a key they may see. One row: {checked, good, refused, credit, skipped}, where
+/// skipped counts the keys that were due and got no verdict in this run.
+@executor("integration.vendorkeys.sweep")
+builtin vendorKeysSweep { }

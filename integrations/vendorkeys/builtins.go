@@ -422,24 +422,34 @@ func (i *Integration) handleCheck(ctx context.Context, args map[string]any, _ in
 	if err != nil {
 		return nil, err
 	}
-	note, err := i.check(ctx, key)
+	result, err := i.check(ctx, key)
 	if err != nil {
 		return nil, err
 	}
-	return i.cardReply(ctx, me, key.Id, note)
+	return i.cardReply(ctx, me, key.Id, result.note)
 }
 
-// check asks the vendor about one key and records what it said. The note is a
-// sentence for the person when the check could not decide anything.
-func (i *Integration) check(ctx context.Context, key Key) (note string, err error) {
+// checkResult is what one check of a key came to.
+type checkResult struct {
+	// verdict is the vendor's answer, a memql.VendorKeyProbe constant. Only
+	// good, refused and credit are verdicts on the key and were recorded.
+	verdict string
+	// note is a sentence for a person when the check decided nothing.
+	note string
+}
+
+// check asks the vendor about one key and records what it said. It is the one
+// check: a person's Check now and the daily pass both come through here.
+func (i *Integration) check(ctx context.Context, key Key) (checkResult, error) {
 	if key.CheckedBy == CheckedByUse {
-		return useOnlyNote, nil
+		return checkResult{verdict: memql.VendorKeyProbeUseOnly, note: useOnlyNote}, nil
 	}
 	plain, err := i.resolver.Secret(ctx, accountOf(key))
 	if err != nil {
-		return "", refuse("This key could not be checked, because it could not be unsealed on this node. A cluster owner can find out why in the logs.")
+		return checkResult{}, refuse("This key could not be checked, because it could not be unsealed on this node. A cluster owner can find out why in the logs.")
 	}
 	probe := i.probe(ctx, key.Vendor, plain)
+	result := checkResult{verdict: probe.Verdict}
 	switch probe.Verdict {
 	case memql.VendorKeyProbeGood:
 		err = i.store.observe(ctx, key.Id, memql.VendorKeyGood, probe.At, "", true)
@@ -450,15 +460,18 @@ func (i *Integration) check(ctx context.Context, key Key) (note string, err erro
 	case memql.VendorKeyProbeUseOnly:
 		// The key was restricted since it was added. Nothing was learned
 		// about whether it works.
-		return useOnlyNote, nil
+		result.note = useOnlyNote
+		return result, nil
 	default:
 		// Not a verdict on the key: what is known about it stands.
-		return saidOr(probe.Detail, vendorName(key.Vendor)+" could not be reached to check the key. Try again in a moment."), nil
+		result.verdict = memql.VendorKeyProbeUnreachable
+		result.note = saidOr(probe.Detail, vendorName(key.Vendor)+" could not be reached to check the key. Try again in a moment.")
+		return result, nil
 	}
 	if err != nil {
-		return "", i.failed("check", key.Id, err)
+		return checkResult{}, i.failed("check", key.Id, err)
 	}
-	return "", nil
+	return result, nil
 }
 
 // handleForActor lists the keys the caller can see.

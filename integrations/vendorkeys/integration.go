@@ -52,6 +52,8 @@ type Integration struct {
 	// (memql.MemQLEngine.ShareDirectoryFor): the people and groups a machine of
 	// theirs could be lent to.
 	directory func(ctx context.Context) (memql.ShareDirectoryView, error)
+	// sweepLimit is how many keys one daily check lists at most.
+	sweepLimit int
 }
 
 // NewIntegration builds the integration over a store and its resolver.
@@ -156,6 +158,12 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Description: "What one of the caller's keys paid for this month: calls and estimated cost, in total and per person.",
 			Handler:     i.handleActivity,
 			ArgsSchema:  map[string]string{"keyId": "string (required) -- one of the caller's own keys."},
+		},
+		{
+			Name: "sweep",
+			Description: "The daily check: list the vendor's models with every active key idle for a day and record the answers. " +
+				"Answers only to the engine's own vendorKeysDailyCheck automation.",
+			Handler: i.handleSweep,
 		},
 	}
 }

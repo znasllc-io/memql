@@ -144,6 +144,9 @@ func autoOn() keyOption                 { return func(o *keyOptions) { o.auto = 
 func added(ago time.Duration) keyOption { return func(o *keyOptions) { o.addedAt = -ago } }
 func holding(plain string) keyOption    { return func(o *keyOptions) { o.plain = plain } }
 
+// checkedByUse makes the key one that may not list models (K12).
+func checkedByUse() keyOption { return func(o *keyOptions) { o.checkedBy = CheckedByUse } }
+
 // key adds a key for an owner the way the add does: both rows, as the owner,
 // good as of the check that let it in. It returns the key's bare id.
 func (w *world) key(owner, label string, opts ...keyOption) string {
@@ -170,6 +173,16 @@ func (w *world) key(owner, label string, opts ...keyOption) string {
 		require.NoError(w.t, w.store.UpdateSettings(context.Background(), id, Settings{AutoUse: &on}))
 	}
 	return id
+}
+
+// corruptSealedValue replaces a key's stored ciphertext with something this
+// cluster cannot open, in every stored version of the row.
+func (w *world) corruptSealedValue(key string) {
+	w.t.Helper()
+	_, err := w.db.NewUpdate().TableExpr(`"MemoryNodes"`).
+		Set(`payload = jsonb_set(payload, '{encryptedValue}', '"not-a-sealed-value"')`).
+		Where("id = ?", keyConcept+":"+key).Exec(context.Background())
+	require.NoError(w.t, err)
 }
 
 // lend sets who a key is lent to, as its owner.
