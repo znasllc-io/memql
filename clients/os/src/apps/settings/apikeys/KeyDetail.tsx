@@ -52,15 +52,20 @@ export function KeyDetail({
   const vendor = vendorName(card.vendor);
   // What a key paid for is its owner's to read. Nobody else is asked for it.
   const activity = useKeyActivity(card.id, mine, 0);
+  // What a check that HAPPENED has to add (the vendor could not be reached,
+  // a hold was lifted): information. A check that did not happen is a failure
+  // and is said as one, beside it and never in its place.
   const [note, setNote] = useState("");
+  const [checkRefusal, setCheckRefusal] = useState("");
   const checking = keys.busy === `check:${card.id}`;
   const waited = useElapsed(checking);
 
   async function checkNow() {
     setNote("");
+    setCheckRefusal("");
     const result = await keys.check(card.id);
     if (result.outcome === "done") setNote(result.card.note);
-    else setNote(result.sentence);
+    else setCheckRefusal(result.sentence);
   }
 
   const words = stateWords(card);
@@ -71,7 +76,7 @@ export function KeyDetail({
   if (card.full && card.checkedBy !== "use" && !checking) acts.push({ label: "Check now", tone: "primary", onAct: () => void checkNow() });
 
   return (
-    <div className="fleet-key" data-os-page-context={JSON.stringify({ page: "API key", name: card.label, vendor })}>
+    <div className="os-apikey" data-os-page-context={JSON.stringify({ page: "API key", name: card.label, vendor })}>
       <Head
         navigationKey={`key:${card.id}`}
         title={card.label}
@@ -124,6 +129,7 @@ export function KeyDetail({
       </Details>
 
       {note !== "" ? <Notice tone="info" sentence={note} /> : null}
+      {checkRefusal !== "" ? <Notice tone="error" sentence="The key was not checked." detail={checkRefusal} /> : null}
       <ActionBar
         state={checking ? `Checking with ${vendor}` : words.word}
         detail={checking ? "Listing models. No prompt is sent." : stateDetail(card, now)}
@@ -194,10 +200,10 @@ function RenameField({ card, keys, taken }: { card: KeyCard; keys: VendorKeys; t
           });
         }}
       >
-        <label className="os-sr-only" htmlFor={`fleet-key-name-${card.id}`}>
+        <label className="os-sr-only" htmlFor={`os-apikey-name-${card.id}`}>
           Name for {card.label}
         </label>
-        <input id={`fleet-key-name-${card.id}`} className="os-input" value={draft} maxLength={MAX_NAME} disabled={busy} aria-invalid={problem !== "" || undefined} onChange={(e) => setDraft(e.target.value)} />
+        <input id={`os-apikey-name-${card.id}`} className="os-input" value={draft} maxLength={MAX_NAME} disabled={busy} aria-invalid={problem !== "" || undefined} onChange={(e) => setDraft(e.target.value)} />
         <Button type="submit" tone="primary" disabled={!changed || problem !== ""} busy={busy} busyLabel="Saving...">
           Rename
         </Button>

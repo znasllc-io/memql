@@ -26,7 +26,7 @@ import { useOsConnection } from "../../live/connection";
 // and Apply.
 //
 // A PERSON'S OWN API KEY IS A DIFFERENT THING, AND IS NOT ON THIS PAGE. It is
-// added in Fleet > API keys, sealed as that person's row, and pays only for
+// added in Settings > API keys, sealed as that person's row, and pays only for
 // calls a person makes (design record
 // 2026-11-21-vendor-accounts-and-api-keys). The cluster still has no key.
 

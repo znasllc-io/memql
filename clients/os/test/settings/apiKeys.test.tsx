@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-// Fleet > API keys, the list (design record
+// Settings > API keys, the list (design record
 // 2026-11-21-vendor-accounts-and-api-keys, U1): a person's own keys and the
 // keys lent to them, as records that open; the one Add control; and for a
 // cluster owner, every key on the cluster behind Refine. Every key here is a
@@ -14,7 +14,8 @@ vi.mock("../../src/live/connection", () => ({
   osBridgePath: "/_memql/ws",
 }));
 
-const { activityRow, keyCard, keysConnection, lentCard, renderKeys, settle } = await import("./keysFixtures");
+const { activityRow, keyCard, keysConnection, lentCard, renderKeys, settle } = await import("./apiKeysFixtures");
+const { API_KEYS_ADD_PART } = await import("../../src/apps/settings/apikeys/ApiKeysSection");
 
 afterEach(cleanup);
 
@@ -95,7 +96,7 @@ describe("a key's row", () => {
     expect(within(personal).getByText("Personal")).toBeTruthy();
     expect(within(personal).getByText("Anthropic · ...a1b2")).toBeTruthy();
     expect(within(personal).getByText("Lent to 2")).toBeTruthy();
-    expect(within(personal).getByText("$1.20 this month")).toBeTruthy();
+    expect(within(personal).getByText("Estimated $1.20 this month")).toBeTruthy();
     const work = rowOf("Work");
     expect(within(work).getByText("OpenAI · ...c3d4")).toBeTruthy();
     // A model that was called has no price listed here: the cost is not a zero.
@@ -109,7 +110,7 @@ describe("a key's row", () => {
       activity: { k1: activityRow({ keyId: "k1", calls: 9, estimatedCost: 0.4, priced: false }), k2: activityRow({ keyId: "k2", calls: 0, estimatedCost: 0, priced: true }) },
     });
     await renderKeys("developer");
-    expect(within(rowOf("Personal")).getByText("$0.40 or more this month")).toBeTruthy();
+    expect(within(rowOf("Personal")).getByText("Estimated $0.40 or more this month")).toBeTruthy();
     expect(within(rowOf("Work")).getByText("Not used this month")).toBeTruthy();
   });
 
@@ -183,13 +184,31 @@ describe("what a person may do", () => {
     expect(screen.getAllByRole("button", { name: "Add an API key" })).toHaveLength(1);
   });
 
-  it("offers no Add control to somebody who may not, and still shows what is lent to them", async () => {
-    use({ lent: [lentCard()] });
-    // An admin holds neither Fleet nor the keys part; the section is drawn
-    // here only because the test mounts it directly.
-    await renderKeys("admin");
+  // Owner decision 2026-11-22: keys are bring-your-own for everybody. The
+  // set each role holds is read from the seeds themselves (seededAccess.ts).
+  it.each(["owner", "developer", "admin", "user", "viewer"])("offers the Add control to a signed-in %s", async (role) => {
+    use();
+    await renderKeys(role);
+    expect(screen.getAllByRole("button", { name: "Add an API key" })).toHaveLength(1);
+  });
+
+  it("offers no Add control to somebody the part was withheld from, and still shows the keys they own and are lent", async () => {
+    use({ mine: [keyCard()], lent: [lentCard()] });
+    // An operator's deny of the part, as it resolves for this person. A key's
+    // owner sees and opens their keys whatever they hold: only adding is gated.
+    await renderKeys("user", {}, [API_KEYS_ADD_PART]);
     expect(screen.queryByRole("button", { name: "Add an API key" })).toBeNull();
+    expect(rowOf("Personal")).toBeTruthy();
     expect(rowOf("Team")).toBeTruthy();
+    fireEvent.click(rowOf("Personal"));
+    await settle();
+    expect(screen.getByRole("heading", { name: "Personal" })).toBeTruthy();
+  });
+
+  it("tells a person with no keys and no way to add one what they will see here", async () => {
+    use();
+    await renderKeys("user", {}, [API_KEYS_ADD_PART]);
+    expect(screen.getByText("Keys that other people lend you appear here.")).toBeTruthy();
   });
 
   it("lets a cluster owner reach every key through Refine, and asks the cluster only then", async () => {
@@ -215,6 +234,33 @@ describe("what a person may do", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove Every key on this cluster" }));
     await settle();
     expect(within(list()).queryByText("Dana's")).toBeNull();
+  });
+
+  // K5: a cluster owner can check and remove ANY key on their cluster. One
+  // that is also lent to them arrives twice, as the short card of a borrower
+  // and as the full card of a cluster owner, and the fuller one is the one
+  // they asked for: the short card has no Check now and no Remove.
+  it("gives a cluster owner the full card of a key that is also lent to them", async () => {
+    use({
+      mine: [keyCard()],
+      lent: [lentCard({ id: "k9", label: "Team" })],
+      all: [keyCard(), keyCard({ id: "k9", label: "Team", vendor: "openai", fingerprint: "...9z9z", ownerUserId: "ben", ownerName: "Ben", relation: "lent", isDefault: true })],
+    });
+    await renderKeys("owner");
+    // Before asking, it is a key lent to them like any other.
+    expect(within(rowOf("Team")).getByText("OpenAI · lent by Ben")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Find API keys" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Every key on this cluster" }));
+    await settle();
+    expect(within(list()).getAllByRole("button", { name: /^Open Team\b/ })).toHaveLength(1);
+    expect(within(rowOf("Team")).getByText("OpenAI · ...9z9z")).toBeTruthy();
+
+    fireEvent.click(within(list()).getByRole("button", { name: /^Open Team\b/ }));
+    await settle();
+    const acts = within(screen.getByRole("group", { name: "What you can do with this" })).queryAllByRole("button").map((b) => b.textContent?.trim() ?? "");
+    expect(acts).toEqual(["Check now"]);
+    expect(screen.getByRole("button", { name: "Remove this key" })).toBeTruthy();
   });
 
   it("offers a developer no way to every key", async () => {

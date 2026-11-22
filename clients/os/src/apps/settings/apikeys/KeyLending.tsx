@@ -2,9 +2,9 @@ import { useState } from "react";
 import { sameEntityId, type Connection } from "@znasllc-io/memql-sdk-core/client";
 
 import { PageHelp } from "../../../kit/pageHelp";
-import { ShareEditor } from "../machines/SharingEditor";
-import type { StoredShare, Subject } from "../machines/sharing";
-import { shareDirectoryFrom, useDirectory, type ShareDirectory } from "../machines/useShareDirectory";
+import { ShareEditor } from "../../fleet/machines/SharingEditor";
+import type { StoredShare, Subject } from "../../fleet/machines/sharing";
+import { shareDirectoryFrom, useDirectory, type ShareDirectory } from "../../fleet/machines/useShareDirectory";
 import type { ActivityReading, VendorKeys } from "./useVendorKeys";
 import type { KeyCard } from "./words";
 

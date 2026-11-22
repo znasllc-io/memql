@@ -37,16 +37,6 @@ export const FLEET_SECTIONS: OsAppSection[] = [
   // the old Machine routing one, so a saved "open Fleet on" preference and a
   // deep link to it still land.
   { id: "routing", name: "Routing" },
-  // A person's own API keys for Anthropic and OpenAI, and the keys lent to
-  // them (design record 2026-11-21-vendor-accounts-and-api-keys, U1 and K4).
-  // After Routing because a key is an account behind the vendor models a
-  // route names, and before the Model library, which says what can serve.
-  //
-  // BEHIND ITS OWN PART, unlike the sections around it. Adding a key puts a
-  // credential that spends somebody's money into the cluster, so who may is a
-  // named part of Fleet (`app:fleet/keys`, seeded on owner and developer)
-  // that an operator can grant or withhold on its own.
-  { id: "keys", name: "API keys", requires: "app:fleet/keys" },
   // What the fleet can actually SERVE, in the order the router picks from
   // (epic memql#5096). The ranking it shows is what Routing's model order
   // (Routing > Machines) reorders.

@@ -1,13 +1,14 @@
 import { act, render } from "@testing-library/react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { KeysSection } from "../../src/apps/fleet/keys/KeysSection";
+import { ApiKeysSection } from "../../src/apps/settings/apikeys/ApiKeysSection";
 import { SessionProvider } from "../../src/chrome/access";
 import { UNKNOWN_RUNTIME_CONFIG } from "../../src/cluster/config";
-import { installSeededAccess } from "../seededAccess";
-import { builtinReply, fakeConnection, type generatedQuery } from "./harness";
+import { setEffectiveCapabilities } from "../../src/system/roles";
+import { installSeededAccess, seededAccessWithout } from "../seededAccess";
+import { builtinReply, fakeConnection, type generatedQuery } from "../fleet/harness";
 
-// The double behind Fleet > API keys (design record
+// The double behind Settings > API keys (design record
 // 2026-11-21-vendor-accounts-and-api-keys, U1 to U3).
 //
 // EVERY VALUE HERE IS MADE UP. No fixture is a key: `TYPED_KEY` only has the
@@ -237,12 +238,18 @@ export async function settle() {
 }
 
 /**
- * Fleet > API keys as FleetApp mounts it, as a role. `sessionRole` is the role
- * the session reports; it differs from `role` only for a person holding a
+ * Settings > API keys as SettingsApp mounts it, as a role. `sessionRole` is the
+ * role the session reports; it differs from `role` only for a person holding a
  * grant.
  */
-export async function renderKeys(role = "owner", props: Partial<Parameters<typeof KeysSection>[0]> = {}) {
-  installSeededAccess(role);
+export async function renderKeys(
+  role = "owner",
+  props: Partial<Parameters<typeof ApiKeysSection>[0]> = {},
+  /** Resources an operator's deny takes away from this person. */
+  withheld: string[] = [],
+) {
+  if (withheld.length === 0) installSeededAccess(role);
+  else setEffectiveCapabilities(seededAccessWithout(role, ...withheld));
   const ui = (active: boolean) => (
     <SessionProvider
       value={{
@@ -250,7 +257,7 @@ export async function renderKeys(role = "owner", props: Partial<Parameters<typeo
         config: { ...UNKNOWN_RUNTIME_CONFIG, domain: "memql.example.com" },
       }}
     >
-      <KeysSection active={active} {...props} />
+      <ApiKeysSection active={active} {...props} />
     </SessionProvider>
   );
   const view = render(ui(props.active ?? true));

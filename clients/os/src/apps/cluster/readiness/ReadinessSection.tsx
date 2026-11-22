@@ -158,7 +158,7 @@ function InferenceLine({
         <Notice
           tone="warn"
           sentence="No door to a model is open, so anything that needs one will refuse."
-          next={notReadyNext({ ...facts, mayAddKey: holds("execute", "app:fleet/keys") })}
+          next={notReadyNext({ ...facts, mayAddKey: holds("execute", "app:settings/apikeys") })}
         >
           <Caption>
             {!facts.fleetCatalogInstalled
@@ -208,7 +208,7 @@ function notReadyNext(facts: {
   federationConfigured: boolean;
   fleetCatalogInstalled: boolean;
   appSessionsInstalled: boolean;
-  /** The reader holds the Fleet part that adds an API key. */
+  /** The reader holds the Settings part that adds an API key. */
   mayAddKey: boolean;
 }): string {
   const routes: string[] = [];
@@ -237,7 +237,7 @@ function notReadyNext(facts: {
   // 2026-11-21-vendor-accounts-and-api-keys). Named only to somebody who may
   // add one: a route nobody on the page can take is not a way to open a door.
   if (facts.mayAddKey) {
-    routes.push("add an API key of your own for Anthropic or OpenAI (Fleet -> API keys)");
+    routes.push("add an API key of your own for Anthropic or OpenAI (Settings -> API keys)");
   }
   // THE KEY ROUTE IS GONE, and `cloudConfigured` no longer earns one of its
   // own (epic memql#5088). "Add a provider key" pointed at a box that no

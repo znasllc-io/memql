@@ -6,13 +6,15 @@ import { AutoRefresh, ChoiceRow, EmptyState, Head, HeadNote, InlineSkeleton, Not
 import { AddButton } from "../../../kit/AddButton";
 import { PageHelp } from "../../../kit/pageHelp";
 import { holds } from "../../../system/roles";
-import { matchesQuery } from "../machines/sharing";
+import { matchesQuery } from "../../fleet/machines/sharing";
 import { AddKeyWizard } from "./AddKeyWizard";
 import { KeyDetail } from "./KeyDetail";
 import { useKeyActivity, useVendorKeys } from "./useVendorKeys";
 import { costWords, drawsStates, stateWords, vendorName, type KeyCard } from "./words";
 
-// Fleet > API keys (design record 2026-11-21-vendor-accounts-and-api-keys, U1).
+// Settings > API keys (design record 2026-11-21-vendor-accounts-and-api-keys,
+// U1 as amended 2026-11-22: the owner moved a person's keys out of Fleet, which
+// opens for owners and developers only, to a place everybody can open).
 //
 // A person's own keys and the keys other people lent them, as one flat list of
 // records that open (DESIGN.md, "Record lists"). The Head carries the title and
@@ -21,24 +23,30 @@ import { costWords, drawsStates, stateWords, vendorName, type KeyCard } from "./
 // scroll column (rule 11).
 //
 // WHO SEES WHAT IS THE CLUSTER'S ANSWER, NOT THIS FILE'S. The list is what
-// `vendorKeysForActor` returns for the caller. What this file decides is only
-// which controls to draw: the Add control for somebody who holds the part, and
-// for a cluster owner the question "every key on this cluster", asked behind
-// Refine and sent only when it is asked.
+// `vendorKeysForActor` returns for the caller: their own keys, whatever their
+// role, and the keys lent to them. What this file decides is only which
+// controls to draw: the Add control for somebody who holds the part, and for a
+// cluster owner the question "every key on this cluster", asked behind Refine
+// and sent only when it is asked.
+//
+// THE SECTION HAS NO FLOOR OF ITS OWN (apps/registry.tsx). A key's owner must
+// always be able to reach it to change or remove it, so the page opens for
+// everybody who opens Settings and only ADDING is a part an operator can
+// withhold.
 
-/** The Fleet part a person's own keys sit behind (K4). */
-const KEYS_PART = "app:fleet/keys";
+/** The part that adds a key. Every predefined role holds it (K4, amended). */
+export const API_KEYS_ADD_PART = "app:settings/apikeys";
 
 type View = { kind: "list" } | { kind: "add" } | { kind: "key"; id: string };
 
-export function KeysSection({ active = true }: { active?: boolean }) {
+export function ApiKeysSection({ active = true }: { active?: boolean }) {
   const keys = useVendorKeys();
   const { access } = useSession();
   // Asking for every key is a cluster owner's question. The cluster is the
   // authority either way; this only keeps the control off pages it would
   // answer nothing on.
   const clusterOwner = access?.role === "owner";
-  const mayAdd = holds("execute", KEYS_PART);
+  const mayAdd = holds("execute", API_KEYS_ADD_PART);
   const [view, setView] = useState<View>({ kind: "list" });
   const [search, setSearch] = useState("");
   // Moves each time the section is shown again, so what a row read once is
@@ -60,13 +68,23 @@ export function KeysSection({ active = true }: { active?: boolean }) {
 
   // Every key the reader can open, once each: their own, then what is lent to
   // them, then (for a cluster owner who asked) everybody else's.
+  //
+  // THE FULLER CARD WINS. A key lent to a cluster owner arrives twice once
+  // they ask for every key: as a borrower's short card, and as the full card
+  // a cluster owner is given of any key. The short one has no Check now and
+  // no Remove, and a cluster owner may check and remove every key on their
+  // cluster, this one included. It keeps its place in the list.
   const everything = useMemo(() => {
-    const seen = new Set<string>();
+    const at = new Map<string, number>();
     const out: KeyCard[] = [];
     for (const card of [...keys.mine, ...keys.lent, ...keys.all]) {
-      if (seen.has(card.id)) continue;
-      seen.add(card.id);
-      out.push(card);
+      const seen = at.get(card.id);
+      if (seen === undefined) {
+        at.set(card.id, out.length);
+        out.push(card);
+      } else if (card.full && !out[seen]!.full) {
+        out[seen] = card;
+      }
     }
     return out;
   }, [keys.mine, keys.lent, keys.all]);
@@ -92,7 +110,7 @@ export function KeysSection({ active = true }: { active?: boolean }) {
   const narrowed = keys.wantAll || search.trim() !== "";
 
   return (
-    <div className="fleet-keys" data-os-page-context={JSON.stringify({ page: "API keys", search: search || undefined })}>
+    <div className="os-apikeys" data-os-page-context={JSON.stringify({ page: "API keys", search: search || undefined })}>
       <Head
         title="API keys"
         meta={keys.state === "ready" && narrowed ? `${shown.length} shown` : undefined}
@@ -122,7 +140,7 @@ export function KeysSection({ active = true }: { active?: boolean }) {
       <PageHelp title="API keys">
         <p>An API key pays for Anthropic or OpenAI models with an account of your own. It is sealed in this cluster when you add it, and nothing shows it again.</p>
         <p>A route you choose in Ask spends your default key at the model's vendor. Auto spends a key only after you turn on "Let Auto use this key" on that key. You can lend a key to named people and groups, who then pay for their calls with it.</p>
-        <p>The cluster never spends a key for its own work. The cluster's own vendor account is set up in Settings, under Vendors.</p>
+        <p>The cluster never spends a key for its own work. The cluster's own vendor account is set up under Vendors.</p>
         <p>Every call a key pays for checks it, and a key nothing used for a day is checked by listing the vendor's models, which sends no prompt and costs nothing.</p>
       </PageHelp>
       <AutoRefresh enabled={active} busy={keys.busy !== ""} onRefresh={keys.reload} />

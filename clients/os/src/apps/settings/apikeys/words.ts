@@ -4,7 +4,7 @@ import { formatMoney } from "../../../kit/format";
 import { flatten } from "../../../kit/rows";
 import type { RecordTone } from "../../../kit/RecordRow";
 
-// Fleet > API keys, as values (design record
+// Settings > API keys, as values (design record
 // 2026-11-21-vendor-accounts-and-api-keys, U1 to U3).
 //
 // PURE, beside the components that draw it, for the reason machines/sharing.ts
@@ -257,8 +257,12 @@ const dollars = formatMoney("USD");
  */
 export function costWords(activity: Pick<KeyActivity, "calls" | "estimatedCost" | "priced">): string {
   if (activity.calls === 0) return "Not used this month";
-  if (activity.priced) return `${dollars(activity.estimatedCost)} this month`;
-  if (activity.estimatedCost > 0) return `${dollars(activity.estimatedCost)} or more this month`;
+  // ALWAYS SAID TO BE AN ESTIMATE, on the row as on the key's page. The figure
+  // is this cluster's own, from the price it lists for each model, and a
+  // number with a dollar sign beside a vendor's name reads as that vendor's
+  // bill unless it says otherwise.
+  if (activity.priced) return `Estimated ${dollars(activity.estimatedCost)} this month`;
+  if (activity.estimatedCost > 0) return `Estimated ${dollars(activity.estimatedCost)} or more this month`;
   return "Not priced";
 }
 
@@ -316,7 +320,7 @@ const NOT_PERMITTED = /capability_not_held|rank_floor_not_met|not permitted/i;
 export function refusalWords(err: unknown, construct: string, typed = ""): string {
   const raw = err instanceof Error ? err.message : String(err);
   let sentence = NOT_PERMITTED.test(raw)
-    ? "You may not add API keys or change them here. A cluster owner can give you the API keys part of Fleet."
+    ? "You may not add API keys on this cluster. A cluster owner can allow it for you in Users, under Access."
     : refusalSentence(err, construct).trim();
   const secret = typed.trim();
   if (secret !== "" && sentence.includes(secret)) sentence = "The cluster refused, and its answer cannot be shown here.";

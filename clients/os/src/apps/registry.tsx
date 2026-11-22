@@ -79,6 +79,19 @@ const settings: OsAppManifest = {
     { id: "connections", name: "Connections", requires: "app:settings/connections" },
     { id: "pipelines", name: "Pipelines", parent: "integrations", requires: "app:settings/pipelines" },
     { id: "providers", name: "Vendors", requires: "app:settings/providers" },
+    // A person's own API keys for Anthropic and OpenAI, and the keys lent to
+    // them (design record 2026-11-21-vendor-accounts-and-api-keys, U1 as
+    // amended 2026-11-22). Beside Vendors because both are accounts that pay
+    // for a vendor's models: Vendors is the cluster's, this is yours.
+    //
+    // NO FLOOR, unlike every section around it, and that is the decision: a
+    // key's owner uses and manages it whatever their role, so the page opens
+    // for everybody who opens Settings. It is what makes Settings open at all
+    // for a user or a viewer, who hold none of the other sections. ADDING a
+    // key is the part (`execute app:settings/apikeys`, seeded on every
+    // predefined role), which an operator withholds with a deny in Users >
+    // Access.
+    { id: "apikeys", name: "API keys" },
     { id: "levels", name: "Levels", requires: "app:settings/levels" },
     { id: "rules", name: "Rules", parent: "levels", requires: "app:settings/rules" },
     { id: "decisions", name: "Decisions", parent: "levels", requires: "app:settings/decisions" },

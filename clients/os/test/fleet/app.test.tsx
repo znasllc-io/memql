@@ -91,9 +91,9 @@ describe("the Fleet manifest", () => {
       "overview",
       "machines",
       "routing",
-      // A person's own API keys, behind the part an owner and a developer hold
-      // (design record 2026-11-21-vendor-accounts-and-api-keys, U1 and K4).
-      "keys",
+      // No API keys section: a person's keys live in Settings, which opens
+      // for every role (design record 2026-11-21-vendor-accounts-and-api-keys,
+      // U1 and K4 as amended 2026-11-22).
       "models",
       "apps",
       "workbenches",

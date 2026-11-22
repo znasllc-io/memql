@@ -11,7 +11,6 @@ import { AppsSection } from "./apps/AppsSection";
 import { useAddMachineFlow } from "./addMachine/useAddMachineFlow";
 import { FleetOverview } from "./overview/FleetOverview";
 import { FleetWorkspace, type FleetSelection } from "./FleetWorkspace";
-import { KeysSection } from "./keys/KeysSection";
 import { ModelsSection } from "./models/ModelsSection";
 import { RoutingSection } from "./routing/RoutingSection";
 import { WorkbenchesSection } from "./workbenches/WorkbenchesSection";
@@ -129,7 +128,6 @@ export function FleetApp({
           : id === "routing" ? <RoutingSection intent={active ? intent : undefined} consumeIntent={consumeIntent}
               onAddMachine={() => { if (!addMachine.active) addMachine.start({ inference: true }); navigate("machines", { fromContent: true }); }}
               onOpenModels={() => navigate("models", { fromContent: true })} />
-          : id === "keys" ? <KeysSection active={active} />
           : id === "workbenches" ? <WorkbenchesSection />
           : id === "apps" ? <AppsSection navigation={active ? navigation : undefined} />
           : <FleetWorkspace selection={selection} select={select} navigate={navigate}

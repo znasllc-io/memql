@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { readTheBarNow } from "../readTheBar";
 
-// Fleet > API keys > a key's page (design record
+// Settings > API keys > a key's page (design record
 // 2026-11-21-vendor-accounts-and-api-keys, U3): what the cluster knows about
 // the key, what its owner may change, who it is lent to, and the state with
 // Check now in the one action bar. An act a person may not take is absent,
@@ -16,7 +16,7 @@ vi.mock("../../src/live/connection", () => ({
   osBridgePath: "/_memql/ws",
 }));
 
-const { activityRow, directoryRow, droppedConnection, keyCard, keysConnection, lentCard, renderKeys, settle } = await import("./keysFixtures");
+const { activityRow, directoryRow, droppedConnection, keyCard, keysConnection, lentCard, renderKeys, settle } = await import("./apiKeysFixtures");
 
 afterEach(cleanup);
 beforeEach(() => {
@@ -244,6 +244,26 @@ describe("the state, and checking now", () => {
     await pressBar("Check now");
     expect(screen.getByText(/The connection dropped before the cluster answered/)).toBeTruthy();
     expect(screen.queryByText("stream closed")).toBeNull();
+  });
+
+  // A check that did not happen is a failure, said as one. What a check that
+  // DID happen has to add (the vendor could not be reached, the hold was
+  // lifted) is information, and stays quiet.
+  it("says a check that failed as a failure, and what a finished check adds as a note", async () => {
+    const made = use({ mine: [keyCard()] });
+    made.fail("vendorKeyCheck", "This key could not be checked, because it could not be unsealed on this node.");
+    await renderKeys("developer");
+    await open("Personal");
+    await pressBar("Check now");
+    const failed = screen.getByText("The key was not checked.").closest(".os-notice");
+    expect(failed?.getAttribute("data-tone")).toBe("error");
+    expect(within(failed as HTMLElement).getByText(/could not be unsealed on this node/)).toBeTruthy();
+
+    made.state.nextChecked = { state: "good", detail: "", note: "Anthropic could not be reached to check the key. Try again in a moment." };
+    await pressBar("Check now");
+    expect(screen.queryByText("The key was not checked.")).toBeNull();
+    const noted = screen.getByText("Anthropic could not be reached to check the key. Try again in a moment.").closest(".os-notice");
+    expect(noted?.getAttribute("data-tone")).toBe("info");
   });
 });
 

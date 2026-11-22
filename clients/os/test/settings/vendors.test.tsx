@@ -38,7 +38,8 @@ import type { DoorId, InferenceReading } from "../../src/apps/settings/routingFa
 // that way. This page is the CLUSTER'S OWN account at a vendor, which is
 // federation and nothing else; the engine's cluster-wide key-sealing builtin is
 // deleted, so a box that posted to it would be a control whose only outcome is
-// a refusal. A person's own API key is added in Fleet, never here.
+// a refusal. A person's own API key is added under API keys, the next section
+// of Settings, never here.
 //
 // The planted key below is what the "no key anywhere" sweeps look for. It is
 // long and distinctive so a sweep over the rendered tree is not vacuous, and
@@ -597,13 +598,17 @@ describe("Settings -> Vendors: no key is entered here", () => {
     // no key anywhere, which stopped being true.
     expect(container.textContent).toMatch(/vendor's own console/i);
     expect(container.textContent).toMatch(/No API key is entered here/i);
-    expect(container.textContent).toMatch(/A key of your own is added in Fleet/i);
+    expect(container.textContent).toMatch(/A key of your own is added under API keys/i);
     expect(container.textContent).not.toMatch(/anywhere else/i);
   });
 
-  it("says once where a person's own key goes, and takes them there", async () => {
-    await renderDoors();
-    expect(screen.getAllByRole("button", { name: "API keys are in Fleet" })).toHaveLength(1);
+  it("says where a person's own key goes in words, and adds no control for the section beside it", async () => {
+    // API keys is the next section of this same app (owner decision
+    // 2026-11-22), one tab along. A second control to an adjacent tab would be
+    // a control with nothing to add, and the page no longer points at Fleet.
+    const { container } = await renderDoors();
+    expect(container.textContent).not.toMatch(/in Fleet, under\s+API keys/i);
+    expect(screen.queryByRole("button", { name: /API keys/i })).toBeNull();
   });
 });
 

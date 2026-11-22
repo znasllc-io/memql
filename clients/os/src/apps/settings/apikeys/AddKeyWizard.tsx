@@ -127,7 +127,7 @@ export function AddKeyWizard({
       answer: vendor !== "" && step !== "vendor" ? vendorName(vendor) : undefined,
       body: (
         <ChoiceStack
-          name="fleet-add-key-vendor"
+          name="os-apikey-add-vendor"
           label="Vendor"
           voice="prose"
           value={vendor}
@@ -149,7 +149,7 @@ export function AddKeyWizard({
       body: (
         <Field label="Name">
           <Input
-            id="fleet-add-key-name"
+            id="os-apikey-add-name"
             label="A name for this key"
             value={name}
             placeholder="Personal"
@@ -172,7 +172,7 @@ export function AddKeyWizard({
       body: (
         <>
           <Field label="API key">
-            <Input id="fleet-add-key-value" label="The API key" value={key} placeholder={placeholder} conceal invalid={refusal !== ""} onChange={setKey} onEnter={() => void add()} />
+            <Input id="os-apikey-add-value" label="The API key" value={key} placeholder={placeholder} conceal invalid={refusal !== ""} onChange={setKey} onEnter={() => void add()} />
           </Field>
           <Caption>
             {vendorLabel} is asked to list its models with this key, which sends no prompt and costs nothing. If it accepts the key, the key is sealed in this cluster and nothing shows it again.
@@ -232,7 +232,7 @@ export function AddKeyWizard({
 
   return (
     <Wizard
-      className="fleet-add-key"
+      className="os-apikey-add"
       icon={<KeyRound aria-hidden />}
       title="Add an API key"
       lead="Pay for Anthropic or OpenAI models with an account of your own."

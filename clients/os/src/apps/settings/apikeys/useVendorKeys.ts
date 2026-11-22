@@ -4,10 +4,10 @@ import { isTransportInterruption, refusalSentence, type QueryClient, type Result
 import { useSession } from "../../../chrome/access";
 import { useReading } from "../../../cluster/reading";
 import { useOsConnection } from "../../../live/connection";
-import type { ShareChoice } from "../machines/useMachineWrites";
+import type { ShareChoice } from "../../fleet/machines/useMachineWrites";
 import { activityFrom, keyCardFrom, keyListsFrom, refusalWords, UNANSWERED, type KeyActivity, type KeyCard, type KeyLists } from "./words";
 
-// The reads and the writes behind Fleet > API keys (design record
+// The reads and the writes behind Settings > API keys (design record
 // 2026-11-21-vendor-accounts-and-api-keys, U1 to U3).
 //
 // NOTHING HERE IS A LIVE FEED. A key's two rows publish no graph events: they

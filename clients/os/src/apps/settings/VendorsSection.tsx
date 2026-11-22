@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Button, Caption, RecordList, RecordRow, Field, Head, Input, Notice, Panel, Subhead, formatMoment } from "../../kit";
 import { findRegion, revealRegion } from "../../kit";
 import { useSession } from "../../chrome/access";
-import { ApiKeysAreInFleet, RoutingIsInFleet } from "./RoutingLink";
+import { RoutingIsInFleet } from "./RoutingLink";
 import type { OsAppProps } from "../../system/registry";
 import {
   doorFor,
@@ -126,17 +126,17 @@ export function VendorsSection({
         </Button>
       </Head>
       {/* THE CLUSTER'S OWN ACCOUNT, and nothing else. No key is entered on
-          this page. A person's own API key is theirs, and is added in Fleet;
-          the page says where once (design record
-          2026-11-21-vendor-accounts-and-api-keys, U6). It used to say there
-          was no API key anywhere, which stopped being true. */}
+          this page. A person's own API key is theirs, and is added under API
+          keys, the next section of this app; the page says where once, in
+          words (design record 2026-11-21-vendor-accounts-and-api-keys, U6 as
+          amended 2026-11-22). No control goes there: the tab is one along. It
+          used to say there was no API key anywhere, which stopped being true. */}
       <p className="os-caption">
         Ids from each vendor&apos;s own console, for the cluster&apos;s own account.
-        No API key is entered here. A key of your own is added in Fleet, under
-        API keys. A vendor bills per call.
+        No API key is entered here. A key of your own is added under API keys.
+        A vendor bills per call.
       </p>
       <RoutingIsInFleet tab="routes" />
-      <ApiKeysAreInFleet />
 
       {registry.error ? (
         <Notice tone="warn" sentence={`The cluster declined this read for ${access?.role || "your role"}.`} detail={registry.error} />

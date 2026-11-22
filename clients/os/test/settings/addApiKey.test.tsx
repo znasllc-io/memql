@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { readTheBarNow } from "../readTheBar";
 
-// Fleet > API keys > Add an API key (design record
+// Settings > API keys > Add an API key (design record
 // 2026-11-21-vendor-accounts-and-api-keys, U2): one question a step on the
 // shell's one wizard, the forward act on the floor, a refusal in place, and a
 // typed value that goes to the cluster in one call and nowhere else. The value
@@ -16,7 +16,7 @@ vi.mock("../../src/live/connection", () => ({
   osBridgePath: "/_memql/ws",
 }));
 
-const { TYPED_KEY, droppedConnection, keyCard, keysConnection, renderKeys, settle } = await import("./keysFixtures");
+const { TYPED_KEY, droppedConnection, keyCard, keysConnection, renderKeys, settle } = await import("./apiKeysFixtures");
 
 afterEach(cleanup);
 // A bar that has just changed takes no press for a moment (kit ActionBar): each
@@ -234,7 +234,7 @@ describe("when the cluster says no", () => {
 
   it("says in the person's words that they may not add keys, when the part was taken away", async () => {
     const made = use();
-    made.fail("vendorKeyAdd", 'vendorKeyAdd: capability_not_held: "vendorKeyAdd" requires execute on app:fleet/keys');
+    made.fail("vendorKeyAdd", 'vendorKeyAdd: capability_not_held: "vendorKeyAdd" requires execute on app:settings/apikeys');
     await renderKeys("developer");
     await toTheKeyStep();
     fireEvent.change(keyField(), { target: { value: TYPED_KEY } });
