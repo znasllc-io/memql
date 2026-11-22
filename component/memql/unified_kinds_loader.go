@@ -158,7 +158,17 @@ func loadUnifiedProvidersFromTree(tree fs.FS, connect bool, logger *slog.Logger,
 		}
 	}
 
-	total := registerParsedProvidersWithClients(logger, registry, all, connect)
+	// A record whose declared job is refused (provider_job.go) is a skip like
+	// any other record the loader cannot use: reported, and not registered.
+	refused := func(p parsedProviderConfig, err error) {
+		file, name, _ := strings.Cut(p.origin, ":")
+		if logger != nil {
+			logger.Warn("memql.unifiedProviderLoader: record refused",
+				"file", file, "provider", name, "error", err)
+		}
+		rep.AddSkip(baseloader.Skip{Component: "memql.unifiedProviderLoader", Keyword: "provider", Name: name, File: file, Phase: "validate", Err: err.Error()})
+	}
+	total := registerParsedProvidersWithClients(logger, registry, all, connect, refused)
 	rep.AddRegistered("providers", total)
 	if logger != nil {
 		logger.Info("memql.unifiedProviderLoader: registered",
@@ -196,10 +206,22 @@ type parsedProviderConfig struct {
 // debug line -- which is the whole point: they stay in the tree for a
 // future re-enable without polluting boot logs.
 func registerParsedProviders(logger *slog.Logger, registry *ProviderRegistry, all []parsedProviderConfig) int {
-	return registerParsedProvidersWithClients(logger, registry, all, true)
+	return registerParsedProvidersWithClients(logger, registry, all, true, nil)
 }
 
-func registerParsedProvidersWithClients(logger *slog.Logger, registry *ProviderRegistry, all []parsedProviderConfig, connect bool) int {
+// registerParsedProvidersWithClients is registerParsedProviders with the two
+// things the loader decides: whether clients are built, and where a record it
+// refuses is reported. A nil refused still leaves the record unregistered.
+func registerParsedProvidersWithClients(logger *slog.Logger, registry *ProviderRegistry, all []parsedProviderConfig, connect bool, refused func(parsedProviderConfig, error)) int {
+	refuse := func(p parsedProviderConfig, err error) {
+		if refused != nil {
+			refused(p, err)
+			return
+		}
+		if logger != nil {
+			logger.Warn("memql.unifiedProviderLoader: record refused", "provider", p.cfg.Name, "error", err)
+		}
+	}
 	// Collect the @disabled @base names up front so pass 2 can
 	// propagate the disable to every child that @extends one. A
 	// disabled base is never registered, so a child extending it
@@ -228,6 +250,11 @@ func registerParsedProvidersWithClients(logger *slog.Logger, registry *ProviderR
 				logger.Debug("memql.unifiedProviderLoader: skipping @disabled base provider",
 					"provider", p.cfg.Name)
 			}
+			continue
+		}
+		// A base serves no call, so it declares no job (provider_job.go).
+		if err := validateProviderJob(*p.cfg); err != nil {
+			refuse(p, err)
 			continue
 		}
 		registry.setEntry(&ProviderConfigEntry{Config: *p.cfg})
@@ -270,6 +297,12 @@ func registerParsedProvidersWithClients(logger *slog.Logger, registry *ProviderR
 		}
 		entry := &ProviderConfigEntry{Config: *p.cfg}
 		resolveProviderExtends(&entry.Config, registry)
+		// The job a record declares is checked HERE, once its base has given
+		// it a type: whether it is a vendor's text model is not known before.
+		if err := validateProviderJob(entry.Config); err != nil {
+			refuse(p, err)
+			continue
+		}
 		// Analysis checks definitions, never resolves live secrets or constructs clients.
 		if !connect {
 			registry.setEntry(entry)

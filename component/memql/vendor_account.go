@@ -218,13 +218,7 @@ func VendorOfEntry(e *ProviderConfigEntry) string {
 	if e.Config.ResolvedModality() != ModalityText {
 		return ""
 	}
-	switch strings.ToLower(strings.TrimSpace(e.Config.Type)) {
-	case "anthropic", "anthropicchat":
-		return VendorAnthropic
-	case "openai", "openaichat":
-		return VendorOpenAI
-	}
-	return ""
+	return vendorOfType(e.Config.Type)
 }
 
 // keysServe reports whether a key may pay for this query at all, before any
