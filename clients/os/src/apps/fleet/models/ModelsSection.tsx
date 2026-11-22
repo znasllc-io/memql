@@ -555,7 +555,11 @@ function ModelLine({
 function doorSentence(doors: DoorsReading): string {
   const open = doors.doorsOpen.map((door) => doorWord(door, doors));
   if (open.length === 0) {
-    return "No inference source is available. Connect a model or a signed-in app to run tasks that need inference.";
+    // All three ways in, because the third is the only one somebody with no
+    // machine and no app can take by themselves: an API key of their own,
+    // added in Settings. The vendors line below says the same in its own
+    // words for the case where only the vendors are missing.
+    return "No inference source is available. Connect a model or a signed-in app, or add an API key in Settings, to run tasks that need inference.";
   }
   if (open.length === 1) return `This cluster reaches a model through ${open[0]}.`;
   return `This cluster reaches a model through ${open.slice(0, -1).join(", ")} and ${open[open.length - 1]}, in that order.`;

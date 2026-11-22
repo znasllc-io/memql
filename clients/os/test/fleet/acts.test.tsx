@@ -1128,5 +1128,18 @@ describe("the vendors line among the inference sources", () => {
     expect(within(line).getByText("Unavailable")).toBeTruthy();
     expect(within(line).getByText("the cluster's vendor account does not pay for your calls; add an API key in Settings")).toBeTruthy();
   });
+
+  // The sentence above the three lines, when nothing can serve. An API key is
+  // the one source a person with no machine and no app can add by themselves,
+  // so the sentence that tells them what to do has to name it.
+  it("names an API key among the ways to get a source when there is none", async () => {
+    await shown({
+      eligible: false, doorsOpen: [], localEligible: false, localModelCount: 0, eligibleModelIds: [],
+      appEligible: false, federationConfigured: false, clusterAccountOpen: false, keyAccount: false,
+    });
+    expect(screen.getByText(
+      "No inference source is available. Connect a model or a signed-in app, or add an API key in Settings, to run tasks that need inference.",
+    )).toBeTruthy();
+  });
 });
 
