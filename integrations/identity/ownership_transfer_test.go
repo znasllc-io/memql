@@ -216,3 +216,78 @@ func TestTransferLeavesAccessCodesWhereTheyWereStamped(t *testing.T) {
 		}
 	}
 }
+
+// A PERSON'S API KEY NEVER CHANGES HANDS (vendor accounts design, K5 and K16). A key spends the
+// money of the person who added it. A transfer that moved it would let a cluster owner take a
+// developer's key by naming it, and would hand a leaver's keys to their heir during an ordinary
+// offboarding, still active and still their default. A leaver's keys stay theirs and stop serving
+// because their owner is no longer an active user. The state row stays beside the key it is about.
+func TestTransferLeavesAPersonsApiKeysWhereTheyAre(t *testing.T) {
+	if _, err := memql.LoadUnifiedConcepts(nil); err != nil {
+		t.Fatalf("LoadUnifiedConcepts: %v", err)
+	}
+	listed := transferableConcepts("")
+	if !slices.Contains(listed, "v1:platform:site") {
+		t.Fatalf("the site is not transferable, so this filter is not what is being measured: %v", listed)
+	}
+	for _, concept := range []string{"v1:router:vendorKey", "v1:router:vendorKeyState"} {
+		if decl := conceptRowAuthz(concept); decl == nil || decl.Owner != "ownerUserId" {
+			t.Fatalf("%s no longer declares an owner field, so nothing here is excluding it: %+v", concept, decl)
+		}
+		if slices.Contains(listed, concept) {
+			t.Errorf("%s is transferable: a whole-user transfer would hand a person's API key to somebody else", concept)
+		}
+		if named := transferableConcepts(concept); len(named) != 0 {
+			t.Errorf("naming %s is a way to take somebody's API key: %v", concept, named)
+		}
+		if reason := stampedAtBirth[concept]; strings.TrimSpace(reason) == "" {
+			t.Errorf("%s is excluded with no reason beside it", concept)
+		}
+	}
+}
+
+// A PERSON'S SOURCE ACCESS NEVER CHANGES HANDS (owner decision 2026-11-22). A source credential
+// is one person's sealed access to their repositories at GitHub, and a source connection is a
+// selection they made from it. A transfer that moved them let an heir fetch as the person who
+// left. The package IS transferred, and stops fetching until its new owner connects their own
+// access: that is the reachable positive here.
+func TestTransferLeavesAPersonsSourceAccessWhereItIs(t *testing.T) {
+	if _, err := memql.LoadUnifiedConcepts(nil); err != nil {
+		t.Fatalf("LoadUnifiedConcepts: %v", err)
+	}
+	listed := transferableConcepts("")
+	if !slices.Contains(listed, "v1:platform:package") {
+		t.Fatalf("the package is not transferable, so this filter is not what is being measured: %v", listed)
+	}
+	for _, concept := range []string{"v1:platform:sourceCredential", "v1:platform:sourceConnection"} {
+		if decl := conceptRowAuthz(concept); decl == nil || decl.Owner != "ownerUserId" {
+			t.Fatalf("%s no longer declares an owner field, so nothing here is excluding it: %+v", concept, decl)
+		}
+		if slices.Contains(listed, concept) {
+			t.Errorf("%s is transferable: a whole-user transfer would hand a person's source access to somebody else", concept)
+		}
+		if named := transferableConcepts(concept); len(named) != 0 {
+			t.Errorf("naming %s is a way to take somebody's source access: %v", concept, named)
+		}
+		if reason := stampedAtBirth[concept]; strings.TrimSpace(reason) == "" {
+			t.Errorf("%s is excluded with no reason beside it", concept)
+		}
+	}
+}
+
+// THE TRANSFER SKIPS EVERY CONCEPT WHOSE OWNER THE ENGINE HOLDS. The engine refuses to change
+// the owner of these rows for any writer (component/memql owner_held_write_guard.go). A concept
+// on that list and not on this one would make a whole-user transfer fail partway, on the first
+// such row, with everything before it already moved.
+func TestTransferSkipsEveryConceptWhoseOwnerTheEngineHolds(t *testing.T) {
+	held := memql.OwnerHeldConcepts()
+	if len(held) == 0 {
+		t.Fatal("the engine holds no concept's owner, so this parity is not being measured")
+	}
+	for _, concept := range held {
+		if reason := stampedAtBirth[concept]; strings.TrimSpace(reason) == "" {
+			t.Errorf("the engine refuses to change the owner of %s, and the transfer does not skip it: "+
+				"an offboarding would fail on its first row", concept)
+		}
+	}
+}

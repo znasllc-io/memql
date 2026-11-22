@@ -20,6 +20,9 @@ type shopperRecordingExecutor struct {
 	// account is the account each call's context stated it acts in
 	// (auth.CallAccountFromContext), or shopperNoAccount when it stated none.
 	account []string
+	// visitor is whether each call's context said its authority was borrowed
+	// for a visitor.
+	visitor []bool
 	err     error
 	result  any
 	// errForCall fails ONE call rather than all of them, which is what an
@@ -48,6 +51,7 @@ func (e *shopperRecordingExecutor) Execute(ctx context.Context, query string) (a
 		account = shopperNoAccount
 	}
 	e.account = append(e.account, account)
+	e.visitor = append(e.visitor, auth.BorrowedForVisitor(ctx))
 	if e.onCall != nil {
 		e.onCall(len(e.calls)-1, ctx)
 	}
@@ -260,6 +264,11 @@ func TestAGoodPostWritesUnderTheSiteOwner(t *testing.T) {
 	if exec.account[0] != "acct-merchant" {
 		t.Fatalf("the write acts in account %q, want the site's", exec.account[0])
 	}
+	// AND MARKED AS A VISITOR'S: a person's API key never pays for a model call
+	// a shopper's form started (design record 2026-11-21, K8).
+	if !exec.visitor[0] {
+		t.Fatal("the write ran as the owner's own work, with nothing to say a shopper asked for it")
+	}
 	assertRedirect(t, rec, "/reviews/thanks", "")
 }
 
@@ -417,6 +426,10 @@ func TestAReadAnswersJSONUnderTheSiteOwner(t *testing.T) {
 	// site's account for the same reason the form does.
 	if exec.account[0] != "acct-merchant" {
 		t.Fatalf("the read acts in account %q, want the site's", exec.account[0])
+	}
+	// And a visitor's, as the form is: a declared read can call a model.
+	if !exec.visitor[0] {
+		t.Fatal("the read ran as the owner's own work, with nothing to say a shopper asked for it")
 	}
 }
 

@@ -59,6 +59,9 @@ shape call routerDecision {
   billing
   executionSurface
   route
+  accountKind
+  accountKeyId
+  accountKeyOwnerUserId
 }
 
 /// What the sharing ledger reads: WHERE a call went, WHO it was for, and how
@@ -146,4 +149,70 @@ shape call routerCallSpend {
   totalCost
   billing
   row.createdAt
+}
+
+/// What a key's activity reads off one call it paid for: whose call it was and what it cost.
+/// Nothing about the call itself, for routerCallLedger's reason: the owner of a key is entitled to
+/// know it is being used and by whom, and not to read what it was used for.
+@row
+shape call routerCallPaidBy {
+  row.id
+  userId
+  totalCost
+  pricingConfigured
+  row.createdAt
+}
+
+// ---- API keys (design record 2026-11-21-vendor-accounts-and-api-keys) ----
+
+/// Everything about an API key BUT ITS SEALED VALUE, for the reads integrations/vendorkeys makes
+/// before it decides what a caller may see. The omission is the security property: no list and no
+/// by-id read returns ciphertext, because only vendorKeySealed projects it.
+@row
+shape vendorKey vendorKeyCard {
+  row.id
+  row.createdAt
+  ownerUserId
+  vendor
+  label
+  fingerprint
+  isDefault
+  autoUse
+  checkedBy
+  status
+  addedAt
+  removedAt
+  removedBy
+  sharing
+}
+
+/// The one projection that carries an API key's sealed value. Carried by vendorKeySealedById alone,
+/// which is @serverOnly and read from inside one request to the vendor; the ciphertext is unsealed
+/// into a local that dies with the request. `status` and `ownerUserId` ride along so the unsealing
+/// can refuse a removed key from the row it already read.
+@row
+shape vendorKey vendorKeySealed {
+  row.id
+  ownerUserId
+  vendor
+  status
+  encryptedValue
+}
+
+/// What the engine observed about an API key.
+@row
+shape vendorKeyState vendorKeyStateFull {
+  row.id
+  keyId
+  ownerUserId
+  vendor
+  state
+  evidenceAt
+  detail
+  heldUntil
+  checkedAt
+  goodAt
+  lastUsedAt
+  notifiedAt
+  noticeTriedAt
 }

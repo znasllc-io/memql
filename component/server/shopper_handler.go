@@ -232,8 +232,14 @@ func (h *ShopperHandler) resolveSite(ctx context.Context, stamp shopperStamp) *S
 // owner, as it did before a site's account was stated here.
 //
 // Never internal origin, for the reason the call sites give.
+//
+// AND MARKED AS A VISITOR'S (auth.ContextWithVisitorBorrow). The lent authority
+// makes a shopper's post look like the merchant acting to everything
+// downstream; the mark is what keeps the merchant's own API key from paying for
+// a model call a shopper's form started.
 func shopperContext(ctx context.Context, owner string, site *ShopperSite) context.Context {
-	return auth.ContextWithCallAccount(auth.ContextWithUserActor(ctx, owner), site.AccountID)
+	return auth.ContextWithVisitorBorrow(
+		auth.ContextWithCallAccount(auth.ContextWithUserActor(ctx, owner), site.AccountID))
 }
 
 // parseShopperRoute splits "{prefix}{pack}/{name}".

@@ -873,7 +873,14 @@ func (s *Service) joinRoom(ctx context.Context, site callrules.SiteRef, room roo
 		return callrules.JoinResult{}, out, err
 	}
 	if result, err = s.admittedWithFunding(ctx, site.OwnerUserID, *server, credential, room.ID, seat, policy); err != nil {
-		return callrules.JoinResult{}, out, err
+		// THE REFUSAL KEEPS ITS REASON. A join let in under the gates can still be
+		// refused here, when the host ended the call (or the admission changed)
+		// between the gates and the pass. That join is owed the answer one arriving
+		// a moment later gets, "ended" with call_ended, and not an ended with no
+		// reason: the check above returns the refusal it decided, and dropping it
+		// left the caller with an error and nothing to tell the person. On any
+		// other failure the result is empty, and no pass ever rides an error.
+		return result, out, err
 	}
 	return result, out, nil
 }

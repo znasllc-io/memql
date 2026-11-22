@@ -153,6 +153,30 @@ func TestAModelOverrideOutranksEveryOtherPin(t *testing.T) {
 	}
 }
 
+// A step re-run on a named model through an app session's credential is the
+// app's choice of model, not the person's: the request is marked, and the
+// person's API key does not pay for it on the strength of that pin.
+func TestAModelOverrideMadeByAMachineIsMarked(t *testing.T) {
+	build := func(ov *common.StepOverride) airoute.ResolveRequest {
+		t.Helper()
+		req, err := requestForPrompt(stepCtx(ov), draftPrompt(), &AIInvocation{TemplateId: "draftReport"}, airoute.ModalityChat, "draft it")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return req
+	}
+	marked := build(&common.StepOverride{Model: "federation:claudeSonnet", RequestedBy: "u-ana", ByMachine: true})
+	if marked.ExplicitProvider != "federation:claudeSonnet" || marked.PinnedBy != "u-ana" {
+		t.Fatalf("the override's model was not applied: %+v", marked)
+	}
+	if !marked.ChoiceByMachine {
+		t.Error("a model an app session named for a re-run reached the router as the person's own pin")
+	}
+	if own := build(&common.StepOverride{Model: "federation:claudeSonnet", RequestedBy: "u-ana"}); own.ChoiceByMachine {
+		t.Error("a person's own re-run was marked as a machine's")
+	}
+}
+
 func TestPromptAndGuidanceRideAsTwoMessages(t *testing.T) {
 	e, model, _ := overrideSeamEngine(t, aiCacheConfig{})
 	ov := &common.StepOverride{

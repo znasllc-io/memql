@@ -160,7 +160,13 @@ func TestSavedFileContentAndImageOperationsAreInTheRealCapabilityShortlist(t *te
 	e := newQuietEngine(t)
 	t.Cleanup(e.cache.close)
 	require.NoError(t, bootPrivateEngine(e, loadedConceptRegistry(t)))
-	for _, name := range []string{"fleetEnergySettings", "routerSetApiKey", "platform.sourceCredentialCreate", "integrations.integrationConfigure"} {
+	// The builtin that sealed a vendor key for the whole cluster is gone, and
+	// nothing registers its name (design record
+	// 2026-11-21-vendor-accounts-and-api-keys, K18). A person's own key is
+	// added by router.vendorKeyAdd, which is private input like the rest here.
+	_, leftover := e.lookupBuiltinFunction("routerSetApiKey")
+	require.False(t, leftover, "the builtin that sealed a key nothing reads is still registered")
+	for _, name := range []string{"fleetEnergySettings", "router.vendorKeyAdd", "platform.sourceCredentialCreate", "integrations.integrationConfigure"} {
 		private, ok := e.lookupBuiltinFunction(name)
 		require.True(t, ok, name)
 		require.False(t, e.workCapabilityAllowed(askTestActor(), private), "private input must stay out of discovery: %s", name)

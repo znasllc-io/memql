@@ -157,6 +157,7 @@ pipeline:
       - integrations/email
       - integrations/siteaccess
       - integrations/sitepreview
+      - integrations/vendorkeys
       - integrations/work
       - integrations/workbench
       - examples/referencepack

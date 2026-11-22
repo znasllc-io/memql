@@ -43,7 +43,7 @@ func (i *Integration) handleBranchRun(ctx context.Context, args map[string]any, 
 		return nil, fmt.Errorf("work: branchRun needs a runId and a stepKey")
 	}
 	requestedBy := trim(ac.UserId)
-	override, err := overrideFromArgs(args, requestedBy)
+	override, err := overrideFromArgs(ctx, args, requestedBy)
 	if err != nil {
 		return nil, err
 	}

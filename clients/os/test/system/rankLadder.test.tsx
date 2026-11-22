@@ -124,8 +124,11 @@ describe("each seeded role's desktop is the one the floors used to draw", () => 
     owner: { apps: ["Users", "Accounts", "Training", "Logs", "Cluster", "Concepts"], not: [] },
     developer: { apps: ["Users", "Accounts", "Training", "Logs", "Cluster", "Concepts"], not: [] },
     admin: { apps: ["Users", "Accounts", "Training", "Logs", "Cluster", "Concepts"], not: [] },
-    writer: { apps: ["Training", "Deployables", "Files", "Profile"], not: ["Users", "Accounts", "Logs", "Settings", "Identity"] },
-    reader: { apps: ["Deployables", "Files", "Profile"], not: ["Users", "Accounts", "Training", "Logs", "Settings", "Identity"] },
+    // Settings is on a writer's and a reader's desktop since 2026-11-22: it
+    // holds their own API keys, the one section of it with no floor. What they
+    // find inside it is asserted in appRelocations.test.ts.
+    writer: { apps: ["Training", "Deployables", "Files", "Profile", "Settings"], not: ["Users", "Accounts", "Logs", "Identity"] },
+    reader: { apps: ["Deployables", "Files", "Profile", "Settings"], not: ["Users", "Accounts", "Training", "Logs", "Identity"] },
   };
   for (const [role, want] of Object.entries(expected)) {
     it(`draws ${role}'s desktop`, () => {

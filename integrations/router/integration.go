@@ -1,10 +1,14 @@
-// Package router exposes BYOK credential + budget admin capabilities
-// to the MemQL DSL so the frontend's /router/settings page can add,
-// rotate, and delete API keys and budgets without the plaintext ever
-// being persisted. Plaintext keys arrive through this integration's
-// capabilities; they leave encrypted via `component/secret.Encrypt`
-// and are inserted into v1:router:apikey by the ordinary mutation
-// pipeline.
+// Package router exposes the router's read-only admin capabilities to the
+// MemQL DSL: the live model catalog, the routing policies, and the nightly
+// fold of decision records into evidence.
+//
+// IT SEALS NO KEY. It used to carry a capability that encrypted a vendor API
+// key and stored it as a cluster-wide secret, for a settings page that was
+// removed; nothing ever read the secret back (design record
+// docs/superpowers/specs/2026-11-21-vendor-accounts-and-api-keys-design.md,
+// decision K18). The cluster has no key of its own: it reaches a vendor by
+// workload identity federation. A person's API key is theirs, and is added,
+// sealed, lent and removed through integrations/vendorkeys.
 package router
 
 import (
@@ -15,10 +19,8 @@ import (
 	"strings"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
-	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	routerlib "github.com/znasllc-io/memql/component/router"
-	"github.com/znasllc-io/memql/component/secret"
 )
 
 // Integration implements memql.IntegrationProvider for router admin
@@ -74,11 +76,6 @@ func (i *Integration) IntegrationName() string { return "router" }
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return append(evidenceScopeCapabilities(), []memql.IntegrationCapability{
 		{
-			Name:        "setApiKey",
-			Description: "Encrypt a plaintext vendor API key and persist it as a v1:router:apikey row. Returns the inserted row id.",
-			Handler:     i.handleSetApiKey,
-		},
-		{
 			Name:        "listModels",
 			Description: "Return the full live model catalog -- every provider registered at engine startup with its vendor, model id, pricing, and availability. Feeds the /router/catalog page.",
 			Handler:     i.handleListModels,
@@ -94,92 +91,6 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Handler:     i.handleListPolicies,
 		},
 	}...)
-}
-
-// secretNameForVendor maps a router vendor identifier to the
-// canonical secret name used by ResolveSecret. The name deliberately
-// matches the env-var convention so the same lookup resolves against
-// v1:platform:partitionSecret (partition BYOK), v1:platform:globalSecret (instance
-// default), or -- for callers that still read env -- the process env.
-func secretNameForVendor(vendor string) string {
-	return strings.ToUpper(strings.TrimSpace(vendor)) + "_API_KEY"
-}
-
-// handleSetApiKey seals a vendor key into v1:platform:partitionSecret.
-//
-// WHO MAY is decided by that concept, not here: the write below runs under the
-// caller's own context, and the concept declares @rowAuthz(clusterOwner), so a
-// cluster owner's key lands and anyone else's call comes back with the tier's
-// refusal. There is deliberately no stamp on the write: nothing in this handler
-// authorizes a caller, so it has no standing to write on one's behalf.
-func (i *Integration) handleSetApiKey(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	vendor := strings.TrimSpace(stringArg(args, "vendor"))
-	plaintext := strings.TrimSpace(stringArg(args, "plaintextKey"))
-	label := strings.TrimSpace(stringArg(args, "label"))
-	addedBy := strings.TrimSpace(stringArg(args, "addedBy"))
-
-	if vendor == "" {
-		return nil, fmt.Errorf("integration.router.setApiKey: vendor is required")
-	}
-	if plaintext == "" {
-		return nil, fmt.Errorf("integration.router.setApiKey: plaintextKey is required")
-	}
-
-	ciphertext, fingerprint, err := secret.Encrypt(plaintext)
-	if err != nil {
-		// Most common failure: MEMQL_MASTER_KEY unset.
-		// Surface a clear message so the /router/settings UI can
-		// explain the operator needs to set the env var before BYOK
-		// will work.
-		return nil, fmt.Errorf("integration.router.setApiKey: encrypt: %w", err)
-	}
-
-	// Folded into v1:platform:partitionSecret (Phase 3 of the env-var refactor):
-	//  * Secret name = <VENDOR>_API_KEY so ResolveSecret reuses the
-	//    same name space as instance-wide defaults in v1:platform:globalSecret.
-	//  * kind="vendor_api_key" lets the router resolver (and the UI's
-	//    listRouterApiKeys query) filter by type.
-	//  * Deterministic id `secret-vendor-<vendor>` means re-submitting
-	//    rotates the key for that vendor in the current partition; the
-	//    time-series history in MemoryNodes retains prior values.
-	name := secretNameForVendor(vendor)
-	id := fmt.Sprintf("secret-vendor-%s", strings.ToLower(vendor))
-
-	mutArgs := map[string]any{
-		"id":             id,
-		"name":           name,
-		"encryptedValue": ciphertext,
-		"fingerprint":    fingerprint,
-		"kind":           "vendor_api_key",
-		"description":    label,
-		"addedBy":        addedBy,
-		"active":         true,
-	}
-	query, err := langparser.RenderCall("setPartitionSecret", mutArgs)
-	if err != nil {
-		return nil, fmt.Errorf("integration.router.setApiKey: render mutation: %w", err)
-	}
-	if _, err := i.engine.Execute(ctx, query); err != nil {
-		return nil, fmt.Errorf("integration.router.setApiKey: execute mutation: %w", err)
-	}
-
-	// Return a redacted projection so the DSL caller can chain on it
-	// without seeing the ciphertext.
-	p := map[string]any{
-		"vendor":      vendor,
-		"name":        name,
-		"fingerprint": fingerprint,
-		"kind":        "vendor_api_key",
-		"label":       label,
-	}
-	payloadJSON, _ := json.Marshal(p)
-	return []memorynodes.MemoryNode{
-		{
-			ID:      id,
-			Concept: "v1:platform:partitionSecret",
-			Payload: payloadJSON,
-		},
-	}, nil
 }
 
 func (i *Integration) handleListModels(_ context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
@@ -265,14 +176,4 @@ func vendorFromType(typeName string) string {
 	default:
 		return lower
 	}
-}
-
-func stringArg(args map[string]any, key string) string {
-	if args == nil {
-		return ""
-	}
-	if v, ok := args[key].(string); ok {
-		return v
-	}
-	return ""
 }

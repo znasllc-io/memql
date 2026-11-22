@@ -231,7 +231,7 @@ func buildRecord(
 			outcome = "error"
 		}
 		errCat = CategorizeError(err)
-		errMsg = TruncateError(err.Error(), 500)
+		errMsg = recordedError(resolved.Decision, err)
 	case ctxErr != nil:
 		outcome = "cancelled"
 		errCat = CategorizeError(ctxErr)
@@ -251,7 +251,7 @@ func buildRecord(
 	// the caller gave up, and the source did nothing wrong.
 	considered := resolved.Decision.Considered
 	if outcome == "error" {
-		considered = withFailureNoted(considered, resolved.ProviderName, resolved.Decision.Door, err)
+		considered = withFailureNoted(considered, resolved.ProviderName, accountRef(resolved.Decision), resolved.Decision.Door, err)
 	}
 
 	return CallRecord{
@@ -306,6 +306,13 @@ func buildRecord(
 		// a future door that decides the machine up front would set it there,
 		// and a provider that says nothing must not blank what it knew.
 		MachineOwnerUserId: firstNonEmpty(machineOwnerOf(inner), resolved.Decision.MachineOwnerUserId),
+
+		// WHICH ACCOUNT PAID a vendor text call (accounts.go): the one this
+		// attempt was bound to when the call was made, never the one the
+		// resolution expected.
+		AccountKind:           resolved.Decision.AccountKind,
+		AccountKeyId:          resolved.Decision.AccountKeyId,
+		AccountKeyOwnerUserId: resolved.Decision.AccountKeyOwnerUserId,
 
 		// WHERE IT RAN. See execution_surface.go: the field and the column
 		// both predate this line, and nothing ever assigned it -- so every

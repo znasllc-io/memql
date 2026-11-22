@@ -22,6 +22,9 @@ import (
 const (
 	siteAccessCodeConcept    = "v1:platform:siteAccessCode"
 	siteAccessSessionConcept = "v1:platform:siteAccessSession"
+	// The two rows of a person's API key (vendor_account.go).
+	vendorKeyConcept      = "v1:router:vendorKey"
+	vendorKeyStateConcept = "v1:router:vendorKeyState"
 )
 
 // callsClientUnreadableReason is why every v1:calls concept is client-unreadable:
@@ -112,6 +115,10 @@ var clientUnreadableConcepts = map[string]string{
 	"v1:calls:scheduledCall":        callsClientUnreadableReason,
 	"v1:calls:mediaServer":          callsClientUnreadableReason,
 	"v1:calls:policy":               callsClientUnreadableReason,
+	// A person's API key and what the engine observed about it (design record
+	// 2026-11-21-vendor-accounts-and-api-keys, K2, K5 and S3).
+	vendorKeyConcept:      "its row holds a person's sealed API key, and what a caller may see of it depends on who they are (its owner everything but the value, a person it is lent to a short card, a cluster owner its facts); only the key builtins decide that, and a raw read or a graph event would hand the row tier's answer to the owner and a cluster owner instead",
+	vendorKeyStateConcept: "its row is the engine's account of whether a vendor accepts a person's API key, with the vendor's words about that person's account; it is read beside the key through the key builtins and by nothing a client calls",
 }
 
 // conceptIsClientUnreadable reports whether a concept is on clientUnreadableConcepts.

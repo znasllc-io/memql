@@ -348,6 +348,9 @@ type chainWinner struct {
 	// carried out so a fallback wrapper hopping to a vendor later asks the
 	// cost ceiling on exactly the condition the walk asks it on.
 	localSeen bool
+	// account is the account that pays, for a vendor text record on a surface
+	// an account pays for (accounts.go), and nil for every other winner.
+	account *memql.VendorAccount
 }
 
 // resolveChain decides which provider serves this call, and records the whole
@@ -374,6 +377,9 @@ func (r *Router) resolveChain(ctx context.Context, req ResolveRequest, mod provi
 	if err := ctx.Err(); err != nil {
 		return nil, Resolved{}, err
 	}
+	// One resolution asks which of a person's API keys can pay once per vendor,
+	// however many of the vendor's records its chains name (accounts.go).
+	ctx = withAccountMemo(ctx)
 	var policies *memql.PolicyRegistry
 	var rules *memql.RuleRegistry
 	if r != nil && r.policies != nil {
@@ -858,7 +864,13 @@ func (r *Router) walkChain(
 				report.note(cand.Name, "no provider by that name is registered")
 				continue
 			}
-			if !entry.Available {
+			// A VENDOR'S TEXT MODEL IS PAID BY AN ACCOUNT (accounts.go), and
+			// the cluster's own is only one of them: a record the cluster has
+			// no account for may still be served by a person's API key. So
+			// whether such a record can serve is asked of its accounts, below,
+			// and not of entry.Available.
+			paidByAccount := r.accountRecord(mod, cand, entry)
+			if !paidByAccount && !entry.Available {
 				reason := "unavailable"
 				if err := entry.Err(); err != nil {
 					reason = err.Error()
@@ -918,11 +930,35 @@ func (r *Router) walkChain(
 				report.note(cand.Name, why)
 				continue
 			}
+			// WHO PAYS, asked last: after the run's no-paid-providers ceiling,
+			// the cost ceiling, the context floor and the modality check, each
+			// exactly where it was (design record R7). A key is a paid
+			// provider, so nothing that stops the cluster's account may let a
+			// key through, and no row is read for a record that could not
+			// have served anyway.
+			var account *memql.VendorAccount
+			if paidByAccount {
+				accounts, passedOver := r.accountsFor(ctx, req, entry)
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
+				if len(accounts) == 0 {
+					// K9: nothing can pay, so the model is unavailable for
+					// this person and the line says why.
+					report.note(cand.Name, noAccountReason(passedOver))
+					continue
+				}
+				for _, p := range passedOver {
+					report.noteAccount(cand.Name, cand.Door, p.Account.Ref(), p.Reason)
+				}
+				account = &accounts[0]
+			}
 			return &chainWinner{
 				entry:     entry,
 				door:      cand.Door,
-				remaining: r.remainingNames(ctx, req, candidates[ci:], chain[idx+1:], banned),
+				remaining: r.remainingNames(ctx, req, mod, candidates[ci:], chain[idx+1:], banned),
 				localSeen: sawLocalDoor,
+				account:   account,
 			}, nil
 		}
 	}
@@ -939,9 +975,15 @@ func (r *Router) walkChain(
 // error. The expansion writes to a THROWAWAY report: these entries were never
 // tried, and a reason recorded for an entry nobody reached is a line that
 // contradicts the walk it appears in.
+//
+// A VENDOR'S TEXT MODEL APPEARS ONCE PER ACCOUNT THAT CAN PAY, the winner
+// included (chainEntriesFor): the chain carries the model and the account
+// together, so a failing account is followed by the next account for the same
+// model before the route moves on (design record K10).
 func (r *Router) remainingNames(
 	ctx context.Context,
 	req ResolveRequest,
+	mod providerModality,
 	rest []candidate,
 	laterEntries []string,
 	banned map[string]bool,
@@ -949,7 +991,7 @@ func (r *Router) remainingNames(
 	out := make([]string, 0, len(rest))
 	for _, c := range rest {
 		if !banned[c.Name] {
-			out = append(out, c.Name)
+			out = append(out, r.chainEntriesFor(ctx, req, mod, c)...)
 		}
 	}
 	discard := &doorReporter{}
@@ -960,7 +1002,7 @@ func (r *Router) remainingNames(
 		}
 		for _, c := range cands {
 			if !banned[c.Name] {
-				out = append(out, c.Name)
+				out = append(out, r.chainEntriesFor(ctx, req, mod, c)...)
 			}
 		}
 	}
@@ -981,10 +1023,17 @@ func (r *Router) resolvedFrom(
 	decision airoute.Decision,
 ) Resolved {
 	decision.Door = winner.door
+	// WHO PAYS, for a vendor's text model (accounts.go). The winner's own line
+	// names the account, so a later attempt on another account for the same
+	// model is a different line of the walk.
+	if winner.account != nil {
+		stampAccount(&decision, *winner.account)
+	}
 	decision.Considered = append(report.entries(), airoute.ConsideredEntry{
-		Entry:  winner.entry.Config.Name,
-		Door:   winner.door,
-		Reason: "selected",
+		Entry:   winner.entry.Config.Name,
+		Door:    winner.door,
+		Reason:  "selected",
+		Account: accountRef(decision),
 	})
 	decision.Outcome = airoute.OutcomeOK
 	// A SESSION WINNER'S CHAIN IS ITSELF AND NOTHING ELSE. `remaining` is empty
@@ -1075,13 +1124,25 @@ func (r *Router) refusalWith(
 // (nil, zero, false) when the provider is unregistered, unavailable,
 // or doesn't implement the interface.
 func (r *Router) providerLookup(ctx context.Context, req ResolveRequest, name string, mod providerModality) (any, Resolved, bool) {
+	// A vendor entry may name the ACCOUNT that pays beside the record
+	// ("claude@key:<id>", accounts.go). Every other question is asked of the
+	// record.
+	name, ref := splitChainEntry(name)
 	// Rechecked for call-time fallback and cloud consent, which may resolve a
 	// provider after the initial chain walk has completed.
 	if req.NoPaidProviders && doorFor(name) == DoorFederation {
 		return nil, Resolved{}, false
 	}
 	entry, ok := r.providers.EntryForUser(ctx, req.UserId, name)
-	if !ok || !entry.Available || entry.Client == nil {
+	if !ok || entry.Client == nil {
+		return nil, Resolved{}, false
+	}
+	// WHO PAYS, judged at the time of the call. A plain name is the record on
+	// the cluster's own account and needs the record available, as it always
+	// did; a reference to a key is checked against the rows again, so a key
+	// removed or paused since the resolution is not spent.
+	account, paid, ok := r.accountAtCall(ctx, req, entry, ref, mod)
+	if !ok {
 		return nil, Resolved{}, false
 	}
 	resolved := Resolved{
@@ -1097,6 +1158,9 @@ func (r *Router) providerLookup(ctx context.Context, req ResolveRequest, name st
 	// name cannot say which door was taken, because `app:claude-code` serves a
 	// chat turn as `app` and takes a whole step as a `session`.
 	resolved.Decision.Door = doorFor(entry.Config.Name)
+	if paid {
+		stampAccount(&resolved.Decision, account)
+	}
 	if ok, _ := servesModality(entry.Client, mod); !ok {
 		// THE SAME QUESTION THE WALK ASKED, and asking it here is what keeps
 		// the fallback wrapper from stepping past a session winner it just
@@ -1120,6 +1184,16 @@ func (r *Router) providerLookup(ctx context.Context, req ResolveRequest, name st
 		return sessionClient, resolved, true
 	}
 	var client any = entry.Client
+	// A key pays through the record's own client, rebuilt around the key for
+	// this call (memql.BindVendorAccount). The cluster's account is the client
+	// as registered.
+	if paid && account.Kind == memql.VendorAccountKey {
+		bound, ok := r.providers.BindVendorAccount(entry, account)
+		if !ok {
+			return nil, Resolved{}, false
+		}
+		client = bound
+	}
 	// Bind the floor on every lookup, including fallback attempts and direct
 	// structured/vision resolutions. The provider returns an independent client.
 	if scoped, ok := client.(interface{ WithMinContextTokens(int) any }); ok {
@@ -1221,6 +1295,12 @@ func buildRouterCallArgs(rec CallRecord, callId string) map[string]any {
 		"minContextTokens":   rec.MinContextTokens,
 		"machineOwnerUserId": rec.MachineOwnerUserId,
 		"route":              rec.Route,
+
+		// WHO PAID a vendor text call, by the key's id and its owner's id and
+		// never by its name (design record 2026-11-21-vendor-accounts, K15).
+		// Both are empty unless a key paid.
+		"accountKeyId":          rec.AccountKeyId,
+		"accountKeyOwnerUserId": rec.AccountKeyOwnerUserId,
 	}
 
 	// `cacheKind` IS OMITTED RATHER THAN SENT EMPTY, and it has to be: the
@@ -1231,6 +1311,12 @@ func buildRouterCallArgs(rec CallRecord, callId string) map[string]any {
 	// what every row written before memql#5581 was.
 	if airoute.ValidCacheKind(rec.CacheKind) {
 		args["cacheKind"] = rec.CacheKind
+	}
+	// `accountKind` IS OMITTED FOR THE SAME REASON: it is a two-value enum on
+	// the mutation, and a local model, an app and every surface a key does not
+	// pay for have no account at all. Absent is what such a row stores.
+	if rec.AccountKind == memql.VendorAccountCluster || rec.AccountKind == memql.VendorAccountKey {
+		args["accountKind"] = rec.AccountKind
 	}
 	return args
 }
@@ -1243,11 +1329,16 @@ func buildRouterCallArgs(rec CallRecord, callId string) map[string]any {
 func consideredArgs(entries []airoute.ConsideredEntry) []map[string]any {
 	out := make([]map[string]any, 0, len(entries))
 	for _, e := range entries {
-		out = append(out, map[string]any{
+		line := map[string]any{
 			"entry":  e.Entry,
 			"door":   e.Door,
 			"reason": e.Reason,
-		})
+		}
+		// Only a line about who pays carries an account.
+		if e.Account != "" {
+			line["account"] = e.Account
+		}
+		out = append(out, line)
 	}
 	return out
 }

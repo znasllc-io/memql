@@ -243,6 +243,14 @@ func (r *doorReporter) noteConsidered(name, door, reason string) {
 	r.considered = append(r.considered, airoute.ConsideredEntry{Entry: name, Door: door, Reason: reason})
 }
 
+// noteAccount records one ACCOUNT that could not pay for a vendor model that
+// was served by another (accounts.go, design record K9). It belongs on the
+// decision and not in a refusal's door list: the model was not passed over,
+// one way of paying for it was.
+func (r *doorReporter) noteAccount(name, door, account, reason string) {
+	r.considered = append(r.considered, airoute.ConsideredEntry{Entry: name, Door: door, Reason: reason, Account: account})
+}
+
 // entries returns the decision's considered list, in walk order.
 func (r *doorReporter) entries() []airoute.ConsideredEntry {
 	if r == nil {

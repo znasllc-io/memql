@@ -8,6 +8,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/core/airoute"
 	"github.com/znasllc-io/memql/core/common"
 )
@@ -104,6 +105,104 @@ func TestARouteReplacesTheRulesChainAndClearsAnAuthorsPin(t *testing.T) {
 	}
 	if got.Route != "localFirst" || got.ExplicitProvider != "" || got.PinnedBy != "" {
 		t.Fatalf("route=%q pin=%q by=%q, want the route alone", got.Route, got.ExplicitProvider, got.PinnedBy)
+	}
+}
+
+// Which account pays depends on WHO CHOSE (design record
+// 2026-11-21-vendor-accounts-and-api-keys, K8 lines 4 and 5): a route the
+// acting person chose, or a model they pinned, may be paid by their key; Auto
+// counts only keys switched on for it. The request therefore says who chose.
+func TestApplyRunRoutingNamesWhoChose(t *testing.T) {
+	req := airoute.ResolveRequest{Level: airoute.LevelStrong, Modality: airoute.ModalityChat}
+	for name, tc := range map[string]struct {
+		choice            common.RouteChoice
+		routeBy, pinnedBy string
+	}{
+		"a person's route": {common.RouteChoice{Source: "route:apps", By: "alice"}, "alice", ""},
+		"a policy route":   {common.RouteChoice{Source: "policy:localFirst", By: "alice"}, "alice", ""},
+		"a pinned source":  {common.RouteChoice{Source: "federation:strongest", By: "alice"}, "", "alice"},
+		"auto":             {common.RouteChoice{Level: "strong", By: "alice"}, "", ""},
+	} {
+		got, err := ApplyRunRouting(stepOf("reason", tc.choice, nil), req)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got.RouteBy != tc.routeBy || got.PinnedBy != tc.pinnedBy {
+			t.Errorf("%s: route chosen by %q, pinned by %q; want %q and %q", name, got.RouteBy, got.PinnedBy, tc.routeBy, tc.pinnedBy)
+		}
+	}
+	// A run nobody chose for names nobody.
+	got, err := ApplyRunRouting(stepOf("reason", common.RouteChoice{}, nil), req)
+	if err != nil || got.RouteBy != "" || got.PinnedBy != "" {
+		t.Fatalf("a run nobody chose for: route by %q, pinned by %q, err %v", got.RouteBy, got.PinnedBy, err)
+	}
+}
+
+// A goal a visitor's request opened runs later, as its owner's own run, on a
+// node that never saw the request. The mark is on the run's routing, and every
+// model call of the run carries it, whatever its modality.
+func TestApplyRunRoutingCarriesAVisitorsMark(t *testing.T) {
+	marked := common.RouteChoice{By: "alice", ForVisitor: true}
+	for _, mod := range []airoute.Modality{airoute.ModalityChat, airoute.ModalityStreamingTools, airoute.ModalityStructured, airoute.ModalityEmbedding} {
+		got, err := ApplyRunRouting(stepOf("reason", marked, nil), airoute.ResolveRequest{Level: airoute.LevelFast, Modality: mod})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !got.ForVisitor {
+			t.Errorf("%s: a visitor's run reached the router as the owner's own work", mod)
+		}
+	}
+	got, err := ApplyRunRouting(stepOf("reason", common.RouteChoice{Source: "route:apps", By: "alice"}, nil),
+		airoute.ResolveRequest{Level: airoute.LevelFast, Modality: airoute.ModalityChat})
+	if err != nil || got.ForVisitor {
+		t.Fatalf("a person's own run was marked as a visitor's (err %v)", err)
+	}
+}
+
+// A choice made through a credential that acts as a person without being them
+// reaches the router marked, on every call of the run, so the account rule can
+// tell it from the person's own (vendor accounts design, K8 and O4).
+func TestApplyRunRoutingCarriesAChoiceMadeByAMachine(t *testing.T) {
+	req := airoute.ResolveRequest{Level: airoute.LevelStrong, Modality: airoute.ModalityChat}
+	for name, source := range map[string]string{"a pinned source": "federation:strongest", "a person's route": "route:apps", "a policy route": "policy:localFirst"} {
+		got, err := ApplyRunRouting(stepOf("reason", common.RouteChoice{Source: source, By: "alice", ByMachine: true}, nil), req)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !got.ChoiceByMachine {
+			t.Errorf("%s: a choice an app session made reached the router as the person's own", name)
+		}
+		// Who it is attributed to is unchanged: an app door reached through a
+		// pin still reads it as the owner's.
+		if got.PinnedBy+got.RouteBy != "alice" {
+			t.Errorf("%s: pinned by %q, route by %q", name, got.PinnedBy, got.RouteBy)
+		}
+	}
+	own, err := ApplyRunRouting(stepOf("reason", common.RouteChoice{Source: "federation:strongest", By: "alice"}, nil), req)
+	if err != nil || own.ChoiceByMachine {
+		t.Fatalf("a person's own choice was marked as a machine's (err %v)", err)
+	}
+
+	// THE MARK DESCRIBES THE CHOICE IT TRAVELS WITH. A run's choice replaces
+	// whatever the request itself named, so it replaces that pin's answer too:
+	// a hint an app session put on a turn does not make the route its person
+	// chose read as the app's, and a person's hint does not launder a run an
+	// app session opened.
+	hinted := airoute.ResolveRequest{Level: airoute.LevelStrong, Modality: airoute.ModalityChat, ExplicitProvider: "claudeSonnet", PinnedBy: "alice", ChoiceByMachine: true}
+	got, err := ApplyRunRouting(stepOf("reason", common.RouteChoice{Source: "route:apps", By: "alice"}, nil), hinted)
+	if err != nil || got.RouteBy != "alice" || got.ChoiceByMachine {
+		t.Fatalf("a person's own route, on a turn whose hint an app made: route by %q, by machine %v, err %v", got.RouteBy, got.ChoiceByMachine, err)
+	}
+	hinted.ChoiceByMachine = false
+	got, err = ApplyRunRouting(stepOf("reason", common.RouteChoice{Source: "route:apps", By: "alice", ByMachine: true}, nil), hinted)
+	if err != nil || !got.ChoiceByMachine {
+		t.Fatalf("a run an app session chose the route for read as the person's own (err %v)", err)
+	}
+	// With no choice on the run, the request's own pin keeps its own answer.
+	hinted.ChoiceByMachine = true
+	got, err = ApplyRunRouting(stepOf("reason", common.RouteChoice{}, nil), hinted)
+	if err != nil || !got.ChoiceByMachine || got.PinnedBy != "alice" {
+		t.Fatalf("an Auto run changed the turn's own pin: %+v (err %v)", got, err)
 	}
 }
 
@@ -293,6 +392,48 @@ func TestApplyRunRoutingUsesTheTurnChoiceOutsideARun(t *testing.T) {
 	}
 }
 
+// credentialCtx is a call made as user through a credential of the given class
+// ("" is a person's own signed-in session).
+func credentialCtx(user, class string) context.Context {
+	claims := map[string]any{"sub": user}
+	if class != "" {
+		claims["class"] = class
+	}
+	return auth.ContextWithAccess(auth.ContextWithClaims(context.Background(), claims), &auth.AccessContext{UserId: user, Role: auth.RoleDeveloper})
+}
+
+// EVERY STAMP OF A TURN'S CHOICE GOES THROUGH ONE FUNCTION, and that function
+// records whose credential made it. An app session's subject is the person who
+// owns the machine, so the choice names them either way; only the credential
+// says whether they made it (vendor accounts design, K8 line 4, O4).
+func TestTheChoiceATurnStampsSaysWhoseCredentialMadeIt(t *testing.T) {
+	const ana = "v1:identity:user:ana"
+	choice := common.RouteChoice{Source: "federation:strongest", By: ana}
+	for name, tc := range map[string]struct {
+		ctx  context.Context
+		want bool
+	}{
+		"the person's own session":           {credentialCtx(ana, ""), false},
+		"an app session on their machine":    {credentialCtx(ana, auth.ForwardedClassAppSession), true},
+		"a service account":                  {credentialCtx(ana, auth.ForwardedClassServiceAccount), true},
+		"server code acting on their behalf": {auth.ContextWithUserActor(context.Background(), ana), true},
+	} {
+		got := GoalRouteChoice(ContextWithGoalRouteChoice(tc.ctx, choice), ana)
+		if got.Source != choice.Source || got.By != ana {
+			t.Fatalf("%s: the stamp lost the choice: %+v", name, got)
+		}
+		if got.ByMachine != tc.want {
+			t.Errorf("%s: ByMachine = %v, want %v", name, got.ByMachine, tc.want)
+		}
+	}
+	// A caller that already knows the person did not choose says so, and a
+	// person's session does not undo that: the product picked this route.
+	kept := GoalRouteChoice(ContextWithGoalRouteChoice(credentialCtx(ana, ""), common.RouteChoice{Source: "route:apps", By: ana, ByMachine: true}), ana)
+	if !kept.ByMachine {
+		t.Error("a choice the caller marked as not the person's own was unmarked by their session")
+	}
+}
+
 // sameRouting reports whether a request still goes where it went before a
 // choice was applied: the same source, route, level and ceiling.
 func sameRouting(a, b airoute.ResolveRequest) bool {
@@ -306,7 +447,8 @@ func sameRouting(a, b airoute.ResolveRequest) bool {
 // made it -- a choice is never lent to somebody else's goal.
 func TestAGoalTakesTheChoiceOfTheRequestOrOfTheRunThatOpenedIt(t *testing.T) {
 	requested := common.RouteChoice{Source: "fleet:fastest", Level: "fast", By: "v1:identity:user:alice"}
-	got := GoalRouteChoice(ContextWithGoalRouteChoice(context.Background(), requested), "alice")
+	// The request is alice's own, in her own session: the stamp adds nothing.
+	got := GoalRouteChoice(ContextWithGoalRouteChoice(credentialCtx("v1:identity:user:alice", ""), requested), "alice")
 	if got != requested {
 		t.Fatalf("requested choice = %+v, want %+v", got, requested)
 	}

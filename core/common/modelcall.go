@@ -159,6 +159,10 @@ type StepOverride struct {
 	FeedbackId string
 	// RequestedBy is the person who asked for this version.
 	RequestedBy string
+	// ByMachine says the request came through a credential acting as
+	// RequestedBy without being them (RouteChoice.ByMachine has the reasons).
+	// A model named by such a request is not the person's own pin.
+	ByMachine bool
 }
 
 // Empty reports whether the override changes nothing about the call.
@@ -377,6 +381,7 @@ func StepOverrideFromRecord(m map[string]any) *StepOverride {
 		Effort:      strings.TrimSpace(overrideString(m, "effort")),
 		Prompt:      overrideString(m, "prompt"),
 		RequestedBy: strings.TrimSpace(overrideString(m, "requestedBy")),
+		ByMachine:   m["byMachine"] == true,
 	}
 	o.WholePrompt = whole && strings.TrimSpace(o.Prompt) != ""
 	if inputs, ok := m["inputs"].(map[string]any); ok && len(inputs) > 0 {

@@ -82,6 +82,25 @@ func TestTheOverrideRoundTripsThroughItsStoredForm(t *testing.T) {
 	}
 }
 
+// A re-run asked for through a credential that acts as a person without being
+// them says so in its stored form: the step executes later, on an agent that
+// never saw the request.
+func TestAnOverrideRemembersItWasNotAskedForInPerson(t *testing.T) {
+	stored := Override{Model: "federation:claudeSonnet", RequestedBy: "u1", ByMachine: true}.Object()
+	if stored["byMachine"] != true {
+		t.Fatalf("stored form = %v, want the mark", stored)
+	}
+	if got := ParseOverride(stored); !got.ByMachine || got.RequestedBy != "u1" {
+		t.Errorf("round trip = %+v", got)
+	}
+	if own := (Override{Model: "federation:claudeSonnet", RequestedBy: "u1"}).Object(); own["byMachine"] != nil {
+		t.Errorf("a person's own re-run is stored with the mark: %v", own)
+	}
+	if got := ParseOverride(map[string]any{"model": "m", "byMachine": "true"}); got.ByMachine {
+		t.Error("a mark that is not the literal true was read")
+	}
+}
+
 // A whole session prompt says so in its stored form, and a flag with no prompt
 // behind it is no flag: there is nothing for it to describe.
 func TestAWholePromptRoundTripsOnlyWithAPrompt(t *testing.T) {

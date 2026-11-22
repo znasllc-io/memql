@@ -15,7 +15,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/config"
 	"github.com/anthropics/anthropic-sdk-go/option"
 
@@ -392,34 +391,26 @@ func anthropicBearerMiddleware(signIn *vendorSignIn) option.Middleware {
 	}
 }
 
-// newAnthropicClient builds the SDK client for a provider config, whichever
-// credential it carries. Both Anthropic constructors go through it so the
-// choice is made in exactly one place.
-func newAnthropicClient(cfg ProviderConfig, httpClient *http.Client) (anthropic.Client, credentialPath, error) {
-	opts, path, err := anthropicCredential(cfg, httpClient)
-	if err != nil {
-		return anthropic.Client{}, "", err
-	}
-	if path == credentialPathUnavailable {
-		// REFUSING HERE IS THE WHOLE POINT OF THE UNAVAILABLE PATH.
-		//
-		// anthropicCredential returns no error for "nothing configured",
-		// because that is a legitimate state rather than a fault. But
-		// anthropic.NewClient() with no options is a perfectly constructible
-		// client that carries no credential -- so returning it would register
-		// every Claude provider as AVAILABLE on a cluster that cannot call
-		// one, and the failure would arrive as a 401 on a user's turn instead
-		// of as a line at boot. TestRealTreeBootsKeylessAndQuiet is what
-		// caught exactly that.
-		return anthropic.Client{}, path, fmt.Errorf(
-			"provider %q has no Anthropic credential: workload identity federation is not configured on this "+
-				"cluster. Set %s, %s and %s, in Settings > Vendors or the overlay "+
-				"(docs/public/operate/auth/anthropic-federation.md, which has the steps for a local cluster too). "+
-				"The cluster has no API key to fall back to; until then it reaches models through a signed-in "+
-				"fleet machine or a local model",
-			cfg.Name, envAnthropicFederationRuleID, envAnthropicOrganizationID, envAnthropicServiceAccountID)
-	}
-	return anthropic.NewClient(opts...), path, nil
+// anthropicCredentialMissing is why the cluster's own account cannot pay for an
+// Anthropic record: nobody set Anthropic up here.
+//
+// "Nothing configured" is a legitimate state rather than a fault, so
+// anthropicCredential returns no error for it. But a client with no credential
+// is perfectly constructible, and a record that registered as AVAILABLE on a
+// cluster that cannot call it would fail as a 401 on a user's turn instead of
+// as a line at boot (TestRealTreeBootsKeylessAndQuiet caught exactly that). So
+// the record carries this error, the loader registers it as unavailable with
+// it, and the record's cluster client refuses every request before it is sent
+// (vendor_account_middleware.go). The record itself still builds, because a
+// person's API key can pay through it.
+func anthropicCredentialMissing(cfg ProviderConfig) error {
+	return fmt.Errorf(
+		"provider %q has no Anthropic credential: workload identity federation is not configured on this "+
+			"cluster. Set %s, %s and %s, in Settings > Vendors or the overlay "+
+			"(docs/public/operate/auth/anthropic-federation.md, which has the steps for a local cluster too). "+
+			"The cluster has no API key to fall back to; until then it reaches models through a signed-in "+
+			"fleet machine or a local model",
+		cfg.Name, envAnthropicFederationRuleID, envAnthropicOrganizationID, envAnthropicServiceAccountID)
 }
 
 // preflightIdentityToken refuses a provider when the projected token is not a

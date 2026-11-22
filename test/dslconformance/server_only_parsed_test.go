@@ -2231,6 +2231,49 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "pipelines/queries.memql", Name: "pipelineRunsForPipelineEvent"}: true,
 		{Path: "pipelines/mutations.memql", Name: "createPipelineChannel"}:      true,
 		{Path: "pipelines/mutations.memql", Name: "updatePipelineChannel"}:      true,
+
+		// A PERSON'S API KEY (design record 2026-11-21-vendor-accounts-and-api-keys).
+		// Two rows, v1:router:vendorKey and v1:router:vendorKeyState, written and
+		// read by integrations/vendorkeys alone.
+		//
+		// THE WRITES. Each row claims something only the Go frame that checked can
+		// vouch for: that the sealed value is a key the vendor accepted a moment
+		// ago, that a label is free, that a person named in a share is somebody
+		// the owner may pick, that a verdict is the vendor's answer to a real
+		// call. The owned tier's cluster-owner arm would also admit a cluster
+		// owner to renaming, defaulting, switching Auto on and lending a key that
+		// is not theirs, which is spending somebody else's money; the builtins
+		// admit a cluster owner to checking and removing only. And the state row
+		// is written as the cluster acting, from whichever replica made the call
+		// the key paid for.
+		//
+		// THE READS. A key's row belongs to its owner, so a read scoped to the
+		// caller returns nothing for the two readers that matter most: the
+		// resolver finding the keys LENT to a person, and the daily check, which
+		// has no person. What a caller may see of a key differs by who they are
+		// (owner, borrower, cluster owner) and only the builtins decide it; the
+		// one read that carries the sealed value is made inside a request to the
+		// vendor. Both concepts are on clientUnreadableConcepts besides.
+		{Path: "router/mutations.memql", Name: "createVendorKey"}:        true,
+		{Path: "router/mutations.memql", Name: "updateVendorKey"}:        true,
+		{Path: "router/mutations.memql", Name: "setVendorKeySharing"}:    true,
+		{Path: "router/mutations.memql", Name: "removeVendorKey"}:        true,
+		{Path: "router/mutations.memql", Name: "createVendorKeyState"}:   true,
+		{Path: "router/mutations.memql", Name: "updateVendorKeyState"}:   true,
+		{Path: "router/queries.memql", Name: "vendorKeyById"}:            true,
+		{Path: "router/queries.memql", Name: "vendorKeySealedById"}:      true,
+		{Path: "router/queries.memql", Name: "vendorKeysForOwner"}:       true,
+		{Path: "router/queries.memql", Name: "vendorKeysActiveAtVendor"}: true,
+		{Path: "router/queries.memql", Name: "vendorKeyStateById"}:       true,
+		{Path: "router/queries.memql", Name: "vendorKeyStatesForKeys"}:   true,
+		// What one key paid for this month, for its owner (vendorKeyActivity).
+		// The rows are attributed to the people the key is LENT to, so a read
+		// scoped to the caller would count only the owner's own calls and report
+		// a lent key as unused; the builtin establishes that the caller owns the
+		// key, and then reads as the cluster acting. The call concept declares
+		// the public tier, so a client-reachable version would also be a way to
+		// read who used whose key. It keeps only rows the router itself wrote.
+		{Path: "router/queries.memql", Name: "routerCallsPaidByKey"}: true,
 	}
 	for k := range want {
 		if !set[k] {

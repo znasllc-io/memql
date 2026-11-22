@@ -69,7 +69,8 @@ The order inside a chain is three kinds of cost, increasing:
 - **`app:`** -- a signed-in Claude Code or Codex on one of your machines. Costs a
   subscription you already pay for; MemQL is not billed for it.
 - **`federation:`** -- a metered vendor. Costs money, and is therefore the hop the
-  cost ceiling gates.
+  cost ceiling gates. Whose money is a second question, answered after the
+  model is chosen: [which account pays](#which-account-pays-for-a-vendor-call).
 
 The ceiling is asked **only when a local door preceded the vendor in the chain**.
 A chain that starts at a vendor is a decision somebody made, not a fallback, and
@@ -387,7 +388,10 @@ you, made from a copy of Local, Apps or nothing.
 A turn naming a route you do not have is refused with `route_policy_unknown`;
 one whose route cannot serve every job for you right now is refused with
 `route_not_ready` and the reason ("Needs an embedding model", "No signed-in app
-on your machines"), before any goal exists.
+on your machines", "Needs an API key or a vendor account"), before any goal
+exists. Whether a vendor can serve is asked **for the person**: the cluster's
+own account counts for everybody, and a key counts for the people it can pay
+for.
 
 ### App selection on a machine
 
@@ -457,8 +461,11 @@ are weighed by the cluster's **Auto balance** -- Speed, Cost and Quality, 0 to
 100 each, 50 each recommended -- and reliability always weighs their mean.
 A person's **monthly budget** (`myBudget`, `myBudgetSave`) bends the order:
 from 80% of it vendors go after every free source, and at 100% they are left
-out of that person's calls. A chain Auto reordered asks the cost ceiling before
-every vendor hop. The decision record keeps one `(auto)` entry in `considered`
+out of that person's calls. The budget counts the calls that person made,
+whichever account paid: a call paid by an API key somebody lent them counts
+toward their budget, not the key owner's. A chain Auto reordered asks the cost
+ceiling before every vendor hop. Auto spends a person's API key only when the
+key's owner turned on **Let Auto use this key**. The decision record keeps one `(auto)` entry in `considered`
 with every score.
 
 Builtins: `routesForActor`, `routeSave`, `routeDelete`, `routeReset`,
@@ -546,6 +553,56 @@ empty / `fast` / `strong` / `reasoning`, refuses the turn with gRPC
 
 ---
 
+## Which account pays for a vendor call
+
+Everything above chooses a **model**. For a text model at Anthropic or OpenAI
+one step follows: which **account** pays. There are two kinds. The **cluster's
+account** is the cluster's own sign-in with the vendor. An
+[**API key**](api-keys.md) is a person's.
+
+| The call | Accounts, in order |
+|---|---|
+| Has no person behind it (a schedule, a sweep, a seed, a synthetic identity) | the cluster's account only |
+| Runs under a person's authority borrowed for a visitor (a shopper form, an access-code call) | the cluster's account only. Never a key |
+| Was made on a route its person chose, or a source they pinned themselves | their default key at the vendor, then keys lent to them (the key added earliest first), then the cluster's account |
+| Anything else: Auto, and every call nobody chose a route for | the same order, counting only keys whose owner turned on **Let Auto use this key** |
+
+A choice is the acting person's own or it is not a choice: an agent's stored
+pin is its owner's, and a run shared with another person keeps its opener's
+route. It must also have been made by the person themselves. A source named
+through an app session, a badge, delegated access or by the cluster on a
+person's behalf is attributed to that person and counted as work nobody chose
+(`byMachine` on the run's `routing`, `ChoiceByMachine` on the request).
+
+**The account rides the chain.** A vendor record is walked once per account
+that can pay, as `<record>@key:<id>` and then `<record>@cluster`. An answer
+that is about the account (the key is not accepted, has no permission, is out
+of credit or at a spending limit) is followed by **the same model on the next
+account** before the route moves to its next model. Any other failure skips the
+record's remaining accounts and follows the ordinary fallback. `providerName`
+on the decision record stays the plain record name.
+
+**Nothing that stops the cluster's account lets a key through.** The question
+is asked after every gate that already stands in front of a vendor: a run's
+no-paid-provider ceiling, the cost ceiling, the context floor and the modality
+check. A record with no account that can pay is passed over like a shut door,
+with each account's reason on its line in `considered`. A reason never names a
+key.
+
+**Judged again at the call.** Each chain entry is resolved by name when the
+call is made, and a key is checked against its rows again there: one removed,
+paused or refused since the resolution is not spent, and a reference to a key
+the acting person may not use resolves nothing, exactly as a made-up one does.
+
+**Text surfaces only**: chat, streaming chat, both tool surfaces and structured
+output. Vision, embeddings, speech, transcription and images stay on the
+cluster's account.
+
+[API keys](api-keys.md) has the rest: who may add one, lending, checks, what a
+key's owner is told when it stops working, and what a cluster owner can do.
+
+---
+
 ## Reading what the router decided
 
 Every resolution writes one `v1:router:call` row, on success and on a park. Beyond
@@ -563,6 +620,7 @@ the tokens, cost and latency the row already carried, a decision carries:
 | `minContextTokens` | the context floor this resolution was made against |
 | `callerKind` | what KIND of caller made the call: `user`, `system`, `connector`, `anonymous` or `unattributed` |
 | `cacheKind` | which CACHE answered, when one did: `exact` or `semantic`. Absent means a provider answered |
+| `accountKind` / `accountKeyId` / `accountKeyOwnerUserId` | which ACCOUNT paid a vendor text call: `cluster`, or `key` with the key's id and its owner's. Absent for a source that takes no account. Never the key's name or fingerprint; a `fallback_used` row names the account that FAILED. When a key paid and the call failed, the row's `errorMessage` is the router's code and sentence, never the vendor's own words ([API keys](api-keys.md#reading-which-account-paid)) |
 | `executionSurface` | which machine took the call, as `fleet:<registrationId>`, whether it served it or failed it. `outcome` says which, and a failed call counts against that machine in [fleet capacity](#fleet-capacity), including one that ran out of its caller's time. A machine that declined before handing the call to a runtime, or that nothing had been heard from when its caller gave up, is neither named nor counted |
 
 **`session` is a fourth door, not a flag on `app`.** `app` means a subscription app
@@ -658,6 +716,7 @@ laptop to open and the model to pull.
 ## Related
 
 - [LLM cost control](../ai/llm-cost-control.md) -- the defence-in-depth accounting
+- [API keys](api-keys.md) -- a person's own account at a vendor, and who it pays for
 - [The MemQL language](../language/memql.md) -- the `rule` construct and `@level`
 - [Workers runbook](workers-runbook.md) -- machine routing, which happens *after* a
   model is chosen and is a separate decision

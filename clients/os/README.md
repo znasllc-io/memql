@@ -405,9 +405,30 @@ authorized directory and edits grants; it does not create or rename identities.
 into the whole app: **Machines** (rename, operator labels, remove,
 per-machine detail, and the guided cockpit install), **Routing** (routes,
 rules, the machine choice and the history of what served -- see
-`src/apps/fleet/routing/`), **Workbenches** (per-plan workspaces
-by replica), and its own **Settings**. Five things about it generalize to
-every app epic after it:
+`src/apps/fleet/routing/`), **Workbenches** (per-plan workspaces by replica),
+and its own **Settings**.
+
+**API keys live in Settings, not Fleet** (`src/apps/settings/apikeys/`): a
+person's own keys at Anthropic and OpenAI and the keys lent to them. Fleet
+opens for owners and developers only, and a key's owner must always be able to
+reach it, so the section sits beside Vendors with NO floor of its own. It is
+the one Settings section a user or a viewer holds, which is what puts Settings
+on their desktop. Adding a key is the part (`execute app:settings/apikeys`,
+seeded on every predefined role).
+
+**API keys is deliberately NOT a live surface.** A key's rows publish no graph
+event, by design: an event carries the whole row, the sealed value included, to
+every subscriber. So there is no collection to `retain()` and none may be
+added. The section reads through the `vendorKey*` builtins (`useVendorKeys`),
+reads again after every write of its own, and catches what somebody else
+changed (a key lent to you, a key the vendor refused) with `AutoRefresh`. The
+pasted key is typed into a `conceal` input (`kit/controls`), which is
+uncontrolled on purpose so the value is never written into the page's markup.
+It lives in the wizard's own state and the field's value, leaves in the one
+call that adds it, and is never in a draft store, the page context Ask reads,
+a client error report or browser storage.
+
+Five things about Fleet generalize to every app epic after it:
 
 - **A flow the person walks away from lives ABOVE the section.** The guided
   install (`fleet/addMachine/`, design record

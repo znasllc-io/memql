@@ -95,8 +95,10 @@ mutation globalVariable setGlobalVariable {
 // Upserts a partition-scoped encrypted secret row in
 // v1:platform:partitionSecret. Callers pre-compute the ciphertext +
 // fingerprint via component/secret.Encrypt; this mutation only persists
-// the opaque fields. The router integration uses this for vendor_api_key
-// rows; future callers will use it for per-tenant integration creds.
+// the opaque fields. The environment injector uses it for a partition-scoped
+// secret it persists (component/memql/default_injector.go). A person's API
+// key at a model vendor is not stored here: it is a v1:router:vendorKey,
+// sealed by integrations/vendorkeys.
 //
 // Deterministic id means re-submitting rotates the value; the prior
 // ciphertext remains in the time-series history under the same id.

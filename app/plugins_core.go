@@ -65,6 +65,14 @@ import (
 	// operator can mint a code depend on which replica their browser's stream
 	// landed on.
 	_ "github.com/znasllc-io/memql/integrations/siteaccess"
+	// API keys (design record 2026-11-21-vendor-accounts-and-api-keys). On
+	// every node type, for a reason beyond siteaccess's: the plug-in installs
+	// the seam the provider registry asks which of a person's keys can pay
+	// for a vendor call, and that question is asked on whichever replica
+	// makes the call, an agent or a planner as often as the bff. A node
+	// without it would pay a forwarded call with the cluster's account or
+	// with nothing, whatever the person chose.
+	_ "github.com/znasllc-io/memql/integrations/vendorkeys"
 	// Groups (epic memql#5165). On every node type for customdomain's
 	// reason: the five caller-facing verbs are reached from whichever node
 	// serves the OS shell's connection, and gating by build tag would make a

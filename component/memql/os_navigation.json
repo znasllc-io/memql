@@ -616,6 +616,10 @@
         "requires": "app:settings/providers"
       },
       {
+        "id": "apikeys",
+        "name": "API keys"
+      },
+      {
         "id": "levels",
         "name": "Levels",
         "requires": "app:settings/levels"

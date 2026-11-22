@@ -462,6 +462,15 @@ owner's** actor, through a query whose only predicate is the owner term. So:
 - The polling feed **skips** a package whose credential will not resolve
   rather than polling it anonymously, so a private repository never reads as
   unchanged because the request answered 404.
+- **A credential never changes owner**, and neither does a saved connection
+  made from it. Transferring a person's rows to somebody else
+  (`transferRowOwnership`, used when somebody leaves) moves their packages and
+  leaves their credentials and connections with them, and the engine refuses
+  any write that would change a credential's owner, a cluster owner's and
+  server code's included. A package that was handed over is refused
+  `credential_not_found` at its next fetch until its new owner selects a
+  connection of their own on its Source stop. Nobody fetches as a person who
+  left.
 
 Decryption happens only inside a fetch, or the probe that stands in for one.
 No query and no capability returns plaintext; the one query that returns

@@ -46,23 +46,26 @@ func TestAnAgentsStoredPinIsItsOwners(t *testing.T) {
 	ctx := auth.ContextWithUserActor(context.Background(), "v1:identity:user:user-1")
 	msg := &memqlv1.AgentGenerateTurnMsg{AgentId: "v1:agents:agent:user-2s-agent"}
 
-	provider, pinnedBy := r.turnPin(ctx, msg, agentPinData("app:claude-code"))
+	provider, pinnedBy, byMachine := r.turnPin(ctx, msg, agentPinData("app:claude-code"))
 	if provider != "app:claude-code" || pinnedBy != "v1:identity:user:user-2" {
 		t.Fatalf("pin = %q by %q, want app:claude-code by the agent's owner", provider, pinnedBy)
+	}
+	if byMachine {
+		t.Error("an agent's stored pin, which its owner set, reads as a machine's choice")
 	}
 
 	// The stored MODEL is promoted to the pin when no provider is stored, and
 	// it is the owner's choice all the same.
 	data := agentPinData("")
 	data["assistant"].(map[string]any)["providerConfig"].(map[string]any)["llm"] = map[string]any{"model": "app:claude-code"}
-	provider, pinnedBy = r.turnPin(ctx, msg, data)
+	provider, pinnedBy, _ = r.turnPin(ctx, msg, data)
 	if provider != "app:claude-code" || pinnedBy != "v1:identity:user:user-2" {
 		t.Fatalf("model pin = %q by %q, want app:claude-code by the agent's owner", provider, pinnedBy)
 	}
 
 	// No pin reads nothing and names nobody.
 	engine.queries = nil
-	if provider, pinnedBy := r.turnPin(ctx, msg, map[string]any{}); provider != "" || pinnedBy != "" || len(engine.queries) != 0 {
+	if provider, pinnedBy, byMachine := r.turnPin(ctx, msg, map[string]any{}); provider != "" || pinnedBy != "" || byMachine || len(engine.queries) != 0 {
 		t.Fatalf("an unpinned turn pinned %q by %q after %d read(s)", provider, pinnedBy, len(engine.queries))
 	}
 }
@@ -111,5 +114,48 @@ func TestATurnsHintedPinIsTheCallers(t *testing.T) {
 	}
 	if got := prepared.routerReq; got.ExplicitProvider != "" || strings.TrimSpace(got.PinnedBy) != "" {
 		t.Fatalf("an unpinned turn pins %q by %q, want nothing by nobody", got.ExplicitProvider, got.PinnedBy)
+	}
+}
+
+// forwardedTurnCtx is an agent turn as the agent node receives it: forwarded
+// from the bff, bound from the assertion, which is the only thing that says
+// which credential the turn came on.
+func forwardedTurnCtx(t *testing.T, user, class string) context.Context {
+	t.Helper()
+	ac := &auth.AccessContext{UserId: user, Role: auth.RoleDeveloper}
+	asserted, err := auth.ForwardedAuthorityForUser(ac, class, "", time.Now().Add(time.Hour), time.Now())
+	if err != nil {
+		t.Fatalf("class %q: %v", class, err)
+	}
+	verified, err := auth.VerifyForwardedAuthority(asserted, time.Now())
+	if err != nil {
+		t.Fatalf("class %q: %v", class, err)
+	}
+	return auth.BindForwardedContext(context.Background(), asserted.Principal().Claims, verified, asserted)
+}
+
+// A HINT IS ITS CALLER'S PIN, AND A CALLER IS NOT ALWAYS THE PERSON (vendor
+// accounts design, K8 line 4 and O4). An app session may send an agent turn,
+// and its subject is the person who owns the machine: a provider it hints is
+// attributed to them. It is still the coding agent naming a model, and the
+// person's API key must not pay on the strength of it.
+func TestAHintedPinSaysWhoseCredentialMadeIt(t *testing.T) {
+	const person = "v1:identity:user:hint-caller"
+	r := newTestReplier(&agentOwnerEngine{owner: person})
+	msg := &memqlv1.AgentGenerateTurnMsg{AgentId: "v1:agents:agent:a", Hints: map[string]string{"provider": "federation:strongest"}}
+	for name, tc := range map[string]struct {
+		class string
+		want  bool
+	}{
+		"the person's own session, forwarded": {auth.ForwardedClassUser, false},
+		"an app session, forwarded":           {auth.ForwardedClassAppSession, true},
+	} {
+		provider, pinnedBy, byMachine := r.turnPin(forwardedTurnCtx(t, person, tc.class), msg, map[string]any{})
+		if provider != "federation:strongest" || pinnedBy != person {
+			t.Fatalf("%s: pin = %q by %q", name, provider, pinnedBy)
+		}
+		if byMachine != tc.want {
+			t.Errorf("%s: the pin reads as made by a machine = %v, want %v", name, byMachine, tc.want)
+		}
 	}
 }

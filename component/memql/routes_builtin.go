@@ -437,9 +437,13 @@ func (e *MemQLEngine) routeReadinessFor(ctx context.Context) routeReadiness {
 	return r
 }
 
-// generationReady reports whether anything can answer this person.
+// generationReady reports whether anything can answer this person UNDER AUTO.
+// It reads FederationAuto, not Federation: a person's API key answers Auto
+// only once its owner switched that on (design record
+// 2026-11-21-vendor-accounts-and-api-keys, decisions O4 and A8), and a route
+// the person chooses is judged source by source in servesNow.
 func (r routeReadiness) generationReady() bool {
-	return r.doors.LocalEligible || r.doors.AppEligible || r.doors.Federation
+	return r.doors.LocalEligible || r.doors.AppEligible || r.doors.FederationAuto
 }
 
 // summarize judges one route against this moment.
@@ -450,6 +454,11 @@ func (r routeReadiness) summarize(spec RouteSpec) routeSummaryJSON {
 	}
 	if spec.Kind == RouteKindAuto {
 		switch {
+		case !r.generationReady() && r.doors.KeyAccount:
+			// The person HAS a source, a key of theirs or one lent to them,
+			// and Auto may not spend it until its owner says so (O4). "Needs a
+			// source" would send them looking for a second one.
+			out.Reason = "An API key you can use is off for Auto"
 		case !r.generationReady():
 			out.Reason = "Needs a source that can answer"
 		case !r.embeddingReachable:
@@ -525,6 +534,8 @@ func (r routeReadiness) servesNow(entry string) (string, bool) {
 			}
 		}
 	case strings.HasPrefix(entry, "federation:"):
+		// Federation is this person's answer for a route they choose: the
+		// cluster's account, or a key of theirs (A8).
 		if d.Federation {
 			switch strings.TrimPrefix(entry, "federation:") {
 			case "cheapest":
@@ -552,7 +563,7 @@ func (r routeReadiness) unreadyReason(sources []string, job string) string {
 	case allFleet:
 		return "No local model reachable"
 	case allVendors:
-		return "No vendor is set up"
+		return "Needs an API key or a vendor account"
 	}
 	return job + ": nothing can serve it now"
 }

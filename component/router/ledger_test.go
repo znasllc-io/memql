@@ -354,7 +354,12 @@ func TestRouterDecisionShapeKeepsItsProjectionAndGainsTheTwoNewFields(t *testing
 	}
 	// callerKind and cacheKind (memql#5581), and route -- the route a person
 	// chose, which History filters on (design record 2026-10-18-routes).
-	added := []string{"callerKind", "cacheKind", "route", "apiEquivalent", "actualBilling", "electricityEstimate"}
+	// And who paid a vendor text call: the account's kind, the key's id and
+	// its owner's id (design record 2026-11-21-vendor-accounts, K15).
+	added := []string{
+		"callerKind", "cacheKind", "route", "apiEquivalent", "actualBilling", "electricityEstimate",
+		"accountKind", "accountKeyId", "accountKeyOwnerUserId",
+	}
 	for _, field := range added {
 		if !body[field] {
 			t.Errorf("routerDecision does not project %q, so the reader cannot see it", field)

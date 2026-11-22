@@ -863,7 +863,13 @@ func (h *AccessHandler) serveCall(w http.ResponseWriter, r *http.Request, stamp 
 	// (codeOpensSite), a field of the row resolveSite read as the cluster and held to the
 	// stamp; nothing the visitor sent reaches it. A site with none states none, and the
 	// engine resolves the account from the borrowed owner as it did before.
-	ctx := auth.ContextWithCallAccount(auth.ContextWithUserActor(r.Context(), site.OwnerUserID), site.AccountID)
+	//
+	// AND MARKED AS A VISITOR'S (auth.ContextWithVisitorBorrow). The lent
+	// authority makes this look like the owner acting to everything downstream;
+	// the mark is what keeps the owner's own API key from paying for a model
+	// call a stranger's click started.
+	ctx := auth.ContextWithVisitorBorrow(
+		auth.ContextWithCallAccount(auth.ContextWithUserActor(r.Context(), site.OwnerUserID), site.AccountID))
 	result, err := h.engine.Execute(ctx, call)
 	if err != nil {
 		// NOT THE ERROR. It can repeat the statement, and the statement is every argument

@@ -39,6 +39,11 @@ import (
 // walk -- and a test -- can tell a failure from a door passed over.
 const failedWhenCalledPrefix = "failed when called: "
 
+// accountFailureCodePrefix starts the code of a failure about the account that
+// paid: account_refused, account_credit, account_permission,
+// account_unavailable.
+const accountFailureCodePrefix = "account_"
+
 // failureWords is what each stable code means, in the decision record's
 // words. A code with no entry is printed alone: a code is still an answer.
 //
@@ -68,6 +73,16 @@ var failureWords = map[string]string{
 	"auth":              "the credentials were refused",
 	"upstream":          "the provider failed",
 
+	// A failure about the ACCOUNT that paid for a vendor call (accounts.go,
+	// design record 2026-11-21-vendor-accounts, K10): the same model is tried
+	// on the next account. The kinds are component/memql's
+	// (VendorAccountFailureKinds), and a test holds every one of them to words
+	// here. The words never say which key: the line's account does.
+	accountFailureCodePrefix + "refused":     "the vendor does not accept the account that paid",
+	accountFailureCodePrefix + "credit":      "the account that paid is out of credit or at its spend limit",
+	accountFailureCodePrefix + "permission":  "the account that paid may not make this call",
+	accountFailureCodePrefix + "unavailable": "the account that paid could not be used",
+
 	// The router's own refusals, in the words its error leads with
 	// (InferenceUnavailable.Error). Without them a refusal read as "other".
 	work.RefusalEveryDoorShut:  "no door to a model is open for this call",
@@ -82,6 +97,35 @@ func FailureReason(err error) string {
 		return failedWhenCalledPrefix + code + ": " + words
 	}
 	return failedWhenCalledPrefix + code
+}
+
+// recordedError is the error text a call's row keeps in errorMessage.
+//
+// THE VENDOR'S SENTENCE NEVER GOES ON THE ROW OF A CALL A PERSON'S API KEY PAID
+// FOR (owner decision 2026-11-22). That sentence is about the key owner's
+// account at the vendor: it can name their organization, their plan, the
+// limit they set, a part of their key. The row is read by other people -- the
+// caller a key was lent to, and whoever reads the cluster's calls -- so it
+// keeps who paid (the account fields) and why in the router's own words: the
+// stable code and its sentence, the same pair the walk carries. Every failure
+// of such a call is worded this way, not only one about the account: a rate
+// limit's sentence names the organization as readily as a refusal's.
+//
+// The key's owner still reads the vendor's words, on the key's own page: a
+// failure about the account is kept on the key's state by the engine's
+// observer (integrations/vendorkeys/observe.go), which only they and a cluster
+// owner read.
+//
+// The cluster's own account and every source that takes no account keep the
+// error's text, as they always did.
+func recordedError(d airoute.Decision, err error) string {
+	if err == nil {
+		return ""
+	}
+	if paidByAKey(d) {
+		return strings.TrimPrefix(FailureReason(err), failedWhenCalledPrefix)
+	}
+	return TruncateError(err.Error(), 500)
 }
 
 // failureCode is the most specific stable code the error carries.
@@ -116,6 +160,13 @@ func failureCode(err error) string {
 	if errors.Is(err, memql.ErrAppUnavailable) {
 		return memql.AppRefusalCode
 	}
+	// A vendor's answer about the account that paid, or the engine's own
+	// finding about it. Asked before the ledger's categories, which would call
+	// most of these `auth` and lose the one fact a reader needs: the model was
+	// not at fault, the account was.
+	if kind, aboutAccount := memql.VendorAccountFailure(err); aboutAccount {
+		return accountFailureCodePrefix + kind
+	}
 	return CategorizeError(err)
 }
 
@@ -127,11 +178,15 @@ func failureCode(err error) string {
 // The LAST line naming the entry is the attempt's own ("selected", or
 // "selected from fallback chain"), which is always appended after the lines
 // for the entries the walk passed over.
-func withFailureNoted(considered []airoute.ConsideredEntry, entry, door string, err error) []airoute.ConsideredEntry {
+//
+// account is the account the attempt was paid by ("" for a source that takes
+// none). One vendor model can be tried on several accounts, and each attempt
+// has a line of its own, so the failure goes on the line for THIS account.
+func withFailureNoted(considered []airoute.ConsideredEntry, entry, account, door string, err error) []airoute.ConsideredEntry {
 	out := append([]airoute.ConsideredEntry(nil), considered...)
 	line := FailureReason(err)
 	for i := len(out) - 1; i >= 0; i-- {
-		if out[i].Entry == entry {
+		if out[i].Entry == entry && out[i].Account == account {
 			out[i].Reason = line
 			if out[i].Door == "" {
 				out[i].Door = door
@@ -139,7 +194,7 @@ func withFailureNoted(considered []airoute.ConsideredEntry, entry, door string, 
 			return out
 		}
 	}
-	return append(out, airoute.ConsideredEntry{Entry: entry, Door: door, Reason: line})
+	return append(out, airoute.ConsideredEntry{Entry: entry, Door: door, Reason: line, Account: account})
 }
 
 // withAttemptFailed is the selection a wrapper carries to its NEXT attempt
@@ -147,6 +202,6 @@ func withFailureNoted(considered []airoute.ConsideredEntry, entry, door string, 
 // source's line. Every later row of the walk -- the served one included --
 // then says the source in front of it failed, and why.
 func (selection Resolved) withAttemptFailed(failed Resolved, err error) Resolved {
-	selection.Decision.Considered = withFailureNoted(selection.Decision.Considered, failed.ProviderName, failed.Decision.Door, err)
+	selection.Decision.Considered = withFailureNoted(selection.Decision.Considered, failed.ProviderName, accountRef(failed.Decision), failed.Decision.Door, err)
 	return selection
 }

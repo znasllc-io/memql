@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { OS_REGISTRY } from "../../src/apps/registry";
 import { settingsSectionProblem, type OsAppManifest } from "../../src/system/registry";
-import { rolesOpening } from "../seededAccess";
+import { rolesOpening, seededAccessFor } from "../seededAccess";
 
 // The per-app settings contract (memql#4743). `settingsSection` is REQUIRED
 // on every manifest -- the type enforces its presence, and this enforces
@@ -114,8 +114,14 @@ describe("the settings-section contract", () => {
   it("Settings itself declares its sections", () => {
     const settings = OS_REGISTRY.apps.find((a) => a.id === "settings");
     expect(settings?.sections?.map((s) => s.id)).toEqual([
-      "integrations", "data", "connections", "pipelines", "providers", "levels", "rules", "decisions", "procedures", "logs",
+      "integrations", "data", "connections", "pipelines", "providers", "apikeys", "levels", "rules", "decisions", "procedures", "logs",
     ]);
+    // API keys carries no floor (owner decision 2026-11-22): a key's owner
+    // reaches it whatever their role. Adding is the part, on every seeded role.
+    expect(settings?.sections?.find((s) => s.id === "apikeys")?.requires).toBeUndefined();
+    for (const role of ["owner", "developer", "admin", "user", "viewer"]) {
+      expect(seededAccessFor(role).some((c) => c.verb === "execute" && c.resource === "app:settings/apikeys" && c.effect === "allow"), `${role} adds an API key`).toBe(true);
+    }
     expect(settings?.sections?.find((s) => s.id === "pipelines")?.requires).toBe("app:settings/pipelines");
     expect(rolesOpening("app:settings/pipelines")).toEqual(["owner"]);
     expect(OS_REGISTRY.apps.find(app => app.id === "identity")?.sections?.find(s => s.id === "policy")?.requires).toBe("app:settings/cluster");

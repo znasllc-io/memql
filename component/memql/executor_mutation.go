@@ -1020,6 +1020,13 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			if err := e.validateSourceConnectionWrite(ctx, conceptMeta.Name, priorPayload, payload); err != nil {
 				return nil, meta, err
 			}
+			// A person's API key and their source access never change hands,
+			// whoever writes (owner_held_write_guard.go). Here, before the merge,
+			// for the reason the row-authz guard is: after it the stored owner is
+			// gone.
+			if err := guardOwnerHeld(conceptMeta.Name, priorPayload, payload); err != nil {
+				return nil, meta, err
+			}
 			organizationPrior = maps.Clone(priorPayload)
 			if conceptMeta.Name == conceptPlatformPackage {
 				// loadPriorPayload decoded JSON maps/slices. A shallow copy would

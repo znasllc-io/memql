@@ -178,7 +178,9 @@ func TestASourceCredentialsFieldsAreServerWritten(t *testing.T) {
 	t.Run("a cluster owner/ownerUserId", func(t *testing.T) {
 		err := rawInsertFor(t, owner, eng, sourceCredentialConceptForTest, f.grantId, map[string]any{"ownerUserId": "source-credential-somebody-else-" + f.suffix})
 		require.Error(t, err, "a cluster owner moved a source credential to another person with the raw literal")
-		require.Contains(t, err.Error(), sourceCredentialWriteRefusal)
+		// Refused by the rule that holds for every writer, internal origin
+		// included (owner_held_write_guard.go), which is asked before this one.
+		require.Contains(t, err.Error(), "owner never changes")
 		require.Equal(t, before, storedSourceCredential(t, db, f, f.grantId))
 	})
 
@@ -258,4 +260,64 @@ func TestAPersonStillRevokesTheirOwnSourceCredential(t *testing.T) {
 	require.Equal(t, "revoked", grant["status"])
 	require.Contains(t, fmt.Sprint(grant["ownerUserId"]), f.personId, "a cluster owner's revoke moved the row to themselves")
 	require.Equal(t, "sealed-by-the-server-grant", grant["encryptedValue"])
+}
+
+// A PERSON'S SOURCE ACCESS NEVER CHANGES HANDS, WHOEVER WRITES (owner decision
+// 2026-11-22, with the API keys work).
+//
+// A source credential is one person's sealed access to their repositories at
+// GitHub, and a source connection is a selection they made from it. The row
+// rule above already refuses a person's or a cluster owner's own write of the
+// owner. It admitted internal origin, and the ownership transfer writes
+// exactly that: a whole-user transfer handed a leaver's access to their heir,
+// who then fetched as the person who left.
+//
+// So the case measured here is the transfer's own write: a raw insert naming
+// only the owner, by a cluster owner, under internal origin.
+func TestAPersonsSourceAccessNeverChangesHands(t *testing.T) {
+	eng, db, _ := sharedReadMergeEngine(t)
+	if eng == nil {
+		return // skipped: no database
+	}
+	f := newSourceCredentialFixture(t, eng, "ownerstays")
+	const connectionConcept = "v1:platform:sourceConnection"
+	connectionId := "source-connection-" + f.suffix
+	_, err := runSiteMutation(t, f.server, eng, "recordSourceConnection", map[string]any{
+		"connectionId": connectionId, "credentialId": f.grantId, "installationId": "1001",
+		"providerAccountId": "583231", "accountLogin": "octocat", "accountType": "User",
+	})
+	require.NoError(t, err, "server code records a connection the person selected from their grant")
+
+	asTheTransfer := auth.ContextWithInternalOrigin(clusterOwnerCtx("source-access-operator-" + f.suffix))
+	heir := "source-access-heir-" + f.suffix
+	rows := []struct{ concept, id string }{
+		{sourceCredentialConceptForTest, f.tokenId},
+		{sourceCredentialConceptForTest, f.grantId},
+		{connectionConcept, connectionId},
+	}
+	for _, row := range rows {
+		stored := func() map[string]any {
+			return latestPayload(t, context.Background(), db, row.concept, row.concept+":"+row.id)
+		}
+		before := stored()
+		require.Contains(t, fmt.Sprint(before["ownerUserId"]), f.personId, "%s is not the person's to begin with", row.concept)
+		for name, to := range map[string]string{"another person": heir, "nobody": ""} {
+			err := rawInsertFor(t, asTheTransfer, eng, row.concept, row.id, map[string]any{"ownerUserId": to})
+			require.Error(t, err, "%s was handed to %s", row.concept, name)
+			require.Contains(t, err.Error(), "owner never changes", "%s was refused, but not by the rule that it never changes hands", row.concept)
+			require.Equal(t, before, stored(), "the refused write changed the stored %s", row.concept)
+		}
+		// Naming the SAME owner again is not a change: a read-merge carries the
+		// field through every ordinary write.
+		err := rawInsertFor(t, asTheTransfer, eng, row.concept, row.id, map[string]any{"ownerUserId": before["ownerUserId"]})
+		require.NoError(t, err, "a write that leaves the owner of %s where it was is refused", row.concept)
+	}
+
+	// The engine's own writers still land after all of that.
+	_, err = runSiteMutation(t, f.server, eng, "touchSourceCredential", map[string]any{
+		"credentialId": f.tokenId, "lastUsedAt": "2030-03-04T05:06:07Z",
+	})
+	require.NoError(t, err, "the fetcher's heartbeat")
+	_, err = runSiteMutation(t, f.server, eng, "removeSourceConnection", map[string]any{"connectionId": connectionId})
+	require.NoError(t, err, "removing the connection from the chooser")
 }

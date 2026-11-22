@@ -277,7 +277,12 @@ func TestAskHandsTheTurnsRouteChoiceToTheGoalAndRefusesAnUnknownOne(t *testing.T
 	auth.SetCapabilityCatalog(nil)
 	t.Cleanup(func() { auth.SetCapabilityCatalog(previousCatalog) })
 	user := "v1:identity:user:" + id.NewShortId()
-	ctx := auth.ContextWithAccess(auth.ContextWithToken(context.Background(), &auth.TokenInfo{Subject: user}), &auth.AccessContext{UserId: user, Role: auth.RoleWriter})
+	// A PERSON'S OWN SIGNED-IN SESSION, claims included: that is who types in
+	// Ask, and it is what makes the choice below theirs. A context with no
+	// claims is not a session, and the stamp then says a machine chose
+	// (auth.ChoiceIsThePersons).
+	session := auth.ContextWithClaims(context.Background(), map[string]any{"sub": user})
+	ctx := auth.ContextWithAccess(auth.ContextWithToken(session, &auth.TokenInfo{Subject: user}), &auth.AccessContext{UserId: user, Role: auth.RoleWriter})
 	calls := 0
 	var handed common.RouteChoice
 	e.builtinExecutorHandlers["integration.work.createGoal"] = func(callCtx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {

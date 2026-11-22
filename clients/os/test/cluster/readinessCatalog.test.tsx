@@ -40,3 +40,34 @@ describe("fleet readiness through a BFF", () => {
     expect(screen.queryByRole("button", { name: "Add a machine for local models" })).toBeNull();
   });
 });
+
+// The vendor door is open for a person whose API key can pay, with no
+// federation on the cluster (design record
+// 2026-11-21-vendor-accounts-and-api-keys, A8). What it is called must be what
+// is true for the reader.
+describe("the vendor door, by what pays", () => {
+  function mountDoors(row: Record<string, unknown>) {
+    h.connection = fakeConnection({ inferenceStatus: [{
+      eligible: true, localEligible: false, localModelCount: 0, doorsOpen: ["federation"],
+      fleetCatalogInstalled: true, fleetInferenceInstalled: false, ...row,
+    }] });
+    render(withSession(<ReadinessSection />));
+  }
+
+  it("names an API key when a key is what opens it, and not federation", async () => {
+    mountDoors({ federationConfigured: false, keyAccount: true });
+    await screen.findByText("This cluster can reach a model through an API key of yours.");
+    expect(screen.queryByText(/workload-identity federation\./)).toBeNull();
+  });
+
+  it("names federation when the cluster's own account opens it", async () => {
+    mountDoors({ federationConfigured: true, keyAccount: false });
+    await screen.findByText("This cluster can reach a model through workload-identity federation.");
+  });
+
+  it("names both when both can pay", async () => {
+    mountDoors({ federationConfigured: true, keyAccount: true });
+    await screen.findByText("This cluster can reach a model through workload-identity federation and an API key of yours.");
+  });
+});
+

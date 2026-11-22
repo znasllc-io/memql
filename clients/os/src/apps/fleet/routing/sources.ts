@@ -17,7 +17,8 @@
 //                   allowed by the machine, an app this engine drives); "any
 //                   app" names the one the router would take -- the owner's
 //                   delegation app order first, then the engine's own order
-//   a vendor        `inferenceStatus` says a vendor is set up
+//   a vendor        `inferenceStatus` says an account can pay: the
+//                   cluster's federation, or an API key of the reader's
 //   another route   something in ITS chain is ready
 //
 // THREE ANSWERS, NOT TWO. `unknown` is its own value: before the machines have
@@ -54,7 +55,7 @@ export interface RoutingFacts {
   /** The machine feed has settled; before that, nothing about a machine is known. */
   machinesRead: boolean;
   machines: readonly MachineFacts[];
-  /** Whether a vendor is set up, per `inferenceStatus`. */
+  /** Whether an account can pay for a vendor's models for this reader, per `inferenceStatus`. */
   vendor: Readiness;
   routes: readonly RouteLike[];
   /** The owner's model order, which `fleet:strongest` honours first. */
@@ -113,6 +114,8 @@ export function factsFrom(input: {
   inference: {
     read: boolean;
     federationConfigured: boolean;
+    /** The reader has an API key that can pay for a vendor model, federation or not. */
+    keyAccount?: boolean;
     error: string;
     eligibleModelIds?: readonly string[];
     /** The answering node has the fleet catalog at all; without it the list is empty for a reason that is not the models'. */
@@ -134,7 +137,9 @@ export function factsFrom(input: {
         models: machineModelsFrom(m.labels),
         apps: m.apps,
       })),
-    vendor: !input.inference.read ? "unknown" : input.inference.federationConfigured ? "ready" : "idle",
+    // A vendor can serve this reader when an account can pay: the cluster's
+    // federation, or an API key of theirs.
+    vendor: !input.inference.read ? "unknown" : input.inference.federationConfigured || input.inference.keyAccount === true ? "ready" : "idle",
     routes: input.routes,
     preference: input.preference,
     eligibleModelIds:
@@ -275,7 +280,7 @@ export function readSource(entry: string, facts: RoutingFacts, seen: ReadonlySet
   const rest = entry.includes(":") ? entry.slice(entry.indexOf(":") + 1) : entry;
 
   if (kind === "vendor") {
-    return reading(entry, facts.vendor, "", facts.vendor === "idle" ? "no vendor set up" : "");
+    return reading(entry, facts.vendor, "", facts.vendor === "idle" ? "no API key or vendor account" : "");
   }
   if (kind === "embeddings") return reading(entry, "unknown", "", "", true);
   if (kind === "provider") return reading(entry, "unknown", "", "");

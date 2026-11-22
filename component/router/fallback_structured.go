@@ -199,8 +199,12 @@ func (r *Router) fallbackWalk(
 	var lastErr error
 	var lastFailed Resolved
 	localSeen := selection.localSeen
+	var hop accountHop
 
 	for _, name := range chain {
+		if hop.passOver(name) {
+			continue
+		}
 		client, resolved, ok := r.providerLookup(ctx, req, name, mod)
 		if !ok {
 			continue
@@ -231,6 +235,9 @@ func (r *Router) fallbackWalk(
 		// Every later attempt's row -- the served one included -- names the
 		// source that just failed, and why (failure_reason.go).
 		selection = selection.withAttemptFailed(resolved, err)
+		// And a failure that is not about the account that paid takes the
+		// record's other accounts with it (accounts.go).
+		hop.failed(name, err)
 	}
 
 	if lastErr != nil {
@@ -272,7 +279,15 @@ func (r *Router) fallbackHopRefusal(
 		return nil
 	}
 	report := &doorReporter{}
-	report.note(failed.ProviderName, "failed when it was called: "+TruncateError(errOrString(failure), 200))
+	// The failed attempt's own error, cut short -- unless a person's API key
+	// paid for it. Then the why is the router's words and never the vendor's
+	// sentence, which is about the key owner's account and would reach the
+	// caller and the decision here (failure_reason.go, recordedError).
+	why := "failed when it was called: " + TruncateError(errOrString(failure), 200)
+	if paidByAKey(failed.Decision) {
+		why = FailureReason(failure)
+	}
+	report.note(failed.ProviderName, why)
 	report.note(next.ProviderName, "the cost ceiling for this process has been reached")
 	decision := next.Decision
 	decision.Considered = append(append([]airoute.ConsideredEntry(nil), next.Decision.Considered...), report.entries()...)

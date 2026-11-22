@@ -46,11 +46,31 @@ type RouteChoice struct {
 	// embeddings. It survives row serialization and cannot be relaxed by a
 	// step override, a fallback or a child goal.
 	NoPaidProviders bool
+	// ForVisitor marks a goal that a VISITOR'S request opened: a shopper form
+	// or an access-code call, run under the site owner's borrowed authority
+	// (auth.ContextWithVisitorBorrow). The rows name the owner, and the run
+	// executes later as the owner's own, so this is the only thing left that
+	// says a stranger's click started it. A person's API key never pays for
+	// such work (design record 2026-11-21-vendor-accounts-and-api-keys, K8
+	// line 2). Stamped by the server from the request's context, never from an
+	// argument; inherited by a child goal, a fork, a replay and a branch, and
+	// cleared by nothing.
+	ForVisitor bool
+	// ByMachine marks a choice that was made through a credential acting as
+	// By without being them: an app session on their machine, a badge,
+	// delegated access (auth.ChoiceIsThePersons). The run executes later on a
+	// restored context that says nothing about how its choice was made, so
+	// this is the only thing left that does. A choice so marked does not let
+	// the person's API key pay: it is counted as work nobody chose in person
+	// (design record 2026-11-21-vendor-accounts-and-api-keys, K8 line 5, O4).
+	// Stamped by the server from the request's context, never from an
+	// argument, and inherited with the choice it describes.
+	ByMachine bool
 }
 
 // IsZero reports whether the choice changes nothing: Auto source, Auto level.
 func (c RouteChoice) IsZero() bool {
-	return strings.TrimSpace(c.Source) == "" && strings.TrimSpace(c.Level) == "" && c.Destination == "" && !c.NoPaidProviders
+	return strings.TrimSpace(c.Source) == "" && strings.TrimSpace(c.Level) == "" && c.Destination == "" && !c.NoPaidProviders && !c.ForVisitor
 }
 
 // Map is the row form written to v1:work:goal.routing and v1:work:run.routing.
@@ -67,6 +87,9 @@ func (c RouteChoice) Map() map[string]any {
 	if c.NoPaidProviders {
 		out["noPaidProviders"] = true
 	}
+	if c.ForVisitor {
+		out["forVisitor"] = true
+	}
 	if v := strings.TrimSpace(c.Source); v != "" {
 		out["source"] = v
 	}
@@ -75,6 +98,9 @@ func (c RouteChoice) Map() map[string]any {
 	}
 	if v := strings.TrimSpace(c.By); v != "" {
 		out["by"] = v
+	}
+	if c.ByMachine {
+		out["byMachine"] = true
 	}
 	return out
 }
@@ -92,7 +118,8 @@ func RouteChoiceFrom(v any) RouteChoice {
 		s, _ := m[key].(string)
 		return strings.TrimSpace(s)
 	}
-	c := RouteChoice{Source: text("source"), Level: text("level"), Destination: text("destination"), By: text("by"), NoPaidProviders: m["noPaidProviders"] == true}
+	c := RouteChoice{Source: text("source"), Level: text("level"), Destination: text("destination"), By: text("by"),
+		NoPaidProviders: m["noPaidProviders"] == true, ForVisitor: m["forVisitor"] == true, ByMachine: m["byMachine"] == true}
 	if c.IsZero() {
 		return RouteChoice{}
 	}

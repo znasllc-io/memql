@@ -13,7 +13,7 @@ import { isWorkerOnline } from "../online";
 import type { MachineRow } from "../rows";
 import { groupSize, matchesQuery, sharingSignature, standInNames, storedSubjects, subjectKey, type StoredShare, type Subject, type SubjectKind } from "./sharing";
 import type { MachineWrites, ShareChoice, SharingResource } from "./useMachineWrites";
-import { useShareDirectory } from "./useShareDirectory";
+import { useShareDirectory, type DirectoryRead } from "./useShareDirectory";
 
 interface Candidate { kind: SubjectKind; id: string; name: string; detail: string }
 interface ShareDraft { subject: Subject; name: string; paused: boolean; baseline: string }
@@ -44,9 +44,82 @@ export function sharingActiveCalls(machine: MachineRow, subject: Subject, now = 
   return typeof count === "number" && Number.isSafeInteger(count) && count >= 0 ? count : null;
 }
 
+/**
+ * What the editor lends, and how it reads and writes who it is lent to.
+ *
+ * ONE EDITOR, SEVERAL THINGS TO LEND. A machine's models, a machine's fleet
+ * workbenches and an API key are each lent to named people and groups, with a
+ * switch, a search picker and a card for each grant (DESIGN.md, "Sharing gives
+ * each shared resource its own toggle"). The interaction is this component's;
+ * what differs is here: the saved audience, the one write, the directory of
+ * who may be picked, the figure on a card, and the words.
+ */
+export interface ShareTarget {
+  /** The saved sharing, as the thing's own row holds it. */
+  share: StoredShare;
+  /** The one write: truthy when it was saved, null when it was refused. */
+  setSharing: (choice: ShareChoice) => Promise<unknown | null>;
+  /** Another write on the same thing is out. */
+  busy: boolean;
+  /** The refusal behind the last failed write, in the cluster's words. */
+  error?: string;
+  /** Who may be picked, read once sharing is first on. */
+  directory: { read: DirectoryRead; refreshing: boolean; retry: () => void };
+  /** Called when the directory is first needed. Sharing that was never on reads nobody. */
+  needDirectory: () => void;
+  /** The figure on a grant's card, and what a dash means when there is none. */
+  callsOf: (subject: Subject) => { text: string; title?: string };
+  words: ShareWords;
+}
+
+export interface ShareWords {
+  /** Names the editor to assistive tech: "Model sharing". */
+  title: string;
+  /** The switch: "Share models". */
+  toggle: string;
+  /** Under the switch, for each state of it. */
+  whenOff: string;
+  whenOn: string;
+  whenPaused: string;
+  /** What a grant is called on its card's controls: "sharing with". */
+  grant: string;
+  /** A failed write: "Sharing could not be updated." */
+  failed: string;
+}
+
+/** A machine's models or fleet workbenches, lent through the shared editor. */
 export function SharingEditor({ machine, writes, resource = "models" }: { machine: MachineRow; writes: MachineWrites; resource?: SharingResource }) {
-  const title = resource === "models" ? "Model sharing" : "Fleet workbench sharing";
-  const toggleLabel = resource === "models" ? "Share models" : "Share fleet workbenches";
+  const [directoryNeeded, setDirectoryNeeded] = useState(machine.sharingMode !== "owner");
+  const directory = useShareDirectory(machine.id, directoryNeeded, resource);
+  return <ShareEditor target={{
+    share: machine,
+    setSharing: choice => resource === "models" ? writes.setSharing(machine.id, choice) : writes.setSharing(machine.id, choice, resource),
+    busy: writes.busyId === machine.id,
+    error: writes.actionErrorScope === (resource === "models" ? "sharing" : "workbenchSharing") ? writes.actionError : undefined,
+    directory,
+    needDirectory: () => setDirectoryNeeded(true),
+    callsOf: subject => {
+      const count = sharingActiveCalls(machine, subject);
+      return count === null ? { text: "— active calls", title: "Active calls unavailable" } : { text: `${count} active ${count === 1 ? "call" : "calls"}` };
+    },
+    words: {
+      title: resource === "models" ? "Model sharing" : "Fleet workbench sharing",
+      toggle: resource === "models" ? "Share models" : "Share fleet workbenches",
+      whenOff: "Only you have access.",
+      whenOn: resource === "models" ? "Share inference. Machine control stays with you." : "Share isolated workbenches. Host access stays with you.",
+      whenPaused: "Paused. Your audience is saved; running work can finish.",
+      grant: "sharing with",
+      failed: "Sharing could not be updated.",
+    },
+  }} />;
+}
+
+export function ShareEditor({ target }: { target: ShareTarget }) {
+  const machine = target.share;
+  const { words } = target;
+  const title = words.title;
+  const toggleLabel = words.toggle;
+  const grantTitle = words.grant.charAt(0).toUpperCase() + words.grant.slice(1);
   const searchId = useId(), listId = useId();
   const root = useRef<HTMLElement>(null), search = useRef<HTMLInputElement>(null);
   const searchArea = useRef<HTMLDivElement>(null), popup = useRef<HTMLDivElement>(null);
@@ -68,11 +141,11 @@ export function SharingEditor({ machine, writes, resource = "models" }: { machin
   const [chosenKeys, setChosenKeys] = useState<string[]>([]);
   const [focusAfter, setFocusAfter] = useState<string | null>(null);
   const subjects = useMemo(() => storedSubjects(current), [current]);
-  const [directoryNeeded, setDirectoryNeeded] = useState(current.sharingMode !== "owner");
-  useEffect(() => { if (current.sharingMode !== "owner") setDirectoryNeeded(true); }, [current.sharingMode]);
-  const { read, refreshing, retry } = useShareDirectory(machine.id, directoryNeeded, resource);
+  const needDirectory = useRef(target.needDirectory); needDirectory.current = target.needDirectory;
+  useEffect(() => { if (current.sharingMode !== "owner") needDirectory.current(); }, [current.sharingMode]);
+  const { read, refreshing, retry } = target.directory;
   const directory = read.state === "ready" ? read.directory : null;
-  const busy = pending !== "" || writes.busyId === machine.id;
+  const busy = pending !== "" || target.busy;
   const candidates: Candidate[] = directory ? [
     ...directory.groups.map((g): Candidate => ({ kind: "group", id: g.id, name: g.name, detail: groupSize(g.members) })),
     ...directory.people.map((p): Candidate => ({ kind: "person", id: p.id, name: p.name, detail: p.detail })),
@@ -105,7 +178,7 @@ export function SharingEditor({ machine, writes, resource = "models" }: { machin
     const startedHere = root.current?.contains(document.activeElement);
     inFlight.current = true; setPending(key); setFailed(null);
     try {
-      const receipt = resource === "models" ? await writes.setSharing(machine.id, choice) : await writes.setSharing(machine.id, choice, resource);
+      const receipt = await target.setSharing(choice);
       if (!receipt) { setFailed({ choice, baseline, finishEdit, addedKeys }); return false; }
       const share: StoredShare = { sharingMode: choice.mode, sharingPaused: choice.paused ?? false, sharedUserIds: choice.mode === "people" ? choice.userIds : [], sharedGroupIds: choice.mode === "people" ? choice.groupIds : [], pausedUserIds: choice.pausedUserIds ?? [], pausedGroupIds: choice.pausedGroupIds ?? [] };
       setSaved({ before: liveSignature, share });
@@ -202,7 +275,7 @@ export function SharingEditor({ machine, writes, resource = "models" }: { machin
     <AutoRefresh enabled={sharing} busy={busy || refreshing} onRefresh={retry} />
     <div className="fleet-share-body">
       <div className="fleet-share-toggle">
-        <div><span>{toggleLabel}</span><Caption>{current.sharingPaused ? "Paused. Your audience is saved; running work can finish." : current.sharingMode === "owner" ? "Only you have access." : resource === "models" ? "Share inference. Machine control stays with you." : "Share isolated workbenches. Host access stays with you."}</Caption></div>
+        <div><span>{toggleLabel}</span><Caption>{current.sharingPaused ? words.whenPaused : current.sharingMode === "owner" ? words.whenOff : words.whenOn}</Caption></div>
         <Switch checked={sharing} disabled={locked} onChange={enabled => void persist({ ...choiceFor(current.sharingMode === "owner" ? "people" : current.sharingMode, subjects), paused: !enabled }, "mode")}><span className="os-sr-only">{toggleLabel}</span></Switch>
       </div>
       {sharing && current.sharingMode === "cluster" ? <Notice tone="info" sentence="Currently shared with everyone in this cluster."><Button disabled={locked} onClick={() => void persist(choiceFor("people", []), "mode")}>Choose users and groups</Button></Notice> : null}
@@ -237,8 +310,8 @@ export function SharingEditor({ machine, writes, resource = "models" }: { machin
             </AnchoredPicker> : null}
           </div>
           <p className="os-caption fleet-share-selection-count" id={`${searchId}-selection`} role="status" aria-live="polite" aria-atomic="true">{selection.length} selected</p>
-          {draft ? <div className="os-card-draft" role="group" aria-label={`Edit sharing with ${draft.name}`} onKeyDown={event => { if (event.key === "Escape" && !busy) { event.preventDefault(); event.stopPropagation(); cancelEdit(); } }}>
-            <div className="os-card-draft-title">Sharing with <strong>{draft.name}</strong></div>
+          {draft ? <div className="os-card-draft" role="group" aria-label={`Edit ${words.grant} ${draft.name}`} onKeyDown={event => { if (event.key === "Escape" && !busy) { event.preventDefault(); event.stopPropagation(); cancelEdit(); } }}>
+            <div className="os-card-draft-title">{grantTitle} <strong>{draft.name}</strong></div>
             <Switch checked={!draft.paused} disabled={busy} onChange={enabled => setDraft({ ...draft, paused: !enabled })}>Allow new calls</Switch>
             {conflict && !busy ? <Notice tone="warn" sentence="Sharing changed elsewhere." next="Cancel and reopen the card to edit current access." /> : null}
             <div className="os-panel-actions">
@@ -249,11 +322,11 @@ export function SharingEditor({ machine, writes, resource = "models" }: { machin
           {read.state === "loading" ? <CardCollectionSkeleton label="Loading users and groups" /> : matches.length ? <CardCarousel key={`${searchBy}:${query}`} items={matches} itemKey={subject => subjectKey(subject.kind, subject.id)} revealKey={revealKey} minCardWidth={240}
             label="Sharing access cards" listLabel="Shared users and groups" noun="entry" plural="entries" renderItem={subject => {
               const key = subjectKey(subject.kind, subject.id), { name, stale } = describe(subject);
-              const count = sharingActiveCalls(machine, subject);
-              return <EditableCard label={`Edit sharing with ${name}`} disabled={locked} onEdit={() => beginEdit(subject)}
-                meta={<span className="fleet-share-calls" title={count === null ? "Active calls unavailable" : undefined}>{count === null ? "— active calls" : `${count} active ${count === 1 ? "call" : "calls"}`}</span>} actions={<>
-                <IconButton data-share-action={key} label={`${subject.paused ? "Resume" : "Pause"} sharing with ${name}`} disabled={locked} onClick={() => void persist(choiceFor("people", subjects.map(s => subjectKey(s.kind, s.id) === key ? { ...s, paused: !s.paused } : s)), key, key)}>{pending === key ? <LoaderCircle size={15} aria-hidden className="os-spin" /> : subject.paused ? <Play size={15} aria-hidden /> : <Pause size={15} aria-hidden />}</IconButton>
-                <IconButton className="os-card-remove" label={`Remove sharing with ${name}`} disabled={locked} onClick={() => { setRevealKey(undefined); void persist(choiceFor("people", subjects.filter(s => subjectKey(s.kind, s.id) !== key)), `remove:${key}`, "search"); }}><Trash2 size={15} aria-hidden /></IconButton>
+              const calls = target.callsOf(subject);
+              return <EditableCard label={`Edit ${words.grant} ${name}`} disabled={locked} onEdit={() => beginEdit(subject)}
+                meta={<span className="fleet-share-calls" title={calls.title}>{calls.text}</span>} actions={<>
+                <IconButton data-share-action={key} label={`${subject.paused ? "Resume" : "Pause"} ${words.grant} ${name}`} disabled={locked} onClick={() => void persist(choiceFor("people", subjects.map(s => subjectKey(s.kind, s.id) === key ? { ...s, paused: !s.paused } : s)), key, key)}>{pending === key ? <LoaderCircle size={15} aria-hidden className="os-spin" /> : subject.paused ? <Play size={15} aria-hidden /> : <Pause size={15} aria-hidden />}</IconButton>
+                <IconButton className="os-card-remove" label={`Remove ${words.grant} ${name}`} disabled={locked} onClick={() => { setRevealKey(undefined); void persist(choiceFor("people", subjects.filter(s => subjectKey(s.kind, s.id) !== key)), `remove:${key}`, "search"); }}><Trash2 size={15} aria-hidden /></IconButton>
               </>}>
                 <strong>{name}</strong>
                 <span>{stale ? "Unavailable" : subject.kind === "group" ? "Group" : "User"}{subject.paused ? <> · <em>Paused</em></> : null}</span>
@@ -263,7 +336,7 @@ export function SharingEditor({ machine, writes, resource = "models" }: { machin
         </div>
       </section> : null}
     </div>
-    {failed ? <div className="fleet-share-error"><Notice tone="error" sentence="Sharing could not be updated." detail={writes.actionErrorScope === (resource === "models" ? "sharing" : "workbenchSharing") ? writes.actionError : undefined}>
+    {failed ? <div className="fleet-share-error"><Notice tone="error" sentence={words.failed} detail={target.error}>
       {canRetry ? <Button disabled={busy} onClick={() => void persist(failed.choice, "retry", failed.finishEdit || failed.addedKeys.length ? "search" : undefined, failed.finishEdit, failed.addedKeys)}>Try again</Button> : <Caption>{failed.addedKeys.length ? "Selection or access changed. Add the current selection." : "Sharing changed elsewhere. Choose the action again."}</Caption>}
     </Notice></div> : null}
   </section>;

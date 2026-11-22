@@ -467,3 +467,39 @@ changed without disturbing O1 to O6.
 16. **A5:** Settings > Vendors shows only the answering node's sign-in, with
     no cluster-wide table.
 17. **K8:** keys lent to a person are tried in the order the keys were added.
+
+## Owner decisions after the independent review (2026-11-22)
+
+The whole-branch review of part 2 left five things only the owner could
+settle. He answered them one at a time. Where an answer changes a decision
+above, the answer is what the code does, and the row above is the history.
+
+1. **A coding agent's choice of route is not the person's.** A key pays for a
+   route somebody chose only when that somebody is the person, in a signed-in
+   session or with their own access token. An app session, a service account
+   and work continued on a person's behalf are not, so they reach a key only
+   through Auto, when its owner switched that on (`auth.ChoiceIsThePersons`).
+   This confirms what the review's fix built.
+2. **The cluster's own vendor account pays for the cluster's work, and for a
+   person's calls only when that person is allowed.** The owner's rule is
+   bring-your-own for everything: a connected cluster account is not a free
+   pool for everybody on the cluster. The cluster owner is allowed from the
+   start and can allow others. This narrows K8's last fallback and is built
+   after part 2 lands and before the API route.
+3. **API keys live in Settings, and anybody signed in may add one** (changes K4
+   and U1). His words: a key's owner uses it whatever their role, and must be
+   able to manage it. Fleet opens for owners and developers only. So the
+   section is Settings > API keys with no floor of its own, a person's own keys
+   are listed whatever their role holds, and adding is `execute
+   app:settings/apikeys`, seeded on every predefined role. An operator
+   withholds adding from a person or a group with a deny.
+4. **The record of a key-paid call that failed keeps who paid and the router's
+   own words.** The vendor's sentence is about the key owner's account and the
+   record is readable by every signed-in person. The key's owner reads the
+   vendor's words on the key's page.
+5. **A person's source credentials never change hands either.** The ownership
+   transfer moved them like any owned row, so an heir fetched private sources
+   as the person who left. They are held to the rule the keys are: the transfer
+   skips them and the engine refuses the move for every writer. A package that
+   was handed over stops fetching until its new owner selects a connection of
+   their own.

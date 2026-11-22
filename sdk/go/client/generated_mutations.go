@@ -2045,7 +2045,7 @@ type CreateAuditEventArgs struct {
 	ActorEmail      string
 	ActorRole       string
 	ActorIdentityId string
-	// Enum: user | session | identity | invitation | accessRequest | config | magicLinkRequest | authCode | clusterSettings | deviceCode | delegation | workerPairingCode | enrolmentToken | passkeyIdentity | badgeIdentity | appSession | shopifyStore | releaseCut | oauthClient | upstreamIdentity | rowOwnership | githubGrant | role | group | groupMembership | grant | worker | agent | siteAccessCode | accountExport | account
+	// Enum: user | session | identity | invitation | accessRequest | config | magicLinkRequest | authCode | clusterSettings | deviceCode | delegation | workerPairingCode | enrolmentToken | passkeyIdentity | badgeIdentity | appSession | shopifyStore | releaseCut | oauthClient | upstreamIdentity | rowOwnership | githubGrant | role | group | groupMembership | grant | worker | agent | siteAccessCode | accountExport | account | vendorKey
 	TargetType    string
 	TargetId      string
 	TargetEmail   string
@@ -9011,6 +9011,13 @@ type RecordRouterCallArgs struct {
 	MachineOwnerUserId string
 	// The route a person chose for this call in Ask. Empty means Auto.
 	Route string
+	// Which account paid a vendor text call: cluster | key. Absent means the source takes none.
+	// Enum: cluster | key
+	AccountKind string
+	// The id of the API key that paid, when a key did. Never its name.
+	AccountKeyId string
+	// The id of the person that key belongs to.
+	AccountKeyOwnerUserId string
 }
 
 // RecordRouterCall calls the engine mutation recordRouterCall.
@@ -9323,6 +9330,27 @@ func RecordRouterCallBuild(args RecordRouterCallArgs) string {
 		}
 		b.WriteString("route: ")
 		b.WriteString(quoteMemQL(args.Route))
+	}
+	if args.AccountKind != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("accountKind: ")
+		b.WriteString(quoteMemQL(args.AccountKind))
+	}
+	if args.AccountKeyId != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("accountKeyId: ")
+		b.WriteString(quoteMemQL(args.AccountKeyId))
+	}
+	if args.AccountKeyOwnerUserId != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("accountKeyOwnerUserId: ")
+		b.WriteString(quoteMemQL(args.AccountKeyOwnerUserId))
 	}
 	b.WriteString(")")
 	return b.String()
