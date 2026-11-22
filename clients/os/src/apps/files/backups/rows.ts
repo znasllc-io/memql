@@ -273,3 +273,61 @@ export function backupSchedule(minutes = 5): string {
   const [count, unit] = minutes % 1440 === 0 ? [minutes / 1440, "day"] : minutes % 60 === 0 ? [minutes / 60, "hour"] : [minutes, "minute"];
   return `Every ${count === 1 ? "" : `${count} `}${unit}${count === 1 ? "" : "s"}`;
 }
+
+/** The schedule as the list row says it, mid-sentence: "every 10 min". */
+function rowSchedule(minutes = 5): string {
+  if (minutes % 1440 === 0) return minutes === 1440 ? "every day" : `every ${minutes / 1440} days`;
+  if (minutes % 60 === 0) return minutes === 60 ? "every hour" : `every ${minutes / 60} hours`;
+  return `every ${minutes} min`;
+}
+
+/** The Backups list's row: its quiet second line and the state beside it. */
+export interface BackupLineView {
+  secondary: string;
+  /** The second line is about the machine being away: the warning colour. */
+  offline: boolean;
+  state: string;
+  tone: "accent" | "warn" | "muted";
+}
+
+/**
+ * One row per backed-up folder (the owner's pick "8A", Nov 22 2026).
+ *
+ * `machine` is undefined when the machine list has not answered or does not
+ * hold this machine. That is NOT offline, so the row then says nothing about
+ * the machine being away. Paused wins over offline (the person turned it off);
+ * offline wins over the link tone, because whatever the link says was seen
+ * before the machine went.
+ *
+ * Only figures the data carries are shown: `filesSeen` once the origin has
+ * reported, and `changedFiles` -- how many of this backup's own files the
+ * machine holds a newer copy of. The concept has no progress figure for a
+ * sweep in flight, so the row draws no progress bar, and no "last copy" time
+ * (`lastSweepAt` is when the machine last CHECKED, so the row says "checked").
+ */
+export function backupLine(
+  backup: BackupRow,
+  tone: LinkTone,
+  machine: { name: string; online: boolean; lastSeenAt: string } | undefined,
+  changedFiles: number,
+  freshness: (iso: string) => string,
+): BackupLineView {
+  const head = `${machine?.name ?? backup.workerId} · ${rowSchedule(backup.intervalMinutes)}`;
+  if (tone === "paused") return { secondary: `${head} · paused`, offline: false, state: TONE_LABEL.paused, tone: "muted" };
+  if (machine !== undefined && !machine.online) {
+    const seen = machine.lastSeenAt === "" ? "" : `, last seen ${freshness(machine.lastSeenAt)}`;
+    return { secondary: `Machine offline${seen} · resumes when it's back`, offline: true, state: "Waiting", tone: "muted" };
+  }
+  if (tone === "waiting") return { secondary: `${head} · no report yet`, offline: false, state: "Waiting", tone: "muted" };
+  if (tone === "behind") {
+    const what = changedFiles > 0 ? `copying ${changedFiles.toLocaleString("en-US")} changed ${changedFiles === 1 ? "file" : "files"}` : "copying changed files";
+    return { secondary: `${head} · ${what}`, offline: false, state: "Copying", tone: "muted" };
+  }
+  const checked = backup.lastSweepAt === "" ? "" : ` · checked ${freshness(backup.lastSweepAt)}`;
+  if (tone === "settled") {
+    const files = `${backup.filesSeen.toLocaleString("en-US")} ${backup.filesSeen === 1 ? "file" : "files"}`;
+    return { secondary: `${head}${checked} · ${files}`, offline: false, state: "Up to date", tone: "accent" };
+  }
+  // refused / broken: the existing labels, and the fault sentence under the row.
+  return { secondary: `${head}${checked}`, offline: false, state: TONE_LABEL[tone], tone: "warn" };
+}
