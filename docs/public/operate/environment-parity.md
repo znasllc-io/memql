@@ -81,12 +81,14 @@ with the very YAML the cloud runs. The engine branches on the VALUES, never on
 a target — there is no environment for it to read, and
 `TestNoEnvironmentBranchingInEngineCode` still holds.
 
-The reason local cannot federate is a fact about k3d rather than a choice:
-its OIDC issuer is `https://kubernetes.default.svc.cluster.local`, whose JWKS
-sits on a node IP Anthropic cannot reach. The alternative (`inline` JWKS mode)
-would mean registering an issuer per developer cluster and re-pasting it after
-every `make up-refresh` — not a reproducible path. Runbook:
-[auth/anthropic-federation.md](auth/anthropic-federation.md).
+A local cluster's ids start empty for a reason that is a fact about k3d rather
+than a choice: its OIDC issuer is `https://kubernetes.default.svc.cluster.local`,
+whose keys sit where a vendor cannot fetch them. A local cluster federates by
+giving the vendor those keys directly (`make federation-keys`), and `make up`
+keeps its signing key across recreation so what was pasted stays good. The
+manifests and the engine are the same either way; only how the vendor learns
+the keys differs. Runbook:
+[auth/anthropic-federation.md](auth/anthropic-federation.md#on-a-local-cluster).
 
 ## The connection model in practice
 

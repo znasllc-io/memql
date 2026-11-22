@@ -101,10 +101,9 @@ func (a *App) initOpenAIRealtimeProvider(name string) {
 	bearer, ok := a.openAIBearerForSTT()
 	if !ok {
 		// NOT AN ERROR, and the message says which fact it is reporting. A
-		// local cluster cannot federate at all -- its OIDC issuer is private --
-		// so streaming transcription is off there by design (memql#5088, D6),
-		// and a fresh cloud cluster is in the same state until an operator
-		// finishes the runbook.
+		// cluster nobody has set OpenAI up on, local or cloud, has no
+		// transcription: it is how every cluster is installed (memql#5088),
+		// and it stays that way until an operator finishes the runbook.
 		a.Logger.Info("audio websocket disabled (no OpenAI federation on this cluster)",
 			"runbook", "docs/public/operate/auth/openai-federation.md")
 		return

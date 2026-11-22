@@ -462,12 +462,12 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
     //
     // `providerFederation` asks a running pod whether the cluster's federated
     // credential is accepted. A cluster this wizard builds is a local one, and
-    // a local cluster CANNOT federate: k3d's OIDC issuer is not publicly
-    // reachable, so neither vendor can verify a token minted by it. There is
-    // no key arm left either -- both vendors are federation-only now. So on
-    // this lane there is never anything to check, and the step is always
-    // skipped. A developer reaches cloud models through a fleet machine or a
-    // local model instead.
+    // the wizard sets no vendor up on it: a local cluster federates only after
+    // a vendor has been given its public keys by hand (make federation-keys),
+    // which happens after install, in Settings > Vendors. The cluster has no
+    // key arm either. So on this lane there is never anything to check, and
+    // the step is always skipped. Until a vendor is set up, a developer
+    // reaches cloud models through a fleet machine or a local model.
     //
     // The step is SKIPPED rather than deleted from the graph: the same
     // document drives cloud installs, where the check is exactly the fail-fast

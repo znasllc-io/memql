@@ -765,10 +765,20 @@ legitimate for the router's BYOK path and the Shopify connector.
 [anthropic-federation.md](docs/public/operate/auth/anthropic-federation.md) ·
 [openai-federation.md](docs/public/operate/auth/openai-federation.md).
 
-**A LOCAL cluster reaches neither**: a k3d cluster's OIDC issuer is not
-publicly reachable, so nothing it mints can be verified. The install wizard
-collects no AI credential, `providerFederation` skips satisfied, and a
-developer reaches models through a signed-in fleet machine or a local model.
+**A LOCAL cluster federates by pasted keys** (design record
+[2026-11-21](docs/superpowers/specs/2026-11-21-vendor-accounts-and-api-keys-design.md)).
+A vendor cannot fetch a k3d cluster's keys, but both accept them pasted in:
+`make federation-keys` prints them, Settings > Vendors takes the ids, and
+`make up` keeps the cluster's signing key across recreation
+(`~/.memql/k3d/<cluster>/service-account.key`, a secret). The install wizard
+still collects no AI credential and `providerFederation` skips satisfied.
+
+**Each engine process signs in to a vendor ONCE per identity token**
+(`component/memql/ai_vendor_signin.go`). Anthropic accepts a token once, so a
+second signer in a pod is refused: `memql provider-auth check` reports the
+engine's recorded sign-in and never makes one, and a new client of a vendor
+takes its bearer from `processVendorSignIn`, never from a credential of its
+own. Never run against a vendor yet; the runbooks say what to record.
 
 ### AI Endpoints (gRPC on `MemqlService.Stream`)
 

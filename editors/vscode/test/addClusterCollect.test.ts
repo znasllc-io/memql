@@ -54,7 +54,8 @@ test("a repair can be started without typing anything, once the receipt is in", 
   // by epic memql#5088). It used to be the one thing standing between a fresh
   // state and a startable repair, on the reasoning that the run could not pass
   // wave 2 without it. It can now: `providerFederation` skips satisfied, always,
-  // because a local cluster cannot federate. Keeping it required would have
+  // because this wizard sets no vendor up on the local cluster it builds (a
+  // local cluster federates later, by pasted keys). Keeping it required would have
   // made repair unreachable for every cluster there now is.
   const state = new AddClusterState();
   state.chooseAction("repair");

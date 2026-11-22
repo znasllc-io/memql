@@ -82,9 +82,8 @@ const (
 // configured at all.
 //
 // It is a PATH rather than an error because it is the normal state of a fresh
-// cluster and of every local cluster: a k3d cluster's OIDC issuer is private,
-// so neither vendor can discover it, and after this epic there is no key to
-// fall back to (design D6). The readiness model reports that as `ai`
+// cluster, local or cloud: no vendor has been set up yet, and the cluster has
+// no key to fall back to. The readiness model reports that as `ai`
 // unconfigured; nothing about it is a fault.
 const credentialPathUnavailable credentialPath = "unavailable"
 

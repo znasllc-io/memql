@@ -89,10 +89,14 @@ func TestProviderAuthReportUnavailablePath(t *testing.T) {
 	if !strings.Contains(out, "federation is not configured") {
 		t.Errorf("the report does not say WHY there is no credential:\n%s", out)
 	}
-	// It must not read as a fault: a local cluster is in this state
-	// permanently and by design.
-	if !strings.Contains(out, "normal state of a local cluster") {
+	// It must not read as a fault: every cluster is installed in this state.
+	if !strings.Contains(out, "normal state of a cluster nobody has set a vendor up on") {
 		t.Errorf("the report does not say this state is normal:\n%s", out)
+	}
+	// And it must not tell a local cluster's operator that nothing can be done:
+	// a local cluster federates by pasted keys (design 2026-11-21, A6).
+	if strings.Contains(out, "cannot be federated") {
+		t.Errorf("the report still says a local cluster cannot federate:\n%s", out)
 	}
 	// Federation-only rows must not appear as empty labels.
 	for _, absent := range []string{"federationRuleId", "tokenSubject", "exchange:", "workspaceId"} {

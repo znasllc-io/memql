@@ -340,9 +340,7 @@ const KeylessBootSummary = "AI providers not configured; configure in MemQL OS: 
 //   - NOTHING RESOLVED. Every provider is unavailable, which after epic
 //     memql#4440 is the state a freshly installed cluster is in by design:
 //     installing spends no inference and asks for no key -- and after epic
-//     memql#5088 there is no key to ask for at all, so it is also the
-//     permanent state of every LOCAL cluster, whose private OIDC issuer no
-//     vendor can federate with. Emitting one warning
+//     memql#5088 the cluster has no key to ask for at all. Emitting one warning
 //     per provider -- a dozen of them, every boot, on every node -- trains an
 //     operator to ignore this component's warnings, which is exactly when the
 //     one that matters arrives. So: ONE line, at INFO, naming the count and

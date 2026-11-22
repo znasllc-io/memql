@@ -392,9 +392,10 @@ func newAnthropicClient(cfg ProviderConfig, httpClient *http.Client) (anthropic.
 		// caught exactly that.
 		return anthropic.Client{}, path, fmt.Errorf(
 			"provider %q has no Anthropic credential: workload identity federation is not configured on this "+
-				"cluster. Set %s, %s and %s (docs/public/operate/auth/anthropic-federation.md). There is no API "+
-				"key to fall back to -- a local cluster cannot federate, because its OIDC issuer is private, and "+
-				"reaches models through a signed-in fleet machine or a local model instead",
+				"cluster. Set %s, %s and %s, in Settings > Vendors or the overlay "+
+				"(docs/public/operate/auth/anthropic-federation.md, which has the steps for a local cluster too). "+
+				"The cluster has no API key to fall back to; until then it reaches models through a signed-in "+
+				"fleet machine or a local model",
 			cfg.Name, envAnthropicFederationRuleID, envAnthropicOrganizationID, envAnthropicServiceAccountID)
 	}
 	return anthropic.NewClient(opts...), path, nil

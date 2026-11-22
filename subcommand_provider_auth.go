@@ -217,9 +217,8 @@ func writeProviderAuthReport(w io.Writer, r memql.ProviderAuthReport) {
 		}
 	case "unavailable":
 		line("note", "this node has NO credential for this vendor: federation is not configured. "+
-			"That is the normal state of a local cluster, whose OIDC issuer is private and cannot "+
-			"be federated with, and of a cloud cluster whose runbook is not finished. There is no "+
-			"API key to fall back to.")
+			"That is the normal state of a cluster nobody has set a vendor up on, local or cloud. "+
+			"The federation runbooks have the steps for both. The cluster has no API key to fall back to.")
 	}
 
 	if r.ModelsListed > 0 {

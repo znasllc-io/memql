@@ -237,9 +237,8 @@ provider openai {
     //
     // ALL THREE OR NONE: all three set means the engine exchanges the pod's
     // projected token for a short-lived bearer, none means the OpenAI
-    // providers register as unavailable (the normal state of a fresh cloud
-    // cluster and of EVERY local cluster, whose OIDC issuer is private and
-    // cannot be discovered), and one or two refuses boot naming both halves.
+    // providers register as unavailable (the normal state of a fresh cluster,
+    // local or cloud), and one or two refuses boot naming both halves.
     // Optional at resolution, like Anthropic's, so openaiCredential is the one
     // place that decides what an absence means.
     // Runbook: docs/public/operate/auth/openai-federation.md.
