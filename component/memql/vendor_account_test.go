@@ -395,6 +395,52 @@ func TestVendorAccountsForOrdersKeysBeforeTheCluster(t *testing.T) {
 	}
 }
 
+// One read of a person's keys serves every record of the vendor a route names,
+// and an answer read for one vendor never offers its keys at another.
+func TestOneKeyAnswerServesEveryRecordOfItsVendor(t *testing.T) {
+	reg := newProviderRegistry()
+	keys := newFakeVendorKeys()
+	keys.usable = []VendorAccount{keyAccount(VendorAnthropic, "mine", "ana")}
+	keys.passedOver = []VendorAccountPassedOver{{Account: keyAccount(VendorAnthropic, "bad", "ana"), Reason: "its API key was refused by Anthropic"}}
+	reg.SetVendorKeys(keys)
+
+	answer := reg.VendorKeysAt(personContext("ana"), VendorAccountQuery{Vendor: VendorAnthropic, ActingUserId: "ana", Chosen: true})
+	for _, available := range []bool{true, false} {
+		accounts, passed := reg.VendorAccountsWith(vendorEntry(VendorAnthropic, available, ""), answer)
+		if len(accounts) == 0 || accounts[0].Ref() != "key:mine" {
+			t.Fatalf("accounts = %+v, want the person's key first", accounts)
+		}
+		if (len(accounts) == 2) != available {
+			t.Fatalf("accounts = %+v with the cluster's account available=%v", accounts, available)
+		}
+		if len(passed) == 0 || passed[0].Account.KeyId != "bad" {
+			t.Fatalf("passed over = %+v, want the refused key", passed)
+		}
+	}
+	if len(keys.queries) != 1 {
+		t.Fatalf("the seam was asked %d times, want once", len(keys.queries))
+	}
+
+	accounts, passed := reg.VendorAccountsWith(vendorEntry(VendorOpenAI, true, ""), answer)
+	if len(accounts) != 1 || accounts[0].Kind != VendorAccountCluster || len(passed) != 0 {
+		t.Fatalf("an Anthropic answer at an OpenAI record gave %+v / %+v, want the cluster's account alone", accounts, passed)
+	}
+
+	// No vendor named, no person, a visitor: the seam is not asked at all.
+	for name, q := range map[string]VendorAccountQuery{
+		"no vendor": {ActingUserId: "ana", Chosen: true},
+		"no person": {Vendor: VendorAnthropic, Chosen: true},
+		"a visitor": {Vendor: VendorAnthropic, ActingUserId: "ana", Chosen: true, ForVisitor: true},
+	} {
+		if got := reg.VendorKeysAt(personContext("ana"), q); len(got.Usable)+len(got.PassedOver) != 0 {
+			t.Errorf("%s: answer = %+v, want nothing", name, got)
+		}
+	}
+	if len(keys.queries) != 1 {
+		t.Fatalf("the seam was asked %d times after questions it must not see", len(keys.queries))
+	}
+}
+
 func TestVendorAccountsForNoPersonIsClusterOnly(t *testing.T) {
 	for name, tc := range map[string]struct {
 		ctx    context.Context

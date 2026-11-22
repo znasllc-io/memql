@@ -74,9 +74,15 @@ mutation call recordRouterCall {
     machineOwnerUserId  string
     /// The route a person chose for this call in Ask. Empty means Auto.
     route               string
+    /// Which account paid a vendor text call: cluster | key. Absent means the source takes none.
+    accountKind         enum("cluster", "key")
+    /// The id of the API key that paid, when a key did. Never its name.
+    accountKeyId        string
+    /// The id of the person that key belongs to.
+    accountKeyOwnerUserId string
   }
   insert {
-    accept { electricityEstimate, apiEquivalent, actualBilling, requestId, agentId, userId, callerKind, cacheKind, promptName, policyName, vendor, model, providerName, inputTokens, outputTokens, cachedInputTokens, tokensEstimated, inputCost, outputCost, cachedInputCost, totalCost, pricingConfigured, timeToFirstTokenMs, totalDurationMs, tokensPerSec, streaming, outcome, errorCategory, errorMessage, fallbackFromModel, executionSurface, level, requestedLevel, servedLevel, servedModel, servedEffort, degraded, rule, policy, door, considered, touches, minContextTokens, machineOwnerUserId, route }
+    accept { electricityEstimate, apiEquivalent, actualBilling, requestId, agentId, userId, callerKind, cacheKind, promptName, policyName, vendor, model, providerName, inputTokens, outputTokens, cachedInputTokens, tokensEstimated, inputCost, outputCost, cachedInputCost, totalCost, pricingConfigured, timeToFirstTokenMs, totalDurationMs, tokensPerSec, streaming, outcome, errorCategory, errorMessage, fallbackFromModel, executionSurface, level, requestedLevel, servedLevel, servedModel, servedEffort, degraded, rule, policy, door, considered, touches, minContextTokens, machineOwnerUserId, route, accountKind, accountKeyId, accountKeyOwnerUserId }
     stamp {
       id: args.callId
       // NOT in accept{}: a concept-level @default is documentation and is

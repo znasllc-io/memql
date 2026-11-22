@@ -63,6 +63,13 @@ const (
 	accountFailureUnavailable = "unavailable"
 )
 
+// VendorAccountFailureKinds lists every kind VendorAccountFailure can answer.
+// The router words each one on the decision record, and its test asks this
+// list so a kind added here cannot be left without words there.
+func VendorAccountFailureKinds() []string {
+	return []string{accountFailureRefused, accountFailureCredit, accountFailurePermission, accountFailureUnavailable}
+}
+
 // maxAccountFailureReason bounds the vendor's words kept on a ledger row and
 // on a key's state.
 const maxAccountFailureReason = 300

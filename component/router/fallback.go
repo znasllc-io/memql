@@ -45,8 +45,12 @@ func (f *fallbackStreamWithTools) CallChatStreamWithTools(
 	// The selection each attempt's decision is copied from; a failed attempt
 	// is noted on it, so every later row names the source that failed.
 	selection := f.resolved
+	var hop accountHop
 
 	for i, name := range f.chain {
+		if hop.passOver(name) {
+			continue
+		}
 		client, resolved, ok := f.router.providerLookup(ctx, f.req, name, modalityStreamTools)
 		if !ok {
 			continue
@@ -79,6 +83,7 @@ func (f *fallbackStreamWithTools) CallChatStreamWithTools(
 		lastErr = err
 		lastFailedResolved = resolved
 		selection = selection.withAttemptFailed(resolved, err)
+		hop.failed(name, err)
 	}
 
 	if lastErr != nil {
@@ -133,7 +138,7 @@ func (f *fallbackStreamWithTools) retryUnstartedStream(
 				// The walk so far travels with the retry: `failed` carries every
 				// earlier failure noted on its decision, and this one is added.
 				remaining.resolved = f.resolved
-				remaining.resolved.Decision.Considered = withFailureNoted(failed.Decision.Considered, failed.ProviderName, failed.Decision.Door, chunk.Error)
+				remaining.resolved.Decision.Considered = withFailureNoted(failed.Decision.Considered, failed.ProviderName, accountRef(failed.Decision), failed.Decision.Door, chunk.Error)
 				retry, err := remaining.CallChatStreamWithTools(ctx, messages, tools)
 				if err != nil {
 					if errors.Is(err, errNoChainEntryAvailable) {
@@ -194,8 +199,12 @@ func (f *fallbackWithTools) CallChatWithTools(
 	var lastErr error
 	var lastFailedResolved Resolved
 	selection := f.resolved
+	var hop accountHop
 
 	for _, name := range f.chain {
+		if hop.passOver(name) {
+			continue
+		}
 		client, resolved, ok := f.router.providerLookup(ctx, f.req, name, modalityTools)
 		if !ok {
 			continue
@@ -223,6 +232,7 @@ func (f *fallbackWithTools) CallChatWithTools(
 		lastErr = err
 		lastFailedResolved = resolved
 		selection = selection.withAttemptFailed(resolved, err)
+		hop.failed(name, err)
 	}
 
 	if lastErr != nil {
@@ -382,10 +392,17 @@ func fallbackRecord(req ResolveRequest, failedResolved Resolved, err error) Call
 		Policy:             failedResolved.Decision.Policy,
 		Route:              failedResolved.Decision.Route,
 		Door:               failedResolved.Decision.Door,
-		Considered:         withFailureNoted(failedResolved.Decision.Considered, failedResolved.ProviderName, failedResolved.Decision.Door, err),
+		Considered:         withFailureNoted(failedResolved.Decision.Considered, failedResolved.ProviderName, accountRef(failedResolved.Decision), failedResolved.Decision.Door, err),
 		Touches:            failedResolved.Decision.Touches,
 		MinContextTokens:   failedResolved.Decision.MinContextTokens,
 		MachineOwnerUserId: failedResolved.Decision.MachineOwnerUserId,
+
+		// The account that FAILED, which is the point of this row when the
+		// next attempt is the same model on another account (design record
+		// 2026-11-21-vendor-accounts, K15).
+		AccountKind:           failedResolved.Decision.AccountKind,
+		AccountKeyId:          failedResolved.Decision.AccountKeyId,
+		AccountKeyOwnerUserId: failedResolved.Decision.AccountKeyOwnerUserId,
 	}
 }
 
@@ -419,18 +436,30 @@ func (*chainUnavailableError) Error() string {
 // step as a `session`, and only the resolution knows which happened. Deriving
 // it here would quietly record every session as an ordinary app turn -- which
 // is what this did, and what the ledger test now catches.
+//
+// THE ATTEMPT'S ACCOUNT COMES FROM THE LOOKUP TOO (accounts.go). A chain can
+// try one vendor model on several accounts, so an attempt differs from the
+// selection when its model OR its account does, and its own line of the walk
+// names both.
 func (resolved Resolved) withDecisionFrom(selection Resolved) Resolved {
-	attemptDoor := resolved.Decision.Door
+	attempt := resolved.Decision
 	resolved.PolicyName = selection.PolicyName
 	resolved.Decision = selection.Decision
-	resolved.Decision.Door = attemptDoor
-	if resolved.ProviderName != selection.ProviderName {
+	resolved.Decision.Door = attempt.Door
+	resolved.Decision.AccountKind = attempt.AccountKind
+	resolved.Decision.AccountKeyId = attempt.AccountKeyId
+	resolved.Decision.AccountKeyOwnerUserId = attempt.AccountKeyOwnerUserId
+	otherSource := resolved.ProviderName != selection.ProviderName
+	if otherSource || accountRef(attempt) != accountRef(selection.Decision) {
 		// Each call can walk the same wrapper concurrently. Copy before
 		// appending so neither another call nor the caller's resolution changes.
 		resolved.Decision.Considered = append([]airoute.ConsideredEntry(nil), selection.Decision.Considered...)
 		resolved.Decision.Considered = append(resolved.Decision.Considered, airoute.ConsideredEntry{
 			Entry: resolved.ProviderName, Door: resolved.Decision.Door, Reason: "selected from fallback chain",
+			Account: accountRef(attempt),
 		})
+	}
+	if otherSource {
 		// The original machine's owner is not evidence about a new attempt.
 		resolved.Decision.MachineOwnerUserId = ""
 	}

@@ -6522,6 +6522,9 @@
       "concept": "v1:router:call",
       "file": "router/concepts.memql",
       "fields": [
+        "accountKeyId",
+        "accountKeyOwnerUserId",
+        "accountKind",
         "actualBilling",
         "agentId",
         "apiEquivalent",
@@ -6578,6 +6581,10 @@
         "vendor"
       ],
       "enums": {
+        "accountKind": [
+          "cluster",
+          "key"
+        ],
         "billing": [
           "local",
           "metered",

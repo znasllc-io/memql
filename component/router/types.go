@@ -202,6 +202,14 @@ type CallRecord struct {
 	// epic 4 (shared machines) fills it.
 	MachineOwnerUserId string
 
+	// AccountKind, AccountKeyId and AccountKeyOwnerUserId say which ACCOUNT
+	// paid a vendor text call: the cluster's own, or a person's API key by its
+	// id and its owner's (airoute.Decision). A fallback_used row names the
+	// account that FAILED. All three are empty for a source that takes none.
+	AccountKind           string
+	AccountKeyId          string
+	AccountKeyOwnerUserId string
+
 	// Billing says who PAID (memql#4362): "metered" (MemQL's own
 	// vendor spend, which is what the cost fields above are about),
 	// "subscription" (the call ran inside an app the user already

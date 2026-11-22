@@ -199,8 +199,12 @@ func (r *Router) fallbackWalk(
 	var lastErr error
 	var lastFailed Resolved
 	localSeen := selection.localSeen
+	var hop accountHop
 
 	for _, name := range chain {
+		if hop.passOver(name) {
+			continue
+		}
 		client, resolved, ok := r.providerLookup(ctx, req, name, mod)
 		if !ok {
 			continue
@@ -231,6 +235,9 @@ func (r *Router) fallbackWalk(
 		// Every later attempt's row -- the served one included -- names the
 		// source that just failed, and why (failure_reason.go).
 		selection = selection.withAttemptFailed(resolved, err)
+		// And a failure that is not about the account that paid takes the
+		// record's other accounts with it (accounts.go).
+		hop.failed(name, err)
 	}
 
 	if lastErr != nil {

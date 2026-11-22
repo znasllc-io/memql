@@ -33,6 +33,13 @@ type ConsideredEntry struct {
 	Entry  string `json:"entry"`
 	Door   string `json:"door"`
 	Reason string `json:"reason"`
+	// Account is the account this line is about, when the entry is a vendor
+	// model and the line is about who pays for it: "cluster" for the cluster's
+	// own account, "key:<id>" for a person's API key (design record
+	// 2026-11-21-vendor-accounts-and-api-keys, K9, K10, K15). Empty on every
+	// other line. It carries the key's id and never its name: a screen
+	// resolves the name through the key's own read.
+	Account string `json:"account,omitempty"`
 }
 
 // Decision is one resolution in the words the record uses. Every field is
@@ -74,6 +81,19 @@ type Decision struct {
 	// MachineOwnerUserId names whose machine served a local call. Empty until
 	// epic 4 (shared machines) fills it.
 	MachineOwnerUserId string
+
+	// AccountKind says which ACCOUNT pays for a vendor text call (design
+	// record 2026-11-21-vendor-accounts-and-api-keys, K15): "cluster" for the
+	// cluster's own account at the vendor, "key" for a person's API key.
+	// Empty for every source that takes no account: a local model, an app, and
+	// the vendor surfaces a key does not pay for.
+	AccountKind string
+	// AccountKeyId is the bare id of the key that pays, and
+	// AccountKeyOwnerUserId the bare id of the person it belongs to. Both are
+	// empty unless AccountKind is "key". The key's name and fingerprint are
+	// never here.
+	AccountKeyId          string
+	AccountKeyOwnerUserId string
 
 	// Outcome is "ok" on a resolution and the refusal code on a park.
 	Outcome string

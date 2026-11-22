@@ -59,6 +59,9 @@ shape call routerDecision {
   billing
   executionSurface
   route
+  accountKind
+  accountKeyId
+  accountKeyOwnerUserId
 }
 
 /// What the sharing ledger reads: WHERE a call went, WHO it was for, and how

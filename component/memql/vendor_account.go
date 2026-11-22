@@ -16,8 +16,9 @@ package memql
 // WHAT THIS FILE HOLDS. The account's name, the seam the key integration
 // installs on the provider registry (VendorKeys), and the three questions the
 // router asks of the registry: which accounts can pay for this person at this
-// record (VendorAccountsFor), may this one still pay (VendorAccountUsable), and
-// give me this record's client paid by it (BindVendorAccount). How a key's
+// record (VendorAccountsFor, or its two halves VendorKeysAt and
+// VendorAccountsWith), may this one still pay (VendorAccountUsable), and give
+// me this record's client paid by it (BindVendorAccount). How a key's
 // credential reaches a request is vendor_account_middleware.go.
 //
 // WHY A SEAM. Whether a key may pay is a question about rows: whose key it is,
@@ -249,42 +250,65 @@ func keysRefusedAt(e *ProviderConfigEntry, vendor string) string {
 	return fmt.Sprintf("this cluster sends %s calls to another address, so an API key is not used", vendorDisplayName(vendor))
 }
 
-// VendorAccountsFor answers which accounts can pay for this person at this
-// record, in order, and which were passed over (K8, K9).
+// VendorKeyAnswer is what the seam said about one person's keys at one vendor.
+type VendorKeyAnswer struct {
+	// Usable are the keys that can pay, in the order they are tried.
+	Usable []VendorAccount
+	// PassedOver are the keys that cannot, each with its reason.
+	PassedOver []VendorAccountPassedOver
+}
+
+// VendorKeysAt asks the seam which keys can pay for this person at q.Vendor.
 //
-// The order: the keys the seam offers (the person's own default, then keys
-// lent to them), then the cluster's account. A call with no acting person, or
-// one made for a visitor, has the cluster's account and nothing else.
+// It is the half of VendorAccountsFor that READS ROWS, split out so that one
+// walk of a route asks once per vendor however many of the vendor's records
+// the route names (component/router/accounts.go).
 //
-// A read that FAILS passes keys over and never fails the call: the cluster's
-// account may still serve it, and a call that could have been served must not
-// be refused because a list of keys could not be read.
-func (r *ProviderRegistry) VendorAccountsFor(ctx context.Context, q VendorAccountQuery, e *ProviderConfigEntry) ([]VendorAccount, []VendorAccountPassedOver) {
+// A call with no acting person, or one made for a visitor, has no keys and the
+// seam is not asked. A read that FAILS passes keys over and never fails the
+// call: the cluster's account may still serve it, and a call that could have
+// been served must not be refused because a list of keys could not be read.
+func (r *ProviderRegistry) VendorKeysAt(ctx context.Context, q VendorAccountQuery) VendorKeyAnswer {
+	keys := r.installedVendorKeys()
+	if keys == nil || q.Vendor == "" || !keysServe(ctx, q) {
+		return VendorKeyAnswer{}
+	}
+	usable, passedOver, err := keys.KeysFor(ctx, q)
+	if err != nil {
+		return VendorKeyAnswer{PassedOver: []VendorAccountPassedOver{{
+			Account: VendorAccount{Kind: VendorAccountKey, Vendor: q.Vendor},
+			Reason:  "API keys could not be read",
+		}}}
+	}
+	return VendorKeyAnswer{Usable: usable, PassedOver: passedOver}
+}
+
+// VendorAccountsWith composes a record's accounts from an answer already read:
+// the keys the seam offers, then the cluster's account (K8), with every account
+// that cannot pay beside its reason (K9). It reads nothing.
+//
+// The answer must be the one for this record's vendor; a key of another vendor
+// is left out rather than offered.
+func (r *ProviderRegistry) VendorAccountsWith(e *ProviderConfigEntry, keys VendorKeyAnswer) ([]VendorAccount, []VendorAccountPassedOver) {
 	vendor := VendorOfEntry(e)
 	if vendor == "" {
 		return nil, nil
 	}
-	q.Vendor = vendor
 	var accounts []VendorAccount
-	var passedOver []VendorAccountPassedOver
-
-	if keys := r.installedVendorKeys(); keys != nil && keysServe(ctx, q) {
-		usable, skipped, err := keys.KeysFor(ctx, q)
+	passedOver := make([]VendorAccountPassedOver, 0, len(keys.PassedOver)+1)
+	for _, skipped := range keys.PassedOver {
+		if skipped.Account.Vendor == vendor {
+			passedOver = append(passedOver, skipped)
+		}
+	}
+	refusal := keysRefusedAt(e, vendor)
+	for _, key := range keys.Usable {
 		switch {
-		case err != nil:
-			passedOver = append(passedOver, VendorAccountPassedOver{
-				Account: VendorAccount{Kind: VendorAccountKey, Vendor: vendor},
-				Reason:  "API keys could not be read",
-			})
+		case key.Vendor != vendor:
+		case refusal != "":
+			passedOver = append(passedOver, VendorAccountPassedOver{Account: key, Reason: refusal})
 		default:
-			passedOver = append(passedOver, skipped...)
-			if refusal := keysRefusedAt(e, vendor); refusal != "" {
-				for _, key := range usable {
-					passedOver = append(passedOver, VendorAccountPassedOver{Account: key, Reason: refusal})
-				}
-			} else {
-				accounts = append(accounts, usable...)
-			}
+			accounts = append(accounts, key)
 		}
 	}
 
@@ -298,6 +322,21 @@ func (r *ProviderRegistry) VendorAccountsFor(ctx context.Context, q VendorAccoun
 		})
 	}
 	return accounts, passedOver
+}
+
+// VendorAccountsFor answers which accounts can pay for this person at this
+// record, in order, and which were passed over (K8, K9).
+//
+// The order: the keys the seam offers (the person's own default, then keys
+// lent to them), then the cluster's account. A call with no acting person, or
+// one made for a visitor, has the cluster's account and nothing else.
+func (r *ProviderRegistry) VendorAccountsFor(ctx context.Context, q VendorAccountQuery, e *ProviderConfigEntry) ([]VendorAccount, []VendorAccountPassedOver) {
+	vendor := VendorOfEntry(e)
+	if vendor == "" {
+		return nil, nil
+	}
+	q.Vendor = vendor
+	return r.VendorAccountsWith(e, r.VendorKeysAt(ctx, q))
 }
 
 // VendorAccountUsable judges one account reference again at the time of the
