@@ -126,7 +126,8 @@ func (e *MemQLEngine) actorSeesEveryone(ctx context.Context) bool {
 // shareDirectoryFor builds the caller's directory.
 //
 // accountGroupsOnly narrows the co-member half to groups of kind `account` --
-// the caller's ORGANIZATION -- which is the Library's rule for sharing a file
+// the caller's ORGANIZATION -- and adds the cluster's staff (the block at the
+// end), which is the Library's rule for sharing a file
 // (library_share_directory.go). Fleet lends a machine to anybody the owner
 // shares any active group with, custom groups included, and passes false. The
 // `everyone` half is the same for both: `read principal` already sees everyone,
@@ -157,6 +158,10 @@ func (e *MemQLEngine) shareDirectoryFor(ctx context.Context, accountGroupsOnly b
 	type person struct {
 		entry  shareEntry
 		active bool
+		// staff: a cluster-wide (not account-scoped) role at admin rank or
+		// above -- the people the account tier already counts as standing
+		// members of every account (rowauthz_account.go, design D6).
+		staff bool
 	}
 	people := map[string]person{}
 	activeGroups := map[string]shareEntry{}
@@ -177,7 +182,8 @@ func (e *MemQLEngine) shareDirectoryFor(ctx context.Context, accountGroupsOnly b
 				entry.Detail = email
 			}
 			active := payload["active"] == true && strings.TrimSpace(stringFromAny(payload["suspendedAt"])) == ""
-			people[id] = person{entry: entry, active: active}
+			staff := auth.IsClusterOperator(auth.Role(strings.TrimSpace(stringFromAny(payload["role"]))))
+			people[id] = person{entry: entry, active: active, staff: staff}
 			dir.knownPeople[id] = entry
 		case conceptIdentityGroup:
 			entry := shareEntry{Id: id, Name: strings.TrimSpace(stringFromAny(payload["name"]))}
@@ -273,6 +279,27 @@ func (e *MemQLEngine) shareDirectoryFor(ctx context.Context, accountGroupsOnly b
 					}
 					break
 				}
+			}
+		}
+	}
+
+	// THE PRIMARY ACCOUNT'S STAFF, for a Library share (Jesús, Nov 22 2026).
+	// A client's person is in their own organization's group and nobody else's,
+	// so without this they could receive files from ZNAS but never send one
+	// back. The engine already treats the cluster's staff as standing members
+	// of every account, as a RULE rather than membership rows (design D6,
+	// rowauthz_account.go): rows drift, and nobody can place an owner in a
+	// group by hand (a target must rank strictly below whoever adds them).
+	// José's picture on the Nov 20 call is the same one: the primary account
+	// is the outer bubble every client account sits inside. So a Library
+	// share also offers every active staff person, by name only. Only people:
+	// a group share still reaches the group's real members (dir.members), and
+	// Fleet's machine lending and API-key lending (accountGroupsOnly false)
+	// are unchanged.
+	if accountGroupsOnly && !dir.everyone {
+		for user, p := range people {
+			if p.staff {
+				offerPerson(user)
 			}
 		}
 	}

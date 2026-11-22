@@ -385,7 +385,13 @@ active group, custom ones included. Anyone else is offered the active people of
 their own **organization** -- those holding an active membership in an active
 group of kind `account` that the caller is also an active member of -- and those
 organization groups; custom groups do not count, because they can cross
-organizations. `libraryShareDirectory(groupId)` answers the people a share with
+organizations. Anyone else is also offered the cluster's **staff** -- every active
+person whose role is cluster-wide (not scoped to one account) at admin rank or
+above -- by name only (Nov 22 2026). The account tier already counts staff as
+standing members of every account (design D6), and without them a client's
+person could receive files from the primary account but never send one back.
+A group share still reaches only that group's real members.
+`libraryShareDirectory(groupId)` answers the people a share with
 that group would reach: its active members other than the caller, and nobody
 for a group not offered. It is Fleet's directory (`fleetShareDirectory`)
 narrowed to the organization, from the same code

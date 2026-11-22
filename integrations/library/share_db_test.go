@@ -633,15 +633,27 @@ func testViewerSharesWithAdmin(t *testing.T, x *shareFixture) {
 }
 
 func testDirectoryFollowsTheOrganization(t *testing.T, x *shareFixture) {
+	// A member is offered their organization (alice, vera, adam) and the
+	// cluster's staff -- every owner, developer and admin (olga, dev, devi,
+	// ada), the primary account's people (Nov 22 2026) -- but never a member or
+	// viewer outside their organization (bob), and never themselves. Not an
+	// exact count: the database holds other runs' staff, who are offered too.
 	mine := x.directory(x.mike())
-	want := map[string]string{x.ids["alice"]: x.name("alice"), x.ids["vera"]: x.name("vera"), x.ids["adam"]: x.name("adam")}
-	if len(mine) != len(want) {
-		t.Fatalf("mike's directory: %v, want exactly his organization %v", mine, want)
-	}
-	for id, name := range want {
-		if mine[id] != name {
-			t.Fatalf("mike's directory: %v, want %v", mine, want)
+	for _, p := range []string{"alice", "vera", "adam", "olga", "dev", "devi", "ada"} {
+		if mine[x.ids[p]] != x.name(p) {
+			t.Fatalf("mike's directory is missing %s (%s): %v", p, shareRoles[p], mine)
 		}
+	}
+	for _, p := range []string{"bob", "mike"} {
+		if _, offered := mine[x.ids[p]]; offered {
+			t.Fatalf("mike's directory offers %s (%s)", p, shareRoles[p])
+		}
+	}
+	// So a member can send a file back to staff outside their organization.
+	back := x.file(x.mike(), "mike", "to-staff.txt", "for the developers")
+	x.mustShare(x.f.first, x.mike(), back, "devi", 7)
+	if code, _ := x.download(x.f.other, x.as("devi", shareRoles["devi"]), back, ""); code != http.StatusOK {
+		t.Fatalf("a developer cannot open what a member shared with her: %d", code)
 	}
 	everyone := x.directory(x.adam())
 	for _, p := range []string{"alice", "vera", "mike", "bob"} {

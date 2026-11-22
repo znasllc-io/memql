@@ -11,6 +11,11 @@ package memql
 // Fleet: a file is shared within the organization a person works in, and a
 // custom group can cross organizations.
 //
+// AND THE CLUSTER'S STAFF (Nov 22 2026): anyone else is also offered every
+// active person whose role is cluster-wide at admin rank or above, so a
+// client's person can send a file back to the primary account
+// (fleet_share_directory.go, the staff block at the end of shareDirectoryFor).
+//
 // BY DISPLAY NAME ONLY, for every caller. Fleet hands an email to a caller who
 // already reads one; a share dialog has no use for it, so this never does.
 //
