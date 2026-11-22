@@ -31,6 +31,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/airoute"
@@ -118,8 +119,48 @@ func healingPatchResolveRequest() airoute.ResolveRequest {
 	}
 }
 
-// resolveVisionProvider returns a vision-capable provider for this node, or
-// nil when no door is open.
+// callerVision is a vision provider that is RESOLVED WHEN IT IS CALLED, for
+// whoever is making that call.
+//
+// WHY IT EXISTS. An extractor is built once, when the node starts or a plug-in
+// is wired, and used for every upload after. Handing it a provider resolved at
+// that moment resolved it for NOBODY: no caller, so the router judged it the
+// cluster's own work, and the cluster's vendor account then described every
+// person's pictures, whoever uploaded them. The cluster's account pays for a
+// person's calls only when that person may use it (owner decision 2026-11-22,
+// component/memql/vendor_account_cluster.go), and a picture follows the rule.
+//
+// So the provider an extractor holds is this one. Each CallVision resolves
+// through the router with THAT call's context, which is where the caller is
+// (applyCallAttribution reads it), and the gates in front of a vendor are
+// asked about that person. A person no vision model can serve gets an error on
+// the image, which the processor reports on that file; every other format is
+// unaffected.
+//
+// Regression tests: vision_for_caller_test.go.
+type callerVision struct {
+	resolve func(ctx context.Context) common.VisionAIProvider
+}
+
+func (v callerVision) CallVision(ctx context.Context, prompt string, images []common.VisionContent) (string, error) {
+	var provider common.VisionAIProvider
+	if v.resolve != nil {
+		provider = v.resolve(ctx)
+	}
+	if provider == nil {
+		return "", fmt.Errorf("no vision model can describe this image for the caller")
+	}
+	return provider.CallVision(ctx, prompt, images)
+}
+
+// visionForCaller is the vision provider the app hands to every extractor.
+func (a *App) visionForCaller() common.VisionAIProvider {
+	return callerVision{resolve: a.resolveVisionProvider}
+}
+
+// resolveVisionProvider returns a vision-capable provider for the caller on
+// ctx, or nil when no source can serve them. It is asked per call
+// (callerVision), never once at start.
 //
 // NIL RATHER THAN AN ERROR, because that is the contract both callers already
 // have: component/fileprocessor takes a provider that may be absent and
@@ -133,7 +174,7 @@ func (a *App) resolveVisionProvider(ctx context.Context) common.VisionAIProvider
 	}
 	provider, _, err := memql.ResolveAITyped[common.VisionAIProvider](ctx, a.engine, visionResolveRequest())
 	if err != nil {
-		a.Logger.Warn("no vision model is reachable, so image description is unavailable on this node; text formats are unaffected",
+		a.Logger.Warn("no vision model can serve this caller, so this image is not described; text formats are unaffected",
 			"component", "ai.router", "error", err)
 		return nil
 	}

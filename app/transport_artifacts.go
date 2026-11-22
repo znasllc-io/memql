@@ -128,10 +128,21 @@ func (a *App) mountLibraryArtifactEndpoints(uploader server.FileUploader, contai
 // The extractor is the SAME fileprocessor.DefaultProcessor the attachment
 // route analyses with (transport_attachments.go), so "the known types" means
 // one set across both upload paths rather than two that drift.
+// libraryExtractor is the text extractor an upload to the Library is read
+// with. Its vision provider resolves when a picture is described, for the
+// person who uploaded it (callerVision, ai_call_sites.go): resolved here, once,
+// it would be resolved for nobody, and the cluster's vendor account would
+// describe every uploader's pictures.
+//
+// Regression test: transport_artifacts_vision_test.go.
+func (a *App) libraryExtractor() *fileprocessor.DefaultProcessor {
+	return fileprocessor.NewDefaultProcessor(a.visionForCaller())
+}
+
 func (a *App) newLibraryAnalyzer(uploader server.FileUploader) server.LibraryAnalyzer {
 	lib := library.NewIntegration(a.engine)
 	lib.SetLogger(a.Logger)
-	lib.SetExtractor(fileprocessor.NewDefaultProcessor(a.resolveVisionProvider(context.Background())))
+	lib.SetExtractor(a.libraryExtractor())
 	// The blob fetcher (memql#4782): the pass streams a chunked upload's
 	// committed blob once, for the hash always and for extraction when
 	// readable. Same checked-assertion pattern as the transport's own
