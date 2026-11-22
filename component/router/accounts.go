@@ -220,6 +220,13 @@ func accountRef(d airoute.Decision) string {
 	return ""
 }
 
+// paidByAKey reports whether a decision says a person's API key paid. What a
+// row and a refusal may say about such a call's failure is narrower than for
+// any other source (failure_reason.go, recordedError).
+func paidByAKey(d airoute.Decision) bool {
+	return d.AccountKind == memql.VendorAccountKey
+}
+
 // accountHop is K10's second half, for one walk of a wrapper's chain: after a
 // failure that is NOT about the account, the record's remaining accounts are
 // passed over and the route moves to the next model.

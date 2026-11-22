@@ -99,6 +99,35 @@ func FailureReason(err error) string {
 	return failedWhenCalledPrefix + code
 }
 
+// recordedError is the error text a call's row keeps in errorMessage.
+//
+// THE VENDOR'S SENTENCE NEVER GOES ON THE ROW OF A CALL A PERSON'S API KEY PAID
+// FOR (owner decision 2026-11-22). That sentence is about the key owner's
+// account at the vendor: it can name their organization, their plan, the
+// limit they set, a part of their key. The row is read by other people -- the
+// caller a key was lent to, and whoever reads the cluster's calls -- so it
+// keeps who paid (the account fields) and why in the router's own words: the
+// stable code and its sentence, the same pair the walk carries. Every failure
+// of such a call is worded this way, not only one about the account: a rate
+// limit's sentence names the organization as readily as a refusal's.
+//
+// The key's owner still reads the vendor's words, on the key's own page: a
+// failure about the account is kept on the key's state by the engine's
+// observer (integrations/vendorkeys/observe.go), which only they and a cluster
+// owner read.
+//
+// The cluster's own account and every source that takes no account keep the
+// error's text, as they always did.
+func recordedError(d airoute.Decision, err error) string {
+	if err == nil {
+		return ""
+	}
+	if paidByAKey(d) {
+		return strings.TrimPrefix(FailureReason(err), failedWhenCalledPrefix)
+	}
+	return TruncateError(err.Error(), 500)
+}
+
 // failureCode is the most specific stable code the error carries.
 //
 // A no-owner refusal is asked first: AppUnavailable's own Code() is the

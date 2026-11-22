@@ -231,7 +231,7 @@ func buildRecord(
 			outcome = "error"
 		}
 		errCat = CategorizeError(err)
-		errMsg = TruncateError(err.Error(), 500)
+		errMsg = recordedError(resolved.Decision, err)
 	case ctxErr != nil:
 		outcome = "cancelled"
 		errCat = CategorizeError(ctxErr)

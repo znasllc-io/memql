@@ -279,7 +279,15 @@ func (r *Router) fallbackHopRefusal(
 		return nil
 	}
 	report := &doorReporter{}
-	report.note(failed.ProviderName, "failed when it was called: "+TruncateError(errOrString(failure), 200))
+	// The failed attempt's own error, cut short -- unless a person's API key
+	// paid for it. Then the why is the router's words and never the vendor's
+	// sentence, which is about the key owner's account and would reach the
+	// caller and the decision here (failure_reason.go, recordedError).
+	why := "failed when it was called: " + TruncateError(errOrString(failure), 200)
+	if paidByAKey(failed.Decision) {
+		why = FailureReason(failure)
+	}
+	report.note(failed.ProviderName, why)
 	report.note(next.ProviderName, "the cost ceiling for this process has been reached")
 	decision := next.Decision
 	decision.Considered = append(append([]airoute.ConsideredEntry(nil), next.Decision.Considered...), report.entries()...)

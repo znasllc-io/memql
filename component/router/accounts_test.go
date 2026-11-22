@@ -13,6 +13,7 @@ package router
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"sync"
@@ -984,5 +985,131 @@ func TestWithoutAKeySeamAVendorCallIsTheClustersAccount(t *testing.T) {
 	}
 	if reason, ok := consideredLine(resolved.Decision.Considered, "claude", ""); !ok || !strings.Contains(reason, "not set up for Anthropic") {
 		t.Errorf("claude's line is %q (found %v)", reason, ok)
+	}
+}
+
+// OWNER DECISION 2026-11-22 (D4): the record of a call a person's API key paid
+// for says who paid and why it failed in the router's own words, and never
+// carries the vendor's sentence. That sentence is about the key owner's
+// account at the vendor (it can name their organization, their plan, a part of
+// their key), and this row is read by other people: the caller the key was
+// lent to, and everybody who reads the decisions list. The key's owner reads
+// the vendor's words on the key's own page.
+func TestAKeyPaidFailureKeepsTheRoutersWordsAndNeverTheVendors(t *testing.T) {
+	const vendorsWords = "the vendor's words"
+	for _, kind := range memql.VendorAccountFailureKinds() {
+		t.Run("about the account/"+kind, func(t *testing.T) {
+			f := newAccountFixture(t, []string{"claude"}, []lentKey{aliceOwnKey, bobLentKey}, claudeRecord)
+			f.calls.fail["claude@key:k-own"] = accountFailure(kind)
+			ctx := personCtx(alice)
+			got, err := f.router.ResolveFor(ctx, chosenRequest(airoute.ModalityChat))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := got.Client.(common.ChatAIProvider).CallChat(ctx, helloMessages()); err != nil {
+				t.Fatal(err)
+			}
+			want := "account_" + kind + ": " + failureWords["account_"+kind]
+			for _, outcome := range []string{"error", "fallback_used"} {
+				row := f.ledger.args(t)
+				if row["outcome"] != outcome || rowAccount(row) != [3]string{memql.VendorAccountKey, "k-own", alice} {
+					t.Fatalf("row = outcome %v paid by %v, want the %s row of alice's key", row["outcome"], rowAccount(row), outcome)
+				}
+				if message := fmt.Sprint(row["errorMessage"]); message != want {
+					t.Errorf("the %s row's errorMessage = %q, want the router's own words %q", outcome, message, want)
+				}
+				if message := fmt.Sprint(row["errorMessage"]); strings.Contains(message, vendorsWords) || strings.Contains(message, "sk-ant-secret") {
+					t.Errorf("the %s row quotes the vendor: %q", outcome, message)
+				}
+			}
+		})
+	}
+
+	// A failure that says nothing about the account is the vendor's sentence
+	// all the same, and it can name the key owner's organization.
+	t.Run("about something else", func(t *testing.T) {
+		f := newAccountFixture(t, []string{"claude"}, []lentKey{aliceOwnKey}, claudeRecord)
+		f.calls.fail["claude@key:k-own"] = errors.New("429 rate limit reached for organization org-alices-company on tokens per minute")
+		ctx := personCtx(alice)
+		got, err := f.router.ResolveFor(ctx, chosenRequest(airoute.ModalityChat))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := got.Client.(common.ChatAIProvider).CallChat(ctx, helloMessages()); err == nil {
+			t.Fatal("the call was served, so no failed row is being measured")
+		}
+		row := f.ledger.args(t)
+		if row["outcome"] != "error" || rowAccount(row) != [3]string{memql.VendorAccountKey, "k-own", alice} {
+			t.Fatalf("row = outcome %v paid by %v, want the failed attempt on alice's key", row["outcome"], rowAccount(row))
+		}
+		if message := fmt.Sprint(row["errorMessage"]); message != "rate_limit: rate limited" {
+			t.Errorf("errorMessage = %q, want the router's own words for a rate limit", message)
+		}
+	})
+
+	// THE CLUSTER'S OWN ACCOUNT keeps the error's text, as it always did: the
+	// decision is about a person's key.
+	t.Run("the cluster's account keeps its text", func(t *testing.T) {
+		f := newAccountFixture(t, []string{"claude"}, nil, claudeRecord)
+		f.calls.fail["claude@cluster"] = errors.New("500 internal server error: upstream said so")
+		ctx := personCtx(alice)
+		got, err := f.router.ResolveFor(ctx, chosenRequest(airoute.ModalityChat))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := got.Client.(common.ChatAIProvider).CallChat(ctx, helloMessages()); err == nil {
+			t.Fatal("the call was served, so no failed row is being measured")
+		}
+		row := f.ledger.args(t)
+		if message := fmt.Sprint(row["errorMessage"]); !strings.Contains(message, "upstream said so") {
+			t.Errorf("errorMessage = %q, want the error's own text for the cluster's account", message)
+		}
+	})
+}
+
+// D4 again, on the one other place a failed attempt's error is written down:
+// the refusal a wrapper answers when the cost ceiling is reached before its
+// next vendor hop. That refusal names the source that just failed and why, to
+// the caller and on the decision. When a person's key paid for the failed
+// attempt, the why is the router's words.
+func TestACeilingRefusalAfterAKeyFailedNeverQuotesTheVendor(t *testing.T) {
+	f := newAccountFixture(t, []string{"fleet:absent", "claude"}, []lentKey{aliceOwnKey, bobLentKey}, claudeRecord)
+	f.providers.SetFleetInference(&stubFleetInference{})
+	f.calls.fail["claude@key:k-own"] = accountFailure("refused")
+	// Reached only once a vendor attempt has been made: the resolution passes,
+	// and the hop to the next account is the one that is refused.
+	f.router.ceilingCheck = func(context.Context) (string, bool) {
+		return "the ceiling of this test", len(f.calls.attempts()) > 0
+	}
+	ctx := personCtx(alice)
+
+	got, err := f.router.ResolveFor(ctx, chosenRequest(airoute.ModalityChat))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = got.Client.(common.ChatAIProvider).CallChat(ctx, helloMessages())
+	var refusal *InferenceUnavailable
+	if !errors.As(err, &refusal) || refusal.Code != work.RefusalCeilingReached {
+		t.Fatalf("err = %v, want the ceiling's refusal after the first account failed", err)
+	}
+	if made := f.calls.attempts(); !reflect.DeepEqual(made, []string{"claude@key:k-own"}) {
+		t.Fatalf("calls = %v, want one attempt on alice's key and none past the ceiling", made)
+	}
+	said := false
+	for _, door := range refusal.Doors {
+		if strings.Contains(door.Reason, "the vendor's words") || strings.Contains(door.Reason, "sk-ant-secret") {
+			t.Errorf("the refusal quotes the vendor to the caller: %q", door.Reason)
+		}
+		if door.Name == "claude" && door.Reason == FailureReason(accountFailure("refused")) {
+			said = true
+		}
+	}
+	if !said {
+		t.Errorf("the refusal does not say why the key-paid attempt failed in the router's words: %+v", refusal.Doors)
+	}
+	for _, line := range refusal.Decision.Considered {
+		if strings.Contains(line.Reason, "the vendor's words") || strings.Contains(line.Reason, "sk-ant-secret") {
+			t.Errorf("the decision quotes the vendor: %q", line.Reason)
+		}
 	}
 }

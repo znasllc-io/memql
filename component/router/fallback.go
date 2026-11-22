@@ -378,7 +378,7 @@ func fallbackRecord(req ResolveRequest, failedResolved Resolved, err error) Call
 		Streaming:         failedResolved.Streaming,
 		Outcome:           "fallback_used",
 		ErrorCategory:     CategorizeError(err),
-		ErrorMessage:      TruncateError(errOrString(err), 500),
+		ErrorMessage:      recordedError(failedResolved.Decision, err),
 		FallbackFromModel: failedResolved.Model,
 
 		// Every attempt keeps the rule/level decision that chose this chain;
