@@ -176,6 +176,7 @@ return { act: "ask", question: "A stricter authored policy requires a person bef
 					e.SetRunCeilingGuard(work.NewRunCeilings(e, e.Logger))
 					e.SetModelCallJournal(work.NewModelJournal(e))
 					registry := memql.NewProviderRegistryForTest()
+					clusterAccountPaysForThePeopleHere(registry)
 					registry.RegisterWithParamsForTest("fixture", "OpenAI", "fixture", map[string]any{"contextWindow": 200000}, providers[n])
 					rules := memql.NewRuleRegistry()
 					require.NoError(t, rules.Register(&memql.RuleConfig{Name: memql.DefaultRuleName, Policy: "fixture", Locked: true, OnUnavailable: memql.OnUnavailableDegrade, SourceFile: "dsl/rules/rules.memql"}))
