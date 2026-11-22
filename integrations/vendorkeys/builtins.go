@@ -236,7 +236,7 @@ func (i *Integration) handleAdd(ctx context.Context, args map[string]any, _ int)
 		CheckedBy: checkedBy, IsDefault: len(atVendorOf(mine, vendor)) == 0, Sealed: sealedValue(sealed),
 		CheckedAt: probe.At,
 	}
-	if err := i.store.Create(ctx, me.userId, created); err != nil {
+	if err := i.store.Add(ctx, me.userId, created); err != nil {
 		return nil, i.failed("add", created.Id, err)
 	}
 	i.audit(ctx, me, auditAdded, created.Id, map[string]any{

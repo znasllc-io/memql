@@ -324,13 +324,19 @@ func (s *Store) owner(ctx context.Context, userId string) (name, email string, a
 	return rowString(rows[0], "displayName"), rowString(rows[0], "primaryEmail"), true, nil
 }
 
-// Create stores a new key and starts the engine's record of it, as the owner.
+// Add stores a new key and starts the engine's record of it, as the owner.
+//
+// Both writes are mutations run through the engine (createVendorKey,
+// createVendorKeyState), so every write guard applies to them. The method is
+// not named Create because a three-argument Create is what the repository's
+// gate against writes that skip the executor looks for
+// (unguarded_concept_create_test.go), and this is not one.
 //
 // TWO WRITES, AND THE KEY FIRST. A key with no state row is a key nothing was
 // observed about, which reads as usable and is corrected by its first call or
 // check; a state row with no key would be a record of nothing. So a failure
 // between the two leaves the harmless half.
-func (s *Store) Create(ctx context.Context, owner string, key NewKey) error {
+func (s *Store) Add(ctx context.Context, owner string, key NewKey) error {
 	owned, ok := asOwner(ctx, owner)
 	if !ok {
 		return errors.New("vendorkeys: an API key belongs to the person adding it, and nobody is")

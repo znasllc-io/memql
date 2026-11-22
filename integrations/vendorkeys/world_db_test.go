@@ -161,7 +161,7 @@ func (w *world) key(owner, label string, opts ...keyOption) string {
 
 	saved := w.clock
 	w.clock = w.clock.Add(o.addedAt)
-	err = w.store.Create(context.Background(), owner, NewKey{
+	err = w.store.Add(context.Background(), owner, NewKey{
 		Id: id, Vendor: o.vendor, Label: label + " " + w.suffix, Fingerprint: fingerprint,
 		CheckedBy: o.checkedBy, IsDefault: !o.notDef, Sealed: sealedValue(sealed),
 	})
