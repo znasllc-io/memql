@@ -370,6 +370,11 @@ components for this layout. They own the spacing and responsive alignment used
 by Fleet, Cluster and Files' file Details page (José, Nov 19: "this is how
 details should show up"; its Labels and Client are one short row each); avoid
 app-specific copies of the same grid.
+A details page shows details, not actions: no footer or action bar pinned to
+it. Acts on the thing live where it was opened from (its icons and right-click
+menu). A pinned footer belongs only to a wizard, the step-one, step-two flows
+(José, Nov 20 2026: "this footer should only show up in the wizards ... it's
+supposed to just show the details, not show actions").
 For a machine, Details follows Equipment and holds what the machine reported:
 connection advisories, System, Hardware, Connection, Features, Registration and
 Reported labels. Settings is the last tab, after Activity, and holds only what

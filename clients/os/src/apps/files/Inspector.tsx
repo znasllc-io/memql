@@ -1,16 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Trash2, CornerUpRight, Download, RotateCcw } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
 
 import { useAuthSource } from "../../auth/context";
-import { useSession } from "../../chrome/access";
 import { useOs } from "../../chrome/state";
 import { canOpen } from "../../system/registry";
-import { openInVsCode, VSCODE_NO_ANSWER_MESSAGE } from "../../items/vscode";
-import { editorFilename, isZipArtifact } from "../../items/editorPreference";
-import { binItemFromArtifact } from "../bin/rows";
-import { planRestore, runRestore } from "../bin/restore";
-import { Button, Details, DetailsSection, Fact, Facts, Notice, Head, formatBytes, formatMoment } from "../../kit";
-import { ActionBar } from "../../kit/ActionBar";
+import { Details, DetailsSection, Fact, Facts, Notice, Head, formatMoment } from "../../kit";
 import { LabelEditor } from "./LabelEditor";
 import { AccountPicker } from "../accounts/AccountPicker";
 import { useAccountOptions } from "../accounts/tie";
@@ -19,18 +12,16 @@ import { useFileVersions } from "./actions/versions";
 import { VersionHistory } from "./VersionHistory";
 import { fileHeadFromRow, type VersionEntry } from "./versions";
 import { useLiveCollection } from "../../live/useLiveCollection";
-import { useOsConnection } from "../../live/connection";
-import { rowNumber, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 import type { Breadcrumb } from "../../kit/Breadcrumbs";
 import { MATERIALIZER_APP_ID, MATERIALIZER_MADE_SECTION } from "../../items/materialize";
 import {
-  downloadArtifact,
   OVER_LIMIT_SENTENCE,
   planDownload,
   runBufferedDownload,
 } from "./actions/download";
 import { downloadWorkerRegistration, runWorkerDownload } from "./actions/downloadWorker";
-import { artifactName, deskEntryOf, fileStory, type ArtifactRow, type CompositionRow } from "./rows";
+import { artifactName, fileStory, type ArtifactRow, type CompositionRow } from "./rows";
 
 // File details occupy the page, laid out like Fleet's machine Details tab
 // (José, Nov 19: "this is how details should show up"; Jesús picked draft A,
@@ -39,7 +30,7 @@ import { artifactName, deskEntryOf, fileStory, type ArtifactRow, type Compositio
 // the pointer lit with its copy button -- the kit's Details, DetailsSection and
 // Fact.copyValue, which own that grid for Fleet and Cluster too (DESIGN.md,
 // "Details and settings content"). Same sections and words as before; Labels
-// and Client are one short row each, and the action bar stays pinned below.
+// and Client are one short row each. No action bar (Nov 20 call, below).
 
 function describe(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -50,9 +41,7 @@ export function Inspector({
   files,
   composition,
   folderNameOf,
-  archivedFolderIds,
   presence,
-  confirmBeforeArchive,
   onClose,
   backLabel = "Files",
   breadcrumbs,
@@ -69,35 +58,28 @@ export function Inspector({
    */
   composition: CompositionRow | null;
   folderNameOf: (folderId: string) => string;
-  /** Ids of KNOWN-archived folders -- the restore re-file predicate. */
-  archivedFolderIds: ReadonlySet<string>;
   presence: (workerId: string) => { name?: string; online: boolean } | null;
-  confirmBeforeArchive: boolean;
   onClose: () => void;
   backLabel?: string;
   breadcrumbs?: readonly Breadcrumb[];
 }) {
-  const { config } = useSession();
   const { actions, registry } = useOs();
-  const connection = useOsConnection();
   const authSource = useAuthSource();
 
   const name = artifactName(row);
   const machine = row.producedByWorkerId ? presence(row.producedByWorkerId) : null;
   const story = fileStory(row, machine, composition);
 
-  // Every action reports beside itself, in surface. One error slot per
-  // action, so a download refusal never sits under the archive button.
-  const [vsNoAnswer, setVsNoAnswer] = useState(false);
+  // NO ACTION BAR (José, Nov 20 2026 call: "we shouldn't have this footer
+  // there ... this footer should only show up in the wizards ... it's
+  // supposed to just show the details, not show actions. The actions are
+  // back there"). Open, Download, Share, Send to desktop and Delete live on
+  // the file's own icons and right-click menu in the place it was opened
+  // from. The one act left here is downloading an older version from the
+  // Versions list, and its refusal reports beside that list.
   const [downloadError, setDownloadError] = useState("");
-  const [downloadBusy, setDownloadBusy] = useState(false);
-  const [deskNote, setDeskNote] = useState("");
   const accounts = useAccountOptions();
   const accountTie = useArtifactAccounts();
-  const [archiveError, setArchiveError] = useState("");
-  const [archiveBusy, setArchiveBusy] = useState(false);
-  const [confirmingArchive, setConfirmingArchive] = useState(false);
-  const cancelHandoff = useRef<(() => void) | null>(null);
 
   // --- versions (epic memql#4806) ---
   //
@@ -122,61 +104,6 @@ export function Inspector({
   const headRevision = liveVersion ? `${liveVersion.versionNumber}:${liveVersion.sha256}:${liveVersion.versionUploadedAt}` : "";
   const versions = useFileVersions(fileId, headRevision);
   const [downloadingVersion, setDownloadingVersion] = useState(0);
-
-  useEffect(() => () => cancelHandoff.current?.(), []);
-  useEffect(() => {
-    if (!vsNoAnswer) return;
-    const t = setTimeout(() => setVsNoAnswer(false), 8000);
-    return () => clearTimeout(t);
-  }, [vsNoAnswer]);
-
-  const openVsCode = useCallback(() => {
-    cancelHandoff.current?.();
-    setVsNoAnswer(false);
-    cancelHandoff.current = openInVsCode(config.domain, row.id, () => setVsNoAnswer(true), undefined, editorFilename(row));
-  }, [config.domain, row.id, row.title]);
-
-  const sendToDesk = useCallback(() => {
-    const outcome = actions.sendFileToDesk(deskEntryOf(row));
-    setDeskNote(
-      outcome === "full"
-        ? "The desk is full -- remove something from it first."
-        : outcome === "focused"
-          ? "Already on the desk; it is selected there now."
-          : "On the desk.",
-    );
-  }, [actions, row, name]);
-
-  useEffect(() => {
-    if (deskNote === "") return;
-    const t = setTimeout(() => setDeskNote(""), 5000);
-    return () => clearTimeout(t);
-  }, [deskNote]);
-
-  const download = useCallback(async () => {
-    setDownloadBusy(true);
-    setDownloadError("");
-    try {
-      await downloadArtifact({
-        artifactId: row.id,
-        name,
-        fileId: row.kind === "file" ? (row.sourceConceptRef.split(":").pop() ?? "") : "",
-        readFile: connection
-          ? async (id) => {
-              const result = await connection.query.libraryFileById({ fileId: id });
-              const fileRow = result.rows()[0] ?? null;
-              if (!fileRow) return null;
-              return { sizeBytes: rowNumber(fileRow, "size"), name: rowString(fileRow, "name") };
-            }
-          : null,
-        bearer: () => authSource.bearer(),
-      });
-    } catch (err: unknown) {
-      setDownloadError(describe(err));
-    } finally {
-      setDownloadBusy(false);
-    }
-  }, [row, name, connection, authSource]);
 
   const downloadVersion = useCallback(
     async (entry: VersionEntry) => {
@@ -220,68 +147,6 @@ export function Inspector({
     [row.id, name, authSource],
   );
 
-  const archive = useCallback(async () => {
-    const query = connection?.query ?? null;
-    if (query === null) {
-      setArchiveError("Not connected to the cluster, so nothing was deleted.");
-      return;
-    }
-    setConfirmingArchive(false);
-    setArchiveBusy(true);
-    setArchiveError("");
-    try {
-      await query.archiveArtifact({ artifactId: row.id });
-    } catch (err: unknown) {
-      setArchiveError(describe(err));
-    } finally {
-      setArchiveBusy(false);
-    }
-  }, [connection, row.id]);
-
-  // Restore, for a row being read in the Bin place (epic memql#4842,
-  // #4846): the Bin's client-driven pair, verbatim -- the index first, then
-  // the backing file -- so the two surfaces cannot drift apart on what
-  // "putting back" means. The automation mirror deliberately does not exist
-  // (apps/bin/restore.ts says why), which is why this is two writes.
-  //
-  // ONE addition over the Bin's flow (#4846 AC): a file whose folder is
-  // KNOWN-ARCHIVED re-files to the Library root, because a row restored into
-  // an invisible folder is invisible everywhere except search. Fail-closed on
-  // archived-list membership -- an absence test against the live tree would
-  // re-file out of live folders while the feed is still seeding.
-  const restore = useCallback(async () => {
-    const query = connection?.query ?? null;
-    if (query === null) {
-      setArchiveError("Not connected to the cluster, so nothing was restored.");
-      return;
-    }
-    setArchiveBusy(true);
-    setArchiveError("");
-    try {
-      await runRestore(planRestore(binItemFromArtifact(row)), {
-        restoreArtifact: async (artifactId) => {
-          await query.restoreArtifact({ artifactId });
-        },
-        restoreFile: async (fileId) => {
-          await query.restoreLibraryFile({ fileId });
-        },
-        restoreFolder: async (folderId) => {
-          await query.restoreLibraryFolder({ folderId });
-        },
-      });
-      if (row.folderId !== "" && archivedFolderIds.has(row.folderId)) {
-        await query.moveArtifactToFolder({ artifactId: row.id, folderId: "" });
-        setDeskNote("Restored to the Library root -- its folder is still in the Bin.");
-      }
-    } catch (err: unknown) {
-      setArchiveError(describe(err));
-    } finally {
-      setArchiveBusy(false);
-    }
-  }, [connection, row, archivedFolderIds]);
-
-  // Download is offered only where bytes or a body exist: a file always, the
-  // rendered kinds by construction of the content route.
   const filedIn = folderNameOf(row.folderId);
 
   return (
@@ -398,60 +263,8 @@ export function Inspector({
           />
         ) : null}
       </Details>
+      {downloadError ? <Notice tone="error" sentence="The download did not land." detail={downloadError} /> : null}
       </div>
-      <footer className="os-file-detail-footer" data-confirming={confirmingArchive || undefined}>
-        {vsNoAnswer || downloadError || archiveError ? (
-          <div className="os-file-detail-notices">
-            {vsNoAnswer ? <Notice tone="warn" sentence={VSCODE_NO_ANSWER_MESSAGE} /> : null}
-            {downloadError ? (
-              <Notice tone="error" sentence="The download did not land." detail={downloadError}>
-                <Button onClick={download} busy={downloadBusy}>Try again</Button>
-              </Notice>
-            ) : null}
-            {archiveError ? (
-              <Notice tone="error" sentence={row.archived ? "The file was not restored." : "The file was not deleted."} detail={archiveError} />
-            ) : null}
-          </div>
-        ) : null}
-        <ActionBar
-          state={archiveBusy ? (row.archived ? "Restoring" : "Deleting")
-            : confirmingArchive ? `Delete "${name}"?`
-            : downloadBusy || downloadingVersion > 0 ? "Downloading"
-            : row.archived ? "In Bin" : uploadUnavailable ? "Upload failed" : "In Library"}
-          detail={confirmingArchive ? "You can restore it from the Bin until it is purged."
-            : deskNote || (versions.head ? `Version ${versions.head.versionNumber} · ${formatBytes(versions.head.size)}` : undefined)}
-          live
-        >
-          {confirmingArchive ? (
-            <>
-              <button type="button" className="os-actbar-text" onClick={() => setConfirmingArchive(false)}>Cancel</button>
-              <Button tone="danger" onClick={archive}>Delete</Button>
-            </>
-          ) : (
-            <>
-              {row.archived ? (
-                <Button busy={archiveBusy} busyLabel="Restoring…" onClick={restore}>
-                  <RotateCcw size={16} aria-hidden /> Restore
-                </Button>
-              ) : (
-                <Button tone="danger" busy={archiveBusy} ariaLabel={archiveBusy ? "Deleting" : "Delete"} title="Delete"
-                  onClick={() => (confirmBeforeArchive ? setConfirmingArchive(true) : archive())}>
-                  <Trash2 size={16} aria-hidden />
-                </Button>
-              )}
-              <Button onClick={sendToDesk} disabled={archiveBusy} ariaLabel="Send to desktop" title="Send to desktop">
-                <CornerUpRight size={16} aria-hidden />
-              </Button>
-              {!uploadUnavailable ? <Button onClick={download} busy={downloadBusy} disabled={archiveBusy}
-                tone={isZipArtifact(row) ? "primary" : "quiet"}
-                ariaLabel={downloadBusy ? "Downloading" : isZipArtifact(row) ? "Download ZIP" : "Download"} title={isZipArtifact(row) ? "Download ZIP" : "Download"}>
-                <Download size={16} aria-hidden />
-              </Button> : null}
-              {!uploadUnavailable && !isZipArtifact(row) ? <Button tone="primary" onClick={openVsCode} disabled={archiveBusy}>Open</Button> : null}
-            </>
-          )}
-        </ActionBar>
-      </footer>
     </section>
   );
 }

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // The inspector's presentation pass: the horizontal scroll, the copyable
@@ -52,7 +52,9 @@ it("keeps a stored file available when only its analysis failed", async () => {
   await renderFiles();
   const inspector = await openInspector("notes\\.md");
   expect(within(inspector).queryByText("This upload did not finish.")).toBeNull();
-  expect(within(inspector).getByRole("button", { name: "Open" })).toBeTruthy();
+  // Open lives on the file's right-click menu (no action bar since Nov 20).
+  fireEvent.contextMenu(screen.getByRole("button", { name: /notes\.md/, hidden: true }));
+  expect(within(screen.getByRole("menu", { name: "File" })).getByRole("menuitem", { name: "Open" })).toBeTruthy();
 });
 
 describe("the inspector header", () => {
@@ -107,8 +109,8 @@ describe("the details page in Fleet's layout", () => {
 
     // Client is one short row: the picker alone.
     expect(within(sections[2] as HTMLElement).getByLabelText("The client this file is about")).toBeTruthy();
-    // The bottom bar stays.
-    expect(within(inspector).getByRole("group", { name: "What you can do with this" })).toBeTruthy();
+    // No bottom bar (José, Nov 20 call: details, not actions).
+    expect(within(inspector).queryByRole("group", { name: "What you can do with this" })).toBeNull();
   });
 });
 

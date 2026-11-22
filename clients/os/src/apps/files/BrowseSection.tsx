@@ -692,7 +692,6 @@ export function BrowseSection({
     : pickedNotice !== null ? { name: pickedNotice.title, entries: noticeMenuEntries(pickedNotice) }
     : pickedRow !== null ? { name: artifactName(pickedRow), entries: rowMenuEntries(pickedRow) }
     : null;
-  const archivedFolderIdSet = new Set(archivedFolders.map((f) => f.id));
   const searching = filter.search.trim() !== "";
 
   const folderNameOf = (folderId: string): string => {
@@ -1196,9 +1195,7 @@ export function BrowseSection({
             files={files}
             composition={materialized.get(selected.id) ?? null}
             folderNameOf={folderNameOf}
-            archivedFolderIds={archivedFolderIdSet}
             presence={presence}
-            confirmBeforeArchive={confirmBeforeArchive}
             backLabel={headTitle}
             breadcrumbs={[...(headTrail ?? [{label: headTitle}]).map((crumb, i, all) => i === all.length - 1 ? {...crumb, onSelect: () => onSelect("")} : {...crumb, onSelect: () => { onSelect(""); crumb.onSelect?.(); }}), {label: artifactName(selected)}]}
             onClose={() => onSelect("")}

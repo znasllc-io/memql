@@ -14,7 +14,7 @@ import { LocalDesktopStore, DESKTOP_STORE_KEY } from "../../src/system/store";
 import type { OsRuntimeConfig } from "../../src/cluster/config";
 import type { UploadProvider } from "../../src/items/upload";
 import { ARTIFACT_CONCEPT } from "../../src/apps/files/concepts";
-import { artifactRow, click, fakeConnection, renderFiles, openDetails } from "./harness";
+import { artifactRow, click, fakeConnection, renderFiles } from "./harness";
 
 // The desk half of the unification (epic #4723, reshaped by epic memql#4842):
 // a desk folder is a real desktop icon -- click selects, double-click opens
@@ -156,11 +156,15 @@ describe("send to desktop", () => {
     });
     h.connection = connection;
     await renderFiles();
-    await openDetails(/brief\.pdf/);
-    const inspector = screen.getByRole("region", { name: "File details" });
-    await click(within(inspector).getByRole("button", { name: "Send to desktop" }));
-    expect(within(inspector).getByText("On the desk.")).toBeTruthy();
-    await click(within(inspector).getByRole("button", { name: "Send to desktop" }));
-    expect(within(inspector).getByText(/Already on the desk/)).toBeTruthy();
+    // From the file's right-click menu: the Details page has no action bar
+    // since the Nov 20 call.
+    const send = async () => {
+      fireEvent.contextMenu(screen.getByRole("button", { name: /brief\.pdf/ }));
+      await click(within(screen.getByRole("menu", { name: "File" })).getByRole("menuitem", { name: "Send to desktop" }));
+    };
+    await send();
+    expect(screen.getByText("On the desk.")).toBeTruthy();
+    await send();
+    expect(screen.getByText(/Already on the desk/)).toBeTruthy();
   });
 });
