@@ -177,9 +177,29 @@ type inferenceDoors struct {
 	AppEligible          bool
 	RunnableApps         []string
 	AppSessionsInstalled bool
-	CloudConfigured      bool
-	Federation           bool
-	Doors                []string
+	// CloudConfigured and ClusterFederation are about the CLUSTER'S OWN
+	// account at a vendor, the same for every caller: a paid provider is
+	// callable here, and it got its credential through workload identity
+	// federation.
+	CloudConfigured   bool
+	ClusterFederation bool
+	// Federation, FederationAuto and KeyAccount are about THIS CALLER (design
+	// record 2026-11-21-vendor-accounts-and-api-keys, decision A8). A vendor's
+	// models can be paid for by the cluster's account or by a person's API
+	// key, so "can a vendor serve" is asked per person (VendorDoorFor):
+	//
+	//   - Federation: on a route the person chooses themselves;
+	//   - FederationAuto: under Auto, where a key counts only once its owner
+	//     switched that on;
+	//   - KeyAccount: the person has a key that can pay on a route they choose.
+	//
+	// The vendor door keeps the name it had when federation was the only
+	// account behind it. A key is a second account behind the same door, not a
+	// door of its own.
+	Federation     bool
+	FederationAuto bool
+	KeyAccount     bool
+	Doors          []string
 }
 
 func (e *MemQLEngine) inferenceDoors(ctx context.Context) inferenceDoors {
@@ -239,13 +259,25 @@ func (e *MemQLEngine) inferenceDoors(ctx context.Context) inferenceDoors {
 	sort.Strings(d.RunnableApps)
 
 	d.CloudConfigured = e.providers.HasCloudProviderConfigured()
-	var federationStreams bool
-	d.Federation, federationStreams = e.providers.federationReadiness()
-	d.StreamingChatEligible = d.StreamingChatEligible || federationStreams
+	// The vendor door, asked for this caller. Ask needs a stream, and a route
+	// is the person's to choose there, so it reads the chosen-route answer.
+	vendor := e.providers.VendorDoorFor(ctx, actingUserFromContext(ctx))
+	d.ClusterFederation = vendor.Cluster
+	d.Federation = vendor.Chosen
+	d.FederationAuto = vendor.Auto
+	d.KeyAccount = vendor.Key
+	d.StreamingChatEligible = d.StreamingChatEligible || vendor.ChosenStreams
 	// THE ORDER IS THE ORDER THE DEFAULT CHAIN TRIES THEM (design D4): a
 	// model on the person's own hardware, then a subscription they already
-	// pay for, then federation, then a key. Every client renders this list
-	// rather than re-deriving one, so the order is part of the answer.
+	// pay for, then a vendor. Every client renders this list rather than
+	// re-deriving one, so the order is part of the answer.
+	//
+	// The vendor door is open when an account can pay for THIS caller on a
+	// route they choose: the cluster's federation, or an API key of theirs.
+	// It is the chosen-route answer, not Auto's, so that `eligible` and this
+	// list say the same thing: a person who added a key can get inference by
+	// choosing a route, whether or not they let Auto spend the key. Auto's
+	// own readiness is the Auto route's (routeReadiness.generationReady).
 	if d.LocalEligible {
 		d.Doors = append(d.Doors, InferenceDoorLocal)
 	}
@@ -288,7 +320,12 @@ func (e *MemQLEngine) evaluateInferenceStatusExpression(ctx context.Context) ([]
 		"localModelCount":       d.LocalModels,
 		"eligibleModelIds":      toAnySlice(d.EligibleModelIds),
 		"cloudConfigured":       d.CloudConfigured,
-		"federationConfigured":  d.Federation,
+		// The cluster's own account, as every sentence that reads this field
+		// says ("workload-identity federation"). Whether a vendor can serve
+		// THIS caller is doorsOpen; whether a key of theirs is what pays is
+		// keyAccount.
+		"federationConfigured": d.ClusterFederation,
+		"keyAccount":           d.KeyAccount,
 		// fleetInferenceInstalled distinguishes "your machines are asleep"
 		// from "the node answering this request has no worker service at
 		// all". They look identical from a page and have entirely different

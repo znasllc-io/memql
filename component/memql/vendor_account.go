@@ -44,6 +44,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // The two kinds of account.
@@ -380,4 +381,118 @@ func (r *ProviderRegistry) BindVendorAccount(e *ProviderConfigEntry, a VendorAcc
 		return nil, false
 	}
 	return client.WithVendorAccount(a, keys), true
+}
+
+// VendorDoor is whether a vendor's text models can serve one person, and what
+// would pay (A8).
+//
+// "Can a vendor serve" used to be one flag, set when providers loaded: is the
+// cluster's federation set up. A person's API key is a second account that can
+// pay, and whether a key counts depends on who is asking and on how their route
+// was chosen (K8). So the question is asked per person, at the time it is
+// asked, through the same composition the router uses for a call
+// (VendorAccountsWith). A page that says a vendor can serve and a call that
+// then finds no account would be two definitions of one fact.
+type VendorDoor struct {
+	// Chosen: some vendor text record has an account that can pay for this
+	// person on a route they choose themselves.
+	Chosen bool
+	// ChosenStreams: one of those records can answer a plain streaming chat,
+	// which is what Ask needs. An account alone does not establish that.
+	ChosenStreams bool
+	// Auto: some vendor text record has an account that can pay for this
+	// person when nobody chose the route. A key counts here only once its
+	// owner switched Auto on for it (O4).
+	Auto bool
+	// AutoStreams is ChosenStreams for Auto.
+	AutoStreams bool
+	// Cluster: the cluster's own account is set up at some vendor, which is
+	// its workload identity federation. The same answer for everybody.
+	Cluster bool
+	// Key: this person has an API key that can pay on a route they choose,
+	// their own or one lent to them.
+	Key bool
+}
+
+// VendorDoorFor answers whether a vendor can serve one person, by asking which
+// accounts can pay for them at each vendor text record (A8).
+//
+// actingUserId is the person the answer is for. Blank, a synthetic actor's id,
+// or a context that borrowed a person's authority for a visitor is a call no
+// key pays for: the answer is then the cluster's account alone, and the keys
+// are not read.
+//
+// THE CLUSTER'S HALF is the predicate it always was (federationReadiness, the
+// one the Providers page reads), so a cluster with no keys answers exactly as
+// before. It is deliberately not "this record is available": a record counts
+// only when its credential came through federation, and
+// TestInferenceStatusStreamingFederationRequiresAvailablePlainStream holds
+// that line.
+//
+// THE KEYS' HALF costs at most two reads of rows per vendor, and one for a
+// person with no key there, which is nearly everybody: Auto is asked about
+// only when a chosen route found a key, because the keys that count under Auto
+// are among the ones that count for a chosen route (VendorAccountQuery.Chosen).
+// Nothing is remembered between calls. A key added, removed or paused a second
+// ago decides this answer, on whichever replica is asked.
+func (r *ProviderRegistry) VendorDoorFor(ctx context.Context, actingUserId string) VendorDoor {
+	var door VendorDoor
+	if r == nil {
+		return door
+	}
+	var streams bool
+	door.Cluster, streams = r.federationReadiness()
+	door.Chosen, door.Auto = door.Cluster, door.Cluster
+	door.ChosenStreams, door.AutoStreams = streams, streams
+
+	r.mu.RLock()
+	records := make([]*ProviderConfigEntry, 0, len(r.byName))
+	for _, entry := range r.byName {
+		if VendorOfEntry(entry) != "" {
+			records = append(records, entry)
+		}
+	}
+	r.mu.RUnlock()
+
+	query := VendorAccountQuery{
+		ActingUserId: strings.TrimSpace(actingUserId),
+		ForVisitor:   auth.BorrowedForVisitor(ctx),
+	}
+	chosen := map[string]VendorKeyAnswer{}
+	auto := map[string]VendorKeyAnswer{}
+	for _, entry := range records {
+		vendor := VendorOfEntry(entry)
+		if _, asked := chosen[vendor]; !asked {
+			query.Vendor, query.Chosen = vendor, true
+			chosen[vendor] = r.VendorKeysAt(ctx, query)
+			if len(chosen[vendor].Usable) > 0 {
+				query.Chosen = false
+				auto[vendor] = r.VendorKeysAt(ctx, query)
+			}
+		}
+		_, streams := entry.Client.(common.ChatStreamProvider)
+
+		// Only a KEY is taken from the composition. The cluster's account at a
+		// record is already answered above, by the predicate that asks how the
+		// record got its credential and not only whether it is available.
+		if accounts, _ := r.VendorAccountsWith(entry, chosen[vendor]); keyAmong(accounts) {
+			door.Key, door.Chosen = true, true
+			door.ChosenStreams = door.ChosenStreams || streams
+		}
+		if accounts, _ := r.VendorAccountsWith(entry, auto[vendor]); keyAmong(accounts) {
+			door.Auto = true
+			door.AutoStreams = door.AutoStreams || streams
+		}
+	}
+	return door
+}
+
+// keyAmong reports whether one of these accounts is a person's API key.
+func keyAmong(accounts []VendorAccount) bool {
+	for _, account := range accounts {
+		if account.Kind == VendorAccountKey {
+			return true
+		}
+	}
+	return false
 }

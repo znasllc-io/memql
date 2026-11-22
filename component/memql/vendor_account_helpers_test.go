@@ -140,6 +140,13 @@ type fakeVendorKeys struct {
 
 	usable     []VendorAccount
 	passedOver []VendorAccountPassedOver
+	// autoUsable, when not nil, is what a question about Auto (Chosen false)
+	// is answered with: the keys whose owner switched Auto on. Nil answers
+	// both questions with usable.
+	autoUsable *[]VendorAccount
+	// holder, when set, is the one acting person the keys are offered to.
+	// Anybody else who asks has none. Empty offers them to whoever asks.
+	holder string
 	keysErr    error
 	secrets    map[string]string
 	secretErr  error
@@ -168,7 +175,14 @@ func (f *fakeVendorKeys) KeysFor(_ context.Context, q VendorAccountQuery) ([]Ven
 	if f.keysErr != nil {
 		return nil, nil, f.keysErr
 	}
-	return append([]VendorAccount(nil), f.usable...), append([]VendorAccountPassedOver(nil), f.passedOver...), nil
+	if f.holder != "" && q.ActingUserId != f.holder {
+		return nil, nil, nil
+	}
+	usable := f.usable
+	if !q.Chosen && f.autoUsable != nil {
+		usable = *f.autoUsable
+	}
+	return append([]VendorAccount(nil), usable...), append([]VendorAccountPassedOver(nil), f.passedOver...), nil
 }
 
 func (f *fakeVendorKeys) Usable(_ context.Context, q VendorAccountQuery, keyId string) (VendorAccount, string, bool) {
