@@ -13,7 +13,10 @@ A model vendor is paid through an **account**. MemQL knows two kinds:
 
 - **the cluster's account**: the cluster's own sign-in with Anthropic or
   OpenAI, set up once by its owner in **Settings > Vendors**
-  ([Anthropic](auth/anthropic-federation.md), [OpenAI](auth/openai-federation.md));
+  ([Anthropic](auth/anthropic-federation.md), [OpenAI](auth/openai-federation.md)).
+  It bills the organization its owner connected, and it is **not a pool for
+  everybody**: it pays for the cluster's own work and for the people its owner
+  allows ([who the cluster's account pays for](#who-the-clusters-account-pays-for));
 - **an API key**: a person's own key at one of those two vendors, added in
   **Settings > API keys**.
 
@@ -140,8 +143,8 @@ this order:
 | The call | Accounts, in order |
 |---|---|
 | Has no person behind it (a schedule, a sweep, a seed, a synthetic identity) | the cluster's account only |
-| Runs under a person's authority borrowed for a **visitor** (a shopper form, an access-code call, a deployed workflow acting for somebody who is not a user) | the cluster's account only. Never a key |
-| Was made on a route the person **chose** (a route picked in Ask, a route of their own, a policy named as a route), or on a source they pinned themselves | their default key at the vendor, then keys lent to them (the key added earliest first), then the cluster's account |
+| Runs under a person's authority borrowed for a **visitor** (a shopper form, an access-code call, a deployed workflow acting for somebody who is not a user) | the cluster's account, when the person whose authority is borrowed may use it. Never a key |
+| Was made on a route the person **chose** (a route picked in Ask, a route of their own, a policy named as a route), or on a source they pinned themselves | their default key at the vendor, then keys lent to them (the key added earliest first), then the cluster's account **when they may use it** |
 | Anything else: **Auto**, and every call nobody chose a route for | the same order, counting only keys whose owner turned on **Let Auto use this key** |
 
 A choice counts only when the acting person made it, **themselves**:
@@ -165,7 +168,8 @@ when:
 - its account is out of credit or at a spending limit, for one hour;
 - the key's owner is no longer an active user of the cluster;
 - lending is paused, for that person or for everyone;
-- for the cluster's account: the cluster has not signed in with that vendor.
+- for the cluster's account: the cluster has not signed in with that vendor,
+  or the account does not pay for this person's calls.
 
 A reason never names a key. The decision record is readable by every signed-in
 person, so it says "an API key was refused by Anthropic" and carries the key's
@@ -182,9 +186,70 @@ is not about the account and follows the route's ordinary fallback. Neither is
 this cluster's own cost ceiling stopping a call: that is the cluster's budget,
 and it is never recorded against a key.
 
-**Text model calls only.** Speech, transcription, embeddings and vision stay on
-the cluster's account. Embeddings bind the cluster's shared memory search to
-one model and must not follow a person's key.
+**Text model calls only.** Speech, transcription, embeddings and vision take no
+key: they are the cluster's account or nothing. Embeddings bind the cluster's
+shared memory search to one model and must not follow a person's key.
+
+## The API route
+
+Ask offers **API** beside Auto, Local and Apps: vendor models for every job,
+paid by the accounts above. It is the route to pick when you want your key to
+answer. Auto is not: Auto spends a key only once its owner turned on
+**Let Auto use this key**.
+
+API is ready for you when, for each job, some vendor model that serves that
+job has an account that can pay for you. With one key at one vendor it is
+ready; the jobs are served by that vendor's models. While it is not ready, Ask
+shows it with the reason and does not let it be chosen, and Fleet > Routing >
+Routes says the same. [AI routing](ai-routing.md#routes-a-person-picks-in-ask)
+has the route's rules, and how a model is chosen for a job.
+
+## Who the cluster's account pays for
+
+Model access on a cluster is bring-your-own: a machine, an app, a key. The
+cluster's own account at a vendor is the one exception its owner can make, and
+it is deliberately narrow. It pays for:
+
+- **the cluster's own work**: every call no person is behind;
+- **a person's calls, only when that person may use it.**
+
+| Capability | Lets a person |
+|---|---|
+| `execute app:settings/clusteraccount` | have the cluster's account pay for their model calls |
+
+It is seeded on the **owner** role and no other. The cluster owner gives it to
+a person or a group in **Users > Access**
+([grants](auth/access-model.md#grants-to-people-and-groups)). Everybody else
+reaches a vendor with an API key, their own or one lent to them, or not at
+all: for them a vendor model with no key is passed over, and the record says
+the cluster's account does not pay for this person's calls.
+
+- **The person judged is the one the call is for**, by what the cluster holds
+  about them now: their role, their groups and their grants. Work continued on
+  a person's behalf (a run, an agent, an app session) is judged by that
+  person, never by the stand-in role such work runs under. A visitor's call is
+  judged by the person whose authority it borrows. A person who is no longer
+  an active user holds nothing.
+- **It is asked again when the call is made.** A permission taken away between
+  choosing a model and calling it is not spent.
+- **It covers every kind of vendor call MemQL routes for a person**, not only
+  text: a picture, speech, transcription and an image are the cluster's
+  account or nothing, so for a person it is closed to they are served by a
+  local model or not at all. That includes a picture described when a file is
+  uploaded to the Library, and a vendor reached only because a local model or
+  an app failed when it was called.
+- **Embeddings are the exception.** The memory space is the cluster's, one
+  model for everybody, and a person whose writes were not embedded would be
+  missing from everybody's search. Embeddings are paid by the cluster's
+  account for every caller.
+- **Not covered:** a cluster whose operator set `MEMQL_STT_PROVIDER` to one of
+  the direct OpenAI transcription paths sends everybody's live transcription
+  to OpenAI on the cluster's account. That variable is the operator's own
+  choice of who pays; leave it unset to have transcription follow this rule.
+  And a call that reaches the router naming no person at all counts as the
+  cluster's own work; its decision row reads `callerKind: unattributed`.
+
+A cluster with no vendor account connected is unaffected: nothing is asked.
 
 ## Auto
 

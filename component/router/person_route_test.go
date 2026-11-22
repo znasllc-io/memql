@@ -24,7 +24,7 @@ import (
 // back to the rules would show as a vendor call rather than as a coincidence.
 func routeRouter(t *testing.T, models []memql.FleetModel, doors []memql.AppDoor) (*Router, *countingCloud, *stubAppInference) {
 	t.Helper()
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	providers.SetFleetInference(&stubFleetInference{models: models})
 	apps := &stubAppInference{doors: doors}
 	providers.SetAppInference(apps)
@@ -245,5 +245,68 @@ func TestAnAppAnswersAStreamingTurnOnTheAppsRoute(t *testing.T) {
 	}
 	if text.String() != "app answer" || !done || apps.calls != 1 || cloud.calls != 0 {
 		t.Fatalf("streamed %q done=%v app calls=%d vendor calls=%d", text.String(), done, apps.calls, cloud.calls)
+	}
+}
+
+// API means vendor models (design record 2026-11-21-vendor-accounts-and-api-keys,
+// R4). With a local model online and an app signed in, a call under route:api
+// is served by the strongest vendor record at its level, and when no vendor
+// record can serve it the call is refused NAMING THE ROUTE: it never reaches
+// the model or the app a rule would have tried first.
+func TestACallUnderApiWalksVendorSourcesOnly(t *testing.T) {
+	build := func(vendors ...jobRecordSpec) (*Router, *stubAppInference) {
+		providers := registryOpenToEverybody()
+		providers.SetFleetInference(&stubFleetInference{models: []memql.FleetModel{fleetModel("qwen3.5:9b", true)}})
+		apps := &stubAppInference{doors: []memql.AppDoor{openApp("claude-code")}}
+		providers.SetAppInference(apps)
+		for _, rec := range vendors {
+			providers.RegisterWithParamsForTest(rec.name, rec.providerType, "model-"+rec.name,
+				map[string]any{"contextWindow": 200000, "levels": rec.levels, "rank": rec.rank}, pricedProvider{})
+		}
+		policies := memql.NewPolicyRegistryForTest(map[string][]string{
+			"defaultChain": {memql.FleetStrongest, memql.AppWildcard},
+		})
+		return New(providers, policies, testRules(t, defaultRule("defaultChain")), nil, nil), apps
+	}
+
+	r, apps := build(
+		jobRecordSpec{name: "haiku", providerType: "Anthropic", levels: "fast", rank: 300},
+		jobRecordSpec{name: "sonnet", providerType: "Anthropic", levels: "strong", rank: 600},
+		jobRecordSpec{name: "opus", providerType: "Anthropic", levels: "strong reasoning", rank: 900},
+	)
+	for level, want := range map[airoute.Level]string{
+		airoute.LevelFast:      "haiku",
+		airoute.LevelStrong:    "opus",
+		airoute.LevelReasoning: "opus",
+	} {
+		got, err := r.ResolveFor(routeChoice("route:api"), chatRequest(level))
+		if err != nil {
+			t.Fatalf("%s: ResolveFor: %v", level, err)
+		}
+		d := got.Resolution.Decision
+		if got.Resolution.ProviderName != want || d.Route != memql.RouteIdApi || d.Door != airoute.DoorFederation {
+			t.Fatalf("%s: resolved %q through the %s door under route %q, want %s through a vendor under api",
+				level, got.Resolution.ProviderName, d.Door, d.Route, want)
+		}
+		if d.Rule != "" {
+			t.Fatalf("%s: rule %q decided a call made under a route", level, d.Rule)
+		}
+	}
+
+	// No vendor record at all: refused, naming API, having considered nothing
+	// but vendor sources.
+	r, apps = build()
+	_, err := r.ResolveFor(routeChoice("route:api"), chatRequest(airoute.LevelStrong))
+	var refusal *InferenceUnavailable
+	if !errors.As(err, &refusal) || refusal.Route != "API" || refusal.Decision.Route != memql.RouteIdApi {
+		t.Fatalf("err = %v, want a refusal naming API", err)
+	}
+	for _, d := range refusal.Doors {
+		if d.Door != airoute.DoorFederation {
+			t.Fatalf("the API route considered %q (%s), a source it does not name", d.Name, d.Door)
+		}
+	}
+	if apps.calls != 0 {
+		t.Fatalf("the app was called %d time(s) for a run on the API route", apps.calls)
 	}
 }

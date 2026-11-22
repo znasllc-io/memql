@@ -28,7 +28,7 @@ func (a *pinApps) Call(ctx context.Context, req memql.AppCallRequest) (memql.App
 func TestAnAppDoorCarriesHowItWasReached(t *testing.T) {
 	apps := &pinApps{stubAppInference: stubAppInference{doors: []memql.AppDoor{openApp("claude-code")}}}
 	delegate := &recordingDelegate{}
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	providers.SetFleetInference(&stubFleetInference{})
 	providers.SetAppInference(apps)
 	providers.SetAppSessionDelegate(delegate)

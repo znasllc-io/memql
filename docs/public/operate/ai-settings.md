@@ -23,12 +23,14 @@ OS, split by what each thing is:
 |---|---|---|
 | Settings > Vendors | Which vendors can this cluster reach? | Two rows, each with its form |
 | Settings > Levels | What would happen if something asked for this? | Four sentences |
-| Fleet > Routing > Routes | Which sources serve my messages, job by job? | Auto, Local, Apps and your own |
+| Fleet > Routing > Routes | Which sources serve my messages, job by job? | Auto, Local, Apps, API and your own |
 | Fleet > Routing > Rules | Which calls take which chain? | An ordered list, first match wins; Chains one step under |
 | Fleet > Routing > Machines | Which of my machines takes a call sent to them? | One choice per person |
 | Fleet > Routing > History | What actually happened? | A log |
 
-There is no API key field on any of them, or anywhere else in the product.
+None of them has an API key field. A person's own API key is added in one
+place, Settings > API keys ([API keys](api-keys.md)); the cluster itself holds
+no vendor key.
 
 ## The words
 
@@ -160,7 +162,18 @@ readiness as before.
 **New route** is Name -> Start from -> Jobs. Start from copies Local or Apps as
 they are on this cluster now, or starts empty; a later change to Local or Apps
 does not reach a route made from them. A name is at most 40 characters, is not
-one of yours already, and is not Auto, Local or Apps.
+one of yours already, and is not Auto, Local, Apps or API.
+
+### API
+
+**API** is the built-in route of vendor models, paid by an API key or by the
+cluster's account where that pays for you. Its page offers vendor sources and
+nothing else, because the cluster refuses any other source on it. Each job
+says which model serves it now and which account pays, in the cluster's own
+words, for example "Serves with claude-opus-5-5, paid by your API key". While
+no account can pay, the route is listed with its reason ("Needs an API key or a
+vendor account") and Ask shows it and does not let it be chosen. A key is
+added in Settings, under API keys.
 
 ### Auto
 
@@ -182,7 +195,7 @@ one of yours already, and is not Auto, Local or Apps.
 |---|---|
 | Open Routes; pick a route in Ask | Everyone who can open Fleet |
 | Make, change and delete a route of your own | Everyone, for their own |
-| Change or restore Local and Apps | Owner or developer (`app:settings/rules`) |
+| Change or restore Local, Apps and API | Owner or developer (`app:settings/rules`) |
 | Change Auto's balance | Owner or developer (`app:settings/rules`) |
 
 An act a person cannot take is absent, and the page says who can.

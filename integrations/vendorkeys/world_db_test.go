@@ -55,6 +55,30 @@ type world struct {
 	keys  []string
 }
 
+// allowClusterAccount records the owner's decision that the cluster's own
+// vendor account pays for this person's calls, written through one replica's
+// engine: the grant the Access editor writes.
+func (w *world) allowClusterAccount(eng *memql.MemQLEngine, user string) {
+	w.t.Helper()
+	_, err := eng.Execute(seedContext(), fmt.Sprintf(
+		`mutation writeGrant(grantId: %s, subjectKind: "user", subjectId: %s, verb: "execute", resourceType: %s, effect: "allow", grantedBy: "vendor-keys-seeder")`,
+		langparser.QuoteString(clusterAccountGrant(user)), langparser.QuoteString(user), langparser.QuoteString(memql.ClusterAccountPart)))
+	require.NoError(w.t, err, "allowing %s the cluster's account", user)
+}
+
+// withdrawClusterAccount takes that decision back, through one replica's
+// engine.
+func (w *world) withdrawClusterAccount(eng *memql.MemQLEngine, user string) {
+	w.t.Helper()
+	_, err := eng.Execute(seedContext(), fmt.Sprintf(`mutation deactivateGrant(grantId: %s)`,
+		langparser.QuoteString(clusterAccountGrant(user))))
+	require.NoError(w.t, err, "taking the cluster's account back from %s", user)
+}
+
+func clusterAccountGrant(user string) string {
+	return auth.GrantRowID(auth.SubjectKindUser, user, auth.VerbExecute, memql.ClusterAccountPart)
+}
+
 func newWorld(t *testing.T, name string) *world {
 	t.Helper()
 	eng, db, gate := bootEngine(t)
@@ -91,6 +115,8 @@ func (w *world) sweep() {
 	ctx := context.Background()
 	for _, user := range w.users {
 		_, _ = w.db.NewDelete().TableExpr(`"MemoryNodes"`).Where("id = ?", "v1:identity:user:"+user).Exec(ctx)
+		_, _ = w.db.NewDelete().TableExpr(`"MemoryNodes"`).
+			Where("concept = ?", "v1:rbac:grant").Where("payload->>'subjectId' = ?", user).Exec(ctx)
 	}
 	for _, key := range w.keys {
 		_, _ = w.db.NewDelete().TableExpr(`"MemoryNodes"`).

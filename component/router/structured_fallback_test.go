@@ -73,7 +73,7 @@ func (s *scriptedSource) CallChatStructured(context.Context, []common.ChatMessag
 // sources and nothing else.
 func scriptedRouter(t *testing.T, chain []string, sources map[string]*scriptedSource) *Router {
 	t.Helper()
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	for name, source := range sources {
 		providers.RegisterForTest(name, "Scripted", strings.TrimPrefix(name, memql.FleetReferencePrefix), source)
 	}

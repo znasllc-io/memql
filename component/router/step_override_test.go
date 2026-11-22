@@ -24,7 +24,7 @@ func overriddenStep(ov *common.StepOverride) context.Context {
 func TestAModelOverrideIsAOneEntryChain(t *testing.T) {
 	ruled := &countingCloud{}
 	pinned := &countingCloud{}
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	providers.RegisterWithParamsForTest("ruleWouldPick", "AnthropicStream", "claude-sonnet",
 		map[string]any{"contextWindow": 200000}, ruled)
 	providers.RegisterWithParamsForTest("personPinned", "OpenAI", "gpt",
@@ -108,7 +108,7 @@ func TestEffortReachesOnlyTheDoorsThatHaveTheKnob(t *testing.T) {
 	apps := &effortApps{stubAppInference: stubAppInference{doors: []memql.AppDoor{openApp("claude-code")}}}
 	delegate := &recordingDelegate{}
 	cloud := &countingCloud{}
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	providers.SetFleetInference(fleet)
 	providers.SetAppInference(apps)
 	providers.SetAppSessionDelegate(delegate)

@@ -125,12 +125,12 @@ func (a *App) pluginContext() memql.PluginContext {
 		// entry -- which is the one thing the router seam exists to be the
 		// only doer of.
 		ResolveVisionProvider: func() common.VisionAIProvider {
-			// context.Background() rather than a caller's: the field's
-			// signature takes none, and widening it would touch every pack
-			// that stashes the getter. The vision chain reads no per-request
-			// state, so nothing is lost; the embedding one does, which is why
-			// that one takes a ctx and this one does not.
-			return a.resolveVisionProvider(context.Background())
+			// The field's signature takes no context, and widening it would
+			// touch every pack that stashes the getter. So what it hands out
+			// is a provider that resolves WHEN IT IS CALLED, with that call's
+			// context: who is having a picture described decides which
+			// accounts may pay for it (callerVision, ai_call_sites.go).
+			return a.visionForCaller()
 		},
 		ResolveEmbeddingProvider: func(ctx context.Context, name string) (memql.EmbeddingAIProvider, error) {
 			provider, _, err := memql.ResolveAITyped[memql.EmbeddingAIProvider](ctx, a.engine, embeddingResolveRequest(name))

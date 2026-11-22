@@ -57,7 +57,7 @@ func (*authenticatedFleet) Call(ctx context.Context, req memql.FleetCallRequest)
 }
 func authenticatedRouter(t *testing.T, fleet *authenticatedFleet) *Router {
 	t.Helper()
-	registry := memql.NewProviderRegistryForTest()
+	registry := registryOpenToEverybody()
 	registry.SetFleetInference(fleet)
 	return New(registry, memql.NewPolicyRegistryForTest(map[string][]string{"p": {"fleet:strongest"}}), testRules(t, defaultRule("p")), nil, nil)
 }

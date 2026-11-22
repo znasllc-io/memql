@@ -218,13 +218,7 @@ func VendorOfEntry(e *ProviderConfigEntry) string {
 	if e.Config.ResolvedModality() != ModalityText {
 		return ""
 	}
-	switch strings.ToLower(strings.TrimSpace(e.Config.Type)) {
-	case "anthropic", "anthropicchat":
-		return VendorAnthropic
-	case "openai", "openaichat":
-		return VendorOpenAI
-	}
-	return ""
+	return vendorOfType(e.Config.Type)
 }
 
 // keysServe reports whether a key may pay for this query at all, before any
@@ -251,12 +245,18 @@ func keysRefusedAt(e *ProviderConfigEntry, vendor string) string {
 	return fmt.Sprintf("this cluster sends %s calls to another address, so an API key is not used", vendorDisplayName(vendor))
 }
 
-// VendorKeyAnswer is what the seam said about one person's keys at one vendor.
+// VendorKeyAnswer is what the seam said about one person's keys at one vendor,
+// with whether the cluster's own account may pay for them.
 type VendorKeyAnswer struct {
 	// Usable are the keys that can pay, in the order they are tried.
 	Usable []VendorAccount
 	// PassedOver are the keys that cannot, each with its reason.
 	PassedOver []VendorAccountPassedOver
+	// cluster is whether the cluster's own account may pay for the person
+	// this answer was read for (vendor_account_cluster.go). It is asked the
+	// first time a record needs it and never again for this answer. Nil on an
+	// answer nobody read, which is closed.
+	cluster *clusterAccountAnswer
 }
 
 // VendorKeysAt asks the seam which keys can pay for this person at q.Vendor.
@@ -270,23 +270,31 @@ type VendorKeyAnswer struct {
 // call: the cluster's account may still serve it, and a call that could have
 // been served must not be refused because a list of keys could not be read.
 func (r *ProviderRegistry) VendorKeysAt(ctx context.Context, q VendorAccountQuery) VendorKeyAnswer {
+	// The cluster's half is decided for every caller, a visitor's and the
+	// cluster's own work included, and is asked only if a record needs it.
+	answer := VendorKeyAnswer{cluster: r.clusterAccountFor(ctx, q.ActingUserId)}
 	keys := r.installedVendorKeys()
 	if keys == nil || q.Vendor == "" || !keysServe(ctx, q) {
-		return VendorKeyAnswer{}
+		return answer
 	}
 	usable, passedOver, err := keys.KeysFor(ctx, q)
 	if err != nil {
-		return VendorKeyAnswer{PassedOver: []VendorAccountPassedOver{{
+		answer.PassedOver = []VendorAccountPassedOver{{
 			Account: VendorAccount{Kind: VendorAccountKey, Vendor: q.Vendor},
 			Reason:  "API keys could not be read",
-		}}}
+		}}
+		return answer
 	}
-	return VendorKeyAnswer{Usable: usable, PassedOver: passedOver}
+	answer.Usable, answer.PassedOver = usable, passedOver
+	return answer
 }
 
 // VendorAccountsWith composes a record's accounts from an answer already read:
 // the keys the seam offers, then the cluster's account (K8), with every account
-// that cannot pay beside its reason (K9). It reads nothing.
+// that cannot pay beside its reason (K9). It reads no key. The cluster's
+// account is offered only where the cluster has one for this record and it may
+// pay for the person the answer was read for; that second half is asked of the
+// answer here, the first time a record needs it.
 //
 // The answer must be the one for this record's vendor; a key of another vendor
 // is left out rather than offered.
@@ -314,13 +322,16 @@ func (r *ProviderRegistry) VendorAccountsWith(e *ProviderConfigEntry, keys Vendo
 	}
 
 	cluster := VendorAccount{Kind: VendorAccountCluster, Vendor: vendor}
-	if e.Available {
-		accounts = append(accounts, cluster)
-	} else {
+	switch {
+	case !e.Available:
 		passedOver = append(passedOver, VendorAccountPassedOver{
 			Account: cluster,
 			Reason:  fmt.Sprintf("the cluster's account is not set up for %s", vendorDisplayName(vendor)),
 		})
+	case keys.cluster.closed() != "":
+		passedOver = append(passedOver, VendorAccountPassedOver{Account: cluster, Reason: keys.cluster.closed()})
+	default:
+		accounts = append(accounts, cluster)
 	}
 	return accounts, passedOver
 }
@@ -329,8 +340,10 @@ func (r *ProviderRegistry) VendorAccountsWith(e *ProviderConfigEntry, keys Vendo
 // record, in order, and which were passed over (K8, K9).
 //
 // The order: the keys the seam offers (the person's own default, then keys
-// lent to them), then the cluster's account. A call with no acting person, or
-// one made for a visitor, has the cluster's account and nothing else.
+// lent to them), then the cluster's account when it may pay for them. A call
+// with no acting person has the cluster's account and nothing else. One made
+// for a visitor has no key, and the cluster's account only when the person
+// whose authority it borrows may use it.
 func (r *ProviderRegistry) VendorAccountsFor(ctx context.Context, q VendorAccountQuery, e *ProviderConfigEntry) ([]VendorAccount, []VendorAccountPassedOver) {
 	vendor := VendorOfEntry(e)
 	if vendor == "" {
@@ -350,7 +363,10 @@ func (r *ProviderRegistry) VendorAccountUsable(ctx context.Context, q VendorAcco
 	}
 	q.Vendor = vendor
 	if ref == VendorAccountCluster {
-		return VendorAccount{Kind: VendorAccountCluster, Vendor: vendor}, e.Available
+		// Judged again here like a key: a permission taken away since the
+		// resolution is not spent.
+		return VendorAccount{Kind: VendorAccountCluster, Vendor: vendor},
+			e.Available && r.ClusterAccountClosedTo(ctx, q.ActingUserId) == ""
 	}
 	keyId := strings.TrimPrefix(ref, accountKeyRefPrefix)
 	if keyId == ref || keyId == "" {
@@ -406,12 +422,28 @@ type VendorDoor struct {
 	Auto bool
 	// AutoStreams is ChosenStreams for Auto.
 	AutoStreams bool
-	// Cluster: the cluster's own account is set up at some vendor, which is
-	// its workload identity federation. The same answer for everybody.
+	// ClusterSetUp: the cluster's own account is set up at some vendor, which
+	// is its workload identity federation. The same answer for everybody.
+	ClusterSetUp bool
+	// Cluster: that account may pay for THIS person (or this is the cluster's
+	// own work). A person it is closed to reaches a vendor with a key only.
 	Cluster bool
 	// Key: this person has an API key that can pay on a route they choose,
 	// their own or one lent to them.
 	Key bool
+	// Payers names, for each vendor text record that has one, the first
+	// account that pays for this person on a route they choose, with the
+	// record's model: what a job's "serves now" is read from (design record
+	// R6). It is the composition a call uses (VendorAccountsWith), so a record
+	// is here exactly when a call through it would find an account. Read from
+	// the same answers as the flags above; it costs no read of its own.
+	Payers map[string]VendorPayer
+}
+
+// VendorPayer is one record's model and the account that pays for it.
+type VendorPayer struct {
+	Model   string
+	Account VendorAccount
 }
 
 // VendorDoorFor answers whether a vendor can serve one person, by asking which
@@ -422,12 +454,14 @@ type VendorDoor struct {
 // key pays for: the answer is then the cluster's account alone, and the keys
 // are not read.
 //
-// THE CLUSTER'S HALF is the predicate it always was (federationReadiness, the
-// one the Providers page reads), so a cluster with no keys answers exactly as
-// before. It is deliberately not "this record is available": a record counts
-// only when its credential came through federation, and
-// TestInferenceStatusStreamingFederationRequiresAvailablePlainStream holds
-// that line.
+// THE CLUSTER'S HALF is two questions. Is the account set up: the predicate it
+// always was (federationReadiness, the one the Providers page reads), which is
+// deliberately not "this record is available", because a record counts only
+// when its credential came through federation
+// (TestInferenceStatusStreamingFederationRequiresAvailablePlainStream holds
+// that line). And may it pay for this person (ClusterAccountClosedTo): the
+// cluster's account is not a pool for everybody, so a person it is closed to
+// is served by a vendor only through a key.
 //
 // THE KEYS' HALF costs at most two reads of rows per vendor, and one for a
 // person with no key there, which is nearly everybody: Auto is asked about
@@ -441,9 +475,12 @@ func (r *ProviderRegistry) VendorDoorFor(ctx context.Context, actingUserId strin
 		return door
 	}
 	var streams bool
-	door.Cluster, streams = r.federationReadiness()
+	door.ClusterSetUp, streams = r.federationReadiness()
+	// Asked only where there is an account to open: a cluster with none reads
+	// nothing about the person.
+	door.Cluster = door.ClusterSetUp && r.ClusterAccountClosedTo(ctx, actingUserId) == ""
 	door.Chosen, door.Auto = door.Cluster, door.Cluster
-	door.ChosenStreams, door.AutoStreams = streams, streams
+	door.ChosenStreams, door.AutoStreams = door.Cluster && streams, door.Cluster && streams
 
 	r.mu.RLock()
 	records := make([]*ProviderConfigEntry, 0, len(r.byName))
@@ -475,7 +512,14 @@ func (r *ProviderRegistry) VendorDoorFor(ctx context.Context, actingUserId strin
 		// Only a KEY is taken from the composition. The cluster's account at a
 		// record is already answered above, by the predicate that asks how the
 		// record got its credential and not only whether it is available.
-		if accounts, _ := r.VendorAccountsWith(entry, chosen[vendor]); keyAmong(accounts) {
+		accounts, _ := r.VendorAccountsWith(entry, chosen[vendor])
+		if len(accounts) > 0 {
+			if door.Payers == nil {
+				door.Payers = map[string]VendorPayer{}
+			}
+			door.Payers[entry.Config.Name] = VendorPayer{Model: entry.Config.Model, Account: accounts[0]}
+		}
+		if keyAmong(accounts) {
 			door.Key, door.Chosen = true, true
 			door.ChosenStreams = door.ChosenStreams || streams
 		}

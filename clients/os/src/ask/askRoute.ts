@@ -17,7 +17,7 @@ export const AUTO_ROUTING: AskRouting = Object.freeze({ source: "", level: "" })
 // ---------------------------------------------------------------------------
 //
 // A ROUTE is how a message's model calls are served: Auto (the cluster
-// decides, the default), Local, Apps, or one the person made. The message
+// decides, the default), Local, Apps, API, or one the person made. The message
 // field holds a route ID, and the wire carries it in the existing source
 // field as `route:<id>` -- "" being Auto, so a conversation nobody routed
 // sends exactly what it always did.
@@ -48,7 +48,7 @@ export function routeIdFromSource(source: string | undefined): string {
 export interface AskRouteOption {
   id: string;
   name: string;
-  kind: "auto" | "local" | "apps" | "custom";
+  kind: "auto" | "local" | "apps" | "api" | "custom";
   scope: "cluster" | "personal";
   description: string;
   ready: boolean;
@@ -57,7 +57,7 @@ export interface AskRouteOption {
   reason: string;
 }
 
-const KINDS = new Set(["auto", "local", "apps", "custom"]);
+const KINDS = new Set(["auto", "local", "apps", "api", "custom"]);
 
 /**
  * The picker's options out of a `routesForActor` answer, built-in routes

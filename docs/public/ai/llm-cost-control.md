@@ -468,6 +468,17 @@ where it would be invisible to the one control that stops runaway cost. That is
 the fail-safe direction, and it is why `ExecutorResult.EffectiveBilling()`
 defaults the empty string to `metered` rather than to `unknown`.
 
+### The cluster's account is not a pool
+
+A cluster account at a vendor bills the organization its owner connected. It
+pays for the cluster's own work, and for a person's calls only when that person
+holds `execute app:settings/clusteraccount`, which is seeded on the owner role
+alone and given to others in Users > Access
+([who the cluster's account pays for](../operate/api-keys.md#who-the-clusters-account-pays-for)).
+This is a control on WHOSE calls the cluster's money serves, in front of every
+ceiling below, which bound HOW MUCH. A person it is closed to spends none of
+it: their vendor calls are paid by a key or are not made.
+
 ### A person's API key is metered spend
 
 A vendor call can be paid by a person's own

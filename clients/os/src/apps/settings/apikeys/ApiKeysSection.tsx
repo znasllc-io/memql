@@ -140,7 +140,7 @@ export function ApiKeysSection({ active = true }: { active?: boolean }) {
       <PageHelp title="API keys">
         <p>An API key pays for Anthropic or OpenAI models with an account of your own. It is sealed in this cluster when you add it, and nothing shows it again.</p>
         <p>A route you choose in Ask spends your default key at the model's vendor. Auto spends a key only after you turn on "Let Auto use this key" on that key. You can lend a key to named people and groups, who then pay for their calls with it.</p>
-        <p>The cluster never spends a key for its own work. The cluster's own vendor account is set up under Vendors.</p>
+        <p>The cluster never spends a key for its own work. The cluster's own vendor account is set up under Vendors, and pays for your calls only if the cluster's owner allowed that.</p>
         <p>Every call a key pays for checks it, and a key nothing used for a day is checked by listing the vendor's models, which sends no prompt and costs nothing.</p>
       </PageHelp>
       <AutoRefresh enabled={active} busy={keys.busy !== ""} onRefresh={keys.reload} />

@@ -484,8 +484,12 @@ above, the answer is what the code does, and the row above is the history.
    person's calls only when that person is allowed.** The owner's rule is
    bring-your-own for everything: a connected cluster account is not a free
    pool for everybody on the cluster. The cluster owner is allowed from the
-   start and can allow others. This narrows K8's last fallback and is built
-   after part 2 lands and before the API route.
+   start and can allow others. This narrows K8's last fallback. The
+   permission is `execute app:settings/clusteraccount`, seeded on the owner
+   role alone; the person judged is the one a call is for, from their stored
+   role and grants; pictures, speech, transcription and images follow the same
+   rule, and embeddings do not, because the memory space is the cluster's
+   (`component/memql/vendor_account_cluster.go`).
 3. **API keys live in Settings, and anybody signed in may add one** (changes K4
    and U1). His words: a key's owner uses it whatever their role, and must be
    able to manage it. Fleet opens for owners and developers only. So the
@@ -503,3 +507,65 @@ above, the answer is what the code does, and the row above is the history.
    skips them and the engine refuses the move for every writer. A package that
    was handed over stops fetching until its new owner selects a connection of
    their own.
+
+## Part 3 as built (2026-11-22)
+
+What the builder decided where this record left it open, and what was cut.
+
+- **R5 is not built.** A personal route cannot name the account that pays for
+  a vendor source. The record marks it as the step that can be cut; the rest
+  of the part does not depend on it. Until it exists, a person's non-default
+  key at a vendor is not spent.
+- **R1's spelling.** A record declares `levels "<words>"` (one to three of
+  fast, strong, reasoning) and `rank <1..1000>` in its `params`. Either on a
+  record that is not a vendor's text model refuses the record at load.
+- **R3, the catalog.** Read from both vendors' models, pricing and
+  deprecations pages on 2026-11-22; nothing was run against either. Added:
+  Claude Opus 5.5, Sonnet 5.5 and Haiku 5.5; GPT-5.6 Sol, Terra and Luna;
+  GPT-5.5. Not added: Claude Fable 5.2, which costs twice Claude Opus 5.5 and
+  would be the model a call gets with nobody having chosen it, and OpenAI's
+  GPT-6 family, which takes no function calls on the one OpenAI API the engine
+  speaks. Three names
+  whose models OpenAI shut down are repointed to the replacement it names and
+  declare no level. A record's `contextWindow` is the prompt size its one
+  price is true for. Ranks across vendors are an order (the cheaper of two
+  models of one tier first), not a claim about quality.
+- **Structured output for the current Claude models.** Claude Opus 5.5 and
+  Sonnet 5.5 refuse a forced tool choice, so their records ask by format
+  (`structuredOutput "format"`), with the schema fitted to the keywords the
+  vendor accepts. A limit it does not accept is asked for in the field's
+  description and is not enforced. The format takes closed objects only: an
+  object that takes any key is refused with the field named, and the route's
+  next source serves.
+- **R2's level is the level the call is served at.** The record says "the
+  call's level". A rule's `@level` moves a call before its chain is walked,
+  and the selectors read the level after that, so a call a rule raised to
+  reasoning is offered reasoning records.
+- **A declined reply is a failure.** A Claude model answers a request it
+  declines with an ordinary response and the stop reason `refusal`. That is
+  an error on every Claude record, and so is a structured reply by format cut
+  off at the output limit: the route's next source serves, and the decision
+  says the model declined. Found by the independent review; the first build
+  recorded an empty answer as served.
+- **R4's line.** API's description names the cluster's account only to a
+  person it pays for (decision 2 above); to anybody else it reads "Vendor
+  models, paid by an API key".
+- **R6's sentence.** A third reason joins the two in the record: a person who
+  has an account, and no vendor model for a job, is told the job "needs a
+  vendor model your account can pay for".
+- **U5.** Which account paid is said in a call's detail in History, not on the
+  list row. A key the reader cannot list reads "an API key".
+
+Left open by the independent review, for the owner:
+
+- **What counts as the cluster's own work.** Decision 2 is built on the
+  absence of a person: a blank acting id, or a synthetic one. So a path that
+  loses its caller is paid by the cluster's account, and the only trace is
+  `callerKind: unattributed` on its decision row. A positive definition (a
+  system or synthetic actor, and nothing else) would fail closed, and would
+  refuse every Go call site that stamps no caller until each is stamped.
+- **A route with one vendor selector at every level does not degrade inside
+  itself.** The walk skips a level whose list equals one already walked,
+  which was sound before a selector read the level. API ships that shape.
+  With the shipped catalog every level has records at both vendors, so
+  nothing changes today.

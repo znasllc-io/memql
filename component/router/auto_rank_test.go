@@ -90,7 +90,7 @@ func TestAutoSignalsFoldTheLedger(t *testing.T) {
 // Through the router: a general shipped chain is ranked and the decision
 // record says how; a locked prompt-specific policy is walked as written.
 func TestAutoRankingIsOnTheRecordAndOnlyForTheGeneralChains(t *testing.T) {
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	providers.SetFleetInference(&stubFleetInference{models: []memql.FleetModel{fleetModel("qwen3.5:9b", true)}})
 	providers.SetAppInference(&stubAppInference{doors: []memql.AppDoor{openApp("claude-code")}})
 	policies := memql.NewPolicyRegistryForTest(map[string][]string{
@@ -127,7 +127,7 @@ func TestAutoRankingIsOnTheRecordAndOnlyForTheGeneralChains(t *testing.T) {
 // A vendor Auto moved to the front still asks the cost ceiling: the chain it
 // walks is Auto's reordering, not a paid policy somebody chose.
 func TestAVendorAutoRankedFirstStillAsksTheCeiling(t *testing.T) {
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	providers.SetFleetInference(&stubFleetInference{})
 	cloud := &countingCloud{}
 	providers.RegisterWithParamsForTest("vendor", "OpenAI", "gpt", map[string]any{"contextWindow": 200000}, cloud)

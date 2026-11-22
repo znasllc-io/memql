@@ -215,7 +215,7 @@ func TestObservedFallbackKeepsDecisionAndActualAttemptDoor(t *testing.T) {
 	}
 	for _, mod := range []airoute.Modality{airoute.ModalityChat, airoute.ModalityTools, airoute.ModalityStreamingChat, airoute.ModalityStreamingTools} {
 		t.Run(string(mod), func(t *testing.T) {
-			providers := memql.NewProviderRegistryForTest()
+			providers := registryOpenToEverybody()
 			providers.SetFleetInference(&decisionRefusingFleet{})
 			providers.RegisterWithParamsForTest("cloud", "OpenAI", "cloud-model", map[string]any{"contextWindow": 131072}, &decisionCloud{})
 			ledger := &decisionLedger{writes: make(chan string, 4)}

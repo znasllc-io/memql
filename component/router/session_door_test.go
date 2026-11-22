@@ -68,7 +68,7 @@ func (c *toolCloud) CallChatStreamWithTools(context.Context, []common.ChatMessag
 // "spent money".
 func sessionRouter(t *testing.T, appDoors []memql.AppDoor) (*Router, *toolCloud, *recordingDelegate) {
 	t.Helper()
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	providers.SetFleetInference(&stubFleetInference{})
 	providers.SetAppInference(&stubAppInference{doors: appDoors})
 	delegate := &recordingDelegate{}
@@ -397,7 +397,7 @@ func TestEmbeddingsNeverBecomeASession(t *testing.T) {
 // resolved a chain step naming that model, and the handover has to carry it or
 // the pin is a decision the record claims was made and nothing acted on.
 func TestTheModelPinRidesTheSessionHandover(t *testing.T) {
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	providers.SetFleetInference(&stubFleetInference{})
 	providers.SetAppInference(&stubAppInference{doors: []memql.AppDoor{openApp("claude-code")}})
 	delegate := &recordingDelegate{}

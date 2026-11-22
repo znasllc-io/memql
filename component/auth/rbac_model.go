@@ -268,11 +268,16 @@ var appPartGrants = map[string][]Role{
 	// part of its own because the act puts a credential that spends a person's
 	// money on the cluster, and every predefined role holds it: model access
 	// is bring-your-own for everybody. An operator withholds it with a deny.
-	"app:settings/apikeys":    {RoleOwner, RoleDeveloper, RoleAdmin, RoleWriter, RoleReader},
-	"app:deployables/deploy":  {RoleOwner, RoleDeveloper},
-	"app:deployables/publish": {RoleOwner, RoleDeveloper},
-	"app:deployables/retire":  {RoleOwner, RoleDeveloper},
-	"app:deployables/domains": {RoleOwner, RoleDeveloper},
+	"app:settings/apikeys": {RoleOwner, RoleDeveloper, RoleAdmin, RoleWriter, RoleReader},
+	// Having the cluster's own vendor account pay for one's calls (owner
+	// decision 2026-11-22). Owner only: that account bills the organization
+	// the owner connected and is not a pool for everybody. The owner gives
+	// it to a person or a group.
+	"app:settings/clusteraccount": {RoleOwner},
+	"app:deployables/deploy":      {RoleOwner, RoleDeveloper},
+	"app:deployables/publish":     {RoleOwner, RoleDeveloper},
+	"app:deployables/retire":      {RoleOwner, RoleDeveloper},
+	"app:deployables/domains":     {RoleOwner, RoleDeveloper},
 	// Publishing a CANDIDATE version and exercising it against a development
 	// store (epic memql#5531). Owner and developer, and the line between this
 	// part and `publish` is the one that epic draws: preparing and proving a

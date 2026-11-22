@@ -29,6 +29,53 @@ provider anthropic {
   }
 }
 
+// THE VENDOR TEXT RECORDS (refreshed 2026-11-22, design record
+// docs/superpowers/specs/2026-11-21-vendor-accounts-and-api-keys-design.md, R1
+// to R3). Every model id, price, window and shutdown date below was read from
+// the vendor's own pages on that day: Anthropic's models overview and pricing,
+// OpenAI's models, pricing and deprecations. Nothing was run against either
+// vendor. A refresh re-reads those pages; it does not edit from memory.
+//
+// WHAT A RECORD DECLARES, and what reads it:
+//
+//   levels  the jobs it is for: fast, strong, reasoning. `federation:strongest`
+//           and `federation:cheapest` choose only among the records that
+//           declare the call's level. A record that declares none still
+//           resolves by name and is passed over by both selectors.
+//   rank    its place among the records of a level, 1 to 1000, higher first.
+//           Within a vendor: the newer generation first, then the vendor's own
+//           order of its tiers. Across vendors: models of one tier sit
+//           together and the cheaper is first. That is an ORDER, not a claim
+//           that one vendor's model is better; an owner who disagrees changes
+//           these numbers. The API route's page offers the two selectors and
+//           no single record, so the order is decided here.
+//   prices  per million tokens, the vendor's standard rate.
+//   contextWindow
+//           the largest prompt the record is offered. Where a vendor charges
+//           more past a prompt size (OpenAI past 272,000 tokens, Claude Haiku
+//           5.5 past 100,000), the record declares THAT size, not the model's
+//           whole window: a record states one price, and a prompt the price is
+//           not true for goes to the next record whose window holds it. The
+//           cost of the rule is that such a model is passed over for a prompt
+//           it could have held.
+//
+// A NAME IS NEVER REMOVED. Product bundles pin record names, so a record whose
+// vendor shut its model down is repointed to the replacement the vendor names
+// and keeps resolving. Such a record declares no level: the replacement has a
+// record of its own, and a selector offered one model under two names would
+// retry a failing model.
+//
+// NOT HERE, on purpose:
+//   - Claude Fable 5.2. It costs twice Claude Opus 5.5, and the top record of
+//     a level is the model a call gets with nobody having chosen it. (A
+//     request a Claude model declines is handled alike for every record here:
+//     it is a failure and the route's next source serves,
+//     component/memql/ai_anthropic_declined.go. The vendor's own server-side
+//     fallback is a beta surface this engine does not call, for any of them.)
+//   - OpenAI's GPT-6 family. On Chat Completions, the one OpenAI API this
+//     engine speaks, those models take no function calls, and an agent's turn
+//     is function calls.
+//
 // MEMQL_AI_OPENAI_PROJECT_ID is intentionally NOT listed here because
 // env() placeholders fail registration when the variable is unset,
 // and service-account keys (sk-svcacct-*) do not carry a project id.
@@ -37,43 +84,129 @@ provider anthropic {
 
 // ---- providers/v1/openai/chat53Latest.memql ----
 
-/// OpenAI gpt-5.3-chat-latest - auto-updated chat-tuned alias (non-streaming); use for dev/preview
-/// flows where you want newest tuning without a code change
+/// A name kept for bundles that pin it. OpenAI shut its model, gpt-5.3-chat-latest, down on
+/// 2026-08-10 and names gpt-5.6-sol as the replacement, which this name now calls. It declares
+/// no level: chat56Sol is the record the selectors choose for this model.
 @extends("openai")
-@model("gpt-5.3-chat-latest")
+@model("gpt-5.6-sol")
 provider chat53Latest {
   params {
     streaming                  true
-    contextWindow        128000
-    maxCompletionTokens  4096
+    contextWindow              272000
+    maxCompletionTokens        16384
+    inputCostPerMillion        5.00
+    outputCostPerMillion       30.00
+    cachedInputCostPerMillion  0.50
+  }
+}
+
+// ---- the GPT-5.6 family and GPT-5.5 (added 2026-11-22) ----
+
+/// OpenAI GPT-5.6 Sol - OpenAI's strongest model this engine can drive (Chat Completions with
+/// function calls)
+@extends("openai")
+@model("gpt-5.6-sol")
+provider chat56Sol {
+  params {
+    streaming                  true
+    levels                     "strong reasoning"
+    rank                       880
+    contextWindow              272000
+    maxCompletionTokens        16384
+    // The vendor's REGULAR rate. Until 2026-11-30 its page lists a launch
+    // price of 4.00 / 20.00 / 0.40 and says that is 20% off input and 33% off
+    // output; the regular numbers here are worked out from those two
+    // percentages, not read off the page. Declaring the regular rate
+    // overstates a call's cost for the last days of the offer, which is the
+    // safe direction, and is right from the day after.
+    inputCostPerMillion        5.00
+    outputCostPerMillion       30.00
+    cachedInputCostPerMillion  0.50
+  }
+}
+
+/// OpenAI GPT-5.6 Terra - the middle of the GPT-5.6 family, for everyday strong work
+@extends("openai")
+@model("gpt-5.6-terra")
+provider chat56Terra {
+  params {
+    streaming                  true
+    levels                     "strong"
+    rank                       680
+    contextWindow              272000
+    maxCompletionTokens        16384
+    inputCostPerMillion        2.00
+    outputCostPerMillion       12.00
+    cachedInputCostPerMillion  0.20
+  }
+}
+
+/// OpenAI GPT-5.6 Luna - the small, quick model of the GPT-5.6 family
+@extends("openai")
+@model("gpt-5.6-luna")
+provider chat56Luna {
+  params {
+    streaming                  true
+    levels                     "fast"
+    rank                       360
+    contextWindow              272000
+    maxCompletionTokens        16384
+    inputCostPerMillion        0.20
+    outputCostPerMillion       1.20
+    cachedInputCostPerMillion  0.02
+  }
+}
+
+/// OpenAI GPT-5.5 - the flagship before GPT-5.6 Sol, still served
+@extends("openai")
+@model("gpt-5.5")
+provider chat55 {
+  params {
+    streaming                  true
+    levels                     "strong reasoning"
+    rank                       840
+    contextWindow              272000
+    maxCompletionTokens        16384
+    inputCostPerMillion        5.00
+    outputCostPerMillion       30.00
+    cachedInputCostPerMillion  0.50
   }
 }
 
 // ---- providers/v1/openai/chat54.memql ----
 
-/// OpenAI GPT-5.4 - flagship standard-tier chat (non-streaming)
+/// OpenAI GPT-5.4 - the flagship two generations back, still served
 @extends("openai")
 @model("gpt-5.4")
 provider chat54 {
   params {
     streaming                  true
-    contextWindow              128000
+    levels                     "strong"
+    rank                       600
+    contextWindow              272000
     maxCompletionTokens        4096
+    // CORRECTED 2026-11-22 from the vendor's pricing page. Was 10.00 out and
+    // 1.25 cached: output understated by a third.
     inputCostPerMillion        2.50
-    outputCostPerMillion       10.00
-    cachedInputCostPerMillion  1.25
+    outputCostPerMillion       15.00
+    cachedInputCostPerMillion  0.25
   }
 }
 
 // ---- providers/v1/openai/chat54Mini.memql ----
 
-/// OpenAI GPT-5.4 Mini - balanced cost/latency chat (non-streaming)
+/// OpenAI GPT-5.4 Mini - balanced cost/latency chat
 @extends("openai")
 @model("gpt-5.4-mini")
 provider chat54Mini {
   params {
     streaming                  true
-    contextWindow              128000
+    // The quick tier, which is how every prompt that names this record
+    // describes it.
+    levels                     "fast"
+    rank                       340
+    // The vendor's window is 400,000 with at most 272,000 of it input.
+    contextWindow              272000
     // Bumped 4096 -> 16384 because seedDomainContent's structured
     // schema (up to 50 chunks, 100-300 words each) hit the cap with
     // finish_reason=length and returned empty content. The new si-
@@ -102,17 +235,22 @@ provider chat54Mini {
 
 // ---- providers/v1/openai/chat54Nano.memql ----
 
-/// OpenAI GPT-5.4 Nano - cheapest high-volume chat for low-complexity tasks (non-streaming)
+/// OpenAI GPT-5.4 Nano - cheapest high-volume chat for low-complexity tasks. OpenAI lists it as
+/// deprecated and shuts it down on 2027-04-01.
 @extends("openai")
 @model("gpt-5.4-nano")
 provider chat54Nano {
   params {
     streaming                  true
-    contextWindow              32000
+    levels                     "fast"
+    rank                       150
+    contextWindow              272000
     maxCompletionTokens        2048
-    inputCostPerMillion        0.10
-    outputCostPerMillion       0.40
-    cachedInputCostPerMillion  0.05
+    // CORRECTED 2026-11-22 from the vendor's pricing page. Was 0.10 / 0.40 /
+    // 0.05: input understated by half and output by two thirds.
+    inputCostPerMillion        0.20
+    outputCostPerMillion       1.25
+    cachedInputCostPerMillion  0.02
   }
 }
 
@@ -130,7 +268,8 @@ provider chat54Nano {
 // API support and routes pro-tier calls there instead.
 
 /// OpenAI GPT-5.4 Pro tier (non-streaming) -- aliases to gpt-5.4 because gpt-5.4-pro is
-/// responses-API only; switch the @model back when responses-API support lands
+/// responses-API only; switch the @model back when responses-API support lands. A second name
+/// for a model chat54 already offers, so it declares no level and no selector chooses it.
 @extends("openai")
 @model("gpt-5.4")
 provider chat54Pro {
@@ -146,42 +285,129 @@ provider chat54Pro {
 
 // ---- providers/v1/anthropic/claudeHaiku.memql ----
 
+/// Claude Haiku 4.5 - the quick Claude model before Haiku 5.5, still served
 @extends("anthropic")
 @model("claude-haiku-4-5-20251001")
 provider claudeHaiku {
   params {
     streaming                  true
+    levels                     "fast"
+    rank                       300
     contextWindow              200000
     maxTokens                  4096
-    inputCostPerMillion        0.80
-    outputCostPerMillion       4.00
-    cachedInputCostPerMillion  0.08
+    // CORRECTED 2026-11-22 from the vendor's pricing page. Was 0.80 / 4.00 /
+    // 0.08, the rates of the model before this one: a fifth understated.
+    inputCostPerMillion        1.00
+    outputCostPerMillion       5.00
+    cachedInputCostPerMillion  0.10
+  }
+}
+
+// ---- the current Claude models (added 2026-11-22) ----
+//
+// WHAT THESE THREE RECORDS DO NOT DECLARE, and why. The current models answer
+// a 400 to things an older record sends, so a record for one leaves them out:
+//
+//   - no temperature, topP or topK. Sampling parameters are refused.
+//   - no thinkingBudgetTokens. A thinking budget is refused; these models
+//     decide how much to think, and thinking is on when nothing is said.
+//   - structuredOutput "format". Claude Opus 5.5 and Sonnet 5.5 refuse a
+//     forced tool choice, which is how the older records get structured
+//     output, so these ask by format (ai_anthropic_structured.go). Haiku 5.5
+//     still accepts a forced tool; it asks the same way as its siblings so the
+//     three behave alike.
+//
+// maxTokens is the whole reply, thinking included, so it is larger than the
+// older records'. It stays under 21,333: past that the vendor's SDK refuses a
+// call that does not stream, and the engine's structured, tool and plain chat
+// calls do not (TestNoClaudeRecordDeclaresAnOutputLimitTheSdkRefusesWithoutStreaming).
+
+/// Claude Opus 5.5 - Anthropic's strongest model open to every account at a standard price
+@extends("anthropic")
+@model("claude-opus-5-5")
+provider claudeOpus55 {
+  params {
+    streaming                  true
+    levels                     "strong reasoning"
+    rank                       900
+    structuredOutput           "format"
+    contextWindow              1000000
+    maxTokens                  20000
+    inputCostPerMillion        4.00
+    outputCostPerMillion       20.00
+    cachedInputCostPerMillion  0.20
+  }
+}
+
+/// Claude Sonnet 5.5 - the middle Claude model, for everyday strong work
+@extends("anthropic")
+@model("claude-sonnet-5-5")
+provider claudeSonnet55 {
+  params {
+    streaming                  true
+    levels                     "strong"
+    rank                       700
+    structuredOutput           "format"
+    contextWindow              1000000
+    maxTokens                  16384
+    inputCostPerMillion        2.00
+    outputCostPerMillion       10.00
+    cachedInputCostPerMillion  0.10
+  }
+}
+
+/// Claude Haiku 5.5 - the quick, low-cost Claude model
+@extends("anthropic")
+@model("claude-haiku-5-5")
+provider claudeHaiku55 {
+  params {
+    streaming                  true
+    levels                     "fast"
+    rank                       380
+    structuredOutput           "format"
+    // The model's window is 1,000,000. The vendor charges these rates for a
+    // prompt of up to 100,000 tokens and five times as much above it (0.50 /
+    // 2.50 / 0.05), so the record is offered prompts the price is true for.
+    contextWindow              100000
+    maxTokens                  16384
+    inputCostPerMillion        0.10
+    outputCostPerMillion       0.50
+    cachedInputCostPerMillion  0.01
   }
 }
 
 // ---- providers/v1/anthropic/claudeOpus.memql ----
 
+/// Claude Opus 4.6 - an earlier Opus, still served. Its record with a thinking budget is
+/// reasoningClaudeOpus.
 @extends("anthropic")
 @model("claude-opus-4-6")
 provider claudeOpus {
   params {
     streaming                  true
-    contextWindow              200000
+    levels                     "strong"
+    rank                       820
+    contextWindow              1000000
     maxTokens                  4096
-    inputCostPerMillion        15.00
-    outputCostPerMillion       75.00
-    cachedInputCostPerMillion  1.50
+    // CORRECTED 2026-11-22 from the vendor's pricing page. Was 15.00 / 75.00 /
+    // 1.50, the rates of the Opus before this one: three times overstated.
+    inputCostPerMillion        5.00
+    outputCostPerMillion       25.00
+    cachedInputCostPerMillion  0.50
   }
 }
 
 // ---- providers/v1/anthropic/claudeSonnet.memql ----
 
+/// Claude Sonnet 4.6 - an earlier Sonnet, still served
 @extends("anthropic")
 @model("claude-sonnet-4-6")
 provider claudeSonnet {
   params {
     streaming                  true
-    contextWindow              200000
+    levels                     "strong"
+    rank                       620
+    contextWindow              1000000
     maxTokens                  4096
     inputCostPerMillion        3.00
     outputCostPerMillion       15.00
@@ -285,7 +511,7 @@ provider openai {
 // ---- providers/v1/anthropic/reasoningClaudeOpus.memql ----
 //
 // Claude Opus 4.6 with extended-thinking enabled. The same model as
-// streamClaudeOpus, just with a thinkingBudgetTokens param that the
+// claudeOpus, just with a thinkingBudgetTokens param that the
 // anthropicStreamProvider reads via anthropicThinking() and injects
 // into every MessageNewParams build. The Anthropic API runs the
 // model with an internal reasoning budget BEFORE emitting the user-
@@ -296,8 +522,12 @@ provider openai {
 // planner (decomposing a goal into phases + tasks), the agent
 // factory's role / tool selection, training-plan composition, etc.
 // For chat replies, summaries, or anything latency-sensitive, stay
-// on streamClaudeOpus (or Sonnet) -- extended thinking adds 5-30s
+// on claudeOpus (or Sonnet) -- extended thinking adds 5-30s
 // of latency depending on budget.
+//
+// A thinking budget is what THIS model takes. Anthropic lists it as
+// deprecated here and the models after it refuse one, which is why the
+// current records above declare none.
 //
 // Constraints baked in here:
 //   - maxTokens raised to 16384 so the reasoning budget (8192) leaves
@@ -311,42 +541,55 @@ provider openai {
 //   - The anthropicStreamProvider suppresses the temperature param
 //     when thinking is enabled (Anthropic API requires temp==1
 //     under extended thinking). Callers do not need to coordinate.
-/// Claude Opus 4.6 with extended-thinking enabled. Same model as streamClaudeOpus but the API
+/// Claude Opus 4.6 with extended-thinking enabled. Same model as claudeOpus but the API
 /// reasons over an 8192-token internal budget before answering. Use for planner / factory /
-/// training-plan-composition workloads; stay on streamClaudeOpus for chat replies and
+/// training-plan-composition workloads; stay on claudeOpus for chat replies and
 /// latency-sensitive flows.
 @extends("anthropic")
 @model("claude-opus-4-6")
 provider reasoningClaudeOpus {
   params {
     streaming                  true
-    contextWindow              200000
+    levels                     "reasoning"
+    rank                       820
+    contextWindow              1000000
     maxTokens                  16384
     thinkingBudgetTokens       8192
-    inputCostPerMillion        15.00
-    outputCostPerMillion       75.00
-    cachedInputCostPerMillion  1.50
+    // Corrected with claudeOpus's on 2026-11-22; one model, one price.
+    inputCostPerMillion        5.00
+    outputCostPerMillion       25.00
+    cachedInputCostPerMillion  0.50
   }
 }
 
 // ---- providers/v1/openai/codex51Max.memql ----
 
-/// OpenAI gpt-5.1-codex-max - heavy long-context coding model (streaming); preferred for multi-file
-/// refactors and large-repo understanding tasks
+/// A name kept for bundles that pin it. OpenAI shut its model, gpt-5.1-codex-max, down on
+/// 2026-07-23 and names gpt-5.6-sol as the replacement, which this name now calls. It declares
+/// no level: chat56Sol is the record the selectors choose for this model.
 @extends("openai")
-@model("gpt-5.1-codex-max")
+@model("gpt-5.6-sol")
 provider codex51Max {
   params {
     streaming                  true
-    contextWindow        400000
-    maxCompletionTokens  16384
+    contextWindow              272000
+    maxCompletionTokens        16384
+    inputCostPerMillion        5.00
+    outputCostPerMillion       30.00
+    cachedInputCostPerMillion  0.50
   }
 }
 
 // ---- providers/v1/openai/codex53.memql ----
 
-/// OpenAI gpt-5.3-codex - coding-specialized chat model (streaming); use for NemoClaw /
-/// code-generation flows
+// THIS RECORD CANNOT BE CALLED. OpenAI's page for gpt-5.3-codex says the model
+// is served by the Responses API only, and this engine speaks Chat
+// Completions, so every call through this name fails as a vendor error. The
+// name is kept so a bundle that pins it fails at the call, where the reason
+// is recorded, and not at load. It declares no level. OpenAI lists the model
+// as deprecated and shuts it down on 2027-04-01.
+/// OpenAI gpt-5.3-codex - a coding model served by the Responses API only, which this engine does
+/// not call. Kept by name; it cannot serve a call.
 @extends("openai")
 @model("gpt-5.3-codex")
 provider codex53 {
@@ -359,14 +602,19 @@ provider codex53 {
 
 // ---- providers/v1/openai/reasoning4Mini.memql ----
 
-/// OpenAI o4-mini - efficient reasoning-focused model (o-series); streaming
+/// A name kept for bundles that pin it. OpenAI shut its model, o4-mini, down on 2026-10-23 and
+/// names gpt-5.6-terra as the replacement, which this name now calls. It declares no level:
+/// chat56Terra is the record the selectors choose for this model.
 @extends("openai")
-@model("o4-mini")
+@model("gpt-5.6-terra")
 provider reasoning4Mini {
   params {
     streaming                  true
-    contextWindow        200000
-    maxCompletionTokens  16384
+    contextWindow              272000
+    maxCompletionTokens        16384
+    inputCostPerMillion        2.00
+    outputCostPerMillion       12.00
+    cachedInputCostPerMillion  0.20
   }
 }
 
@@ -426,6 +674,12 @@ provider fleet { }
 @base
 @vendor("SubscriptionApp")
 provider app { }
+
+// OpenAI lists both audio models below as deprecated: gpt-4o-mini-transcribe
+// is shut down on 2027-02-26 and gpt-4o-mini-tts on 2027-01-06 (its
+// deprecations page, read 2026-11-22). Neither is a text record, so the
+// 2026-11-22 refresh did not replace them; whoever does needs the vendor's
+// current audio models and the audio clients' request shape together.
 
 /// Speech input through the same federated credential as chat. Local audio
 /// models remain first in the default policy and need no vendor connection.

@@ -37,7 +37,7 @@ func contextRouter(t *testing.T, chain ...string) (*Router, *contextFleet) {
 		m.Vision = true
 		f.models = append(f.models, m)
 	}
-	p := memql.NewProviderRegistryForTest()
+	p := registryOpenToEverybody()
 	p.SetFleetInference(f)
 	return New(p, memql.NewPolicyRegistryForTest(map[string][]string{"p": chain}), testRules(t, defaultRule("p")), nil, nil), f
 }

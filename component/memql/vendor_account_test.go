@@ -484,6 +484,7 @@ func personContext(userId string) context.Context {
 
 func TestVendorAccountsForOrdersKeysBeforeTheCluster(t *testing.T) {
 	reg := newProviderRegistry()
+	openToEverybody(reg)
 	keys := newFakeVendorKeys()
 	keys.usable = []VendorAccount{keyAccount(VendorAnthropic, "mine", "ana"), keyAccount(VendorAnthropic, "lent", "ben")}
 	keys.passedOver = []VendorAccountPassedOver{{Account: keyAccount(VendorAnthropic, "bad", "cy"), Reason: "its API key was refused by Anthropic"}}
@@ -509,6 +510,7 @@ func TestVendorAccountsForOrdersKeysBeforeTheCluster(t *testing.T) {
 // and an answer read for one vendor never offers its keys at another.
 func TestOneKeyAnswerServesEveryRecordOfItsVendor(t *testing.T) {
 	reg := newProviderRegistry()
+	openToEverybody(reg)
 	keys := newFakeVendorKeys()
 	keys.usable = []VendorAccount{keyAccount(VendorAnthropic, "mine", "ana")}
 	keys.passedOver = []VendorAccountPassedOver{{Account: keyAccount(VendorAnthropic, "bad", "ana"), Reason: "its API key was refused by Anthropic"}}
@@ -580,6 +582,7 @@ func TestVendorAccountsForNoPersonIsClusterOnly(t *testing.T) {
 
 func TestVendorAccountsForAVisitorIsClusterOnly(t *testing.T) {
 	reg := newProviderRegistry()
+	openToEverybody(reg)
 	keys := newFakeVendorKeys()
 	keys.usable = []VendorAccount{keyAccount(VendorOpenAI, "k1", "ana")}
 	reg.SetVendorKeys(keys)
@@ -595,6 +598,7 @@ func TestVendorAccountsForAVisitorIsClusterOnly(t *testing.T) {
 
 func TestVendorAccountsForPassesKeysOverAtAnotherAddress(t *testing.T) {
 	reg := newProviderRegistry()
+	openToEverybody(reg)
 	keys := newFakeVendorKeys()
 	keys.usable = []VendorAccount{keyAccount(VendorAnthropic, "k1", "ana")}
 	reg.SetVendorKeys(keys)

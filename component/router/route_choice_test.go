@@ -70,7 +70,7 @@ func TestAnOwnersAppChoiceTakesTheReplyStepAsTheirPin(t *testing.T) {
 // cannot serve refuses, names what was pinned, and tries nothing else.
 func TestAPinnedSourceTheNodeCannotReachRefusesWithoutSubstituting(t *testing.T) {
 	cloud := &countingCloud{}
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	providers.SetFleetInference(&stubFleetInference{models: []memql.FleetModel{fleetModel("qwen3.5:4b", true)}})
 	providers.RegisterWithParamsForTest("vendor", "OpenAI", "gpt", map[string]any{"contextWindow": 200000}, cloud)
 	policies := memql.NewPolicyRegistryForTest(map[string][]string{"defaultChain": {memql.FleetStrongest, "vendor"}})
@@ -110,7 +110,7 @@ func TestAPinnedSourceTheNodeCannotReachRefusesWithoutSubstituting(t *testing.T)
 // that names Claude Code first answers from the entry behind it.
 func TestAChosenRouteFailsOverAlongItsOwnChain(t *testing.T) {
 	cloud := &countingCloud{}
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	providers.SetFleetInference(&stubFleetInference{models: []memql.FleetModel{fleetModel("qwen3.5:4b", true)}})
 	providers.RegisterWithParamsForTest("vendor", "OpenAI", "gpt", map[string]any{"contextWindow": 200000}, cloud)
 	policies := memql.NewPolicyRegistryForTest(map[string][]string{
@@ -155,7 +155,7 @@ func TestAChosenRouteFailsOverAlongItsOwnChain(t *testing.T) {
 // The LEVEL binds the steps: the reply asks for what the person chose, and
 // the rules route THAT level. Compile-time calls keep their own.
 func TestTheChosenLevelIsWhatTheRulesSeeForAStep(t *testing.T) {
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	providers.SetFleetInference(&stubFleetInference{models: []memql.FleetModel{fleetModel("qwen3.5:4b", true)}})
 	strong := &countingCloud{}
 	providers.RegisterWithParamsForTest("thinker", "OpenAI", "o-think", map[string]any{"contextWindow": 200000}, strong)

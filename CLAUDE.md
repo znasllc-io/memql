@@ -792,8 +792,8 @@ serving.
   synthetic actor: the cluster's account only. A person's authority borrowed
   for a visitor: never a key. A route or pin the acting person chose
   THEMSELVES: their default key, then keys lent to them (earliest added
-  first), then the cluster's. Auto and everything else: the same order,
-  counting only keys whose owner switched Auto on. **"Themselves" is the
+  first), then the cluster's WHEN IT PAYS FOR THEM. Auto and everything else:
+  the same order, counting only keys whose owner switched Auto on. **"Themselves" is the
   credential, not the subject** (`auth.ChoiceIsThePersons`): a choice made
   through an app session, a badge, delegated access or server code acting for
   the person is attributed to them and counts as no choice
@@ -804,17 +804,47 @@ serving.
   (`<record>@key:<id>`, then `<record>@cluster`). A rate limit or an outage is
   not about the account, and neither is the cost guard's own 402
   (`guardStopErrorType`). A request that carries a key follows no redirect.
-- **Text surfaces only.** Vision, embeddings, speech, transcription and images
-  stay on the cluster's account.
+- **THE CLUSTER'S ACCOUNT IS NOT A POOL FOR EVERYBODY** (owner decision
+  2026-11-22; `component/memql/vendor_account_cluster.go`). Model access is
+  bring-your-own. The cluster's account pays for the cluster's own work
+  (`auth.ActsForNoPerson`) and for a person's calls only when that person
+  holds `execute app:settings/clusteraccount`, seeded on the OWNER role alone
+  and given to others in Users > Access. The person judged is the one the call
+  is FOR, from their stored role, groups and grants
+  (`MemQLEngine.clusterAccountOpenTo`): borrowed authority carries a stand-in
+  role, and a visitor's call is judged by the person it borrows from. Asked
+  only where the cluster has an account for the record, once per vendor per
+  resolution, and again AT THE CALL: when `<record>@cluster` resolves, and
+  when a plain record name does after a local model or an app failed
+  (`accountAtCall`). A provider resolved once at start is resolved for nobody,
+  which is the cluster's own work: the Library's picture description resolves
+  per call for the uploader (`callerVision`, `app/ai_call_sites.go`). A
+  registry with no gate installed gives the account to no person; the engine
+  installs its own at bootstrap, and a test fixture says who may use it.
+- **Text surfaces only take a key.** Vision, speech, transcription and images
+  are the cluster's account or nothing, so the router asks the same gate for
+  them (`clusterAccountGated`). EMBEDDINGS ARE NEVER ASKED: the memory space is
+  the cluster's, one model for everybody.
 - **A key's spend is METERED.** Every ceiling and loop cap counts it; there is
   no exemption and no cap per key.
 - **Readiness is per person** (`ProviderRegistry.VendorDoorFor`):
-  `inferenceStatus.federationConfigured` is the cluster's own account,
-  `keyAccount` is whether the READER holds a key that can pay.
+  `inferenceStatus.federationConfigured` is whether the cluster's own account
+  is SET UP (the same for everybody), `clusterAccountOpen` is whether it pays
+  for the READER, and `keyAccount` is whether the reader holds a key that can
+  pay. `eligible` and `doorsOpen` count a vendor only when one of the last two
+  holds.
 - **Two engine-only passes, each on one bff replica behind a lease**:
   `vendorKeysDailyCheck` (04:40, lists models with keys idle for a day) and
   `vendorKeysOwnerNotices` (every ten minutes: one email per fall to the key's
   owner, claimed under the key's gate before it is sent, no link in it).
+- **API is the fourth built-in route** (`route:api`, `component/memql/routes.go`):
+  the strongest vendor model at every job, edited and restored like Local and
+  Apps, and it lists `federation:` sources ONLY
+  (`ValidateBuiltinRouteJobs`, asked in `SaveRouteOverride`). A route's vendor
+  job is ready for a person when a record the selector offers at THAT level
+  has an account for them (`vendorServesNow`, read from `VendorDoor.Payers`),
+  and "serves now" names the model and the KIND of account, never a key. A
+  route cannot name which account pays (R5 of the design, not built).
 
 **A LOCAL cluster federates by pasted keys** (design record
 [2026-11-21](docs/superpowers/specs/2026-11-21-vendor-accounts-and-api-keys-design.md)).
@@ -1234,6 +1264,13 @@ the first** (epic memql#5127; [ai-routing.md](docs/public/operate/ai-routing.md)
   provider name; `fleet:strongest` / `fleet:fastest` / `fleet:<modelId>`;
   `app:*` / `app:<id>` / `app:<id>:<model>`; `federation:cheapest` /
   `federation:strongest` / `federation:<providerName>`; `policy:<name>`.
+  **The two vendor selectors choose among the records that DECLARE the level
+  the call is served at** (`params { levels "strong reasoning"  rank 900 }`,
+  `component/memql/provider_job.go`; a rule's `@level` moves the call first):
+  strongest is highest `rank` first, cheapest is lowest input plus output
+  price first, ties by name. A record that declares no level resolves by name
+  and both selectors pass it over; a bad `levels` or `rank` refuses the record
+  at load.
   `fleet:*` is retired and refuses load. An app id is held to the engine's
   closed runnable set at LOAD (`core/airoute/apps.go`); `app:*:<model>` is
   REFUSED. `policy:<name>` is expanded at load and a cycle refuses load. The
@@ -1694,13 +1731,31 @@ provider openai {
 @model("gpt-5.4-mini")
 provider chat54Mini {
   params {
-    contextWindow        128000
+    levels               "fast"
+    rank                 340
+    contextWindow        272000
     maxCompletionTokens  16384
-    inputCostPerMillion  0.15
-    outputCostPerMillion 0.60
+    inputCostPerMillion  0.75
+    outputCostPerMillion 4.50
   }
 }
 ```
+
+**A vendor text record says what it is FOR**, and the file's own header says
+how its numbers are kept (read from the vendors' pages on a named day, never
+from memory): `levels`, `rank`, the price, and a `contextWindow` that is the
+prompt size the one price is true for. **A record name is never removed**
+(bundles pin names): a model its vendor shut down is repointed and declares no
+level. A Claude record for a current model says `structuredOutput "format"`,
+because Claude Opus 5.5 and Sonnet 5.5 refuse the forced tool choice the older
+records use (`component/memql/ai_anthropic_structured.go`), and keeps
+`maxTokens` under 21,333, above which the vendor's SDK refuses a call that
+does not stream. The format takes closed objects only, so an open one (a map,
+or no declared properties) is REFUSED naming the field, never closed
+silently. **A reply a Claude model declined is an error, not an empty
+answer** (`ErrModelDeclined`, stop reason `refusal`; also a structured reply
+cut off at the output limit): the route's next source serves and the decision
+line reads `model_declined`.
 
 **`@disabled`** (the lifecycle flag shared by functions / builtins / prompts /
 specs / seeds) skips the provider at load -- not registered, no auth

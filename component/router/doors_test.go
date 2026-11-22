@@ -54,7 +54,7 @@ func shutApp(appId string) memql.AppDoor {
 // every call falls to.
 func threeStepRouter(t *testing.T, models []memql.FleetModel, doors []memql.AppDoor, withCloud bool) (*Router, *countingCloud, *stubAppInference) {
 	t.Helper()
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	providers.SetFleetInference(&stubFleetInference{models: models})
 	apps := &stubAppInference{doors: doors}
 	providers.SetAppInference(apps)
@@ -191,7 +191,7 @@ func TestTheCeilingGatesTheFederationHopAndNotADirectVendorChain(t *testing.T) {
 		return "cumulative LLM call ceiling reached: 100 calls admitted this process", true
 	}
 
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	providers.SetFleetInference(&stubFleetInference{models: []memql.FleetModel{fleetModel("llama3.1:8b", false)}})
 	cloud := &countingCloud{}
 	providers.RegisterForTest("streamClaudeSonnet", "AnthropicStream", "claude-sonnet", cloud)

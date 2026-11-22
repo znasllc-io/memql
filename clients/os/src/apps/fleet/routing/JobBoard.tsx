@@ -6,7 +6,7 @@ import { Subhead } from "../../../kit";
 import { InlineSkeleton } from "../../../kit/ContentSkeleton";
 import { IconButton } from "../../../kit/IconButton";
 import { RUNNABLE_APPS } from "../rows";
-import { EDITABLE_JOBS, JOB_MEANING, JOB_TITLES, MAX_JOB_SOURCES, type EditableJob, type EmbedderReading, type JobId, type JobSources } from "./routeModes";
+import { EDITABLE_JOBS, JOB_MEANING, JOB_TITLES, MAX_JOB_SOURCES, type EditableJob, type EmbedderReading, type JobId, type JobSources, type RouteJob } from "./routeModes";
 import { ReadinessDot, SourceGlyph } from "./SourceGlyph";
 import { readSource, servingIndex, type RoutingFacts, type SourceReading } from "./sources";
 import { sourceKind, sourceLabel } from "./vocabulary";
@@ -32,6 +32,19 @@ import { sourceKind, sourceLabel } from "./vocabulary";
 // READINESS IS READ, NEVER SIMULATED (sources.ts): a job says "Serves with X"
 // only when X can take a call right now -- a machine online with a free slot
 // and the memory to load the model, an app signed in, a vendor set up.
+//
+// A VENDOR JOB IS ANSWERED BY THE CLUSTER, where it answered. Which vendor
+// model serves a job, and which account pays, depends on the reader's own
+// accounts at each model and on the job's level, and only the cluster knows
+// both (`reported`, a route's jobs as `routesForActor` gave them). So a job
+// whose serving source is a vendor's, and whose sources are still the ones the
+// cluster judged, says the cluster's words: the model and the account. A job
+// edited since that read is judged from the facts, as a local model or an app
+// always is, until it is saved and read again.
+//
+// AN API ROUTE'S PAGE OFFERS VENDOR SOURCES ONLY (`vendorsOnly`). The cluster
+// refuses anything else on that route, so the tray does not offer it and a
+// placement says why.
 
 const JOB_ICONS: Record<JobId, typeof Zap> = { fast: Zap, strong: MessageSquare, reasoning: BrainCircuit, embeddings: Search };
 
@@ -59,34 +72,57 @@ export function sourceLine(reading: SourceReading): string {
  * `at` is the position being replaced by a reorder: a source already in that
  * position is not a duplicate of itself.
  */
-export function jobPlacementProblem(entry: string, list: readonly string[], facts: RoutingFacts, at?: number): string {
+export function jobPlacementProblem(entry: string, list: readonly string[], facts: RoutingFacts, at?: number, vendorsOnly = false): string {
   const others = list.filter((_, i) => i !== at);
   if (others.includes(entry)) return "Already in this job";
   if (at === undefined && list.length >= MAX_JOB_SOURCES) return `A job holds ${MAX_JOB_SOURCES} sources at most`;
   const kind = sourceKind(entry);
   if (kind !== "local" && kind !== "app" && kind !== "vendor") return "Not a source a route can use";
+  if (vendorsOnly && kind !== "vendor") return "API lists vendor models only";
   if (kind === "local" && readSource(entry, facts).embeddingsOnly) return "Only makes embeddings";
   return "";
 }
 
-/** A job's state in a few words: what serves it now, or why nothing does. */
-export function jobStatus(list: readonly string[], facts: RoutingFacts): { text: string; ready: boolean } {
+/** What the cluster said about one job when the routes were read. */
+export type ReportedJob = Pick<RouteJob, "sources" | "servesNow" | "ready">;
+
+/**
+ * A job's state in a few words: what serves it now, or why nothing does.
+ *
+ * `reported` is the cluster's own answer for this job. It is used only while
+ * the job's sources are the ones the cluster judged, and only where the source
+ * that would serve is a vendor's: the cluster knows which model has an account
+ * for the reader at this job's level, and the facts here do not.
+ */
+export function jobStatus(list: readonly string[], facts: RoutingFacts, reported?: ReportedJob): { text: string; ready: boolean } {
   if (list.length === 0) return { text: "No source yet", ready: false };
   const at = servingIndex(list, facts);
-  if (at.index >= 0) return { text: `Serves with ${readSource(list[at.index]!, facts).serves}`, ready: true };
+  if (at.index >= 0) {
+    const judged = reported !== undefined && reported.sources.length === list.length && reported.sources.every((entry, i) => entry === list[i]);
+    if (judged && sourceKind(list[at.index]!) === "vendor") {
+      if (reported.ready && reported.servesNow !== "") return { text: `Serves with ${reported.servesNow}`, ready: true };
+      if (!reported.ready) return { text: "No vendor model here has an account for this job", ready: false };
+    }
+    return { text: `Serves with ${readSource(list[at.index]!, facts).serves}`, ready: true };
+  }
   if (at.blockedAt >= 0) return { text: facts.machinesRead ? "Not checked" : "", ready: false };
   return { text: sentence(readSource(list[0]!, facts).reason) || "Nothing ready", ready: false };
 }
 
-/** The tray: every source a route can name, grouped the way a person looks for one. */
-export function trayFor(facts: RoutingFacts): { id: string; title: string; sources: SourceReading[] }[] {
+/**
+ * The tray: every source a route can name, grouped the way a person looks for
+ * one. An API route's tray holds the vendors and nothing else.
+ */
+export function trayFor(facts: RoutingFacts, vendorsOnly = false): { id: string; title: string; sources: SourceReading[] }[] {
+  const vendors = { id: "vendors", title: "Vendors", sources: ["federation:cheapest", "federation:strongest"].map((e) => readSource(e, facts)) };
+  if (vendorsOnly) return [vendors];
   const chatModels = Array.from(
     new Set(facts.machines.flatMap((m) => m.models.filter((model) => !model.embeddings).map((model) => model.modelId))),
   ).sort();
   return [
     { id: "models", title: "Models", sources: ["fleet:strongest", "fleet:fastest", ...chatModels.map((id) => `fleet:${id}`)].map((e) => readSource(e, facts)) },
     { id: "apps", title: "Apps", sources: ["app:*", ...RUNNABLE_APPS.map((id) => `app:${id}`)].map((e) => readSource(e, facts)) },
-    { id: "vendors", title: "Vendors", sources: ["federation:cheapest", "federation:strongest"].map((e) => readSource(e, facts)) },
+    vendors,
   ];
 }
 
@@ -96,6 +132,8 @@ export function JobBoard({
   facts,
   embedder,
   readOnly = false,
+  vendorsOnly = false,
+  reported,
   onAnnounce,
   onAddMachine,
   onOpenModels,
@@ -106,6 +144,10 @@ export function JobBoard({
   /** The cluster's bound embedding model, as read. */
   embedder: EmbedderReading;
   readOnly?: boolean;
+  /** The API route: its jobs take vendor sources only. */
+  vendorsOnly?: boolean;
+  /** Each job as the cluster judged it when the routes were read. */
+  reported?: Partial<Record<EditableJob, ReportedJob>>;
   onAnnounce?: (sentence: string) => void;
   onAddMachine?: () => void;
   /** Opens Fleet's Models, where an embedding model is pulled and bound. */
@@ -127,11 +169,11 @@ export function JobBoard({
     setFocusChip(null);
   }, [focusChip, jobs]);
 
-  const groups = readOnly ? [] : trayFor(facts);
+  const groups = readOnly ? [] : trayFor(facts, vendorsOnly);
   const noMachines = facts.machinesRead && facts.machines.length === 0;
 
   function place(job: EditableJob, entry: string, at = jobs[job].length) {
-    const problem = jobPlacementProblem(entry, jobs[job], facts);
+    const problem = jobPlacementProblem(entry, jobs[job], facts, undefined, vendorsOnly);
     if (problem !== "") {
       setRefusal({ job, message: problem });
       onAnnounce?.(`${JOB_TITLES[job]}: ${problem}.`);
@@ -251,8 +293,8 @@ export function JobBoard({
             {EDITABLE_JOBS.map((job) => {
               const Icon = JOB_ICONS[job];
               const list = jobs[job];
-              const status = jobStatus(list, facts);
-              const problem = selected === null ? "" : jobPlacementProblem(selected, list, facts);
+              const status = jobStatus(list, facts, reported?.[job]);
+              const problem = selected === null ? "" : jobPlacementProblem(selected, list, facts, undefined, vendorsOnly);
               return (
                 <div
                   key={job}

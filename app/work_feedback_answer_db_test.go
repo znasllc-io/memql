@@ -153,6 +153,7 @@ func testWorkFeedbackContinuation(t *testing.T, optional bool) {
 		ai := agents.New(e.Agents(), e)
 		ai.SetWorkGoals(&agentWorkGoals{work: wi})
 		registry := memql.NewProviderRegistryForTest()
+		clusterAccountPaysForThePeopleHere(registry)
 		registry.RegisterWithParamsForTest("fixture", "OpenAI", "fixture", map[string]any{"contextWindow": 200000}, runner)
 		rules := memql.NewRuleRegistry()
 		require.NoError(t, rules.Register(&memql.RuleConfig{Name: memql.DefaultRuleName, Policy: "fixture", Locked: true, OnUnavailable: memql.OnUnavailableDegrade, SourceFile: "dsl/rules/rules.memql"}))

@@ -254,6 +254,18 @@ type accountFixture struct {
 	calls     *vendorCalls
 	keys      *accountKeys
 	ledger    *countingLedger
+	// closedTo are the people the cluster's own account does not pay for.
+	// Nobody, unless a test says so: most tests here are about the order of
+	// accounts, and the cluster's account is one of them.
+	closedTo map[string]bool
+}
+
+// clusterAccountClosedTo makes the cluster's own account not pay for these
+// people, as it is for anybody its owner did not allow.
+func (f *accountFixture) clusterAccountClosedTo(people ...string) {
+	for _, p := range people {
+		f.closedTo[p] = true
+	}
 }
 
 // The route these tests choose, and the chain Auto's default rule walks. Both
@@ -270,7 +282,9 @@ func newAccountFixture(t *testing.T, chain []string, keys []lentKey, records ...
 		calls:     &vendorCalls{fail: map[string]error{}},
 		keys:      &accountKeys{keys: keys},
 		ledger:    &countingLedger{writes: make(chan string, 16)},
+		closedTo:  map[string]bool{},
 	}
+	f.providers.SetClusterAccountGate(func(_ context.Context, userId string) bool { return !f.closedTo[userId] })
 	for _, rec := range records {
 		vendor := memql.VendorAnthropic
 		if rec.providerType == "openai" {
@@ -1111,5 +1125,240 @@ func TestACeilingRefusalAfterAKeyFailedNeverQuotesTheVendor(t *testing.T) {
 		if strings.Contains(line.Reason, "the vendor's words") || strings.Contains(line.Reason, "sk-ant-secret") {
 			t.Errorf("the decision quotes the vendor: %q", line.Reason)
 		}
+	}
+}
+
+// registryOpenToEverybody is a provider registry in which the cluster's own
+// vendor account pays for every person.
+//
+// The registry gives that account to NO person until a gate says who may use
+// it (component/memql vendor_account_cluster.go), and most tests in this
+// package are about something else: a level walking down, a selector's order,
+// what a ledger row says. Their fixtures are built with this, which states the
+// assumption they always made. The tests about who may use the account build
+// a registry of their own and are below.
+func registryOpenToEverybody() *memql.ProviderRegistry {
+	providers := memql.NewProviderRegistryForTest()
+	providers.SetClusterAccountGate(func(context.Context, string) bool { return true })
+	return providers
+}
+
+// OWNER DECISION 2026-11-22: the cluster's own vendor account is not a pool
+// for everybody. It pays for the cluster's own work, and for a person's calls
+// only when that person may use it (component/memql vendor_account_cluster.go).
+// These are the router's half: what a walk does for a person it is closed to.
+// bobsChosenRequest is chosenRequest for bob.
+func bobsChosenRequest(modality airoute.Modality) ResolveRequest {
+	req := chosenRequest(modality)
+	req.UserId, req.RouteBy = bob, bob
+	return req
+}
+
+func TestTheClustersAccountDoesNotPayForAPersonItIsClosedTo(t *testing.T) {
+	// No key and a closed account: the vendor's model is passed over for her,
+	// with the reason on its line, and the route says nothing can serve.
+	f := newAccountFixture(t, []string{"claude"}, nil, claudeRecord)
+	f.clusterAccountClosedTo(alice)
+	_, _, err := f.router.resolveChat(personCtx(alice), chosenRequest(airoute.ModalityChat))
+	var refusal *InferenceUnavailable
+	if !errors.As(err, &refusal) {
+		t.Fatalf("err = %v, want a refusal: nothing can pay for her", err)
+	}
+	said := false
+	for _, door := range refusal.Doors {
+		if door.Name == "claude" && strings.Contains(door.Reason, memql.ClusterAccountClosedReason) {
+			said = true
+		}
+	}
+	if !said {
+		t.Errorf("the refusal does not say the cluster's account is closed to her: %+v", refusal.Doors)
+	}
+	if made := f.calls.attempts(); len(made) != 0 {
+		t.Fatalf("the vendor was called (%v) on an account that does not pay for her", made)
+	}
+
+	// Somebody the account is open to is served by it, on the same cluster.
+	got, err := f.router.ResolveFor(personCtx(bob), bobsChosenRequest(airoute.ModalityChat))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := got.Client.(common.ChatAIProvider).CallChat(personCtx(bob), helloMessages()); err != nil {
+		t.Fatal(err)
+	}
+	if made := f.calls.attempts(); !reflect.DeepEqual(made, []string{"claude@cluster"}) {
+		t.Fatalf("calls = %v, want the cluster's account for a person who may use it", made)
+	}
+}
+
+func TestAPersonTheClustersAccountIsClosedToPaysWithTheirKeyAndNothingElse(t *testing.T) {
+	f := newAccountFixture(t, []string{"claude"}, []lentKey{aliceOwnKey}, claudeRecord)
+	f.clusterAccountClosedTo(alice)
+	ctx := personCtx(alice)
+	_, resolved, err := f.router.resolveChat(ctx, chosenRequest(airoute.ModalityChat))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"claude@key:k-own"}; !reflect.DeepEqual(resolved.Chain, want) {
+		t.Fatalf("chain = %v, want %v: the cluster's account is not behind her key", resolved.Chain, want)
+	}
+	// The record says the cluster's account was passed over, and why.
+	line, ok := consideredLine(resolved.Decision.Considered, "claude", memql.VendorAccountCluster)
+	if !ok || line != memql.ClusterAccountClosedReason {
+		t.Errorf("the decision's line for the cluster's account is %q (found %v)", line, ok)
+	}
+
+	// Her key fails for a reason about the account: there is no next account.
+	f.calls.fail["claude@key:k-own"] = accountFailure("credit")
+	got, err := f.router.ResolveFor(ctx, chosenRequest(airoute.ModalityChat))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := got.Client.(common.ChatAIProvider).CallChat(ctx, helloMessages()); err == nil {
+		t.Fatal("the call was served after her only account failed")
+	}
+	if made := f.calls.attempts(); !reflect.DeepEqual(made, []string{"claude@key:k-own"}) {
+		t.Fatalf("calls = %v, want her key alone", made)
+	}
+}
+
+// A wrapper resolves "record@cluster" by name when the call is made, and the
+// account is judged again there: a permission taken away since the resolution
+// is not spent.
+func TestTheClustersAccountIsJudgedAgainWhenTheCallIsMade(t *testing.T) {
+	f := newAccountFixture(t, []string{"claude"}, nil, claudeRecord)
+	ctx := personCtx(alice)
+	req := chosenRequest(airoute.ModalityChat)
+	if _, _, ok := f.router.providerLookup(ctx, req, "claude@cluster", modalityChat); !ok {
+		t.Fatal("the cluster's account did not resolve for a person who may use it")
+	}
+	f.clusterAccountClosedTo(alice)
+	if _, _, ok := f.router.providerLookup(ctx, req, "claude@cluster", modalityChat); ok {
+		t.Fatal("the cluster's account was spent at the call after it was closed to her")
+	}
+}
+
+// The surfaces that take no key of a person's -- a picture, speech,
+// transcription, an image -- are the cluster's account or nothing, so the same
+// gate stands in front of them. Embeddings are the exception: the memory space
+// is the cluster's, one model for everybody.
+func TestTheVendorSurfacesWithNoKeyAskTheSameGate(t *testing.T) {
+	f := newAccountFixture(t, []string{"claude"}, []lentKey{aliceOwnKey}, claudeRecord)
+	f.clusterAccountClosedTo(alice)
+	req := chosenRequest(airoute.ModalityVision)
+	_, _, err := f.router.resolveDirect(personCtx(alice), req, modalityVision)
+	var refusal *InferenceUnavailable
+	if !errors.As(err, &refusal) {
+		t.Fatalf("err = %v, want a refusal: a picture is the cluster's account or nothing, and it is closed to her", err)
+	}
+	said := false
+	for _, door := range refusal.Doors {
+		if strings.Contains(door.Reason, memql.ClusterAccountClosedReason) {
+			said = true
+		}
+	}
+	if !said {
+		t.Errorf("the refusal does not say why: %+v", refusal.Doors)
+	}
+	if asked := f.keys.asked(); len(asked) != 0 {
+		t.Errorf("the key seam was asked %+v for a picture", asked)
+	}
+
+	// The cluster's own work is served as it always was.
+	own := autoRequest(airoute.ModalityVision)
+	own.UserId = ""
+	if _, _, err := f.router.resolveDirect(context.Background(), own, modalityVision); err != nil {
+		t.Fatalf("the cluster's own picture was refused: %v", err)
+	}
+}
+
+func TestEmbeddingsStayOnTheClustersAccountForEverybody(t *testing.T) {
+	if clusterAccountGated(modalityEmbedding) {
+		t.Fatal("embeddings ask the gate: a person whose writes were not embedded would be missing from everybody's search")
+	}
+	// EVERY OTHER SURFACE ASKS. A record whose accounts are composed (a
+	// vendor's text model on a text surface) is asked there; any other vendor
+	// record is the cluster's account or nothing, whatever the surface.
+	for _, mod := range []providerModality{
+		modalityVision, modalitySpeech, modalityTranscribe, modalityImage,
+		modalityStreamTools, modalityChat, modalityStreamChat, modalityTools, modalityStructured,
+	} {
+		if !clusterAccountGated(mod) {
+			t.Errorf("modality %v can be paid by the cluster's account for a person without asking whether they may use it", mod)
+		}
+	}
+}
+
+// THE RULE DOES NOT DEPEND ON WHAT KIND OF CLIENT A RECORD HAS. A vendor
+// record whose client cannot be paid by a key composes no accounts, so on a
+// text surface nothing asked whether the cluster's account pays for the
+// person: it was simply available. Both vendors' text clients can take a key
+// today, so no shipped record is like this; the next kind of record must not
+// be open to everybody by default.
+func TestAVendorRecordThatTakesNoKeyStillAsksWhoTheClustersAccountPaysFor(t *testing.T) {
+	providers := memql.NewProviderRegistryForTest()
+	providers.RegisterWithParamsForTest("plain", "Anthropic", "model-plain", map[string]any{"contextWindow": 200000}, pricedProvider{})
+	allowed := map[string]bool{bob: true}
+	providers.SetClusterAccountGate(func(_ context.Context, userId string) bool { return allowed[userId] })
+	policies := memql.NewPolicyRegistryForTest(map[string][]string{"p": {"plain"}})
+	r := New(providers, policies, testRules(t, defaultRule("p")), nil, nil)
+
+	_, _, err := r.resolveChat(personCtx(alice), ResolveRequest{UserId: alice})
+	var refusal *InferenceUnavailable
+	if !errors.As(err, &refusal) {
+		t.Fatalf("err = %v, want a refusal: the cluster's account does not pay for her", err)
+	}
+	said := false
+	for _, door := range refusal.Doors {
+		said = said || strings.Contains(door.Reason, memql.ClusterAccountClosedReason)
+	}
+	if !said {
+		t.Errorf("the refusal does not say why: %+v", refusal.Doors)
+	}
+	if _, resolved, err := r.resolveChat(personCtx(bob), ResolveRequest{UserId: bob}); err != nil || resolved.ProviderName != "plain" {
+		t.Fatalf("a person the account pays for got %q, %v", resolved.ProviderName, err)
+	}
+	if _, resolved, err := r.resolveChat(context.Background(), ResolveRequest{}); err != nil || resolved.ProviderName != "plain" {
+		t.Fatalf("the cluster's own work got %q, %v", resolved.ProviderName, err)
+	}
+}
+
+// A CHAIN ENTRY RESOLVED BY ITS PLAIN NAME AT THE CALL is the record on the
+// cluster's own account: the media wrappers walk the rest of a chain that way
+// after a local model fails, and so does a consented fallback. The question
+// the walk asks is asked there too, or a person the account is closed to is
+// paid by it for a picture, speech or transcription as soon as their local
+// model fails.
+func TestAPlainRecordNameResolvedAtTheCallAsksWhoTheClustersAccountPaysFor(t *testing.T) {
+	f := newAccountFixture(t, []string{"claude"}, nil, claudeRecord)
+	ctx := personCtx(alice)
+	req := autoRequest(airoute.ModalityChat)
+	surfaces := map[string]providerModality{
+		"a picture":           modalityVision,
+		"a chat turn":         modalityChat,
+		"a structured answer": modalityStructured,
+	}
+	for name, mod := range surfaces {
+		if _, _, ok := f.router.providerLookup(ctx, req, "claude", mod); !ok {
+			t.Fatalf("%s: a person the account pays for was not served", name)
+		}
+	}
+
+	f.clusterAccountClosedTo(alice)
+	for name, mod := range surfaces {
+		if _, _, ok := f.router.providerLookup(ctx, req, "claude", mod); ok {
+			t.Errorf("%s: the cluster's account was spent at the call for a person it is closed to", name)
+		}
+	}
+
+	// The cluster's own work resolves as it always did.
+	own := req
+	own.UserId = ""
+	if _, _, ok := f.router.providerLookup(context.Background(), own, "claude", modalityVision); !ok {
+		t.Error("the cluster's own picture was refused at the call")
+	}
+	// Embeddings are never asked: the memory space is the cluster's.
+	entry, _ := f.providers.Entry("claude")
+	if _, _, ok := f.router.accountAtCall(ctx, req, entry, "", modalityEmbedding); !ok {
+		t.Error("an embedding was refused for a person the account is closed to")
 	}
 }

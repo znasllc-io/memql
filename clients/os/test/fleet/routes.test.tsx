@@ -421,3 +421,58 @@ describe("Auto", () => {
     expect(within(picks).getByText("Main work").nextElementSibling?.textContent).toBe("qwen3.8:27b");
   });
 });
+
+describe("API, with the built-in routes", () => {
+  const apiJobs = (servesNow: Partial<Record<string, string>> = {}) =>
+    routeJobs(["federation:strongest"], ["federation:strongest"], ["federation:strongest"], servesNow);
+  const api = (over: Row = {}) =>
+    routeModeRow({ id: "api", description: "Vendor models, paid by an API key", jobs: apiJobs(), ...over });
+  const withApi = (over: Row = {}) => [...shippedRouteModes(), api(over)];
+
+  it("stands after Apps, and says why it cannot serve", async () => {
+    use({ modes: withApi({ ready: false, reason: "Needs an API key or a vendor account" }) });
+    await renderRouting("owner");
+    const names = within(screen.getByRole("list", { name: "Built-in routes" })).getAllByRole("button").map((b) => b.getAttribute("aria-label"));
+    expect(names).toEqual(["Open Auto, Ready", "Open Local, Ready", "Open Apps, Ready", "Open API, Needs an API key or a vendor account"]);
+  });
+
+  it("offers vendor sources and nothing else on its page", async () => {
+    use({ modes: withApi() });
+    await renderRouting("owner", openRoute("api"));
+    const tray = screen.getByRole("region", { name: "Sources" });
+    expect(within(tray).getAllByRole("button").map((b) => b.getAttribute("aria-label")?.split(":")[0])).toEqual(["Cheapest vendor", "Strongest vendor"]);
+    expect(within(tray).queryByText("Models")).toBeNull();
+    expect(within(tray).queryByText("Apps")).toBeNull();
+  });
+
+  it("says which model serves each job and which account pays, as the cluster reports it", async () => {
+    use({ federationConfigured: true, modes: withApi({ jobs: apiJobs({ fast: "claude-haiku-5-5, paid by your API key", strong: "claude-opus-5-5, paid by your API key", reasoning: "claude-opus-5-5, paid by your API key" }) }) });
+    await renderRouting("owner", openRoute("api"));
+    expect(within(job("Quick tasks")).getByText("Serves with claude-haiku-5-5, paid by your API key")).toBeTruthy();
+    expect(within(job("Deep reasoning")).getByText("Serves with claude-opus-5-5, paid by your API key")).toBeTruthy();
+  });
+
+  it("is saved at the revision it was read at, and restored as Local and Apps are", async () => {
+    const made = use({ federationConfigured: true, modes: withApi() });
+    await renderRouting("owner", openRoute("api"));
+    fireEvent.click(screen.getByRole("button", { name: /^Cheapest vendor: / }));
+    fireEvent.click(within(job("Quick tasks")).getByRole("button", { name: "Add Cheapest vendor" }));
+    pressBar("Save route");
+    await settle();
+    expect(made.calls.routeSave.mock.calls[0]![0]).toEqual({ id: "api", fast: ["federation:strongest", "federation:cheapest"], strong: ["federation:strongest"], reasoning: ["federation:strongest"], revision: 7 });
+    expect(within(bar()).getByText("Changed from shipped")).toBeTruthy();
+    pressBar("Restore default");
+    pressBar("Restore default");
+    await settle();
+    expect(made.calls.routeReset.mock.calls[0]![0]).toEqual({ id: "api", revision: 8 });
+    expect(sourcesOf("Quick tasks")).toEqual(["Strongest vendor"]);
+  });
+
+  it("shows a member its jobs with nothing to change", async () => {
+    use({ modes: withApi() });
+    await renderRouting("writer", openRoute("api"));
+    expect(sourcesOf("Main work")).toEqual(["Strongest vendor"]);
+    expect(screen.queryByRole("region", { name: "Sources" })).toBeNull();
+    expect(barActs()).toEqual([]);
+  });
+});

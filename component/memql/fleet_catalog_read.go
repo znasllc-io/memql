@@ -196,10 +196,24 @@ type inferenceDoors struct {
 	// The vendor door keeps the name it had when federation was the only
 	// account behind it. A key is a second account behind the same door, not a
 	// door of its own.
-	Federation     bool
-	FederationAuto bool
-	KeyAccount     bool
-	Doors          []string
+	//
+	// ClusterAccountOpen: the cluster's own account is set up AND pays for
+	// this caller. It is not a pool for everybody (owner decision 2026-11-22,
+	// vendor_account_cluster.go): a person it is closed to has the vendor door
+	// only through a key.
+	//
+	// VendorPayers and ActingUserId are what a route's job reads to say which
+	// vendor model serves it now and which account pays (routes_builtin.go).
+	VendorPayers       map[string]VendorPayer
+	ActingUserId       string
+	Federation         bool
+	FederationAuto     bool
+	KeyAccount         bool
+	ClusterAccountOpen bool
+	// CloudOpen: a paid provider is callable here AND the cluster's account
+	// pays for this caller. CloudConfigured alone says only that one exists.
+	CloudOpen bool
+	Doors     []string
 }
 
 func (e *MemQLEngine) inferenceDoors(ctx context.Context) inferenceDoors {
@@ -262,7 +276,15 @@ func (e *MemQLEngine) inferenceDoors(ctx context.Context) inferenceDoors {
 	// The vendor door, asked for this caller. Ask needs a stream, and a route
 	// is the person's to choose there, so it reads the chosen-route answer.
 	vendor := e.providers.VendorDoorFor(ctx, actingUserFromContext(ctx))
-	d.ClusterFederation = vendor.Cluster
+	d.ClusterFederation = vendor.ClusterSetUp
+	d.ClusterAccountOpen = vendor.Cluster
+	// A callable paid provider counts for THIS caller only when the cluster's
+	// account pays for them. Where that account is federation the door above
+	// already asked; a provider that is callable some other way is asked here.
+	d.CloudOpen = d.CloudConfigured && (vendor.Cluster ||
+		(!vendor.ClusterSetUp && e.providers.ClusterAccountClosedTo(ctx, actingUserFromContext(ctx)) == ""))
+	d.VendorPayers = vendor.Payers
+	d.ActingUserId = actingUserFromContext(ctx)
 	d.Federation = vendor.Chosen
 	d.FederationAuto = vendor.Auto
 	d.KeyAccount = vendor.Key
@@ -312,19 +334,25 @@ func (e *MemQLEngine) evaluateInferenceStatusExpression(ctx context.Context) ([]
 
 	raw, err := json.Marshal(map[string]any{
 		"streamingChatEligible": d.StreamingChatEligible,
-		"eligible":              d.LocalEligible || d.AppEligible || d.CloudConfigured || d.Federation,
-		"doorsOpen":             toAnySlice(d.Doors),
-		"localEligible":         d.LocalEligible,
-		"appEligible":           d.AppEligible,
-		"runnableApps":          toAnySlice(d.RunnableApps),
-		"localModelCount":       d.LocalModels,
-		"eligibleModelIds":      toAnySlice(d.EligibleModelIds),
-		"cloudConfigured":       d.CloudConfigured,
+		// A vendor counts when an account pays for THIS caller: d.Federation
+		// (the cluster's account where it is open to them, or a key), or a
+		// callable paid provider the cluster's account pays for them through.
+		// A configured provider is not enough by itself any more: the
+		// cluster's account is not a pool for everybody.
+		"eligible":         d.LocalEligible || d.AppEligible || d.CloudOpen || d.Federation,
+		"doorsOpen":        toAnySlice(d.Doors),
+		"localEligible":    d.LocalEligible,
+		"appEligible":      d.AppEligible,
+		"runnableApps":     toAnySlice(d.RunnableApps),
+		"localModelCount":  d.LocalModels,
+		"eligibleModelIds": toAnySlice(d.EligibleModelIds),
+		"cloudConfigured":  d.CloudConfigured,
 		// The cluster's own account, as every sentence that reads this field
 		// says ("workload-identity federation"). Whether a vendor can serve
 		// THIS caller is doorsOpen; whether a key of theirs is what pays is
 		// keyAccount.
 		"federationConfigured": d.ClusterFederation,
+		"clusterAccountOpen":   d.ClusterAccountOpen,
 		"keyAccount":           d.KeyAccount,
 		// fleetInferenceInstalled distinguishes "your machines are asleep"
 		// from "the node answering this request has no worker service at

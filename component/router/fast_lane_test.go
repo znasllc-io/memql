@@ -9,7 +9,7 @@ import (
 
 func shippedFleetRouter(t *testing.T, models []memql.FleetModel) *Router {
 	t.Helper()
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	providers.SetFleetInference(&stubFleetInference{models: models})
 	policies := memql.NewPolicyRegistryForTest(nil)
 	if _, err := memql.LoadUnifiedPolicies(nil, policies); err != nil {

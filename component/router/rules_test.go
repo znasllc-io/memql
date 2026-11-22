@@ -310,7 +310,7 @@ func TestApplyExcludes_RemovesTheEntryAsWritten(t *testing.T) {
 // router picking one on its own, which is exactly the pre-rules precedence
 // this epic deleted, arriving back with nothing to show it.
 func TestNilRuleRegistryIsARefusalNotAFallback(t *testing.T) {
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	providers.RegisterForTest("streamClaudeSonnet", "AnthropicStream", "claude-sonnet", &countingCloud{})
 	// There was a SetDefaultForTest call here, pinning that provider as the
 	// registry default so the refusal below could not be attributed to the

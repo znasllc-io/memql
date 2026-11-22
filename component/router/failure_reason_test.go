@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // machineFailure stands in for component/worker's ModelCallFailed: the router
@@ -26,5 +28,17 @@ func TestAMachineFailureIsNamedOnTheDecisionLine(t *testing.T) {
 	}
 	if strings.Contains(got, "ollama") {
 		t.Fatal("the runtime's text belongs on errorMessage, not on the decision line")
+	}
+}
+
+// A request the model declined is named as a decline. It is an ordinary error
+// with no code of its own, so before it had one the line read `failed when
+// called: other` and a reader could not tell a declined request from a broken
+// source.
+func TestADeclinedRequestIsNamedOnTheDecisionLine(t *testing.T) {
+	err := fmt.Errorf("anthropic structured (classify): %w", fmt.Errorf("anthropic: %w", memql.ErrModelDeclined))
+	got := FailureReason(err)
+	if got != "failed when called: model_declined: the model declined the request" {
+		t.Fatalf("FailureReason = %q", got)
 	}
 }

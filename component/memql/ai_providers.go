@@ -352,6 +352,11 @@ type ProviderRegistry struct {
 	// learned about one. Nil on a node where nothing installed it, which
 	// means no call is ever paid by a key -- see vendor_account.go.
 	vendorKeys VendorKeys
+	// clusterGate answers whether the cluster's own vendor account may pay
+	// for a call made for one person (owner decision 2026-11-22). The engine
+	// installs its own when it starts. Nil means it pays for no person's
+	// call, only for the cluster's own work -- see vendor_account_cluster.go.
+	clusterGate ClusterAccountGate
 }
 
 // ProviderConfigEntry stores metadata + instantiated client for a provider.
@@ -561,12 +566,14 @@ func (r *ProviderRegistry) Names() []string {
 // escape for when the ordinary chain already refused -- so making the escape
 // depend on the corpus would leave a person saying yes and nothing happening.
 //
-// ORDERED BY DECLARED CONTEXT WINDOW, TIE-BROKEN BY NAME, and both halves are
-// deliberate. Context window is the one capability every chat record declares,
-// so it is the only ordering available without epic memql#5146's measurements;
-// the name tie-break is what makes two replicas choose identically and a person
-// able to predict the answer. Map order -- which is what the deleted default
-// actually was -- would fail both.
+// ORDERED BY DECLARED RANK, THEN DECLARED CONTEXT WINDOW, THEN NAME. Rank is
+// what "strongest" means everywhere else (provider_job.go, the vendor
+// selectors), so the consent chain means the same thing by it. A record that
+// declares no rank sorts after every record that does, and the window orders
+// those: it is the one capability every chat record declares. The name
+// tie-break is what makes two replicas choose identically and a person able to
+// predict the answer. Map order -- which is what the deleted default actually
+// was -- would fail both.
 func (r *ProviderRegistry) FederatedByStrength() []string {
 	if r == nil {
 		return nil
@@ -576,6 +583,7 @@ func (r *ProviderRegistry) FederatedByStrength() []string {
 
 	type entry struct {
 		name   string
+		rank   int
 		window int
 	}
 	var candidates []entry
@@ -593,9 +601,12 @@ func (r *ProviderRegistry) FederatedByStrength() []string {
 		if e.Config.ResolvedModality() != ModalityText {
 			continue
 		}
-		candidates = append(candidates, entry{name: name, window: e.Config.ContextWindow()})
+		candidates = append(candidates, entry{name: name, rank: e.Config.Rank(), window: e.Config.ContextWindow()})
 	}
 	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].rank != candidates[j].rank {
+			return candidates[i].rank > candidates[j].rank
+		}
 		if candidates[i].window != candidates[j].window {
 			return candidates[i].window > candidates[j].window
 		}
@@ -2549,6 +2560,9 @@ func (p *anthropicProvider) Call(ctx context.Context, prompt string) (any, error
 		return nil, err
 	}
 	reportAnthropicUsage(ctx, resp.RawJSON())
+	if err := anthropicDeclined(string(resp.StopReason)); err != nil {
+		return nil, err
+	}
 
 	text := extractAnthropicText(resp)
 	if text == "" {
@@ -2597,6 +2611,9 @@ func (p *anthropicProvider) CallChat(ctx context.Context, messages []common.Chat
 		return "", err
 	}
 	reportAnthropicUsage(ctx, resp.RawJSON())
+	if err := anthropicDeclined(string(resp.StopReason)); err != nil {
+		return "", err
+	}
 
 	return extractAnthropicText(resp), nil
 }
@@ -2657,6 +2674,9 @@ func (p *anthropicProvider) CallChatWithTools(ctx context.Context, messages []co
 		return nil, err
 	}
 	reportAnthropicUsage(ctx, resp.RawJSON())
+	if err := anthropicDeclined(string(resp.StopReason)); err != nil {
+		return nil, err
+	}
 
 	result := &common.ToolCallingChatResult{
 		AssistantText: extractAnthropicText(resp),
@@ -2706,6 +2726,9 @@ func (p *anthropicProvider) CallVision(ctx context.Context, prompt string, image
 		return "", fmt.Errorf("vision api: %w", err)
 	}
 	reportAnthropicUsage(ctx, resp.RawJSON())
+	if err := anthropicDeclined(string(resp.StopReason)); err != nil {
+		return "", err
+	}
 	return strings.TrimSpace(extractAnthropicText(resp)), nil
 }
 
@@ -2878,6 +2901,9 @@ func (p *anthropicStreamProvider) CallChat(ctx context.Context, messages []commo
 		return "", err
 	}
 	reportAnthropicUsage(ctx, resp.RawJSON())
+	if err := anthropicDeclined(string(resp.StopReason)); err != nil {
+		return "", err
+	}
 	return extractAnthropicText(resp), nil
 }
 
@@ -2913,6 +2939,9 @@ func (p *anthropicStreamProvider) CallChatWithTools(ctx context.Context, message
 		return nil, err
 	}
 	reportAnthropicUsage(ctx, resp.RawJSON())
+	if err := anthropicDeclined(string(resp.StopReason)); err != nil {
+		return nil, err
+	}
 	result := &common.ToolCallingChatResult{
 		AssistantText: extractAnthropicText(resp),
 	}
@@ -2960,6 +2989,9 @@ func (p *anthropicStreamProvider) CallStream(ctx context.Context, prompt string)
 			usageCacheCreation int64
 			usageCacheRead     int64
 			usageOutput        int64
+			// stopReason is how the vendor said the reply ended; a decline
+			// ends the stream in an error (ai_anthropic_declined.go).
+			stopReason string
 		)
 		for stream.Next() {
 			event := stream.Current()
@@ -2971,6 +3003,9 @@ func (p *anthropicStreamProvider) CallStream(ctx context.Context, prompt string)
 				usageCacheCreation = u.CacheCreationInputTokens
 				usageCacheRead = u.CacheReadInputTokens
 			case "message_delta":
+				if reason := string(event.Delta.StopReason); reason != "" {
+					stopReason = reason
+				}
 				u := event.Usage
 				usageOutput = u.OutputTokens
 				if u.CacheCreationInputTokens > 0 {
@@ -3007,6 +3042,10 @@ func (p *anthropicStreamProvider) CallStream(ctx context.Context, prompt string)
 			chunks <- StreamChunk{Error: err, Done: true}
 			return
 		}
+		if err := anthropicDeclined(stopReason); err != nil {
+			chunks <- StreamChunk{Error: err, Done: true}
+			return
+		}
 		chunks <- StreamChunk{Done: true}
 	}()
 	return chunks, nil
@@ -3038,14 +3077,24 @@ func (p *anthropicStreamProvider) CallChatStream(ctx context.Context, messages [
 	chunks := make(chan common.StreamChunk, 100)
 	go func() {
 		defer close(chunks)
+		stopReason := ""
 		for stream.Next() {
 			event := stream.Current()
 			reportAnthropicUsage(ctx, event.RawJSON())
 			if event.Type == "content_block_delta" && event.Delta.Type == "text_delta" {
 				chunks <- common.StreamChunk{Content: event.Delta.Text}
 			}
+			if event.Type == "message_delta" && event.Delta.StopReason != "" {
+				stopReason = string(event.Delta.StopReason)
+			}
 		}
 		if err := stream.Err(); err != nil {
+			chunks <- common.StreamChunk{Error: err, Done: true}
+			return
+		}
+		// A decline ends the stream in an error, never in a clean Done
+		// (ai_anthropic_declined.go).
+		if err := anthropicDeclined(stopReason); err != nil {
 			chunks <- common.StreamChunk{Error: err, Done: true}
 			return
 		}
@@ -3131,6 +3180,9 @@ func (p *anthropicStreamProvider) CallChatStreamWithTools(ctx context.Context, m
 			usageCacheCreation int64
 			usageCacheRead     int64
 			usageOutput        int64
+			// stopReason is how the vendor said the reply ended; a decline
+			// ends the stream in an error (ai_anthropic_declined.go).
+			stopReason string
 		)
 
 		// Process the first event we peeked at outside the goroutine,
@@ -3147,6 +3199,9 @@ func (p *anthropicStreamProvider) CallChatStreamWithTools(ctx context.Context, m
 				usageCacheCreation = u.CacheCreationInputTokens
 				usageCacheRead = u.CacheReadInputTokens
 			case "message_delta":
+				if reason := string(event.Delta.StopReason); reason != "" {
+					stopReason = reason
+				}
 				u := event.Usage
 				usageOutput = u.OutputTokens
 				if u.CacheCreationInputTokens > 0 {
@@ -3209,6 +3264,10 @@ func (p *anthropicStreamProvider) CallChatStreamWithTools(ctx context.Context, m
 		)
 
 		if err := stream.Err(); err != nil {
+			chunks <- common.StreamToolChunk{Error: err, Done: true}
+			return
+		}
+		if err := anthropicDeclined(stopReason); err != nil {
 			chunks <- common.StreamToolChunk{Error: err, Done: true}
 			return
 		}

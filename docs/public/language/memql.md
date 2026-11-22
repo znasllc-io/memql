@@ -1822,6 +1822,16 @@ provider anthropic {
 
 The legacy `func (Provider) name { ... }` form is retired; the parser rejects it with a migration hint.
 
+**What a vendor text record declares in `params`.** A text model of Anthropic or OpenAI says what it is for, and the two vendor selectors a policy can name (`federation:strongest`, `federation:cheapest`) read nothing else:
+
+| Param | Meaning | Refused at load |
+|---|---|---|
+| `levels "<words>"` | The levels the model serves: one to three of `fast`, `strong`, `reasoning`, separated by spaces | Any other word, a repeated word, an empty value, `embeddings`, or the param on a record that is not a vendor's text model |
+| `rank <n>` | Its place among the records of a level, a whole number from 1 to 1000, higher first | A value outside the range, or the param on a record that is not a vendor's text model |
+| `structuredOutput "<word>"` | How a Claude record asks for structured output: `tool` (the default, a forced tool call) or `format` (the vendor's output format, for the models that refuse a forced tool call) | Any other word, or the param on a record that is not a Claude text model |
+
+A refused record is reported as a skip on the load report, which strict boot does not start on, and is not registered. A record that declares neither `levels` nor `rank` is legal: it resolves by name and both selectors pass it over. [AI routing](../operate/ai-routing.md#what-a-vendor-record-declares) has what the selectors do with them.
+
 **Provider types** (`@type`, matched without regard to case; the clients are in `component/memql/ai_providers.go`) are `OpenAI` / `OpenAIChat` (chat completions), `OpenAITTS` (text-to-speech) and `OpenAIEmbedding` (embeddings) for OpenAI, and `Anthropic` / `AnthropicChat` (Claude chat / vision) for Anthropic. `Fleet` and `SubscriptionApp` are accepted on a `@base` provider only: their models are named from a policy (`fleet:<model>`, `app:<id>`) rather than declared as children. Streaming is a parameter (`streaming true` in `params`), not a type, and a child that `@extends` a base takes the base's type. Any other type leaves the provider registered but unavailable (`unsupported provider type`).
 
 **Lifecycle annotation (`@disabled`).** Providers accept the same lifecycle flag as every other construct kind (the uniform ruling, #2604-#2608). `@enabled` was the explicit-on form and is **retired** (memql#5375, refused at parse as `annotation_retired`): constructs are on by default, so it was a no-op that read like a switch; `memqlmigrate --rewrite=attributes` deletes it. `@disabled` skips the provider at load — it is **not registered and no auth resolution is attempted** — while staying in the tree for a future re-enable. `@disabled` on a `@base` **propagates**: every child that `@extends` it is skipped too. Dependents degrade gracefully — a policy whose `@primary` is disabled routes via its `@fallback`; a prompt whose `@defaultProvider` is disabled falls back to the default.
