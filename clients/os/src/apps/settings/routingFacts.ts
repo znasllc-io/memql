@@ -125,10 +125,33 @@ export interface InferenceReading {
   appEligible: boolean;
   runnableApps: string[];
   appSessionsInstalled: boolean;
+  /** The CLUSTER'S OWN account at a vendor: its workload identity federation. */
   federationConfigured: boolean;
+  /** This reader has an API key that can pay for a vendor model on a route they choose. */
+  keyAccount: boolean;
   fleetInferenceInstalled: boolean;
   fleetCatalogInstalled: boolean;
   error: string;
+}
+
+/**
+ * The vendor door, in the reader's words, by what can pay for it.
+ *
+ * `inferenceStatus` lists the door as `federation`, the name it had when the
+ * cluster's federation was the only account behind it. A person's API key is a
+ * second account behind the same door (design record
+ * 2026-11-21-vendor-accounts-and-api-keys, A8), so what the door is CALLED is
+ * read off the two facts beside it. Calling it federation for somebody whose
+ * key is what pays would tell them the cluster has an account it does not.
+ *
+ * One function, because three surfaces say it (Cluster > Readiness, Fleet >
+ * Model library, and the routing sources) and they must not differ.
+ */
+export function vendorDoorWords(federationConfigured: boolean, keyAccount: boolean): string {
+  if (federationConfigured && keyAccount) return "workload-identity federation and an API key of yours";
+  if (keyAccount) return "an API key of yours";
+  if (federationConfigured) return "workload-identity federation";
+  return "a vendor account";
 }
 
 export const UNREAD_INFERENCE: InferenceReading = {
@@ -144,6 +167,7 @@ export const UNREAD_INFERENCE: InferenceReading = {
   runnableApps: [],
   appSessionsInstalled: false,
   federationConfigured: false,
+  keyAccount: false,
   fleetInferenceInstalled: false,
   fleetCatalogInstalled: false,
   error: "",
@@ -192,6 +216,7 @@ export function inferenceFrom(row: Row | null | undefined, error: string): Infer
     runnableApps: strings(r, "runnableApps"),
     appSessionsInstalled: bool(r, "appSessionsInstalled"),
     federationConfigured: bool(r, "federationConfigured"),
+    keyAccount: bool(r, "keyAccount"),
     fleetInferenceInstalled: bool(r, "fleetInferenceInstalled"),
     fleetCatalogInstalled: bool(r, "fleetCatalogInstalled"),
     error,

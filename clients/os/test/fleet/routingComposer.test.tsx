@@ -247,7 +247,7 @@ describe("the tray hides nothing", () => {
     expect(codex.getAttribute("aria-label")).toBe("Codex: not installed on any machine");
     expect(codex.hasAttribute("data-ready")).toBe(false);
     expect(tray(/^Claude Code:/).getAttribute("aria-label")).toBe("Claude Code: ready");
-    expect(tray(/^Cheapest vendor:/).getAttribute("aria-label")).toBe("Cheapest vendor: no vendor set up");
+    expect(tray(/^Cheapest vendor:/).getAttribute("aria-label")).toBe("Cheapest vendor: no API key or vendor account");
   });
 
   it("offers to add a machine where there is none", async () => {

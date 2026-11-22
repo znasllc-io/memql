@@ -29,6 +29,7 @@ import { CatalogSection } from "./CatalogSection";
 import { EmbeddingStatus } from "./EmbeddingStatus";
 import { eligibleFor, formatContext, formatParams, orderModels, type ModelNeeds } from "./ordering";
 import { useInference, type CatalogModel, type DoorsReading } from "./useInference";
+import { vendorDoorWords } from "../../settings/routingFacts";
 
 // Models: what this fleet can actually serve, in the order the router would
 // pick from (epic memql#5096).
@@ -373,10 +374,12 @@ function DoorsPanel({
             />
             <DoorState
               name="Federation"
-              open={doors.federationConfigured}
+              // Open when an account can pay for a vendor's models for this
+              // reader: the cluster's federation, or an API key of theirs.
+              open={doors.federationConfigured || doors.keyAccount}
               detail={
-                doors.federationConfigured
-                  ? "workload-identity federation"
+                doors.federationConfigured || doors.keyAccount
+                  ? vendorDoorWords(doors.federationConfigured, doors.keyAccount)
                   : doors.cloudConfigured
                     ? // A callable cloud provider that is not federated cannot
                       // happen since epic memql#5088, and this is the one line
@@ -537,7 +540,7 @@ function ModelLine({
 
 /** The doors in a sentence, because the first question is not a list. */
 function doorSentence(doors: DoorsReading): string {
-  const open = doors.doorsOpen.map(doorWord);
+  const open = doors.doorsOpen.map((door) => doorWord(door, doors));
   if (open.length === 0) {
     return "No inference source is available. Connect a model or a signed-in app to run tasks that need inference.";
   }
@@ -547,7 +550,7 @@ function doorSentence(doors: DoorsReading): string {
 
 /** The doors in the reader's words. An unrecognised value is printed as it
  *  came, never dropped: a door this build has no name for is still a door. */
-function doorWord(door: string): string {
+function doorWord(door: string, doors: Pick<DoorsReading, "federationConfigured" | "keyAccount">): string {
   switch (door) {
     case "local":
       // Yours, or lent to you (epic memql#5344): a person's catalog holds
@@ -556,11 +559,14 @@ function doorWord(door: string): string {
     case "app":
       return "a signed-in app on one of your machines";
     case "federation":
-      return "workload-identity federation";
-    // `apiKey` has no case, because it has no producer: the door went with the
-    // vendor keys (epic memql#5088). An older node still reporting it falls
-    // through to the pass-through below and is printed as it came, which is
-    // the right treatment for a value from a build this one does not know.
+      // The vendor door, named by what pays: the cluster's federation, an API
+      // key of the reader's, or both.
+      return vendorDoorWords(doors.federationConfigured, doors.keyAccount);
+    // `apiKey` has no case, because nothing produces it: a person's API key is
+    // an account behind the vendor door above, not a door of its own. An older
+    // node still reporting it falls through to the pass-through below and is
+    // printed as it came, which is the right treatment for a value from a
+    // build this one does not know.
     default:
       return door;
   }
