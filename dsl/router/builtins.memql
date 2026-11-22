@@ -134,3 +134,75 @@ builtin myBudgetSave {
 @sdk
 @executor("fleetCapacity")
 builtin fleetCapacity { }
+
+// ---- API keys (design record 2026-11-21-vendor-accounts-and-api-keys) ----
+//
+// A person's own API key at a model vendor: the second kind of account that can pay for a vendor
+// call, beside the cluster's own. Every client path to a key is one of these builtins. The rows
+// beneath them are read and written by integrations/vendorkeys alone, and each builtin decides who
+// is asking before it reads or writes anything.
+//
+// THE KEY CROSSES THE WIRE ONCE, in vendorKeyAdd, for the reason a source credential's token does: a
+// secret cannot be sealed in a browser, because the key that seals it exists on nodes and must
+// never exist on a laptop. It is sealed there and never sent back. No builtin returns it.
+//
+// A KEY IS ADDED AND CHANGED BY A PERSON, IN THEIR OWN SESSION. Not by a personal access token, a
+// badge, delegated access or a step of a run: a key spends its owner's money, and a run's journal
+// would keep whatever a step was handed.
+
+/// Add an API key for Anthropic or OpenAI, as yours. The key is checked first, by listing the
+/// vendor's models with it, which sends no prompt and costs nothing; a key the vendor refuses is
+/// not saved. Then it is sealed and stored. Your first key at a vendor is your default there. One
+/// row: the key's card, which never carries the key.
+@sdk
+@executor("integration.vendorkeys.add")
+@args(profile="object")
+@requiresCapability("execute", "app:fleet/keys")
+builtin vendorKeyAdd {
+  vendor  enum("anthropic", "openai")!  @description("The vendor the key is for.")
+  label   string!  @description("Your name for the key, 1 to 60 characters, unlike your other keys' names.")
+  key     string!  @secret @description("The API key itself. Read once, checked, sealed and discarded; never stored or echoed in the clear. An organization's admin key is refused.")
+}
+
+/// The API keys you can see. One row: {mine, lent, all}. `mine` are your own keys, with their state
+/// and settings. `lent` are short cards of keys other people lent to you: the name, the vendor, the
+/// owner and whether it works. `all` is every active key on the cluster, for a cluster owner who
+/// asks, and is empty for anybody else. No card carries a key's value.
+@sdk
+@executor("integration.vendorkeys.forActor")
+@args(profile="object")
+builtin vendorKeysForActor {
+  all  boolean  @description("A cluster owner may ask for every active key on the cluster, to stop one. Ignored for anybody else.")
+}
+
+/// Change one of your keys: its name, whether it is your default at its vendor, and whether Auto
+/// may use it. Leave out what you are not changing. Only the key's owner may: a cluster owner can
+/// check and remove a key and cannot change one. One row: the key's card.
+@sdk
+@executor("integration.vendorkeys.update")
+@args(profile="object")
+builtin vendorKeyUpdate {
+  keyId      string!  @description("The key to change.")
+  label      string   @description("A new name, 1 to 60 characters.")
+  isDefault  boolean  @description("True makes this your default key at its vendor, in place of the one that was.")
+  autoUse    boolean  @description("True lets Auto pay with this key, for you and for the people it is lent to. Off for a new key.")
+}
+
+/// Check a key now, by listing its vendor's models with it. It sends no prompt and costs nothing.
+/// The key's owner or a cluster owner may. One row: the key's card after the check.
+@sdk
+@executor("integration.vendorkeys.check")
+@args(profile="object")
+builtin vendorKeyCheck {
+  keyId  string!  @description("The key to check.")
+}
+
+/// Remove a key. It stops paying at once and is never used again; the record of it stays. This does
+/// not revoke the key at the vendor: delete it there too. The key's owner or a cluster owner may.
+/// One row: the key's card.
+@sdk
+@executor("integration.vendorkeys.remove")
+@args(profile="object")
+builtin vendorKeyRemove {
+  keyId  string!  @description("The key to remove.")
+}

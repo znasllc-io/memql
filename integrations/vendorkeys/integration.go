@@ -1,6 +1,7 @@
 package vendorkeys
 
 import (
+	"context"
 	"log/slog"
 
 	"github.com/znasllc-io/memql/component/memql"
@@ -37,18 +38,80 @@ type Integration struct {
 	store    *Store
 	resolver *Resolver
 	logger   *slog.Logger
+	// probe asks a vendor whether it accepts a key, by listing its models
+	// (memql.ProviderRegistry.ProbeVendorKey). A field so a test can stand a
+	// vendor in without a server.
+	probe func(ctx context.Context, vendor, key string) memql.VendorKeyProbe
 }
 
 // NewIntegration builds the integration over a store and its resolver.
-func NewIntegration(store *Store, resolver *Resolver, logger *slog.Logger) *Integration {
+// providers is the node's provider registry, which knows where this cluster
+// sends each vendor's calls and makes the check; with none, every check
+// answers that the vendor could not be reached, and no key is saved.
+func NewIntegration(store *Store, resolver *Resolver, providers *memql.ProviderRegistry, logger *slog.Logger) *Integration {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Integration{store: store, resolver: resolver, logger: logger}
+	i := &Integration{store: store, resolver: resolver, logger: logger}
+	i.probe = func(ctx context.Context, vendor, key string) memql.VendorKeyProbe {
+		if providers == nil {
+			return memql.VendorKeyProbe{
+				Verdict: memql.VendorKeyProbeUnreachable,
+				Detail:  "This node cannot reach a model vendor, so the key could not be checked.",
+			}
+		}
+		return providers.ProbeVendorKey(ctx, vendor, key)
+	}
+	return i
 }
 
 // IntegrationName implements memql.IntegrationProvider.
 func (i *Integration) IntegrationName() string { return "vendorkeys" }
 
 // Capabilities implements memql.IntegrationProvider.
-func (i *Integration) Capabilities() []memql.IntegrationCapability { return nil }
+func (i *Integration) Capabilities() []memql.IntegrationCapability {
+	return []memql.IntegrationCapability{
+		{
+			Name: "add",
+			Description: "Add an API key for Anthropic or OpenAI as the caller's own. The key is checked by listing the vendor's models, " +
+				"sealed and stored. Returns the key's card, which never carries the key.",
+			Handler: i.handleAdd,
+			ArgsSchema: map[string]string{
+				"vendor": "string (required) -- anthropic or openai.",
+				"label":  "string (required) -- the owner's name for the key, 1 to 60 characters.",
+				"key":    "string (required) -- the API key. Read once, checked, sealed and discarded.",
+			},
+		},
+		{
+			Name:        "forActor",
+			Description: "The keys the caller can see: their own, short cards of keys lent to them, and for a cluster owner who asks, every active key.",
+			Handler:     i.handleForActor,
+			ArgsSchema: map[string]string{
+				"all": "boolean (optional) -- a cluster owner may ask for every active key on the cluster.",
+			},
+		},
+		{
+			Name:        "update",
+			Description: "Change the owner's settings on one of their keys: its name, whether it is the default at its vendor, and whether Auto may use it.",
+			Handler:     i.handleUpdate,
+			ArgsSchema: map[string]string{
+				"keyId":     "string (required) -- the key to change.",
+				"label":     "string (optional) -- a new name, 1 to 60 characters.",
+				"isDefault": "boolean (optional) -- true makes it the owner's default at its vendor.",
+				"autoUse":   "boolean (optional) -- whether Auto may pay with it.",
+			},
+		},
+		{
+			Name:        "check",
+			Description: "Check a key now by listing its vendor's models with it, which sends no prompt. The key's owner or a cluster owner may.",
+			Handler:     i.handleCheck,
+			ArgsSchema:  map[string]string{"keyId": "string (required) -- the key to check."},
+		},
+		{
+			Name:        "remove",
+			Description: "Remove a key. It stops paying at once and is never used again; the record stays. The key's owner or a cluster owner may.",
+			Handler:     i.handleRemove,
+			ArgsSchema:  map[string]string{"keyId": "string (required) -- the key to remove."},
+		},
+	}
+}

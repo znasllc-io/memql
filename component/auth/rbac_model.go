@@ -263,10 +263,15 @@ var appPartGrants = map[string][]Role{
 	"app:pipelines/channels":     {RoleOwner, RoleDeveloper},
 	"app:pipelines/requests":     {RoleOwner, RoleDeveloper},
 	"app:settings/connections":   {RoleOwner, RoleDeveloper},
-	"app:deployables/deploy":     {RoleOwner, RoleDeveloper},
-	"app:deployables/publish":    {RoleOwner, RoleDeveloper},
-	"app:deployables/retire":     {RoleOwner, RoleDeveloper},
-	"app:deployables/domains":    {RoleOwner, RoleDeveloper},
+	// Adding an API key of one's own at a model vendor (design record
+	// 2026-11-21-vendor-accounts-and-api-keys, K4). Owner and developer, the
+	// people who can open Fleet. A part of its own because the act puts a
+	// credential that spends a person's money on the cluster.
+	"app:fleet/keys":          {RoleOwner, RoleDeveloper},
+	"app:deployables/deploy":  {RoleOwner, RoleDeveloper},
+	"app:deployables/publish": {RoleOwner, RoleDeveloper},
+	"app:deployables/retire":  {RoleOwner, RoleDeveloper},
+	"app:deployables/domains": {RoleOwner, RoleDeveloper},
 	// Publishing a CANDIDATE version and exercising it against a development
 	// store (epic memql#5531). Owner and developer, and the line between this
 	// part and `publish` is the one that epic draws: preparing and proving a

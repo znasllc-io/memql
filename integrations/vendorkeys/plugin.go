@@ -41,7 +41,7 @@ func init() {
 		if pctx.Providers != nil {
 			pctx.Providers.SetVendorKeys(resolver)
 		}
-		return NewIntegration(store, resolver, pctx.Logger), nil
+		return NewIntegration(store, resolver, pctx.Providers, pctx.Logger), nil
 	})
 }
 

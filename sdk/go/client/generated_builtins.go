@@ -11562,6 +11562,158 @@ func TrainingChunksBrowseBuild(args TrainingChunksBrowseArgs) string {
 	return b.String()
 }
 
+// VendorKeyAdd -- Add an API key for Anthropic or OpenAI, as yours. The key is checked first, by listing the vendor's models with it, which sends no prompt and costs nothing; a key the vendor refuses is not saved. Then it is sealed and stored. Your first key at a vendor is your default there. One row: the key's card, which never carries the key.
+type VendorKeyAddArgs struct {
+	// The vendor the key is for.
+	// Enum: anthropic | openai
+	Vendor string
+	// Your name for the key, 1 to 60 characters, unlike your other keys' names.
+	Label string
+	// The API key itself. Read once, checked, sealed and discarded; never stored or echoed in the clear. An organization's admin key is refused.
+	Key string
+}
+
+// VendorKeyAdd calls the engine builtin vendorKeyAdd.
+func (qc *QueryClient) VendorKeyAdd(ctx context.Context, args VendorKeyAddArgs) (*Result, error) {
+	call := VendorKeyAddBuild(args)
+	return qc.executeNamed(ctx, "vendorKeyAdd", call)
+}
+
+func VendorKeyAddBuild(args VendorKeyAddArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin vendorKeyAdd(")
+	b.WriteString("vendor: ")
+	b.WriteString(quoteMemQL(args.Vendor))
+	if b.Len() > 21 {
+		b.WriteString(", ")
+	}
+	b.WriteString("label: ")
+	b.WriteString(quoteMemQL(args.Label))
+	if b.Len() > 21 {
+		b.WriteString(", ")
+	}
+	b.WriteString("key: ")
+	b.WriteString(quoteMemQL(args.Key))
+	b.WriteString(")")
+	return b.String()
+}
+
+// VendorKeyCheck -- Check a key now, by listing its vendor's models with it. It sends no prompt and costs nothing. The key's owner or a cluster owner may. One row: the key's card after the check.
+type VendorKeyCheckArgs struct {
+	// The key to check.
+	KeyId string
+}
+
+// VendorKeyCheck calls the engine builtin vendorKeyCheck.
+func (qc *QueryClient) VendorKeyCheck(ctx context.Context, args VendorKeyCheckArgs) (*Result, error) {
+	call := VendorKeyCheckBuild(args)
+	return qc.executeNamed(ctx, "vendorKeyCheck", call)
+}
+
+func VendorKeyCheckBuild(args VendorKeyCheckArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin vendorKeyCheck(")
+	b.WriteString("keyId: ")
+	b.WriteString(quoteMemQL(args.KeyId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// VendorKeyRemove -- Remove a key. It stops paying at once and is never used again; the record of it stays. This does not revoke the key at the vendor: delete it there too. The key's owner or a cluster owner may. One row: the key's card.
+type VendorKeyRemoveArgs struct {
+	// The key to remove.
+	KeyId string
+}
+
+// VendorKeyRemove calls the engine builtin vendorKeyRemove.
+func (qc *QueryClient) VendorKeyRemove(ctx context.Context, args VendorKeyRemoveArgs) (*Result, error) {
+	call := VendorKeyRemoveBuild(args)
+	return qc.executeNamed(ctx, "vendorKeyRemove", call)
+}
+
+func VendorKeyRemoveBuild(args VendorKeyRemoveArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin vendorKeyRemove(")
+	b.WriteString("keyId: ")
+	b.WriteString(quoteMemQL(args.KeyId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// VendorKeyUpdate -- Change one of your keys: its name, whether it is your default at its vendor, and whether Auto may use it. Leave out what you are not changing. Only the key's owner may: a cluster owner can check and remove a key and cannot change one. One row: the key's card.
+type VendorKeyUpdateArgs struct {
+	// The key to change.
+	KeyId string
+	// A new name, 1 to 60 characters.
+	Label string
+	// True makes this your default key at its vendor, in place of the one that was.
+	IsDefault    bool
+	IsDefaultSet bool // set true to send isDefault; required because zero-value bool is ambiguous
+	// True lets Auto pay with this key, for you and for the people it is lent to. Off for a new key.
+	AutoUse    bool
+	AutoUseSet bool // set true to send autoUse; required because zero-value bool is ambiguous
+}
+
+// VendorKeyUpdate calls the engine builtin vendorKeyUpdate.
+func (qc *QueryClient) VendorKeyUpdate(ctx context.Context, args VendorKeyUpdateArgs) (*Result, error) {
+	call := VendorKeyUpdateBuild(args)
+	return qc.executeNamed(ctx, "vendorKeyUpdate", call)
+}
+
+func VendorKeyUpdateBuild(args VendorKeyUpdateArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin vendorKeyUpdate(")
+	b.WriteString("keyId: ")
+	b.WriteString(quoteMemQL(args.KeyId))
+	if args.Label != "" {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("label: ")
+		b.WriteString(quoteMemQL(args.Label))
+	}
+	if args.IsDefaultSet {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("isDefault: ")
+		b.WriteString(fmt.Sprintf("%v", args.IsDefault))
+	}
+	if args.AutoUseSet {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("autoUse: ")
+		b.WriteString(fmt.Sprintf("%v", args.AutoUse))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// VendorKeysForActor -- The API keys you can see. One row: {mine, lent, all}. `mine` are your own keys, with their state and settings. `lent` are short cards of keys other people lent to you: the name, the vendor, the owner and whether it works. `all` is every active key on the cluster, for a cluster owner who asks, and is empty for anybody else. No card carries a key's value.
+type VendorKeysForActorArgs struct {
+	// A cluster owner may ask for every active key on the cluster, to stop one. Ignored for anybody else.
+	All    bool
+	AllSet bool // set true to send all; required because zero-value bool is ambiguous
+}
+
+// VendorKeysForActor calls the engine builtin vendorKeysForActor.
+func (qc *QueryClient) VendorKeysForActor(ctx context.Context, args VendorKeysForActorArgs) (*Result, error) {
+	call := VendorKeysForActorBuild(args)
+	return qc.executeNamed(ctx, "vendorKeysForActor", call)
+}
+
+func VendorKeysForActorBuild(args VendorKeysForActorArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin vendorKeysForActor(")
+	if args.AllSet {
+		b.WriteString("all: ")
+		b.WriteString(fmt.Sprintf("%v", args.All))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkAcceptGoalResults -- Accept the exact finished results after the owner reviews them. Only a human interactive request may close the goal this way; model success is not acceptance.
 type WorkAcceptGoalResultsArgs struct {
 	GoalId string

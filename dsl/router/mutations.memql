@@ -337,7 +337,7 @@ mutation vendorKeyState createVendorKeyState {
   args {
     keyId       string!
     vendor      enum("anthropic", "openai")!
-    state       enum("good", "refused", "credit")!
+    state       enum("good", "refused", "credit", "unchecked")!
     evidenceAt  datetime!
     checkedAt   datetime
     goodAt      datetime
@@ -365,7 +365,7 @@ mutation vendorKeyState createVendorKeyState {
 mutation vendorKeyState updateVendorKeyState {
   args {
     keyId       string!
-    state       enum("good", "refused", "credit")
+    state       enum("good", "refused", "credit", "unchecked")
     evidenceAt  datetime
     detail      string  @maxLength(300)
     heldUntil   datetime

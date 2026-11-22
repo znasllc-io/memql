@@ -86,14 +86,20 @@ func (r *Resolver) Observe(ctx context.Context, a memql.VendorAccount, verdict m
 	if a.Kind != memql.VendorAccountKey || keyId == "" || at.IsZero() {
 		return
 	}
-	if err := r.store.observe(ctx, keyId, verdict, at.UTC(), detail); err != nil {
+	if err := r.store.observe(ctx, keyId, verdict, at.UTC(), detail, false); err != nil {
 		r.store.logger.Warn("vendorkeys: what a call learned about an API key was not recorded",
 			"keyId", keyId, "verdict", string(verdict), "error", err)
 	}
 }
 
 // observe records one verdict under the key's state gate.
-func (s *Store) observe(ctx context.Context, keyId string, verdict memql.VendorKeyVerdict, at time.Time, detail string) error {
+//
+// checked says the verdict came from a CHECK (the models were listed) rather
+// than from a call the key paid for. A check stamps checkedAt and is always
+// written, since being asked is what a person wanted recorded; it is not a
+// use, so it leaves lastUsedAt alone.
+func (s *Store) observe(ctx context.Context, keyId string, verdict memql.VendorKeyVerdict, at time.Time, detail string, checked bool) error {
+	at = at.UTC()
 	release, ok, err := s.lockState(ctx, keyId)
 	if err != nil {
 		return err
@@ -119,10 +125,15 @@ func (s *Store) observe(ctx context.Context, keyId string, verdict memql.VendorK
 	// Nanoseconds, because evidence is compared: two verdicts inside one
 	// second must still be ordered.
 	stamp := at.Format(time.RFC3339Nano)
-	fields := map[string]any{"evidenceAt": stamp, "lastUsedAt": stamp}
+	fields := map[string]any{"evidenceAt": stamp}
+	if checked {
+		fields["checkedAt"] = stamp
+	} else {
+		fields["lastUsedAt"] = stamp
+	}
 	switch verdict {
 	case memql.VendorKeyGood:
-		if state.State == StateGood && at.Sub(state.GoodAt) < goodStampEvery {
+		if !checked && state.State == StateGood && at.Sub(state.GoodAt) < goodStampEvery {
 			return nil
 		}
 		fields["state"], fields["goodAt"] = StateGood, stamp

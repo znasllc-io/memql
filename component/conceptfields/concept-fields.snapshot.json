@@ -6751,7 +6751,8 @@
         "state": [
           "credit",
           "good",
-          "refused"
+          "refused",
+          "unchecked"
         ],
         "vendor": [
           "anthropic",

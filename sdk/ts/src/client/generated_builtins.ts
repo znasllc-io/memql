@@ -8922,6 +8922,132 @@ QueryClient.prototype.trainingChunksBrowse = function (this: QueryClient, args: 
   return this.executeNamed("trainingChunksBrowse", buildTrainingChunksBrowse(args), opts);
 };
 
+/** Add an API key for Anthropic or OpenAI, as yours. The key is checked first, by listing the vendor's models with it, which sends no prompt and costs nothing; a key the vendor refuses is not saved. Then it is sealed and stored. Your first key at a vendor is your default there. One row: the key's card, which never carries the key. */
+export interface VendorKeyAddArgs {
+  /** The vendor the key is for. */
+  // Enum: anthropic | openai
+  vendor: string;
+  /** Your name for the key, 1 to 60 characters, unlike your other keys' names. */
+  label: string;
+  /** The API key itself. Read once, checked, sealed and discarded; never stored or echoed in the clear. An organization's admin key is refused. */
+  key: string;
+}
+
+export function buildVendorKeyAdd(args: VendorKeyAddArgs): string {
+  const parts: string[] = [];
+  parts.push("vendor: " + renderMemQLValue(args.vendor));
+  parts.push("label: " + renderMemQLValue(args.label));
+  parts.push("key: " + renderMemQLValue(args.key));
+  return "builtin vendorKeyAdd(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    vendorKeyAdd(args: VendorKeyAddArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.vendorKeyAdd = function (this: QueryClient, args: VendorKeyAddArgs = {} as VendorKeyAddArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("vendorKeyAdd", buildVendorKeyAdd(args), opts);
+};
+
+/** Check a key now, by listing its vendor's models with it. It sends no prompt and costs nothing. The key's owner or a cluster owner may. One row: the key's card after the check. */
+export interface VendorKeyCheckArgs {
+  /** The key to check. */
+  keyId: string;
+}
+
+export function buildVendorKeyCheck(args: VendorKeyCheckArgs): string {
+  const parts: string[] = [];
+  parts.push("keyId: " + renderMemQLValue(args.keyId));
+  return "builtin vendorKeyCheck(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    vendorKeyCheck(args: VendorKeyCheckArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.vendorKeyCheck = function (this: QueryClient, args: VendorKeyCheckArgs = {} as VendorKeyCheckArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("vendorKeyCheck", buildVendorKeyCheck(args), opts);
+};
+
+/** Remove a key. It stops paying at once and is never used again; the record of it stays. This does not revoke the key at the vendor: delete it there too. The key's owner or a cluster owner may. One row: the key's card. */
+export interface VendorKeyRemoveArgs {
+  /** The key to remove. */
+  keyId: string;
+}
+
+export function buildVendorKeyRemove(args: VendorKeyRemoveArgs): string {
+  const parts: string[] = [];
+  parts.push("keyId: " + renderMemQLValue(args.keyId));
+  return "builtin vendorKeyRemove(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    vendorKeyRemove(args: VendorKeyRemoveArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.vendorKeyRemove = function (this: QueryClient, args: VendorKeyRemoveArgs = {} as VendorKeyRemoveArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("vendorKeyRemove", buildVendorKeyRemove(args), opts);
+};
+
+/** Change one of your keys: its name, whether it is your default at its vendor, and whether Auto may use it. Leave out what you are not changing. Only the key's owner may: a cluster owner can check and remove a key and cannot change one. One row: the key's card. */
+export interface VendorKeyUpdateArgs {
+  /** The key to change. */
+  keyId: string;
+  /** A new name, 1 to 60 characters. */
+  label?: string;
+  /** True makes this your default key at its vendor, in place of the one that was. */
+  isDefault?: boolean;
+  /** True lets Auto pay with this key, for you and for the people it is lent to. Off for a new key. */
+  autoUse?: boolean;
+}
+
+export function buildVendorKeyUpdate(args: VendorKeyUpdateArgs): string {
+  const parts: string[] = [];
+  parts.push("keyId: " + renderMemQLValue(args.keyId));
+  if (args.label !== undefined) parts.push("label: " + renderMemQLValue(args.label));
+  if (args.isDefault !== undefined) parts.push("isDefault: " + renderMemQLValue(args.isDefault));
+  if (args.autoUse !== undefined) parts.push("autoUse: " + renderMemQLValue(args.autoUse));
+  return "builtin vendorKeyUpdate(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    vendorKeyUpdate(args: VendorKeyUpdateArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.vendorKeyUpdate = function (this: QueryClient, args: VendorKeyUpdateArgs = {} as VendorKeyUpdateArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("vendorKeyUpdate", buildVendorKeyUpdate(args), opts);
+};
+
+/** The API keys you can see. One row: {mine, lent, all}. `mine` are your own keys, with their state and settings. `lent` are short cards of keys other people lent to you: the name, the vendor, the owner and whether it works. `all` is every active key on the cluster, for a cluster owner who asks, and is empty for anybody else. No card carries a key's value. */
+export interface VendorKeysForActorArgs {
+  /** A cluster owner may ask for every active key on the cluster, to stop one. Ignored for anybody else. */
+  all?: boolean;
+}
+
+export function buildVendorKeysForActor(args: VendorKeysForActorArgs): string {
+  const parts: string[] = [];
+  if (args.all !== undefined) parts.push("all: " + renderMemQLValue(args.all));
+  return "builtin vendorKeysForActor(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    vendorKeysForActor(args: VendorKeysForActorArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.vendorKeysForActor = function (this: QueryClient, args: VendorKeysForActorArgs = {} as VendorKeysForActorArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("vendorKeysForActor", buildVendorKeysForActor(args), opts);
+};
+
 /** Accept the exact finished results after the owner reviews them. Only a human interactive request may close the goal this way; model success is not acceptance. */
 export interface WorkAcceptGoalResultsArgs {
   goalId: string;

@@ -467,6 +467,16 @@ seed capability cap-owner-read-app-fleet-logs { roleSlug: "owner"  verb: "read" 
 @description("developer: read Fleet logs.")
 seed capability cap-developer-read-app-fleet-logs { roleSlug: "developer"  verb: "read"  resourceType: "app:fleet/logs"  predefined: true }
 
+// ---- app:fleet/keys -- add an API key of one's own (design record 2026-11-21-vendor-accounts-and-api-keys, K4) ----
+// A part of its own rather than a reading of `read app:fleet`: adding a key puts a credential that
+// spends a person's money on the cluster. Owner and developer, the people who can open Fleet and
+// who bring machines; anyone else needs a grant of the part and of Fleet. Changing, lending and
+// removing a key need no part: they are its owner's, whoever its owner is by then.
+@description("owner: add an API key of one's own in Fleet.")
+seed capability cap-owner-execute-app-fleet-keys { roleSlug: "owner"  verb: "execute"  resourceType: "app:fleet/keys"  predefined: true }
+@description("developer: add an API key of one's own in Fleet.")
+seed capability cap-developer-execute-app-fleet-keys { roleSlug: "developer"  verb: "execute"  resourceType: "app:fleet/keys"  predefined: true }
+
 // ---- app:logs (registry floor: min admin) ----
 @description("owner: open the logs app -- reproduces the OS registry floor min admin (memql#5300).")
 seed capability cap-owner-read-app-logs { roleSlug: "owner"  verb: "read"  resourceType: "app:logs"  predefined: true }

@@ -129,6 +129,9 @@ type NewKey struct {
 	Id, Vendor, Label, Fingerprint, CheckedBy string
 	IsDefault                                 bool
 	Sealed                                    sealedValue
+	// CheckedAt is when the check that let the key in started: the time of
+	// the evidence its state is born with. Zero is the store's clock.
+	CheckedAt time.Time
 }
 
 // Settings are the owner's settings on a key. A nil field is left as it was.
@@ -265,6 +268,21 @@ func (s *Store) sealed(ctx context.Context, keyId string) (value sealedValue, ve
 	return sealedValue(rowString(row, "encryptedValue")), rowString(row, "vendor"), rowString(row, "status"), true, nil
 }
 
+// UserName is a person's display name, for a card, or "" when they are not an
+// active user or could not be read. A name is decoration: nothing decides by it.
+func (s *Store) UserName(ctx context.Context, userId string) string {
+	userId = memql.BareShortId(userId)
+	if userId == "" || auth.NamesNoPerson(userId) {
+		return ""
+	}
+	call, err := langparser.RenderCall("userByIdSystem", map[string]any{"userId": userId})
+	rows, err := s.read(ctx, "a key owner's name", call, err)
+	if err != nil || len(rows) == 0 {
+		return ""
+	}
+	return rowString(rows[0], "displayName")
+}
+
 // UserIsActive reports whether a person is an active user of this cluster. A
 // key stops serving when its owner stops being one (K16).
 func (s *Store) UserIsActive(ctx context.Context, userId string) (bool, error) {
@@ -281,7 +299,6 @@ func (s *Store) UserIsActive(ctx context.Context, userId string) (bool, error) {
 }
 
 // Create stores a new key and starts the engine's record of it, as the owner.
-// The key was checked a moment ago, so its state is born good as of now.
 //
 // TWO WRITES, AND THE KEY FIRST. A key with no state row is a key nothing was
 // observed about, which reads as usable and is corrected by its first call or
@@ -296,20 +313,28 @@ func (s *Store) Create(ctx context.Context, owner string, key NewKey) error {
 	if id == "" || key.Sealed.reveal() == "" {
 		return errors.New("vendorkeys: an API key needs an id and a sealed value")
 	}
-	at := s.now().UTC().Format(time.RFC3339Nano)
+	added := s.now().UTC()
+	checked := key.CheckedAt.UTC()
+	if key.CheckedAt.IsZero() {
+		checked = added
+	}
+	at := checked.Format(time.RFC3339Nano)
 	call, err := langparser.RenderCall("createVendorKey", map[string]any{
 		"keyId": id, "vendor": key.Vendor, "label": key.Label,
 		"encryptedValue": key.Sealed.reveal(), "fingerprint": key.Fingerprint,
-		"isDefault": key.IsDefault, "checkedBy": key.CheckedBy, "addedAt": at,
+		"isDefault": key.IsDefault, "checkedBy": key.CheckedBy, "addedAt": added.Format(time.RFC3339Nano),
 	})
 	if err := s.write(owned, "the API key", call, err); err != nil {
 		return err
 	}
-	args := map[string]any{"keyId": id, "vendor": key.Vendor, "state": StateGood, "evidenceAt": at, "goodAt": at}
-	if key.CheckedBy != CheckedByUse {
-		// A key that cannot list models was not checked: it is good on the
-		// vendor's word that it is a key, and its first real call is the check.
-		args["checkedAt"] = at
+	// A key whose models were listed is born GOOD, as of that check. A key
+	// that may not list models (K12) is born UNCHECKED: the vendor said it is
+	// a key and nothing more, and its first real call is its check.
+	args := map[string]any{"keyId": id, "vendor": key.Vendor, "evidenceAt": at}
+	if key.CheckedBy == CheckedByUse {
+		args["state"] = StateUnchecked
+	} else {
+		args["state"], args["goodAt"], args["checkedAt"] = StateGood, at, at
 	}
 	call, err = langparser.RenderCall("createVendorKeyState", args)
 	return s.write(owned, "the API key's state", call, err)
