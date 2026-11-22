@@ -232,9 +232,12 @@ the cluster's account does not pay for this person's calls.
   an active user holds nothing.
 - **It is asked again when the call is made.** A permission taken away between
   choosing a model and calling it is not spent.
-- **It covers every vendor call a person makes**, not only text: a picture,
-  speech, transcription and an image are the cluster's account or nothing, so
-  for a person it is closed to they are served by a local model or not at all.
+- **It covers every kind of vendor call MemQL routes for a person**, not only
+  text: a picture, speech, transcription and an image are the cluster's
+  account or nothing, so for a person it is closed to they are served by a
+  local model or not at all. That includes a picture described when a file is
+  uploaded to the Library, and a vendor reached only because a local model or
+  an app failed when it was called.
 - **Embeddings are the exception.** The memory space is the cluster's, one
   model for everybody, and a person whose writes were not embedded would be
   missing from everybody's search. Embeddings are paid by the cluster's
@@ -243,6 +246,8 @@ the cluster's account does not pay for this person's calls.
   the direct OpenAI transcription paths sends everybody's live transcription
   to OpenAI on the cluster's account. That variable is the operator's own
   choice of who pays; leave it unset to have transcription follow this rule.
+  And a call that reaches the router naming no person at all counts as the
+  cluster's own work; its decision row reads `callerKind: unattributed`.
 
 A cluster with no vendor account connected is unaffected: nothing is asked.
 

@@ -159,7 +159,7 @@ provider claudeOpus55 {
 |---|---|---|
 | `levels` | The jobs the model is for: one to three of `fast`, `strong`, `reasoning` | Any other word, a repeated word or `embeddings` refuses the record |
 | `rank` | Its place among the records of a level, 1 to 1000, higher first | A value outside the range refuses the record |
-| `inputCostPerMillion`, `outputCostPerMillion` | The vendor's standard rate | Both or neither |
+| `inputCostPerMillion`, `outputCostPerMillion` | The vendor's standard rate | -- (a record with no price loads, reads as cost unknown, and is last under `federation:cheapest`) |
 | `contextWindow` | The largest prompt the record is offered | -- |
 | `structuredOutput` | How a Claude record asks for structured output: `tool` (the default) or `format` | Any other word, or the param on a record that is not a Claude text model, refuses the record |
 
@@ -172,7 +172,9 @@ provider claudeOpus55 {
 
 Ties are broken by name, so two replicas answer alike. A record that declares
 no level still resolves by name and is passed over by both selectors, with
-that reason in `considered`. The walk then asks each candidate, in order,
+that reason in `considered`; a record that serves other levels is left out
+without a line. The level a selector reads is the one the call is served at:
+a rule's `@level` moves the call first. The walk then asks each candidate, in order,
 whether it holds the call's context floor, serves its modality, and has an
 [account that can pay](#which-account-pays-for-a-vendor-call) for the person.
 The first that does serves.
@@ -193,9 +195,18 @@ engine asked Claude for structured output. A record that says
 `structuredOutput "format"` sends the schema as the vendor's own output
 format, fitted to the schema keywords the vendor accepts; a limit it does not
 accept (a maximum, a length, a pattern) is kept in the field's description
-and is not enforced. Those records also declare no sampling parameter and no
-thinking budget, and keep `maxTokens` under 21,333: above it the vendor's SDK
-refuses a call that does not stream.
+and is not enforced. An object that takes any key (a map, or an object with no
+declared properties) cannot be said in that format, so such a record refuses
+the call, naming the field, and the route's next source serves. Those records
+also declare no sampling parameter and no thinking budget, and keep
+`maxTokens` under 21,333: above it the vendor's SDK refuses a call that does
+not stream.
+
+**A reply a Claude model declined is a failure, not an empty answer.** The
+vendor reports a declined request as an ordinary response with the stop reason
+`refusal`. Every Claude record turns that into an error, and so does a
+structured reply by format that was cut off at the output limit. The route's
+next source then serves, and the decision record says the model declined.
 
 **A record name is never removed.** A product bundle pins record names, so a
 record whose vendor shut its model down is repointed to the replacement the
@@ -247,8 +258,9 @@ them apart would route on who is watching rather than on what is acting.
 The other annotations:
 
 - **`@policy`** -- required. The chain this rule selects.
-- **`@level`** -- optional. Overrides the level the call declared. Both the
-  declared and the effective level land on the decision record.
+- **`@level`** -- optional. Overrides the level the call declared, for the
+  whole walk: a vendor selector offers the records of the level the rule set.
+  Both the declared and the effective level land on the decision record.
 - **`@precedence(N)`** -- highest first. **A tie is a load error**: a tie is
   resolved by nothing, so the rule that wins would differ between replicas.
 - **`@onUnavailable("degrade" | "park")`** -- what happens when the chain is
@@ -461,8 +473,12 @@ route.
 your own walks that route's sources for its level and nothing else. When they are
 exhausted it degrades inside the route (`reasoning` to `strong` to `fast`,
 through the route's own lists) and then refuses with `every_door_shut`, naming
-the route. It never reaches a rule's chain or cloud consent. The decision
-record carries the route in `route`.
+the route. A level whose list is the same as one already walked is not walked
+again, and that includes a vendor selector: a route that lists
+`federation:strongest` at every level, as API ships, tries the records of the
+level asked for and does not go on to the records of a lower one. It never
+reaches a rule's chain or cloud consent. The decision record carries the route
+in `route`.
 
 **Local, Apps and API can be changed for the whole cluster** by an owner or a
 developer: each job holds one to four sources (`fleet:`, `app:` or

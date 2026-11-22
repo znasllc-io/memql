@@ -28,7 +28,9 @@ OS, split by what each thing is:
 | Fleet > Routing > Machines | Which of my machines takes a call sent to them? | One choice per person |
 | Fleet > Routing > History | What actually happened? | A log |
 
-There is no API key field on any of them, or anywhere else in the product.
+None of them has an API key field. A person's own API key is added in one
+place, Settings > API keys ([API keys](api-keys.md)); the cluster itself holds
+no vendor key.
 
 ## The words
 

@@ -814,9 +814,13 @@ serving.
   (`MemQLEngine.clusterAccountOpenTo`): borrowed authority carries a stand-in
   role, and a visitor's call is judged by the person it borrows from. Asked
   only where the cluster has an account for the record, once per vendor per
-  resolution, and again when `<record>@cluster` resolves at the call. A
+  resolution, and again AT THE CALL: when `<record>@cluster` resolves, and
+  when a plain record name does after a local model or an app failed
+  (`accountAtCall`). A provider resolved once at start is resolved for nobody,
+  which is the cluster's own work: the Library's picture description resolves
+  per call for the uploader (`callerVision`, `app/ai_call_sites.go`). A
   registry with no gate installed gives the account to no person; the engine
-  installs its own at bootstrap, and a test says who may use it.
+  installs its own at bootstrap, and a test fixture says who may use it.
 - **Text surfaces only take a key.** Vision, speech, transcription and images
   are the cluster's account or nothing, so the router asks the same gate for
   them (`clusterAccountGated`). EMBEDDINGS ARE NEVER ASKED: the memory space is
@@ -1260,12 +1264,13 @@ the first** (epic memql#5127; [ai-routing.md](docs/public/operate/ai-routing.md)
   provider name; `fleet:strongest` / `fleet:fastest` / `fleet:<modelId>`;
   `app:*` / `app:<id>` / `app:<id>:<model>`; `federation:cheapest` /
   `federation:strongest` / `federation:<providerName>`; `policy:<name>`.
-  **The two vendor selectors choose among the records that DECLARE the call's
-  level** (`params { levels "strong reasoning"  rank 900 }`,
-  `component/memql/provider_job.go`): strongest is highest `rank` first,
-  cheapest is lowest input plus output price first, ties by name. A record
-  that declares no level resolves by name and both selectors pass it over; a
-  bad `levels` or `rank` refuses the record at load.
+  **The two vendor selectors choose among the records that DECLARE the level
+  the call is served at** (`params { levels "strong reasoning"  rank 900 }`,
+  `component/memql/provider_job.go`; a rule's `@level` moves the call first):
+  strongest is highest `rank` first, cheapest is lowest input plus output
+  price first, ties by name. A record that declares no level resolves by name
+  and both selectors pass it over; a bad `levels` or `rank` refuses the record
+  at load.
   `fleet:*` is retired and refuses load. An app id is held to the engine's
   closed runnable set at LOAD (`core/airoute/apps.go`); `app:*:<model>` is
   REFUSED. `policy:<name>` is expanded at load and a cycle refuses load. The
@@ -1745,7 +1750,12 @@ level. A Claude record for a current model says `structuredOutput "format"`,
 because Claude Opus 5.5 and Sonnet 5.5 refuse the forced tool choice the older
 records use (`component/memql/ai_anthropic_structured.go`), and keeps
 `maxTokens` under 21,333, above which the vendor's SDK refuses a call that
-does not stream.
+does not stream. The format takes closed objects only, so an open one (a map,
+or no declared properties) is REFUSED naming the field, never closed
+silently. **A reply a Claude model declined is an error, not an empty
+answer** (`ErrModelDeclined`, stop reason `refusal`; also a structured reply
+cut off at the output limit): the route's next source serves and the decision
+line reads `model_declined`.
 
 **`@disabled`** (the lifecycle flag shared by functions / builtins / prompts /
 specs / seeds) skips the provider at load -- not registered, no auth

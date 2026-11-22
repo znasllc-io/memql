@@ -2209,16 +2209,46 @@ transcription and images, and any record whose client takes no key, so the
 rule does not depend on what kind of client a record has
 (`clusterAccountGated`). Embeddings are never asked: the memory space is the
 cluster's, one model for everybody. A visitor's call is judged by the person
-whose authority it borrows. Invariant: no person spends the cluster's vendor
-account unless its owner said so. Known limit: an operator who sets
-`MEMQL_STT_PROVIDER` to a direct OpenAI transcription path dials OpenAI with
-the cluster's bearer outside the router, for every caller; that variable is
-the operator's own choice and is not gated. Not verified against a real
-vendor. Tests: `vendor_account_cluster_test.go`,
-`cluster_account_gate_db_test.go`, and in `component/router/accounts_test.go`
+whose authority it borrows.
+
+Two paths reached a vendor without being walked, and each now asks. A PLAIN
+record name resolved at the call (`accountAtCall`,
+`component/router/accounts.go`): after a local model or an app fails when
+called, the wrapper resolves the rest of the chain by name, and "available"
+was the whole test, so a person the account is closed to was refused a
+vendor's speech when no local model was online and served it, on the cluster's
+account, when one was online and failed. And the Library's picture
+description (`callerVision`, `app/ai_call_sites.go`): the extractor's provider
+was resolved once, at start, for nobody, so the cluster's account described
+every person's uploads. It is now resolved per call, with the uploader's
+context.
+
+Invariant: no call the router resolves FOR A PERSON is paid by the cluster's
+vendor account unless its owner said so, embeddings aside. Known limits. An
+operator who sets `MEMQL_STT_PROVIDER` to a direct OpenAI transcription path
+dials OpenAI with the cluster's bearer outside the router, for every caller;
+that variable is the operator's own choice and is not gated. And the
+cluster's own work is defined by the ABSENCE of a person (a blank acting id,
+or a synthetic one), so a path that loses its caller is paid by the cluster's
+account; its decision row reads `callerKind: unattributed`, which is how such
+a path is found. Refusing an unattributed call instead would stop every Go
+call site that stamps no caller, and how many there are was not measured.
+A vendor passed over at the call for this reason leaves no line of its own:
+the person sees the error of the source that failed in front of it. Not
+verified against a real vendor. Tests: `vendor_account_cluster_test.go`,
+`cluster_account_gate_db_test.go`, in `component/router/accounts_test.go`
 `TestTheClustersAccountDoesNotPayForAPersonItIsClosedTo`,
-`TestTheVendorSurfacesWithNoKeyAskTheSameGate` and
-`TestEmbeddingsStayOnTheClustersAccountForEverybody`.
+`TestTheVendorSurfacesWithNoKeyAskTheSameGate`,
+`TestEmbeddingsStayOnTheClustersAccountForEverybody` and
+`TestAPlainRecordNameResolvedAtTheCallAsksWhoTheClustersAccountPaysFor`; in
+`app/vision_for_caller_test.go`
+`TestAPictureIsDescribedByTheModelResolvedForItsCaller`; and across two
+replicas over one database, in `integrations/vendorkeys/hop_db_test.go`,
+`TestWhoTheClustersAccountPaysForIsReadOnTheOtherReplica` (granted and taken
+back through one replica, read on the other, a resolved call included) and
+`TestAKeyRemovedOnOneReplicaIsRefusedOnTheOther`. A fixture outside those
+packages that calls a vendor record for a person says who the account pays
+for (`SetClusterAccountGate`), because a registry a test builds has no gate.
 
 **The record of a key-paid call that failed keeps the router's words, not the
 vendor's (owner decision, 2026-11-22).** `v1:router:call` is readable by every
@@ -2275,12 +2305,21 @@ by price, ties by name; the walk then filters by context floor, modality and
 account. The alternative was the old behaviour, name order with no level, under
 which the first record by name answered every job. A record with no level is
 passed over and says so in `considered`; it still resolves by name, so a pinned
-name keeps working. Speech, transcription, image and embedding calls are not
-ordered by this rule: their records are of other kinds and may not declare a
-level. Tests: `TestProviderJobRefusals`,
+name keeps working. A record that serves OTHER levels is left out with no
+line: noting each was eleven lines and about 1.2 KB on every call with the
+shipped catalog, and the line said nothing a reader could act on. Speech,
+transcription, image and embedding calls are not ordered by this rule: their
+records are of other kinds and may not declare a level. The level read is the
+one the call is SERVED at: a rule's `@level` moves the request before the walk
+(`walkReq.Level = effective`, `component/router/router.go`). Read before the
+rule, a strong call a rule had raised to reasoning was served by a record
+that declares only strong, while its decision said reasoning. Tests:
+`TestProviderJobRefusals`,
 `TestALoadRefusesARecordWithABadJobAndKeepsItsNeighbours`,
 `TestTheStrongestVendorIsTheHighestRankAtTheCallsLevel`,
-`TestTwoReplicasOrderAlike`.
+`TestTwoReplicasOrderAlike`,
+`TestAVendorSelectorChoosesForTheLevelARuleRaisedTheCallTo`,
+`TestTheDecisionNamesARecordWithNoLevelAndNotTheOnesForOtherLevels`.
 
 **The catalog's numbers are a reading of the vendors' pages on a day, not a
 measurement** (`dsl/providers/providers.memql`, refreshed 2026-11-22). The file
@@ -2309,14 +2348,42 @@ accepts and a keyword nobody listed is a refusal waiting for the first schema
 that uses it. What is removed (a maximum, a length, a pattern) is written into
 the field's description. The tradeoff: such a limit is asked for and not
 enforced on these records. A record that says nothing sends the forced tool it
-always sent. Not fixed: a schema that refers to itself, which the vendor
-refuses; the call fails as a vendor error and the route's next source serves.
-The same records keep `maxTokens` under 21,333, the line above which the
-vendor's SDK refuses a call that does not stream. Tests:
+always sent. An OPEN object is refused before the request is sent, naming the
+field (`fitFormatSchema`): one whose `additionalProperties` is anything but
+false, or that declares no properties. The format takes closed objects only,
+and closing one silently, which the first build did, made the vendor enforce
+an empty object: the call succeeded and the caller got empty maps with nothing
+saying so. Refused, the route's next source serves. Not fixed: a schema that
+refers to itself, which the vendor refuses; the call fails as a vendor error
+and the route's next source serves. The same records keep `maxTokens` under
+21,333, the line above which the vendor's SDK refuses a call that does not
+stream. Tests:
 `TestACurrentClaudeRecordSendsOnlyWhatItsModelAccepts`,
 `TestOnlyTheKeywordsTheFormatAcceptsRideTheSchema`,
+`TestAnOpenObjectIsRefusedByTheFormatPathAndNamesTheField`,
 `TestNoClaudeRecordDeclaresAnOutputLimitTheSdkRefusesWithoutStreaming`,
 `TestARecordThatAsksForStructuredOutputAWayNobodyReadsIsRefused`.
+
+**A reply a Claude model declined is a failure** (`anthropicDeclined`,
+`ErrModelDeclined`, `component/memql/ai_anthropic_declined.go`). Trigger: the
+stop reason `refusal` on any Claude path, streamed or not, and on the format
+path also `max_tokens`, where text cut off mid-object is not the JSON asked
+for. Before: the vendor's HTTP 200 was read as a reply, so a declined request
+was an empty answer recorded as served, no other source was tried, and the
+person saw nothing. The current models decline more often than their
+predecessors and are the first records a selector tries. Chosen path: an
+error, so the route's ordinary fallback serves from the next source; it is not
+a failure of the account, so the same model is not retried on another account
+(`VendorAccountFailure`). The decision line reads `failed when called:
+model_declined` (`component/router/failure_reason.go`). The alternative, the
+vendor's own server-side fallback, is a beta surface this engine does not
+call. Tradeoff: a decline at a route's last source refuses the call where it
+used to return an empty string; what a stream delivered before a decline has
+already reached the caller. Read from the vendor's documentation, not
+observed. Tests: `TestADeclinedRequestIsAFailureOnEveryPath`,
+`TestAStreamThatEndsInADeclineEndsInAnError`,
+`TestAStructuredReplyCutOffAtTheLimitIsAFailure`,
+`TestADeclinedRequestIsNamedOnTheDecisionLine`.
 
 **API is a built-in route that lists vendor sources only**
 (`ValidateBuiltinRouteJobs`, `component/memql/routes.go`). It is edited,
@@ -2335,8 +2402,11 @@ answered every job as soon as any account could pay at any record, so a person
 with a key at one vendor was told a job naming the other vendor's model was
 ready. Evidence: the selector's own order at the job's level, over the
 accounts `VendorDoorFor` already reads, at most once per vendor per read of
-the routes; the composition is the one a call uses, so the page and the call
-cannot disagree. Nothing is cached. Tests:
+the routes; the composition of accounts is the one a call uses. The page can
+still differ from a call in two ways it does not model: a call carries a
+context floor from its prompt, which can pass over the record the page named,
+and a call whose route a machine chose spends a key only when its owner
+switched that on. Nothing is cached. Tests:
 `TestApiIsReadyWithAKeyAndNoVendorAccount`, `TestApiReadinessIsThePersons`,
 `TestApiReadinessAsksEachVendorsKeysOncePerRead`,
 `TestALevelWithNoRecordMakesApiNotReady`.
@@ -2352,12 +2422,17 @@ over the shipped policies and catalog:
 
 **Limits.** Nothing was run against either vendor: the request a current
 Claude model is sent was read from the vendor's documentation and its SDK's
-source. A declined request (stop reason `refusal`) is still read as an empty
-answer on every Claude record. A personal route cannot name the account that
-pays for a vendor source (R5 of the design, not built), so a person's
-non-default key at a vendor is still never spent. The two OpenAI audio models
-the catalog names are deprecated by their vendor, with shutdown dates in early
-2027 noted beside them.
+source, and the request-shape test covers chat, tools and structured output,
+not the two streaming paths. A route that lists the same vendor selector at
+every level, as API ships, does not degrade inside itself: the walk skips a
+level whose list equals one already walked, which was sound before a selector
+read the level. With the shipped catalog every level has records at both
+vendors, so it changes nothing today. A personal route cannot name the account
+that pays for a vendor source (R5 of the design, not built), so a person's
+non-default key at a vendor is still never spent. A vendor call that is not
+text records no account kind, so History cannot show who paid for speech or a
+picture. The two OpenAI audio models the catalog names are deprecated by their
+vendor, with shutdown dates in early 2027 noted beside them.
 
 ## First pipeline PR qualification keeps approval on one attempt (2026-10-28)
 

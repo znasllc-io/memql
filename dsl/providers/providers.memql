@@ -46,8 +46,9 @@ provider anthropic {
 //           Within a vendor: the newer generation first, then the vendor's own
 //           order of its tiers. Across vendors: models of one tier sit
 //           together and the cheaper is first. That is an ORDER, not a claim
-//           that one vendor's model is better; an owner who disagrees edits
-//           the API route's job list, or these numbers.
+//           that one vendor's model is better; an owner who disagrees changes
+//           these numbers. The API route's page offers the two selectors and
+//           no single record, so the order is decided here.
 //   prices  per million tokens, the vendor's standard rate.
 //   contextWindow
 //           the largest prompt the record is offered. Where a vendor charges
@@ -65,9 +66,12 @@ provider anthropic {
 // retry a failing model.
 //
 // NOT HERE, on purpose:
-//   - Claude Fable 5.2. Its documented integration answers a declined request
-//     with a server-side fallback on a beta surface this engine does not call,
-//     and it costs twice Claude Opus 5.5.
+//   - Claude Fable 5.2. It costs twice Claude Opus 5.5, and the top record of
+//     a level is the model a call gets with nobody having chosen it. (A
+//     request a Claude model declines is handled alike for every record here:
+//     it is a failure and the route's next source serves,
+//     component/memql/ai_anthropic_declined.go. The vendor's own server-side
+//     fallback is a beta surface this engine does not call, for any of them.)
 //   - OpenAI's GPT-6 family. On Chat Completions, the one OpenAI API this
 //     engine speaks, those models take no function calls, and an agent's turn
 //     is function calls.
