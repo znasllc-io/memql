@@ -48,10 +48,22 @@ is no refresh token and nothing long-lived at rest.
 **Each engine process keeps one sign-in for OpenAI**, shared by chat,
 streaming, speech, transcription, embeddings and the transcription socket. It
 used to make one per provider record and one more for each transcription
-path. Every node type that calls models signs in once when it starts, so there
-is a result to read before the first call, and a sign-in OpenAI refused is not
-retried on a timer: pressing **Verify** or **Apply** in Settings > Vendors
-lets every node try once more.
+path. Every node type that calls models signs in once when it starts and lists
+OpenAI's models with the bearer, so there is a result to read before the first
+call; only both halves count as verified. A sign-in OpenAI refused is not
+retried on a timer. After fixing something on OpenAI's side, press **Apply**
+in Settings > Vendors: it lets every node present its refused token once more.
+**Verify** does the same for the one node that answers it, and no other.
+
+**"Come back later" is not a refusal.** A sign-in OpenAI answers with 408, 425
+or 429 is tried again after a short pause, by itself, and is not counted as a
+denial.
+
+**A 401 on one API call does not sign the node out.** OpenAI answers 401 for
+more than a dead bearer: a service account without one endpoint's permission
+gets a 401 there and is served everywhere else. The engine keeps the bearer
+until it expires, at most an hour. (Anthropic's 401 means the credential
+itself, so there the engine drops the bearer.)
 
 The projected token stays at 3600 seconds, unlike Anthropic's 600. An OpenAI
 bearer never outlives the token it was minted from, so a 600 second token
@@ -140,7 +152,7 @@ and token file. The two ids decide whether OpenAI is configured at all:
 |---|---|
 | both ids and the token file | federates |
 | no id | leaves the OpenAI providers registered as unavailable |
-| one id, or both ids with no token file | **refuses the vendor**: every OpenAI provider registers as unavailable, with a message naming what is set and what is missing |
+| one id, or both ids with no token file | **refuses the vendor**: every OpenAI provider registers as unavailable, with a message naming what is set and what is missing. `provider-auth check` prints that message and exits 1 |
 
 **The token file's path is not yours to set, and does not count on its own.**
 Every Deployment sets `MEMQL_AI_OPENAI_IDENTITY_TOKEN_FILE` and mounts the
@@ -239,23 +251,29 @@ belong in your install notes.
 kubectl exec -n memql deploy/agent -- /app/memql provider-auth check --provider=openai
 ```
 
-The command reports the sign-in the engine in that pod made when it started,
-and waits up to its `--timeout` for one to be recorded. It contacts nobody
-itself.
+The command reports what the engine in that pod recorded when it started, and
+waits up to its `--timeout` for the engine to have signed in and listed
+OpenAI's models. It contacts nobody itself.
+
+Two lines carry the answer. `signIn` is OpenAI accepting the identity token.
+`api` is OpenAI's API taking the bearer that sign-in bought, which is the half
+that makes the vendor usable.
 
 | Exit | Meaning |
 |---|---|
-| 0 | OpenAI accepted the engine's sign-in and listed its models with the bearer. Not merely that the config parses |
-| 1 | OpenAI refused it. The reason is on stderr, in OpenAI's words |
-| 4 | Cannot say yet: nothing is recorded (the node has only just started), or OpenAI did not answer. Run it again |
+| 0 | Verified: OpenAI accepted the engine's sign-in, and its API took the bearer (a model list, or a served call). Not merely that the config parses |
+| 1 | Refused: by OpenAI at sign-in, by its API when the engine listed models with the bearer, or by the engine itself (one id of the two, an identity token it cannot use). The reason is on stderr, in the words of whoever refused |
+| 3 | Not set up: this pod holds no OpenAI ids, or it is a node type that signs in to no vendor |
+| 4 | Cannot say yet: nothing is recorded (the node has only just started), OpenAI did not answer, or nothing has used the bearer. Run it again |
 
 The ids printed are the ones the engine used, including ids applied through
 Settings > Vendors. Run it against more than one node type; each pod holds its
 own token, so "it works on agent" is not "it works".
 
 In MemQL OS, **Settings > Vendors > Verify** asks the node that answers to
-list OpenAI's models through its own client. It costs no tokens and no extra
-sign-in.
+list OpenAI's models through its own client. It costs no tokens. It makes a
+sign-in only when that node's last one was refused, which Verify lets it try
+once more; use **Apply** to reach every node at once.
 
 Then watch the exchange counter across a refresh cycle or two:
 
@@ -277,9 +295,11 @@ scripts/install/verify-provider-key.sh \
   --provider=openai --federation-deploy=agent --namespace=memql
 ```
 
-It has no key mode. Exit 3 means the check RAN and OpenAI refused -- go back to
-step 2. Exit 5 means the check could not be run, or ran and could not say yet;
-neither says anything about the credential.
+It has no key mode. Exit 3 means the check RAN and the credential is not
+usable: OpenAI refused it (go back to step 2), or the pod holds no OpenAI ids
+at all (the overlay or Settings > Vendors, and whether the pods rolled); the
+message says which. Exit 5 means the check could not be run, or ran and could
+not say yet, which says nothing about the credential.
 
 ### Step 5 -- There is nothing to remove
 
@@ -350,6 +370,7 @@ the message finds nothing at all.
 | the audience does not match | the token was minted for a different audience | the projected volume's `audience` field; the render gate pins it to `https://api.openai.com/v1` |
 | the issuer cannot be reached | OpenAI cannot fetch the cluster's JWKS | re-run step 1 from outside your network |
 | the token has expired | clock skew, or a token older than the projected lifetime | check node clocks; the projected token is re-minted hourly |
+| `408`, `425` or `429` on the sign-in | OpenAI asked the engine to come back | nothing. The engine tries again after a short pause; it is logged as a fault, not counted as a denial |
 | the service account is gone | the account was deleted or removed from the project | Platform -> Settings -> Service accounts |
 
 Boot-time refusals are a different class and never reach OpenAI:
@@ -381,8 +402,8 @@ review its required authority and extend the explicit allowlist in the existing
 mapping; do not change its Kubernetes identity to inherit another node's grants.
 For the same reason identity does not sign in when it starts, as every other
 node type does: the sign-in would be refused on every boot. `provider-auth
-check` run against identity therefore reports that nothing is recorded and
-exits 4. If identity ever needs OpenAI, remove its opt-out in
+check` run against identity therefore reports that this node type signs in to
+no vendor, and exits 3. If identity ever needs OpenAI, remove its opt-out in
 `app/build_identity.go` as well.
 
 ---

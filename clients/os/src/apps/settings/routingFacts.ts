@@ -361,9 +361,10 @@ export function doorReadings(
       kind: "federation",
       metered: true,
       state,
-      // HALF IS THE ONE THAT SHOUTS, and the reason is the whole of it: the
-      // engine REFUSES BOOT on a partial set, hours after the save that
-      // caused it, so the consequence is named rather than left as "shut".
+      // HALF IS THE ONE THAT SHOUTS, and the reason is the whole of it: every
+      // node refuses the vendor on a partial set (it still starts; this used
+      // to say it refuses boot, which no code does), so the consequence is
+      // named rather than left as "shut".
       // SHUT SAYS IT IS NORMAL, for the opposite reason: it is how every
       // cluster is installed and the permanent state of every local one, and
       // an operator who reads a fresh install as a fault concludes the

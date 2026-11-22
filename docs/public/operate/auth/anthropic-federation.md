@@ -52,11 +52,15 @@ engine is built around that.
 - **Each engine process keeps one sign-in for Anthropic**, shared by every
   Claude provider. A provider reload keeps it while the ids are unchanged. It
   used to make one per provider record, so only the first could be accepted.
-- **The engine never presents a token twice.** When the bearer nears expiry it
-  signs in with the token Kubernetes has projected since. A sign-in Anthropic
-  refused is not retried on a timer. Pressing **Verify** or **Apply** in
-  Settings > Vendors lets every node try once more, which is what you do after
-  fixing something in the Console.
+- **The engine never presents an accepted token twice.** When the bearer nears
+  expiry it signs in with the token Kubernetes has projected since. A sign-in
+  Anthropic refused is not retried on a timer. After fixing something in the
+  Console, press **Apply** in Settings > Vendors: it lets every node present
+  its refused token once more. **Verify** does the same for the one node that
+  answers it, and no other.
+- **"Come back later" is not a refusal.** A sign-in Anthropic answers with
+  408, 425 or 429 is tried again after a short pause, by itself. It is not
+  counted as a denial.
 - **The projected token lives 600 seconds**, so Kubernetes replaces it about
   every 8 minutes. The bearer still lives the hour the rule's
   `token_lifetime_seconds` names. The short token is for one case: a container
@@ -65,8 +69,16 @@ engine is built around that.
   minutes, on that one pod; its sibling replicas keep serving.
   `provider-auth check` reports that state as not verified yet, with the time
   the next token is due, never as a refusal of your configuration.
-- **Every node type that calls models signs in once when it starts**, so there
-  is a result to read before the first call. The identity node does not: see
+- **The engine presents the next token by itself.** When a node is waiting for
+  a token, or was refused in a way a used token alone explains, it signs in
+  with the next token shortly after that token is due, with nobody calling a
+  model. A new pod's first token cannot be told apart from a used one, so a
+  rule that really is wrong on a new pod is reported as refused once that
+  second token has been presented, about 8 minutes after the pod started.
+- **Every node type that calls models signs in once when it starts** and lists
+  Anthropic's models with the bearer, so there is a result to read before the
+  first call. Only both halves count as verified: a bearer the API then
+  refuses is a refusal. The identity node signs in to nothing: see
   [Separate Kubernetes identities](#separate-kubernetes-identities).
 
 WARNING: none of this has been run against Anthropic. It is built from
@@ -110,7 +122,7 @@ and token file. The three ids decide whether Anthropic is configured at all:
 |---|---|
 | all three ids and the token file | federates |
 | no id | leaves the Anthropic providers registered as unavailable |
-| one or two ids, or every id with no token file | **refuses the vendor**: every Anthropic provider registers as unavailable, with a message naming what is set and what is missing |
+| one or two ids, or every id with no token file | **refuses the vendor**: every Anthropic provider registers as unavailable, with a message naming what is set and what is missing. `provider-auth check` prints that message and exits 1 |
 
 **The token file's path is not yours to set, and does not count on its own.**
 Every Deployment sets `MEMQL_AI_ANTHROPIC_IDENTITY_TOKEN_FILE` and mounts the
@@ -205,10 +217,10 @@ your install notes.
 kubectl exec -n memql deploy/agent -- /app/memql provider-auth check
 ```
 
-The command reports the sign-in the engine in that pod made when it started,
-and waits up to its `--timeout` for one to be recorded. It contacts nobody
-itself: a second process signing in with the pod's token would use the token
-up.
+The command reports what the engine in that pod recorded when it started, and
+waits up to its `--timeout` for the engine to have signed in and listed
+Anthropic's models. It contacts nobody itself: a second process signing in
+with the pod's token would use the token up.
 
 Expect:
 
@@ -225,22 +237,30 @@ tokenAudience:         https://api.anthropic.com
 signIn:                ok
 signInAt:              2026-08-23T17:04:11Z
 tokenExpires:          2026-08-23T18:04:11Z (in 59m12s)
+api:                   took the bearer, last shown 2026-08-23T17:04:12Z
 models.list:           12 models returned to the engine
 ```
 
+`signIn` is Anthropic accepting the identity token. `api` is Anthropic's API
+taking the bearer that sign-in bought, which is the half that makes the vendor
+usable.
+
 | Exit | Meaning |
 |---|---|
-| 0 | Anthropic accepted the engine's sign-in and listed its models with the bearer. Not merely that the config parses |
-| 1 | Anthropic refused it. The reason is on stderr, in Anthropic's words |
-| 4 | Cannot say yet: nothing is recorded (the node has only just started), the engine is waiting for its next identity token, or Anthropic did not answer. Run it again |
+| 0 | Verified: Anthropic accepted the engine's sign-in, and its API took the bearer (a model list, or a served call). Not merely that the config parses |
+| 1 | Refused: by Anthropic at sign-in, by its API when the bearer was used, or by the engine itself (a partial set of ids, an identity token it cannot use). The reason is on stderr, in the words of whoever refused |
+| 3 | Not set up: this pod holds no Anthropic ids, or it is a node type that signs in to no vendor |
+| 4 | Cannot say yet: nothing is recorded (the node has only just started), the engine is waiting for its next identity token, a refusal a used token alone would explain, Anthropic did not answer, or nothing has used the bearer. Run it again |
 
 The ids printed are the ones the engine used, including ids applied through
 Settings > Vendors. Run it against more than one node type; each pod holds its
 own token, so "it works on agent" is not "it works".
 
 In MemQL OS, **Settings > Vendors > Verify** asks the node that answers to
-list Anthropic's models through its own client. It costs no tokens and no
-extra sign-in.
+list Anthropic's models through its own client. It costs no tokens. It makes a
+sign-in only when that node's last one was refused, which Verify lets it try
+once more; a second press reaches whichever node answers next, so use
+**Apply** to reach every node at once.
 
 Then watch the exchange counter across a refresh cycle or two:
 
@@ -269,8 +289,10 @@ scripts/install/verify-provider-key.sh \
   --provider=anthropic --federation-deploy=agent --namespace=memql
 ```
 
-Exit 3 means the check ran and Anthropic refused. Exit 5 means it could not be
-run, or ran and could not say yet; neither says anything about the credential.
+Exit 3 means the check ran and the credential is not usable: Anthropic refused
+it, or the pod holds no Anthropic ids at all, and the message says which. Exit
+5 means the check could not be run, or ran and could not say yet, which says
+nothing about the credential.
 
 ### Step 5 -- There is nothing left to remove
 
@@ -323,7 +345,8 @@ inside the message finds nothing at all.
 | `workspace_id_required` | the rule covers more than one workspace | set `MEMQL_AI_ANTHROPIC_WORKSPACE_ID` |
 | `issuer_not_found` / JWKS fetch failure | Anthropic cannot reach the cluster's issuer | re-run step 1 from outside your network |
 | `token_expired` | clock skew, or a token older than the issuer's maximum JWT lifetime | check node clocks; the projected token is replaced about every 8 minutes |
-| a `401` for a token already used, right after a container restarted | the new process read the token its predecessor presented | nothing. The engine signs in with the next token, within about 8 minutes; `provider-auth check` exits 4 until then |
+| a `401` for a token already used, right after a container restarted | the new process read the token its predecessor presented | nothing. The engine presents the next token when Kubernetes has projected it, within about 8 minutes and with no call needed; `provider-auth check` exits 4 until then |
+| `408`, `425` or `429` on the sign-in | Anthropic asked the engine to come back | nothing. The engine tries again after a short pause; it is logged as a fault, not counted as a denial |
 | `service_account_disabled` | the account was disabled or deleted | Console -> Settings -> Service accounts |
 
 Boot-time refusals are a different class and never reach Anthropic:
@@ -357,7 +380,8 @@ matching subject -- its token says
 This costs nothing today: identity does not call Anthropic. For the same
 reason it does not sign in when it starts, as every other node type does: the
 sign-in would be refused on every boot. `provider-auth check` run against
-identity therefore reports that nothing is recorded and exits 4. If identity
+identity therefore reports that this node type signs in to no vendor, and
+exits 3. If identity
 ever needs Anthropic, add a second rule (or widen the prefix to
 `system:serviceaccount:memql:`) in the Console, and remove its opt-out in
 `app/build_identity.go` -- not a change to the manifests.

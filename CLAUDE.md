@@ -778,9 +778,12 @@ still collects no AI credential and `providerFederation` skips satisfied.
 **Each engine process signs in to a vendor ONCE per identity token**
 (`component/memql/ai_vendor_signin.go`). Anthropic accepts a token once, so a
 second signer in a pod is refused: `memql provider-auth check` reports the
-engine's recorded sign-in and never makes one, and a new client of a vendor
-takes its bearer from `processVendorSignIn`, never from a credential of its
-own. Never run against a vendor yet; the runbooks say what to record.
+engine's record and never signs in, and a new client of a vendor takes its
+bearer from `processVendorSignIn`, never from a credential of its own. The
+engine records EVERY vendor, usable or not, and the check answers from that
+record alone: 0 only when the sign-in was accepted AND the vendor's API took
+the bearer, 1 refused, 3 not set up on that node, 4 cannot say yet. Never run
+against a vendor yet; the runbooks say what to record.
 
 ### AI Endpoints (gRPC on `MemqlService.Stream`)
 
