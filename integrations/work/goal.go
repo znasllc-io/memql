@@ -347,6 +347,10 @@ func goalRouting(ctx context.Context, owner string) (common.RouteChoice, error) 
 	parsed.By = routing.By
 	parsed.NoPaidProviders = routing.NoPaidProviders
 	parsed.ForVisitor = routing.ForVisitor
+	// Whose credential made the choice is part of the choice, stamped where it
+	// was made (memql.ContextWithGoalRouteChoice) or inherited from the run
+	// that opened this goal. Re-parsing the grammar must not drop it.
+	parsed.ByMachine = routing.ByMachine
 	parsed.Destination, err = memql.ParseExecutionDestination(routing.Destination)
 	if err != nil {
 		return common.RouteChoice{}, err

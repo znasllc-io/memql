@@ -18,6 +18,8 @@ import (
 	"strings"
 	"testing"
 
+	"context"
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/core/airoute"
 	"github.com/znasllc-io/memql/core/common"
 )
@@ -144,5 +146,38 @@ func TestTheChatSitesEstimateTheirContextFloor(t *testing.T) {
 	if got := chatStreamResolveRequest(long, "", "").Needs.MinContextTokens; got != longFloor {
 		t.Fatalf("the streaming site declares floor %d for the same messages the non-streaming site floors at %d",
 			got, longFloor)
+	}
+}
+
+// A PROVIDER NAMED ON A CHAT IS ITS CALLER'S PIN, AND A CALLER IS NOT ALWAYS
+// THE PERSON (vendor accounts design, K8 line 4 and O4). Somebody acting
+// under delegated access names a provider as the person they act for. That is
+// the delegate choosing, and the person's API key does not pay on the strength
+// of it.
+func TestAChatPinSaysWhoseCredentialMadeIt(t *testing.T) {
+	const person = "v1:identity:user:asker"
+	session := auth.ContextWithAccess(
+		auth.ContextWithClaims(context.Background(), map[string]any{"sub": person}),
+		&auth.AccessContext{UserId: person, Role: auth.RoleDeveloper})
+	delegated := auth.ContextWithDelegation(session, &auth.DelegationContext{DelegationId: "v1:identity:delegation:d"})
+	messages := []common.ChatMessage{{Role: "user", Content: "hello"}}
+
+	for name, build := range map[string]func(context.Context, string) airoute.ResolveRequest{
+		"chat": func(ctx context.Context, provider string) airoute.ResolveRequest {
+			return pinCredential(ctx, chatResolveRequest(messages, provider, chatCaller(ctx)))
+		},
+		"streaming chat": func(ctx context.Context, provider string) airoute.ResolveRequest {
+			return pinCredential(ctx, chatStreamResolveRequest(messages, provider, chatCaller(ctx)))
+		},
+	} {
+		if own := build(session, "claudeSonnet"); own.PinnedBy != person || own.ChoiceByMachine {
+			t.Errorf("%s: a person's own pin reads pinned by %q, by machine %v", name, own.PinnedBy, own.ChoiceByMachine)
+		}
+		if lent := build(delegated, "claudeSonnet"); lent.PinnedBy != person || !lent.ChoiceByMachine {
+			t.Errorf("%s: a delegate's pin reads pinned by %q, by machine %v; it is attributed to the person and is not their choice", name, lent.PinnedBy, lent.ChoiceByMachine)
+		}
+		if none := build(delegated, ""); none.ChoiceByMachine {
+			t.Errorf("%s: a call that pins nothing was marked", name)
+		}
 	}
 }

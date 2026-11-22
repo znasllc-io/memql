@@ -348,6 +348,13 @@ func ApplyRunRouting(ctx context.Context, req airoute.ResolveRequest) (airoute.R
 			req.PinnedBy = strings.TrimSpace(routing.By)
 			req.Route, req.RouteBy = "", ""
 		}
+		// WHOSE CREDENTIAL MADE THE CHOICE travels with the choice
+		// (common.RouteChoice.ByMachine). ASSIGNED, not or-ed: the run's
+		// choice has just replaced whatever the request named, so the answer
+		// for the request's own pin no longer describes anything. A hint an
+		// app session put on a turn must not make a route the person chose
+		// read as the app's, nor the reverse.
+		req.ChoiceByMachine = routing.ByMachine
 	}
 	if choice.Level != "" && strings.TrimSpace(rc.StepKey) != "" && (ov == nil || strings.TrimSpace(ov.Level) == "") {
 		req.Level = airoute.Level(choice.Level)
@@ -368,12 +375,24 @@ type goalRouteChoiceKey struct{}
 // that travels on into other work cannot lend one person's choice to
 // somebody else's goal. A zero choice, or one naming nobody, returns ctx
 // unchanged.
+//
+// IT ALSO RECORDS WHOSE CREDENTIAL MADE THE CHOICE (choice.ByMachine, from
+// auth.ChoiceIsThePersons). By names the acting user, and an app session acts
+// as the person who owns the machine, so By alone cannot tell a route the
+// person picked from one the coding agent on their machine named on a goal it
+// opened. Every stamp of a turn's choice comes through here, which is why the
+// answer is taken here and not at each caller. A caller that already knows
+// the person did not choose (the product picked the route) sets the mark
+// itself, and it is never cleared.
 func ContextWithGoalRouteChoice(ctx context.Context, choice common.RouteChoice) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if choice.IsZero() || strings.TrimSpace(choice.By) == "" {
 		return ctx
+	}
+	if !auth.ChoiceIsThePersons(ctx) {
+		choice.ByMachine = true
 	}
 	return context.WithValue(ctx, goalRouteChoiceKey{}, choice)
 }

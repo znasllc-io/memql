@@ -28,6 +28,10 @@ func TestChosenByActor(t *testing.T) {
 		"auto, with a stale RouteBy":          {ResolveRequest{UserId: "alice", RouteBy: "alice"}, false},
 		"nobody acting":                       {ResolveRequest{PersonRoute: "api", RouteBy: ""}, false},
 		"a pin outranks the route beside it":  {ResolveRequest{UserId: "alice", ExplicitProvider: "claudeSonnet", PinnedBy: "bob", PersonRoute: "api", RouteBy: "alice"}, false},
+		// An app session's subject is the person, and what it pins or chooses
+		// is attributed to them. It is still not them choosing.
+		"a pin an app session made as the person":    {ResolveRequest{UserId: "alice", ExplicitProvider: "claudeSonnet", PinnedBy: "alice", ChoiceByMachine: true}, false},
+		"a route an app session chose as the person": {ResolveRequest{UserId: "alice", PersonRoute: "api", RouteBy: "alice", ChoiceByMachine: true}, false},
 	} {
 		if got := chosenByActor(tc.req); got != tc.want {
 			t.Errorf("%s: chosenByActor = %v, want %v", name, got, tc.want)

@@ -25,9 +25,18 @@ import (
 //
 // A PIN OUTRANKS A ROUTE, as it does in resolution: with a model pinned, who
 // pinned it is the whole answer.
+//
+// AND THE PERSON MUST HAVE MADE IT THEMSELVES. A choice is attributed to the
+// call's acting user, and an app session acts as the person who owns the
+// machine: the coding agent holding it can name a vendor source on a turn, on
+// a goal it opens or on a step it re-runs. That is the agent choosing, so a
+// choice made through such a credential (ChoiceByMachine, from
+// auth.ChoiceIsThePersons where the choice was made) is no choice here. The
+// person's key then pays only if they switched Auto on for it, which is the
+// consent for work nobody chose in person (owner decision O4).
 func chosenByActor(req ResolveRequest) bool {
 	actor := strings.TrimSpace(req.UserId)
-	if actor == "" {
+	if actor == "" || req.ChoiceByMachine {
 		return false
 	}
 	if strings.TrimSpace(req.ExplicitProvider) != "" {

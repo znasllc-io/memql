@@ -64,6 +64,23 @@ func chatCaller(ctx context.Context) string {
 	return ""
 }
 
+// pinCredential marks a caller-named pin with whose credential made it.
+//
+// PinnedBy is the stream's acting user, and several credentials act as a
+// person without being them: delegated access here, an app session on an
+// agent turn (integrations/agent turnPin). A pin made through one is
+// attributed to the person, because an app door reached through it is opened
+// on their machine, and is still not their choice of what to spend: for which
+// ACCOUNT pays it is counted as work nobody chose (auth.ChoiceIsThePersons,
+// airoute.ResolveRequest.ChoiceByMachine). A call that pins nothing has no
+// choice to describe.
+func pinCredential(ctx context.Context, req airoute.ResolveRequest) airoute.ResolveRequest {
+	if strings.TrimSpace(req.ExplicitProvider) != "" && !auth.ChoiceIsThePersons(ctx) {
+		req.ChoiceByMachine = true
+	}
+	return req
+}
+
 // callerPin is who made a caller-named pin: the caller, when there is a pin to
 // have made.
 func callerPin(providerName, caller string) string {
@@ -356,7 +373,7 @@ func chatCallContext(ctx context.Context, provider, registrationId string) (cont
 
 func (s *streamSession) handleAiChatNonStream(ctx context.Context, requestId, correlate string, messages []common.ChatMessage, providerName string) {
 	chatProvider, _, err := memqlengine.ResolveAITyped[common.ChatAIProvider](
-		ctx, s.service.engine, chatResolveRequest(messages, providerName, chatCaller(ctx)))
+		ctx, s.service.engine, pinCredential(ctx, chatResolveRequest(messages, providerName, chatCaller(ctx))))
 	if err != nil {
 		s.sendAiModelError(requestId, correlate, "no model is reachable for this chat turn", err)
 		return
@@ -388,7 +405,7 @@ func (s *streamSession) handleAiChatStream(ctx context.Context, requestId, corre
 	defer cancel()
 
 	streamProvider, _, err := memqlengine.ResolveAITyped[common.ChatStreamProvider](
-		ctx, s.service.engine, chatStreamResolveRequest(messages, providerName, chatCaller(ctx)))
+		ctx, s.service.engine, pinCredential(ctx, chatStreamResolveRequest(messages, providerName, chatCaller(ctx))))
 	if err != nil {
 		s.sendAiModelError(requestId, correlate, "no model is reachable for this streaming chat turn", err)
 		return

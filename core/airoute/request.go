@@ -188,6 +188,16 @@ type ResolveRequest struct {
 	// on. Choosing a route is the telling, and Auto is not.
 	RouteBy string
 
+	// ChoiceByMachine says the choice PinnedBy or RouteBy names was made
+	// through a credential that acts as that person without being them: an
+	// app session, a badge, delegated access, or server code working on their
+	// behalf (auth.ChoiceIsThePersons). Such a choice is the credential's and
+	// not the person's, so for the account rule it is no choice at all: the
+	// Auto line of K8, where a key pays only when its owner switched that on.
+	// Stamped where the choice is made and carried on the run's rows; nothing
+	// a caller sets makes or clears it, and nothing routes on it.
+	ChoiceByMachine bool
+
 	// ForVisitor says this call serves a VISITOR, under a person's borrowed
 	// authority: a shopper form, an access-code call, a deployed workflow's
 	// deployer, or a run such a request opened. A person's API key never pays

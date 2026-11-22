@@ -56,6 +56,16 @@ type RouteChoice struct {
 	// argument; inherited by a child goal, a fork, a replay and a branch, and
 	// cleared by nothing.
 	ForVisitor bool
+	// ByMachine marks a choice that was made through a credential acting as
+	// By without being them: an app session on their machine, a badge,
+	// delegated access (auth.ChoiceIsThePersons). The run executes later on a
+	// restored context that says nothing about how its choice was made, so
+	// this is the only thing left that does. A choice so marked does not let
+	// the person's API key pay: it is counted as work nobody chose in person
+	// (design record 2026-11-21-vendor-accounts-and-api-keys, K8 line 5, O4).
+	// Stamped by the server from the request's context, never from an
+	// argument, and inherited with the choice it describes.
+	ByMachine bool
 }
 
 // IsZero reports whether the choice changes nothing: Auto source, Auto level.
@@ -89,6 +99,9 @@ func (c RouteChoice) Map() map[string]any {
 	if v := strings.TrimSpace(c.By); v != "" {
 		out["by"] = v
 	}
+	if c.ByMachine {
+		out["byMachine"] = true
+	}
 	return out
 }
 
@@ -106,7 +119,7 @@ func RouteChoiceFrom(v any) RouteChoice {
 		return strings.TrimSpace(s)
 	}
 	c := RouteChoice{Source: text("source"), Level: text("level"), Destination: text("destination"), By: text("by"),
-		NoPaidProviders: m["noPaidProviders"] == true, ForVisitor: m["forVisitor"] == true}
+		NoPaidProviders: m["noPaidProviders"] == true, ForVisitor: m["forVisitor"] == true, ByMachine: m["byMachine"] == true}
 	if c.IsZero() {
 		return RouteChoice{}
 	}
