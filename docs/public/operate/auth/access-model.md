@@ -304,11 +304,15 @@ organization for any change of either binding, clearing included, so the deny
 holds there too. The two named mutations ask for the part on every call,
 clearing included.
 
-**Fleet carries one part of its own, `app:fleet/keys`** (vendor accounts
-design, K4). `read app:fleet/keys` opens **Fleet > API keys** and `execute
-app:fleet/keys` adds an API key; both are seeded on owner and developer, the
-roles that can open Fleet, and anybody else needs a grant of the part and of
-Fleet itself. The part gates the door and the act of adding. What a caller may
+**Settings carries one part that every predefined role holds,
+`app:settings/apikeys`** (vendor accounts design, K4 as amended 2026-11-22).
+`execute app:settings/apikeys` adds an API key and is seeded on owner,
+developer, admin, user and viewer: model access is bring-your-own for
+everybody, and an operator stops a person or a group from adding keys with a
+deny of the part. There is no `read` beside it. **Settings > API keys** has no
+floor of its own, so it opens for everybody who opens Settings and is what
+makes Settings open for a user or a viewer at all. The part gates the act of
+adding and nothing else. What a caller may
 do to a key that exists is decided by the key's own row and not by the part:
 its owner changes, lends and removes it, a cluster owner may check and remove
 it and may not change or lend it, and a person it is lent to pays with it

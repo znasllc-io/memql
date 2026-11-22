@@ -15,7 +15,7 @@ A model vendor is paid through an **account**. MemQL knows two kinds:
   OpenAI, set up once by its owner in **Settings > Vendors**
   ([Anthropic](auth/anthropic-federation.md), [OpenAI](auth/openai-federation.md));
 - **an API key**: a person's own key at one of those two vendors, added in
-  **Fleet > API keys**.
+  **Settings > API keys**.
 
 A key belongs to the person who added it and spends that person's money. They
 may lend it to named people and groups. The cluster itself never has a key:
@@ -29,18 +29,29 @@ lends local models; a key lends a vendor account.
 
 ## Who can add a key
 
-Adding and changing keys is a named part of Fleet, `app:fleet/keys`:
+Anybody signed in. Model access on a cluster is bring-your-own for everybody,
+so adding a key is not kept to operators.
+
+Adding is a named part of Settings:
 
 | Capability | Lets a person |
 |---|---|
-| `read app:fleet/keys` | open **Fleet > API keys** |
-| `execute app:fleet/keys` | add a key |
+| `execute app:settings/apikeys` | add a key |
 
-Both are seeded on **owner** and **developer**, the roles that can open Fleet.
-Anybody else needs a grant of the part and of Fleet itself
-([grants](auth/access-model.md#grants-to-people-and-groups)).
+It is seeded on **every predefined role**: owner, developer, admin, user and
+viewer. An operator stops one person or one group from adding keys with a deny
+of that part in **Users > Access**
+([grants](auth/access-model.md#grants-to-people-and-groups)). A role an
+operator authored holds the part only if it was given it.
 
-A person a key is **lent to** needs neither. They use it without opening Fleet.
+**Settings > API keys** itself has no capability of its own. It opens for
+everybody who can open Settings, and it is what a user or a viewer finds
+there. So a person always reaches the keys they own: they see, rename, check,
+lend and remove them whatever their role holds, and a person who loses the
+part keeps the keys they have and can still use them. Only adding is gated.
+
+A person a key is **lent to** needs nothing. They use it without opening
+Settings.
 
 A key is added and changed by a person in their own signed-in session. A
 personal access token, a service account, an app session, access delegated to
@@ -50,7 +61,7 @@ step was handed.
 
 ## Add a key
 
-**Fleet > API keys**, then the add button. The wizard asks one thing at a time:
+**Settings > API keys**, then the add button. The wizard asks one thing at a time:
 
 1. **Vendor**: Anthropic or OpenAI. No other vendor takes a key.
 2. **Name**: yours, 1 to 60 characters, unlike your other keys' names.
@@ -73,7 +84,8 @@ What is refused before the vendor is asked:
 - any key for a vendor whose calls this cluster sends to an address other than
   the vendor's own. A key is only ever sent to `https://api.anthropic.com` or
   `https://api.openai.com`; a cluster that overrides a vendor's address uses no
-  key for it.
+  key for it. A request that carries a key follows no redirect, so the vendor's
+  address cannot pass it on either.
 
 Your first key at a vendor is your **default** there.
 
@@ -84,9 +96,14 @@ them. Such a key is accepted and saved as **checked by the calls it pays
 for**: the wizard says so, the daily check skips it, and it reads "Not checked
 yet" until its first real call.
 
-Not verified: this answer is recognised by the words OpenAI uses for a missing
-permission, which OpenAI does not document as stable. If the wording changes, a
-restricted key is refused when added, with OpenAI's sentence shown.
+Only an answer that **names** a missing permission saves a key this way. Any
+other refusal, a region OpenAI does not serve for instance, verifies nothing
+about the key, and nothing is saved.
+
+Not verified: that answer is recognised by the words OpenAI uses for a missing
+permission ("insufficient permissions", "missing scopes"), which OpenAI does
+not document as stable. If the wording changes, a restricted key is not saved,
+and the wizard shows OpenAI's sentence.
 
 ## What is stored, and what is never shown
 
@@ -127,9 +144,17 @@ this order:
 | Was made on a route the person **chose** (a route picked in Ask, a route of their own, a policy named as a route), or on a source they pinned themselves | their default key at the vendor, then keys lent to them (the key added earliest first), then the cluster's account |
 | Anything else: **Auto**, and every call nobody chose a route for | the same order, counting only keys whose owner turned on **Let Auto use this key** |
 
-A choice counts only when the acting person made it. An agent's stored pin is
-its owner's, and a run shared with another person keeps its opener's route, so
-neither is that person choosing.
+A choice counts only when the acting person made it, **themselves**:
+
+- An agent's stored pin is its owner's, and a run shared with another person
+  keeps its opener's route, so neither is that person choosing.
+- A choice made through a credential that acts as a person without being them
+  is not theirs either: an **app session** (Claude Code or Codex on their own
+  machine, which can name a source on a turn, on a goal it opens or on a step
+  it re-runs), a badge, **delegated access**, or the cluster working on their
+  behalf. The choice is still attributed to them, and their key pays for it
+  only under the Auto rule, which is the consent for work nobody chose in
+  person. A personal access token is the person's own credential and counts.
 
 Your keys at a vendor other than your default are not spent by this order.
 
@@ -153,7 +178,9 @@ record says why for each.
 the vendor's answer is about the account (not accepted, no permission, no
 credit, a spending limit), the call moves to the next account in the order
 above before the route moves to its next model. A rate limit or a vendor outage
-is not about the account and follows the route's ordinary fallback.
+is not about the account and follows the route's ordinary fallback. Neither is
+this cluster's own cost ceiling stopping a call: that is the cluster's budget,
+and it is never recorded against a key.
 
 **Text model calls only.** Speech, transcription, embeddings and vision stay on
 the cluster's account. Embeddings bind the cluster's shared memory search to
@@ -173,7 +200,7 @@ it is lent to.
 
 On the key's page, **Lend this key**:
 
-| In Fleet | Stored as | Who the key pays for |
+| On the page | Stored as | Who the key pays for |
 |---|---|---|
 | Off (the default) | `owner` | its owner |
 | On, with people and groups | `people`, with `userIds` and `groupIds` | its owner, the listed people, and the **active** members of the listed **active** groups |
@@ -192,8 +219,8 @@ A person a key is lent to:
 
 - pays with it for their own calls, after their own default key and before the
   cluster's account;
-- sees a short card of it under **Fleet > API keys**, when they can open that
-  section: its name, its vendor, whose it is, and whether it works. Never the
+- sees a short card of it under **Settings > API keys**: its name, its
+  vendor, whose it is, and whether it works. Never the
   key, its fingerprint, its settings, or who else has it;
 - cannot lend it on, rename it, check it or remove it.
 
@@ -216,7 +243,10 @@ A key is checked without spending a token:
   included, so a key the vendor accepts again recovers by itself. Keys that may
   not list models are skipped, and so are keys held for credit, because a
   listing is answered whether or not the account has credit.
-- **Check now**, on the key's page, for its owner or a cluster owner.
+- **Check now**, on the key's page, for its owner or a cluster owner. On a key
+  that is out of credit a successful check ends the one-hour hold, so the next
+  call tries the key, and does not mark it working: a vendor lists its models
+  whether or not the account can pay.
 
 The daily check is the cluster using a person's key. It sends no prompt and is
 not billed, which is what lets the cluster do it.
@@ -240,7 +270,7 @@ fall**:
   told since the key last worked;
 - naming the key by its name and vendor, quoting the vendor's answer with
   anything key-shaped and any web address removed, and saying where to go in
-  words (Fleet, then API keys). The message carries **no link**, and nothing of
+  words (Settings, then API keys). The message carries **no link**, and nothing of
   the key;
 - not again until the key has worked and then stopped again. A key refused on
   every call for a week is one message; so is a key that goes from refused to
@@ -282,6 +312,11 @@ again, and cannot be restored: add a new one.
   vendor's console too. The sealed value remains in the row's history.
 - A key also stops serving when its owner stops being an active user of the
   cluster.
+- **A key never changes owner.** Transferring a person's rows to somebody else
+  (`transferRowOwnership`, used when somebody leaves) moves neither their keys
+  nor the engine's record of them, and the engine refuses any write that would
+  change a key's owner, a cluster owner's included. A leaver's keys stay
+  theirs and stop serving.
 
 ## What a cluster owner can do
 
@@ -314,16 +349,28 @@ It never carries a key's name or fingerprint. Each entry of `considered` that
 was an account says which kind it was and why it was passed over, and a
 `fallback_used` row names the account that failed.
 
+**When a call a key paid for fails, the record says why in MemQL's own words,
+never the vendor's.** Its `errorMessage` is a code and one sentence, for
+example `account_credit: the account that paid is out of credit or at its
+spend limit` or `rate_limit: rate limited`. The vendor's own sentence is about
+the key owner's account: it can name their organization, their plan or a part
+of their key, and the record is readable by every signed-in person. The key's
+owner reads the vendor's words on the key's own page. The same holds for the
+refusal a caller gets when the cost ceiling stops the next account from being
+tried. A call the cluster's own account paid for keeps the error's text, as
+before.
+
 ## Across replicas
 
 - Which account pays is decided per call from rows read at that moment, on
   whichever replica makes the call. Nothing about a key is remembered in a
   process: a removal, a pause or a refusal applies everywhere by the next call.
-- The node that makes the vendor call unseals the key. A call forwarded
-  between nodes carries the key's id, never its value.
+- The node that makes the vendor call decides which account pays and unseals
+  the key there. A call forwarded between nodes carries nothing about an
+  account, and never a key.
 - What a call learns about a key is written under a lock on that key and
-  stamped with the time the call started, so an older answer that arrives late
-  never overwrites a newer one.
+  dated when the request was sent, not when the answer arrived, so a long call
+  that began before a key was revoked cannot report it working afterwards.
 - The daily check and the pass that mails owners each run on one bff replica.
 
 ## Builtins
@@ -332,8 +379,8 @@ All on the stream. None returns a key.
 
 | Builtin | Does | Who |
 |---|---|---|
-| `vendorKeyAdd { vendor, label, key }` | checks, seals and stores a key | `execute app:fleet/keys`, in a person's own session |
-| `vendorKeysForActor { all }` | your keys, short cards of keys lent to you, and for a cluster owner who asks, every active key | any signed-in person |
+| `vendorKeyAdd { vendor, label, key }` | checks, seals and stores a key | `execute app:settings/apikeys` (every predefined role), in a person's own session |
+| `vendorKeysForActor { all }` | your keys, short cards of keys lent to you, and for a cluster owner who asks, every active key | any signed-in person, whatever their role holds |
 | `vendorKeyUpdate { keyId, label, isDefault, autoUse }` | the owner's settings | the key's owner |
 | `vendorKeyCheck { keyId }` | lists the vendor's models with the key | the key's owner, or a cluster owner |
 | `vendorKeyRemove { keyId }` | removes it | the key's owner, or a cluster owner |

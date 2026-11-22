@@ -8973,7 +8973,7 @@ QueryClient.prototype.vendorKeyAdd = function (this: QueryClient, args: VendorKe
   return this.executeNamed("vendorKeyAdd", buildVendorKeyAdd(args), opts);
 };
 
-/** Check a key now, by listing its vendor's models with it. It sends no prompt and costs nothing. The key's owner or a cluster owner may. One row: the key's card after the check. */
+/** Check a key now, by listing its vendor's models with it. It sends no prompt and costs nothing. The key's owner or a cluster owner may. A key whose account was out of credit is released for its next call to try, and is not marked working: a vendor lists its models whether or not the account can pay. One row: the key's card after the check, with a `note` when the check decided nothing or only lifted a hold. */
 export interface VendorKeyCheckArgs {
   /** The key to check. */
   keyId: string;

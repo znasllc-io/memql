@@ -24,7 +24,7 @@ import (
 // WHAT IS NOT BANNED, and why the list is names rather than concepts:
 //
 //   - A PERSON'S OWN API KEY. A person adds a key of their own in MemQL OS,
-//     under Fleet > API keys. It is checked with the vendor, sealed as that
+//     under Settings > API keys. It is checked with the vendor, sealed as that
 //     person's own row (v1:router:vendorKey), and pays only for calls made by
 //     that person or by somebody they lent it to. It is entered through none
 //     of the names below. That is the design, not a way around this gate: the
@@ -137,7 +137,7 @@ func TestNoVendorApiKeyEntryPoint(t *testing.T) {
 		"These names are how a key for the whole cluster used to be entered, and this gate keeps " +
 		"them out.\n\n" +
 		"A person's own API key is a different thing and is not what this gate is about: it is " +
-		"added in MemQL OS under Fleet > API keys, sealed as that person's row, and entered " +
+		"added in MemQL OS under Settings > API keys, sealed as that person's row, and entered " +
 		"through none of these names (docs/public/operate/api-keys.md).\n\n")
 	for _, h := range hits {
 		text := h.text

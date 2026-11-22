@@ -569,7 +569,10 @@ account** is the cluster's own sign-in with the vendor. An
 
 A choice is the acting person's own or it is not a choice: an agent's stored
 pin is its owner's, and a run shared with another person keeps its opener's
-route.
+route. It must also have been made by the person themselves. A source named
+through an app session, a badge, delegated access or by the cluster on a
+person's behalf is attributed to that person and counted as work nobody chose
+(`byMachine` on the run's `routing`, `ChoiceByMachine` on the request).
 
 **The account rides the chain.** A vendor record is walked once per account
 that can pay, as `<record>@key:<id>` and then `<record>@cluster`. An answer
@@ -617,7 +620,7 @@ the tokens, cost and latency the row already carried, a decision carries:
 | `minContextTokens` | the context floor this resolution was made against |
 | `callerKind` | what KIND of caller made the call: `user`, `system`, `connector`, `anonymous` or `unattributed` |
 | `cacheKind` | which CACHE answered, when one did: `exact` or `semantic`. Absent means a provider answered |
-| `accountKind` / `accountKeyId` / `accountKeyOwnerUserId` | which ACCOUNT paid a vendor text call: `cluster`, or `key` with the key's id and its owner's. Absent for a source that takes no account. Never the key's name or fingerprint; a `fallback_used` row names the account that FAILED |
+| `accountKind` / `accountKeyId` / `accountKeyOwnerUserId` | which ACCOUNT paid a vendor text call: `cluster`, or `key` with the key's id and its owner's. Absent for a source that takes no account. Never the key's name or fingerprint; a `fallback_used` row names the account that FAILED. When a key paid and the call failed, the row's `errorMessage` is the router's code and sentence, never the vendor's own words ([API keys](api-keys.md#reading-which-account-paid)) |
 | `executionSurface` | which machine took the call, as `fleet:<registrationId>`, whether it served it or failed it. `outcome` says which, and a failed call counts against that machine in [fleet capacity](#fleet-capacity), including one that ran out of its caller's time. A machine that declined before handing the call to a runtime, or that nothing had been heard from when its caller gave up, is neither named nor counted |
 
 **`session` is a fourth door, not a flag on `app`.** `app` means a subscription app

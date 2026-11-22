@@ -117,7 +117,7 @@ concept call {
 
   outcome             enum("ok", "error", "cancelled", "fallback_used")!  @description("Final state of this call. `fallback_used` marks a failed pre-flight attempt in a policy chain whose successor succeeded (or failed and fell further).")
   errorCategory       string  @description("Short classifier when outcome=error: timeout, rate_limit, auth, upstream, cancelled, other.")
-  errorMessage        string  @description("Truncated error string for debugging (max 500 chars). Must not contain PII or secrets.")
+  errorMessage        string  @description("Truncated error string for debugging (max 500 chars). Must not contain PII or secrets. For a call a person's API key paid for (accountKind=key) it is the router's own code and sentence, such as `account_credit: the account that paid is out of credit or at its spend limit`, and never the vendor's words: those are about the key owner's account, and this row is readable by every signed-in person.")
   fallbackFromModel   string  @description("On outcome=fallback_used rows, the model that failed and triggered the retry. Empty on ok/error/cancelled rows.")
 
   // THE DECISION (epic memql#5127, design D10). Every resolution writes these,
@@ -226,7 +226,7 @@ concept route {
 @displayCard(primary="label", secondary="vendor", tertiary="fingerprint", status="status")
 @belongsTo(cluster)
 concept vendorKey {
-  ownerUserId     string!  @description("The v1:identity:user this key belongs to: the person who added it, whose money it spends. Stamped by createVendorKey from the actor the write runs as and never an argument. It never moves: a cluster owner who removes a key does not come to own it.")
+  ownerUserId     string!  @description("The v1:identity:user this key belongs to: the person who added it, whose money it spends. Stamped by createVendorKey from the actor the write runs as and never an argument. It never moves: a cluster owner who removes a key does not come to own it, an ownership transfer skips the row, and the engine refuses any write that would change it (vendor_key_owner_write_guard.go).")
   vendor          enum("anthropic", "openai")!  @description("The vendor the key is for. A key is sent to that vendor's own public API address and nowhere else; a cluster that sends the vendor's calls to another address uses no key for it.")
   label           string!  @description("The owner's name for the key, one to 60 characters, unique among that person's active keys. It is never written on a call record: a screen resolves it through the key's own read, so a person who may not see the key reads 'a key'.")
   encryptedValue  string!  @secret  @description("Base64-encoded nonce || NaCl-secretbox ciphertext of the key, sealed under MEMQL_MASTER_KEY by component/secret.Encrypt on the node that received it. Opaque: never rendered, projected by the one sealed shape a @serverOnly read carries, and unsealed only inside one request to the vendor into a local that dies with it. @secret redacts a rejected value in the function-args validator, which matches by argument name, so the writer's argument is named encryptedValue too.")
@@ -283,9 +283,9 @@ concept vendorKeyState {
   ownerUserId    string!  @description("The key's owner, stamped by createVendorKeyState from the actor the write runs as, which is the owner adding the key. The row-authz key; it never moves.")
   vendor         enum("anthropic", "openai")!  @description("The key's vendor, copied at creation so a sweep reads one concept.")
   state          enum("good", "refused", "credit", "unchecked")!  @description("`good`: the vendor served a call or a check with the key. `refused`: the vendor does not accept it, and it is passed over until a check or a served call says otherwise. `credit`: its account is out of credit or at a spend limit, and it is passed over until heldUntil. `unchecked`: nothing has been learned yet, which is a key that may not list models, until the first real call it pays for; it pays like a good one.")
-  evidenceAt     datetime!  @description("The time of the evidence behind `state`: when the call or check that produced it STARTED. A verdict with an earlier time than this is not written.")
+  evidenceAt     datetime!  @description("The time of the evidence behind `state`: when the call or check that produced it was SENT to the vendor, not when its answer arrived. A verdict with an earlier time than this is not written, which is what stops a long call that began before a key was revoked from reporting it working afterwards.")
   detail         string    @description("The vendor's words behind a refusal or a hold, with anything key-shaped removed, at most 300 characters. Empty when good.")
-  heldUntil      datetime  @description("Under `credit`: when the next real call may try the key again, one hour after the evidence. Compared with the clock at the time of a call; a past time holds nothing.")
+  heldUntil      datetime  @description("Under `credit`: when the next real call may try the key again, one hour after the evidence, or the time of a check that lifted the hold. Compared with the clock at the time of a call; a past time holds nothing.")
   checkedAt      datetime  @description("When the key's models were last listed, by the add, the daily check or Check now.")
   goodAt         datetime  @description("When the vendor last served a call or a check with the key, stamped at most once an hour. The daily check lists the models of any active key whose goodAt is more than 24 hours old.")
   lastUsedAt     datetime  @description("When a real call was last paid by the key, to within an hour. A heartbeat: it must never enter an arrival-cue fingerprint.")

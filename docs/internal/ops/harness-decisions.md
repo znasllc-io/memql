@@ -2002,6 +2002,37 @@ shared run keeps its opener's route. Tests:
 `TestWorkWithNoPersonIsPaidByTheClusterOnly`,
 `TestAVisitorsCallIsNeverPaidByAKey`.
 
+**The credential is evidence too, not only the subject**
+(`auth.ChoiceIsThePersons`, `component/auth/choice.go`). Every stamp of "who
+chose" takes the call's acting user, and an app session acts as the person who
+owns the machine. The independent review found three ways the coding agent
+holding one could name a vendor source as that person and have their default
+key pay with Auto off: a provider hint on an agent turn, a `source` on a goal
+it opens, and a model on a step it re-runs. So where a choice is made, the
+credential it came on is recorded beside it: `ChoiceByMachine` on the request
+for a direct call (`pinCredential` in `component/grpc`, `turnPin` in
+`integrations/agent`), `byMachine` on the run's `routing`
+(`memql.ContextWithGoalRouteChoice`, the one function every stamp of a turn's
+choice goes through) and on a re-run's override (`overrideFromArgs`). A choice
+so marked is still attributed to the person, because an app door reached
+through a pin opens on their machine, and `chosenByActor` reads it as no
+choice. Chosen path: a signed-in session and the person's own access token
+count; an app session, a service account, a badge, delegated access and
+borrowed authority do not. Alternative considered: refusing a source from those
+credentials outright, which would stop an app from asking for the local route.
+The mark describes the choice it travels with: `ApplyRunRouting` assigns it
+when a run's choice replaces the request's own, and a step override assigns
+its own. Fallback: anything unreadable reads as not the person's, which can
+only stop a key being spent. Campaign composition marks its route as the
+product's. Tests: `TestAChoiceIsThePersonsOnlyThroughTheirOwnCredential`,
+`TestTheChoiceATurnStampsSaysWhoseCredentialMadeIt`,
+`TestApplyRunRoutingCarriesAChoiceMadeByAMachine`,
+`TestAModelOverrideMadeByAMachineIsMarked`,
+`TestAGoalAnAppSessionOpensWithASourceSaysWhoChose`,
+`TestARerunAskedForThroughAnAppSessionSaysSo`,
+`TestAChatPinSaysWhoseCredentialMadeIt`,
+`TestAHintedPinSaysWhoseCredentialMadeIt`, `TestChosenByActor`.
+
 **Fallback: the next account for the same model, then the next model**
 (`chainEntriesFor`, `accountHop`). The chain a fallback wrapper walks spells a
 vendor record once per account that can pay (`<record>@key:<id>`, then
@@ -2016,6 +2047,25 @@ by every signed-in person. Tests:
 `TestAnotherFailureMovesToTheNextModel`,
 `TestNoAccountMeansTheModelIsPassedOverWithItsReason`,
 `TestTheRecordNamesTheAccountAndNeverTheKeysName`.
+
+**The cost guard's own stop is not the vendor's answer**
+(`classifyVendorAnswer`, `guardStopErrorType`). The guard sits beneath the SDK
+and answers a 402 of its own once the process budget is spent, and 402 is how
+Anthropic says an account is out of credit. Read as that, it held a person's
+key for an hour on every replica, mailed them that their account was empty in
+the engine's own words, and sent the router to the next account for a call no
+account may make. The guard's body carries an error type no vendor sends, and
+the one function that reads an answer for what it says about an account reads
+nothing into it. Test: `TestTheEnginesOwnBudgetStopSaysNothingAboutAKey`.
+
+**A request that carries a key follows no redirect** (`keyBoundRedirectPolicy`,
+`component/memql/vendor_account_middleware.go`). Go drops `Authorization` when
+a redirect leaves the host and keeps every custom header, so a redirect from
+Anthropic's address would have carried `X-Api-Key` to wherever it pointed. The
+request's context is marked and the guarded client hands the 3xx back as the
+answer, for the call path and for the check. Every other request keeps the
+default policy. Tests: `TestAKeyDoesNotFollowARedirect`,
+`TestProbeDoesNotFollowARedirect`.
 
 **Freshness: nothing is remembered** (`integrations/vendorkeys/store.go`,
 `asCluster`). Every answer reads the key rows and their state rows from the
@@ -2034,18 +2084,29 @@ of 30 seconds. Tests: `TestKeysForReadsRowsFreshOnEveryCall`,
 removal), the key's settings, and what the engine observed
 (`v1:router:vendorKeyState`). Temporary: the unsealed value, which exists
 inside one vendor request on the node making it (`Secret`) and is neither
-cached nor sent across the mesh; a forwarded call carries the key's id. Neither
-concept publishes a graph event, and no client reads either row
+cached nor sent across the mesh. A forwarded call carries nothing about an
+account: the node that makes the vendor call resolves it from the rows.
+Neither concept publishes a graph event, and no client reads either row
 (`clientUnreadableConcepts`).
 
 **What a call learns is written from any replica, in evidence order**
 (`observe`, `integrations/vendorkeys/observe.go`). Under the key's write gate,
 a verdict older than the row's `evidenceAt` is dropped, so a slow "good" from a
-call that started earlier cannot overwrite a later "refused". A node with no
-gate pool does not write. A refused key is passed over until a check or a
-served call says otherwise, and a key out of credit for one hour. A rate limit
-or an outage is not a verdict. Tests:
-`integrations/vendorkeys/observe_db_test.go`.
+call that started earlier cannot overwrite a later "refused". The evidence
+time is when the request was SENT (`roundTrip`), not when its answer arrived: a
+non-streaming call answers when generation ends, and dated on arrival a long
+call that began before a revocation reported good afterwards and undid it. A
+node with no gate pool does not write. A refused key is passed over until a
+check or a served call says otherwise, and a key out of credit for one hour. A
+rate limit or an outage is not a verdict. A check that succeeds on a key held
+for credit ends the hold and claims nothing: a vendor lists its models whether
+or not the account can pay, so marking it good showed "Working" for an empty
+account and mailed its owner again at the next failing call. A key with no
+record (an add writes two rows and the second can fail, with the cleanup after
+it) is given one by its first verdict, and the daily check lists it first.
+Tests: `integrations/vendorkeys/observe_db_test.go`,
+`TestAVerdictIsDatedWhenItsCallStarted`, `TestCheckRecordsWhatTheVendorSaid`,
+`integrations/vendorkeys/orphan_db_test.go`.
 
 **Two passes act on a person's key with nobody asking, and both spend
 nothing.** The daily check (`vendorKeysDailyCheck`, 04:40, `sweep.go`) lists
@@ -2069,18 +2130,89 @@ no give-up. Tests: `sweep_db_test.go`, `notice_db_test.go`,
 `component/automations/vendor_keys_daily_check_test.go`,
 `component/automations/vendor_keys_owner_notices_test.go`.
 
-**Permission and ownership.** Adding needs `execute app:fleet/keys` and a
-person's own session (`auth.RequirePersonSession`), and is refused inside a
-run. A key's owner alone renames it, moves the default, switches Auto and lends
+**Permission and ownership.** Adding needs `execute app:settings/apikeys` and
+a person's own session (`auth.RequirePersonSession`), and is refused inside a
+run. Every predefined role holds the part, and the list of a person's own keys
+asks for none (owner decision, 2026-11-22: a key's owner uses and manages it
+whatever their role, and anybody signed in may add one). The first build put
+keys in Fleet behind `app:fleet/keys` for owners and developers and listed a
+person's own keys only to a holder of the part; a person who lost the role
+kept a key that still paid for their calls and could neither see nor remove
+it. The alternative of keeping Fleet as the home with a second, smaller page
+for everybody else was refused for being two places for one thing. An operator
+withholds adding from a person or a group with a deny in Users > Access.
+Tests: `TestEveryRoleAddsAKeyAndADenyStopsOnePerson`,
+`TestAPersonManagesTheirOwnKeysWhateverTheirRole`. A key's owner alone renames it, moves the default, switches Auto and lends
 it. A cluster owner may read its facts, check it and remove it, and nothing
 else. Every write to either row requires internal origin (`@serverWritten`), so
 the builtins are the only way in. Tests: `builtins_db_test.go`,
 `sharing_db_test.go`.
 
+**A key's owner never changes, for any writer** (`guardOwnerHeld`,
+`component/memql/owner_held_write_guard.go`). The independent review
+found that `transferRowOwnership` moved keys like any owned row: a cluster
+owner could take a developer's key by naming it, and an offboarding handed a
+leaver's keys to their heir, still active and still a default. Internal origin
+and the row tier's cluster-owner arm both admitted the write. Two things now
+hold the rule. Both concepts are on the transfer's `stampedAtBirth` list, so an
+offboarding skips them and completes. And the engine refuses a change of
+`ownerUserId` on a stored row of either concept whatever the caller, keyed on a
+change so a read-merge that carries the field through is untouched. A leaver's
+keys stay theirs and stop serving, because their owner is no longer an active
+user. Tests: `TestAVendorKeysOwnerNeverChanges`,
+`TestTransferLeavesAPersonsApiKeysWhereTheyAre`.
+
+**A person's source access is held to the same rule (owner decision,
+2026-11-22).** The transfer moved `v1:platform:sourceCredential` and
+`v1:platform:sourceConnection` too, and this predates the keys: the source
+credential's own rule refuses a person's or a cluster owner's write of the
+owner and admits internal origin, which is what the transfer writes. An heir
+then fetched private sources as the person who left. Both concepts are now on
+`stampedAtBirth` and on the engine's `ownerHeld` list, and
+`TestTransferSkipsEveryConceptWhoseOwnerTheEngineHolds` holds the two lists
+together, because a concept the engine refuses and the transfer does not skip
+would fail an offboarding partway, with every earlier row already moved. The
+chosen cost: a package that was handed over stops fetching, with
+`credential_not_found` or `source_connection_unavailable`, until its new owner
+selects a connection of their own on the Source stop. The alternative, moving
+the access so transferred packages keep deploying, was the behaviour and was
+refused. `v1:platform:externalConnection` (a person's selection of a Shopify
+store) is not on either list and still moves; it carries no credential and was
+not part of the decision. Tests: `TestAPersonsSourceAccessNeverChangesHands`,
+`TestTransferLeavesAPersonsSourceAccessWhereItIs`.
+
+**The record of a key-paid call that failed keeps the router's words, not the
+vendor's (owner decision, 2026-11-22).** `v1:router:call` is readable by every
+signed-in person, and its `errorMessage` held the error as the vendor wrote
+it. For a key that sentence is about one person's account at the vendor: their
+organization, their plan, a masked part of their key. `recordedError`
+(`component/router/failure_reason.go`) writes the stable code and the router's
+sentence instead whenever the decision says a key paid, for every failure and
+not only one about the account, because a rate limit names the organization as
+readily as a refusal does. The observed row and the `fallback_used` row both
+go through it. The one other place a failed attempt's error is written down,
+the door report of the ceiling refusal a wrapper answers before its next vendor
+hop (`fallbackHopRefusal`), uses the same words when a key paid for the attempt
+that failed. Alternatives: scrubbing the vendor's text (no list of what a
+vendor may say exists), or hiding the field from the projection (a raw read
+still returns the row). The key's owner reads the vendor's words on the key's
+page, from the key's state. Not covered: the error a failed call returns to
+its own caller is unchanged, and on the stream it was already a generic
+sentence with an error id. The cluster's own account keeps the error's text.
+Tests: `TestAKeyPaidFailureKeepsTheRoutersWordsAndNeverTheVendors`,
+`TestACeilingRefusalAfterAKeyFailedNeverQuotesTheVendor`.
+
+**A log line names a key by `logger.Subject`, never by an attribute called
+keyId** (`keySubject`, `integrations/vendorkeys/store.go`). The production log
+handler blanks the value of every attribute whose name contains "key", so every
+warning in the package printed `keyId=<redacted>` and none said which key.
+Test: `TestNoLogLineUsesAnAttributeTheHandlerRedacts`.
+
 **Limits.** Nothing here ran against a real vendor: the vendors are test
 servers answering as their documentation describes. A restricted OpenAI key is
 recognised by the wording of OpenAI's refusal, which is not documented as
-stable. Vision, embeddings, speech, transcription and images are never paid by
+stable; a 403 that names no missing permission verifies nothing and saves
+nothing. Vision, embeddings, speech, transcription and images are never paid by
 a key. A person's non-default key at a vendor is never spent until a route can
 name an account. `recordRouterCall` is reachable from a signed-in client, so a
 key's activity counts only the rows the router wrote (`row.createdBy`), and a

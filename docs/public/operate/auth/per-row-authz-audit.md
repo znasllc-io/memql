@@ -318,6 +318,17 @@ decides whether it opens reads that field, and moving it would part it
 from a deployable that kept its owner. Naming either concept moves
 nothing.
 
+Four more concepts are a person's own credentials and never change hands:
+`v1:router:vendorKey` and `v1:router:vendorKeyState` (an API key spends
+the money of the person who added it), and `v1:platform:sourceCredential`
+and `v1:platform:sourceConnection` (a person's sealed access to their
+repositories, and the selection they made from it). The transfer skips
+all four, and the engine refuses a change of their owner for every
+writer, internal origin included. A leaver's keys stop serving. A package
+that was handed over stops fetching a private source, with
+`credential_not_found`, until its new owner selects a connection of their
+own on the package's Source stop.
+
 > **Fields are read through the filter's lambda parameter.** In edition
 > 2026 `row.ownerUserId` is the payload field and `row.id` the intrinsic,
 > so neither the `payload.` prefix this table used to prescribe (retired

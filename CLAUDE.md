@@ -761,7 +761,8 @@ token and exchanges it for a short-lived bearer; a partial set of ids REFUSES
 THAT VENDOR, naming both halves (the token file's path, which every Deployment
 sets, does not count on its own). **The cluster has no API key and never gets
 one**: `TestNoVendorApiKeyEntryPoint` (`vendor_api_key_gate_test.go`) fails the
-build if any retired key env var reappears in a tracked source file. **Read
+build if any retired key env var or the retired key-setting builtin reappears
+in a tracked source file. **Read
 that file rather than restating its list here -- the gate walks this file
 too**; `vendor_api_key` as a globalSecret KIND stays legitimate (the Shopify
 connector seals its secrets under it).
@@ -769,15 +770,21 @@ connector seals its secrets under it).
 [openai-federation.md](docs/public/operate/auth/openai-federation.md).
 
 **A PERSON'S API key is the other kind** ([api-keys.md](docs/public/operate/api-keys.md)):
-Anthropic or OpenAI only, added in Fleet > API keys behind `app:fleet/keys`
-(owner and developer), in a person's own session and never in a run. It is
+Anthropic or OpenAI only, added in Settings > API keys behind `execute
+app:settings/apikeys`, which EVERY predefined role holds (bring-your-own is for
+everybody; a deny withholds it), in a person's own session and never in a run.
+The section itself has no floor: a key's owner lists and manages it whatever
+their role holds. It is
 checked by listing the vendor's models (no prompt, no charge), sealed under
 `MEMQL_MASTER_KEY` by `integrations/vendorkeys`, and never returned, logged or
 sent across the mesh. Two rows, both client-unreadable and publishing NO graph
 event: `v1:router:vendorKey` (what its owner decides) and
 `v1:router:vendorKeyState` (what the engine observes, written under a per-key
-write gate and ordered by the time of the evidence). Only the `vendorKey*`
-builtins decide what a caller sees.
+write gate and ordered by the time of the evidence, which is when the call was
+SENT). Only the `vendorKey*` builtins decide what a caller sees. **A key's
+owner never changes, for any writer** (`owner_held_write_guard.go`), and
+`transferRowOwnership` skips both rows: a leaver's keys stay theirs and stop
+serving.
 
 - **Which account pays is decided per call, from rows read fresh, on the node
   making the call** (`component/router/accounts.go`,
@@ -786,11 +793,17 @@ builtins decide what a caller sees.
   for a visitor: never a key. A route or pin the acting person chose
   THEMSELVES: their default key, then keys lent to them (earliest added
   first), then the cluster's. Auto and everything else: the same order,
-  counting only keys whose owner switched Auto on.
+  counting only keys whose owner switched Auto on. **"Themselves" is the
+  credential, not the subject** (`auth.ChoiceIsThePersons`): a choice made
+  through an app session, a badge, delegated access or server code acting for
+  the person is attributed to them and counts as no choice
+  (`ChoiceByMachine`, stamped where the choice is made and carried on the
+  run's rows).
 - **An account failure moves to the next ACCOUNT for the same model** before
   the route moves to its next model; the chain carries both
   (`<record>@key:<id>`, then `<record>@cluster`). A rate limit or an outage is
-  not about the account.
+  not about the account, and neither is the cost guard's own 402
+  (`guardStopErrorType`). A request that carries a key follows no redirect.
 - **Text surfaces only.** Vision, embeddings, speech, transcription and images
   stay on the cluster's account.
 - **A key's spend is METERED.** Every ceiling and loop cap counts it; there is
@@ -2031,7 +2044,10 @@ does not say.
   personal token a private source fetches under, sealed once server-side and
   resolved under the **package owner's** actor (someone else's credential
   resolves zero rows: `credential_not_found`). There is no cluster-wide source
-  credential. `siteAccessCode` / `siteAccessSession` are a deployable's access codes and the
+  credential. **A source credential and a source connection never change
+  owner, for any writer** (`owner_held_write_guard.go`): a transfer moves a
+  leaver's packages and leaves their source access with them, so a handed-over
+  package stops fetching until its new owner selects a connection of their own. `siteAccessCode` / `siteAccessSession` are a deployable's access codes and the
   visits they opened ([site-access-codes.md](docs/public/operate/site-access-codes.md)): the part
   is `app:deployables/access` (owner and developer), both concepts are `@serverWritten`, publish
   no graph event and are unreadable by any client except through the six `siteAccess*` builtins
