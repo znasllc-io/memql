@@ -116,47 +116,47 @@ describe("the share view", () => {
   });
 
   it("shows who is picked as chips inside the search box, not as 'N selected' (Nov 20 call)", async () => {
-    const connection = connect({ shareDirectory: [...people, { userId: "u-ada", displayName: "Ada Park" }, { groupId: "g-fylo", displayName: "Fylo", members: 4 }] });
+    const connection = connect({ shareDirectory: [...people, { userId: "u-ada", displayName: "Ada Park" }, { groupId: "g-design", displayName: "Design team", members: 4 }] });
     await renderFiles();
     await openShare();
     const box = () => searchBox().closest(".os-card-search-input")!;
     expect(box().hasAttribute("data-picker-field")).toBe(false);
     await pick("Dana Cole");
-    await click(screen.getByRole("option", { name: "Fylo" }));
+    await click(screen.getByRole("option", { name: "Design team" }));
     // Both stand in the box, in the order picked, each with its own x.
-    expect([...box().querySelectorAll(".os-chip")].map((chip) => chip.textContent)).toEqual(["Dana Cole", "Fylo"]);
+    expect([...box().querySelectorAll(".os-chip")].map((chip) => chip.textContent)).toEqual(["Dana Cole", "Design team"]);
     expect(box().hasAttribute("data-picker-field")).toBe(true);
     // The count is for screen readers only now.
     expect(screen.getByText("2 selected").className).toBe("os-sr-only");
     // The x un-picks that one; Backspace in the empty box takes off the last.
     await click(within(box() as HTMLElement).getByRole("button", { name: "Remove Dana Cole" }));
-    expect([...box().querySelectorAll(".os-chip")].map((chip) => chip.textContent)).toEqual(["Fylo"]);
+    expect([...box().querySelectorAll(".os-chip")].map((chip) => chip.textContent)).toEqual(["Design team"]);
     await pick("Ada Park");
     await act(async () => { fireEvent.keyDown(searchBox(), { key: "Backspace" }); });
-    expect([...box().querySelectorAll(".os-chip")].map((chip) => chip.textContent)).toEqual(["Fylo"]);
+    expect([...box().querySelectorAll(".os-chip")].map((chip) => chip.textContent)).toEqual(["Design team"]);
     // What stays picked is what is shared.
     await click(addButton());
     expect(connection.callsNamed("libraryShareFile")).toEqual([
-      'builtin libraryShareFile(artifactId: "a-1", recipientGroupId: "g-fylo", days: 7)',
+      'builtin libraryShareFile(artifactId: "a-1", recipientGroupId: "g-design", days: 7)',
     ]);
     expect(box().querySelectorAll(".os-chip")).toHaveLength(0);
   });
 
   it("offers groups beside people, and shares with a whole group", async () => {
-    const connection = connect({ shareDirectory: [...people, { groupId: "g-fylo", displayName: "Fylo", members: 4 }] });
+    const connection = connect({ shareDirectory: [...people, { groupId: "g-design", displayName: "Design team", members: 4 }] });
     await renderFiles();
     await openShare();
     fireEvent.focus(searchBox());
-    const option = await screen.findByRole("option", { name: "Fylo" });
+    const option = await screen.findByRole("option", { name: "Design team" });
     expect(option.textContent).toContain("Group of 4 people");
     // Groups narrows the list to groups.
     chooseOption(screen.getByLabelText("Search users and groups by", { selector: "button" }), "Groups");
     fireEvent.focus(searchBox());
-    expect(screen.getAllByRole("option").map((o) => o.getAttribute("aria-label"))).toEqual(["Fylo"]);
-    await click(screen.getByRole("option", { name: "Fylo" }));
+    expect(screen.getAllByRole("option").map((o) => o.getAttribute("aria-label"))).toEqual(["Design team"]);
+    await click(screen.getByRole("option", { name: "Design team" }));
     await click(addButton());
     expect(connection.callsNamed("libraryShareFile")).toEqual([
-      'builtin libraryShareFile(artifactId: "a-1", recipientGroupId: "g-fylo", days: 7)',
+      'builtin libraryShareFile(artifactId: "a-1", recipientGroupId: "g-design", days: 7)',
     ]);
   });
 
@@ -198,7 +198,7 @@ describe("the share view", () => {
   });
 
   it("renews a group's share until a picked day", async () => {
-    const groupShare = shareRow({ id: "s-g", artifactId: "a-1", recipientUserId: "", recipientGroupId: "g-fylo", recipientDisplayName: "Fylo" });
+    const groupShare = shareRow({ id: "s-g", artifactId: "a-1", recipientUserId: "", recipientGroupId: "g-design", recipientDisplayName: "Design team" });
     const connection = connect({ shares: [groupShare] });
     await renderFiles();
     await openShare();
@@ -209,11 +209,11 @@ describe("the share view", () => {
     if (inTwo.getMonth() !== today.getMonth()) await click(within(calendar).getByRole("button", { name: "Next month" }));
     await click(within(calendar).getByRole("button", { name: inTwo.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" }) }));
     const words = inTwo.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
-    await click(screen.getByRole("button", { name: "Actions for Fylo" }));
+    await click(screen.getByRole("button", { name: "Actions for Design team" }));
     await click(screen.getByRole("menuitem", { name: `Renew until ${words}` }));
     const end = new Date(inTwo.getFullYear(), inTwo.getMonth(), inTwo.getDate(), 23, 59, 59, 999).toISOString();
     expect(connection.callsNamed("libraryShareFile")).toEqual([
-      `builtin libraryShareFile(artifactId: "a-1", recipientGroupId: "g-fylo", until: "${end}")`,
+      `builtin libraryShareFile(artifactId: "a-1", recipientGroupId: "g-design", until: "${end}")`,
     ]);
   });
 
@@ -228,11 +228,11 @@ describe("the share view", () => {
   });
 
   it("names a group share with its group", async () => {
-    const groupShare = shareRow({ id: "s-g", artifactId: "a-1", recipientUserId: "", recipientGroupId: "g-fylo", recipientDisplayName: "Fylo" });
+    const groupShare = shareRow({ id: "s-g", artifactId: "a-1", recipientUserId: "", recipientGroupId: "g-design", recipientDisplayName: "Design team" });
     connect({ shares: [groupShare] });
     await renderFiles();
     await openShare();
-    const remove = await screen.findByRole("button", { name: "Actions for Fylo" });
+    const remove = await screen.findByRole("button", { name: "Actions for Design team" });
     expect(remove.closest(".os-editable-card")?.textContent).toMatch(/Group · \d+ days left/);
   });
 
@@ -550,10 +550,10 @@ describe("the Shared folder and the Sharing place (Nov 19 2026)", () => {
   });
 
   it("names a whole group, with a group icon", async () => {
-    connect({ shares: [shareRow({ id: "s-g", artifactId: "a-1", recipientUserId: "", recipientGroupId: "g-fylo", recipientDisplayName: "Fylo", title: "brief.pdf" })] });
+    connect({ shares: [shareRow({ id: "s-g", artifactId: "a-1", recipientUserId: "", recipientGroupId: "g-design", recipientDisplayName: "Design team", title: "brief.pdf" })] });
     await renderFiles();
     await click(within(rail()).getByRole("button", { name: "Sharing" }));
-    const stop = await screen.findByRole("button", { name: "Stop sharing brief.pdf with Fylo" });
+    const stop = await screen.findByRole("button", { name: "Stop sharing brief.pdf with Design team" });
     const row = stop.closest("li")!;
     expect(within(row).getByLabelText("Group")).toBeTruthy();
   });
@@ -611,7 +611,7 @@ describe("Shared by, for someone who oversees others' shares (item 13, Nov 20 20
   const mine = shareRow({ id: "s-mine", artifactId: "a-1", recipientUserId: "u-sam", recipientDisplayName: "Sam Lee", title: "brief.pdf" });
   const overseen = [
     { ...mine, ownerUserId: "u-me", ownerDisplayName: "Me Myself", mine: true },
-    shareRow({ id: "s-enr", artifactId: "x-1", ownerUserId: "u-enr", recipientUserId: "u-carlos", recipientDisplayName: "Carlos", title: "Lab results summary.pdf", createdAt: "2026-11-19T10:00:00Z" }),
+    shareRow({ id: "s-enr", artifactId: "x-1", ownerUserId: "u-enr", recipientUserId: "u-casey", recipientDisplayName: "Casey", title: "Lab results summary.pdf", createdAt: "2026-11-19T10:00:00Z" }),
     { ...shareRow({ id: "s-majo", artifactId: "x-2", ownerUserId: "u-majo", recipientUserId: "", recipientDisplayName: "ZNAS team", title: "Site visit 03.jpg", createdAt: "2026-11-19T11:00:00Z" }), recipientGroupId: "g-znas" },
   ].map((row, i) => ({ ...row, ownerDisplayName: (row as Record<string, unknown>).ownerDisplayName ?? ["", "Enrique Mendivil", "Majo Zepeda"][i] }));
   const sharedBy = () => screen.getByLabelText("Shared by", { selector: "button" });
@@ -647,7 +647,7 @@ describe("Shared by, for someone who oversees others' shares (item 13, Nov 20 20
     await click(within(rail()).getByRole("button", { name: "Sharing" }));
     chooseOption(sharedBy(), "Everyone");
     const reads = connection.callsNamed("librarySharesOverseen").length;
-    await click(await screen.findByRole("button", { name: "Stop sharing Lab results summary.pdf with Carlos" }));
+    await click(await screen.findByRole("button", { name: "Stop sharing Lab results summary.pdf with Casey" }));
     expect(connection.callsNamed("libraryShareStop")).toEqual(['builtin libraryShareStop(shareId: "s-enr")']);
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
     expect(connection.callsNamed("librarySharesOverseen").length).toBeGreaterThan(reads);
