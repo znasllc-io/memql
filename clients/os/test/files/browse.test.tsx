@@ -261,22 +261,11 @@ describe("the inspector", () => {
     expect(within(inspector).getByText("Uploaded here")).toBeTruthy();
   });
 
-  it("renders an archive refusal verbatim, in surface", async () => {
-    const connection = fakeConnection({
-      artifacts: [artifactRow({ id: "a-1", title: "brief.pdf" })],
-      refuse: { archiveArtifact: "the cluster refused: archived rows keep counting" },
-    });
-    h.connection = connection;
-    await renderFiles({ settings: { confirmBeforeArchive: false } });
-    await openDetails(/brief\.pdf/);
-    const inspector = screen.getByRole("region", { name: "File details" });
-    await click(within(inspector).getByRole("button", { name: "Delete" }));
-    expect(
-      within(inspector).getByText("the cluster refused: archived rows keep counting"),
-    ).toBeTruthy();
-  });
-
-  it("asks before archiving when the setting says so, and a cancel is a no-op", async () => {
+  it("shows the file's details and no action bar (Nov 20 call)", async () => {
+    // José: "we shouldn't have this footer there ... it's supposed to just
+    // show the details, not show actions." Delete, Open, Download and Send
+    // to desktop stay on the file's icons and right-click menu (deleting,
+    // refusals and the confirm question: rowArchive.test.tsx).
     const connection = fakeConnection({
       artifacts: [artifactRow({ id: "a-1", title: "brief.pdf" })],
     });
@@ -284,20 +273,11 @@ describe("the inspector", () => {
     await renderFiles();
     await openDetails(/brief\.pdf/);
     const inspector = screen.getByRole("region", { name: "File details" });
-    await click(within(inspector).getByRole("button", { name: "Delete" }));
-    const footer = within(inspector).getByRole("group", { name: "What you can do with this" });
-    expect(within(footer).getByText(/Delete "brief\.pdf"\?/)).toBeTruthy();
-    expect(within(footer).queryByRole("button", { name: "Open" })).toBeNull();
-    // The question is drawn by the inspector itself, beside no acts of the
-    // bar's; the bar holds its buttons all the same. The second click of a
-    // double-click on Delete lands on the question's own Delete, and answers
-    // nothing.
-    await click(within(footer).getByRole("button", { name: "Delete" }));
-    expect(connection.callsNamed("archiveArtifact")).toEqual([]);
-    expect(within(footer).getByText(/Delete "brief\.pdf"\?/)).toBeTruthy();
-    await readTheBar();
-    await click(within(footer).getByRole("button", { name: "Cancel" }));
-    expect(within(footer).getByRole("button", { name: "Open" })).toBeTruthy();
-    expect(connection.callsNamed("archiveArtifact")).toEqual([]);
+    expect(inspector.querySelector("footer")).toBeNull();
+    expect(within(inspector).queryByRole("group", { name: "What you can do with this" })).toBeNull();
+    for (const name of ["Delete", "Open", "Download", "Send to desktop", "Restore"]) {
+      expect(within(inspector).queryByRole("button", { name })).toBeNull();
+    }
+    expect(within(inspector).getByText("Uploaded here")).toBeTruthy();
   });
 });

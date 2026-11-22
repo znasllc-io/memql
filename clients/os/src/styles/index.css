@@ -15830,15 +15830,11 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 .os-files { height: auto; min-height: 100%; }
 .os-files-list { display: block; overflow: visible; }
 .os-file-folders { margin: 0; padding: 0; list-style: none; border-bottom: 1px solid var(--os-line); }
-/* The body owns scrolling; the shared footer stays inside the app window. */
+/* The body owns scrolling. No footer: file details carry no action bar
+ * (José, Nov 20 2026 call; footers belong to wizards). */
 .os-files[data-detail] { height: 100%; min-height: 0; display: flex; flex-direction: column; }
 .os-file-detail { flex: 1 1 auto; width: 100%; }
 .os-file-detail-body { display: flex; flex-direction: column; gap: 16px; }
-.os-file-detail-footer { flex: 0 0 auto; min-width: 0; }
-.os-file-detail-footer[data-confirming] .os-actbar-state { flex-direction: column; align-items: flex-start; gap: 4px; }
-.os-file-detail-footer .os-actbar-detail { white-space: normal; }
-.os-file-detail-footer .os-button[aria-label] { min-width: var(--os-control-h); }
-.os-file-detail-notices { display: flex; flex-direction: column; gap: 8px; padding: 12px 20px; max-height: calc(28vh / var(--os-scale, 1)); overflow: auto; border-top: 1px solid var(--os-line); }
 /* Fleet's Details layout (item 11, Nov 20): the sections are the kit's
  * Details grid (kit/details.css); Labels and Client are one SHORT row each. */
 .os-file-detail .os-files-labeledit, .os-file-detail-short { max-width: 22rem; }

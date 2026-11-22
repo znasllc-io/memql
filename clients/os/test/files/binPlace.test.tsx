@@ -12,7 +12,9 @@ describe("Bin workspace", () => {
   await click(screen.getByRole("button",{name:"Open folder Old reports"}));
   await openDetails(/old.pdf/);
   const detail = screen.getByRole("region",{name:"File details"});
-  expect(within(detail).getByRole("button",{name:"Restore"})).toBeTruthy();
+  // No action bar on Details since the Nov 20 call: Restore is on the
+  // file's right-click menu in the Bin.
+  expect(within(detail).queryByRole("button",{name:"Restore"})).toBeNull();
   expect(screen.queryByRole("navigation",{name:"File locations"})).toBeNull();
  });
  it("keeps empty archived folders reachable for restore", async () => {
