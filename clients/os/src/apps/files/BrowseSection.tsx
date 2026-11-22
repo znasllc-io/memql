@@ -27,7 +27,8 @@ import { entriesOf, hasDirectory, walkEntries } from "../../items/folderDrop";
 import { FolderSelect, folderOptions } from "../../items/FolderSelect";
 import { planArchive, readArchiveMembers, runArchiveWalk, subtreeHoldsArtifact } from "./actions/archive";
 
-import { composeIntent, MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION, MATERIALIZER_MADE_SECTION } from "../../items/materialize";
+import { COMPOSE_FORMATS, composeIntent, MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION, MATERIALIZER_MADE_SECTION } from "../../items/materialize";
+import { formatWord } from "../materializer/words";
 import { AddButton } from "../../kit/AddButton";
 import { Submenu } from "../../kit/Submenu";
 import { InPlaceAsk } from "../../kit/pressHold";
@@ -941,16 +942,21 @@ export function BrowseSection({
         {canAdd ? <AddMenu
           disabled={connection === null}
           onUpload={() => pickRef.current?.click()}
-          newFileKinds={canOpen(registry, MATERIALIZER_APP_ID) ? [{
-            label: "Markdown file",
+          // EVERY KIND THE MATERIALIZER WRITES (Nov 20 2026 call, 0:42-1:22:
+          // Jesús, "TXT, HTML, CSV, JSON ... all the files MemQL OS can create
+          // in the Materializer. If you click there, it sends you to the
+          // Materializer to create it"; José: "sí, está bien"), in its own
+          // order and words, each opening its composer set to that kind.
+          newFileKinds={canOpen(registry, MATERIALIZER_APP_ID) ? COMPOSE_FORMATS.map((format) => ({
+            label: formatWord(format),
             run: () => actions.openApp(
               MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION, composeIntent({
-                format: "markdown",
+                format,
                 ...(destinationFolderId ? { folderId: destinationFolderId } : {}),
                 returnTo: { appId: "files", sectionId: "browse" },
               }),
             ),
-          }] : []}
+          })) : []}
           onNewFolder={() => void newFolderIn(destinationFolderId)}
         /> : null}
       </Head>
