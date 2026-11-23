@@ -244,6 +244,17 @@ describe("the empty state", () => {
   });
 });
 
+describe("adding a backup", () => {
+  it("keeps the explanations behind the help button, not on the steps", async () => {
+    h.connection = fakeConnection({ backups: [] });
+    await renderFiles({ section: "backups" });
+    fireEvent.click(screen.getByRole("button", { name: "Back up a folder" }));
+    expect(await screen.findByRole("combobox", { name: "Backup type" })).toBeTruthy();
+    expect(screen.queryByText(/Enter the full path on a paired machine/)).toBeNull();
+    expect(screen.queryByText(/The folder stays in sync/)).toBeNull();
+  });
+});
+
 describe("a refusal", () => {
   it("renders the server's own sentence, verbatim, beside the control that produced it", async () => {
     const connection = fakeConnection({
