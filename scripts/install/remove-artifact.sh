@@ -16,7 +16,9 @@
 #   mkcertCA      EVERYTHING install.mkcert wrote: the local CA (mkcert
 #                 -uninstall + the rootCA files + its marker) AND the front-door
 #                 pair it issued at --cert-file / --key-file
-#   stack         the local k3d cluster named --cluster
+#   stack         the local k3d cluster named --cluster, and the token signing
+#                 key `make up` keeps for it, when --signing-key names it (the
+#                 receipt passes it only when the install made the key)
 #   images        locally built/imported images matching --image-prefix
 #
 # --pre-existing=true IS AN UNCONDITIONAL REFUSAL (exit 3).
@@ -106,6 +108,7 @@ cap_spec_param "caroot"       "mkcert CA root directory (default: whatever 'mkce
 cap_spec_param "cert-file"    "front-door certificate install.mkcert issued (kind=mkcertCA; nothing is removed without it)"
 cap_spec_param "key-file"     "its private key"
 cap_spec_param "cluster"      "k3d cluster name for kind=stack (default memql)"
+cap_spec_param "signing-key"  "kind=stack: the cluster's token signing key the install made, ~/.memql/k3d/<cluster>/service-account.key; removed with the cluster, and nothing is removed without it"
 cap_spec_param "image-prefix" "repository prefix for kind=images (default memql)"
 cap_spec_param "prune-empty-parents" "after removing, rmdir up to two now-empty parent dirs (flag)"
 cap_spec_param "confirm"      "the typed phrase that permits deleting a PRE-EXISTING k3d cluster and its data (kind=stack only)"
@@ -557,22 +560,91 @@ function remove_mkcert_ca() {
 # KIND: stack
 #=============================================================================
 
+# THE CLUSTER'S TOKEN SIGNING KEY GOES WITH THE CLUSTER THE INSTALL MADE.
+#
+# `make up` keeps a local cluster's signing key in
+# ~/.memql/k3d/<cluster>/service-account.key so a recreated cluster is the same
+# issuer and the public keys given to a vendor stay good (scripts/k3d/up.sh,
+# ensure_signing_key). Uninstalling deleted the cluster and left that file, a
+# secret, behind: the installer lifecycle's round trip failed on it, "memqlHome
+# did not return to its baseline".
+#
+# WHICH KEY. Only the one --signing-key names, and the receipt names it only
+# when the install's own run created it (k3d.up's result.createdSigningKeyFile).
+# A key that was already here -- kept by `make down` before the install --
+# holds the keys somebody gave a vendor, and is not the install's to take.
+#
+# WHAT SHAPE. The path must be absolute, free of `..`, end in
+# .memql/k3d/<this cluster>/service-account.key, and be a regular file rather
+# than a link; anything else is refused, exit 2, before the cluster or anything
+# else is touched. One file, then its directory and the k3d directory above it
+# when they are empty: never a recursive removal.
+#
+# WHEN. With the cluster, under the same guard: a cluster that was already here
+# is refused whole, key included. A cluster already deleted by hand still
+# leaves its key to take back.
+#
+# Tests: remove_artifact_signing_key_test.go.
+_RA_SIGNING_KEY_REMOVED=false
+function check_signing_key_path() {
+    local cluster="$1" key="$2"
+    [[ -z "$key" ]] && return 0
+    [[ "$key" == /* ]] \
+        || cap_fail 2 "--signing-key must be an absolute path; refusing ${key}"
+    case "/${key}/" in
+        */../*|*/./*) cap_fail 2 "--signing-key must not climb with . or ..; refusing ${key}" ;;
+    esac
+    [[ "$key" == */.memql/k3d/"${cluster}"/service-account.key ]] \
+        || cap_fail 2 "--signing-key is not cluster '${cluster}'s signing key (want .../.memql/k3d/${cluster}/service-account.key); refusing ${key}"
+    if [[ -L "$key" ]]; then
+        cap_fail 2 "--signing-key ${key} is a link, not the key file; refusing to follow it"
+    fi
+    if [[ -e "$key" && ! -f "$key" ]]; then
+        cap_fail 2 "--signing-key ${key} is not a regular file; refusing"
+    fi
+    return 0
+}
+
+function remove_signing_key_file() {
+    local key="$1" dir
+    [[ -z "$key" || ! -f "$key" ]] && return 0
+    rm -f "$key" || cap_fail 5 "could not remove the cluster's signing key at ${key}"
+    dir="$(dirname "$key")"
+    rmdir "$dir" 2>/dev/null || true
+    rmdir "$(dirname "$dir")" 2>/dev/null || true
+    _RA_SIGNING_KEY_REMOVED=true
+    cap_changed
+    cap_info "Removed the cluster's token signing key the install made (${key})."
+}
+
 function remove_stack() {
-    local cluster="$1"
+    local cluster="$1" key="$2"
     cap_require cluster "$cluster"
+    check_signing_key_path "$cluster" "$key"
 
     command -v k3d &>/dev/null || cap_fail 4 "k3d is not installed; cannot remove the local cluster"
 
-    # Absence before the guard -- see remove_binary (memql#3583).
+    # Absence before the guard -- see remove_binary (memql#3583). The key is
+    # still asked about: a cluster deleted by hand leaves its key to take back,
+    # under the same guard the cluster's removal answers to.
     if ! k3d cluster list 2>/dev/null | grep -q "^${cluster}[[:space:]]"; then
         cap_info "No k3d cluster named '${cluster}' -- nothing to remove."
-        finish stack "$cluster" false "already absent"
+        local detail="already absent"
+        if [[ -n "$key" && -f "$key" ]]; then
+            refuse_if_pre_existing stack "$cluster"
+            remove_signing_key_file "$key"
+            detail="already absent; its signing key removed"
+        fi
+        cap_result_set_raw signingKeyRemoved "$_RA_SIGNING_KEY_REMOVED"
+        finish stack "$cluster" "$_RA_SIGNING_KEY_REMOVED" "$detail"
     fi
     refuse_if_pre_existing stack "$cluster"
     cap_info "Deleting k3d cluster '${cluster}'..."
     k3d cluster delete "$cluster" >&2 || cap_fail 5 "k3d cluster delete ${cluster} failed"
-
     cap_changed
+    remove_signing_key_file "$key"
+
+    cap_result_set_raw signingKeyRemoved "$_RA_SIGNING_KEY_REMOVED"
     finish stack "$cluster" true "cluster deleted"
 }
 
@@ -641,7 +713,7 @@ function main() {
     cap_handle_meta "$@"
     cap_parse_flags "$@"
 
-    local kind path marker caroot cert key cluster prefix
+    local kind path marker caroot cert key cluster signing_key prefix
     kind="$(cap_param kind)"
     path="$(cap_param path "$(cap_param dest)")"
     marker="$(cap_param marker memql)"
@@ -652,6 +724,7 @@ function main() {
     cert="$(cap_param cert-file)"
     key="$(cap_param key-file)"
     cluster="$(cap_param cluster memql)"
+    signing_key="$(cap_param signing-key)"
     prefix="$(cap_param image-prefix memql)"
     _RA_PRE_EXISTING="$(cap_param pre-existing)"
     if cap_bool prune-empty-parents; then _RA_PRUNE_EMPTY_PARENTS=1; else _RA_PRUNE_EMPTY_PARENTS=""; fi
@@ -678,7 +751,7 @@ function main() {
         checkout)     remove_checkout "$path" ;;
         hostsEntries) remove_hosts_entries "$path" "$marker" ;;
         mkcertCA)     remove_mkcert_ca "$caroot" "$cert" "$key" ;;
-        stack)        remove_stack "$cluster" ;;
+        stack)        remove_stack "$cluster" "$signing_key" ;;
         images)       remove_images "$prefix" ;;
         *) cap_fail 2 "unknown kind: ${kind} (supported: binary, checkout, hostsEntries, mkcertCA, stack, images)" ;;
     esac

@@ -514,8 +514,20 @@ const REMOVAL_TARGETS: Record<string, RemovalTarget[]> = {
     { flag: "cert-file", resultField: "certFile", paramField: "cert-file", required: false },
     { flag: "key-file", resultField: "keyFile", paramField: "key-file", required: false },
   ],
-  // k3d.up reports the cluster it created as result.cluster.
-  stack: [{ flag: "cluster", resultField: "cluster", paramField: "cluster", required: false }],
+  // k3d.up reports the cluster it created as result.cluster, and the token
+  // signing key it created for that cluster as result.createdSigningKeyFile.
+  //
+  // THE KEY HAS NO paramField, deliberately: the step is never invoked with it,
+  // and the only key the uninstall may remove is one the run REPORTED MAKING. A
+  // key kept by `make down` before the install holds the keys somebody gave a
+  // vendor and is never named. Carried forward like the cluster's name, so a
+  // repair that finds the key and makes none does not erase the install's
+  // record of making it. remove-artifact.sh checks the path's shape again
+  // before it removes anything.
+  stack: [
+    { flag: "cluster", resultField: "cluster", paramField: "cluster", required: false },
+    { flag: "signing-key", resultField: "createdSigningKeyFile", required: false },
+  ],
 };
 
 /** `next`, with any removal-target field it lacks taken from `previous`. */

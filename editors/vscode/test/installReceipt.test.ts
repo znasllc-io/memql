@@ -239,6 +239,49 @@ test("removalParams -- each artifact kind names its own target", () => {
   });
 });
 
+test("removalParams hands the cluster removal the signing key the install made", () => {
+  // `make up` keeps a local cluster's token signing key under
+  // ~/.memql/k3d/<cluster>/, and the uninstall deleted the cluster and left
+  // the key: the installer lifecycle's round trip failed every leg on a file
+  // under ~/.memql that was not there before. k3d.up records the key in
+  // result.createdSigningKeyFile only when that run made it, so a key kept from
+  // before is never named, and never taken.
+  assert.deepEqual(
+    removalParams(
+      entry({
+        receipt: "stack",
+        result: { cluster: "memql", createdSigningKeyFile: "/home/dev/.memql/k3d/memql/service-account.key" },
+      }),
+    ),
+    {
+      kind: "stack",
+      cluster: "memql",
+      "signing-key": "/home/dev/.memql/k3d/memql/service-account.key",
+      "pre-existing": "false",
+    },
+  );
+  // Never read back from the step's own params: nothing passes it there, and a
+  // key the run did not report making is not one to remove.
+  assert.deepEqual(
+    removalParams(entry({ receipt: "stack", params: { "signing-key": "/x" }, result: { cluster: "memql" } })),
+    { kind: "stack", cluster: "memql", "pre-existing": "false" },
+  );
+});
+
+test("a repair keeps the signing key the install recorded making", async () => {
+  // A repair re-runs clusterUp against the cluster that is there, finds the
+  // key, and makes none, so its result names none. The install's record of
+  // making it must survive, or the uninstall after a repair leaves it.
+  const dir = await tempDir();
+  const file = path.join(dir, "r.json");
+  const stack = { stepId: "clusterUp", script: "k3d.up", receipt: "stack", params: {} };
+  const key = "/home/dev/.memql/k3d/memql/service-account.key";
+  await appendReceiptEntry(file, "install-main", entry({ ...stack, result: { cluster: "memql", clusterCreated: true, createdSigningKeyFile: key } }));
+  await appendReceiptEntry(file, "install-main", entry({ ...stack, result: { cluster: "memql", clusterCreated: false } }));
+  const r = await readReceipt(file);
+  assert.equal(entryFor(r!, "clusterUp")?.result.createdSigningKeyFile, key);
+});
+
 test("removalParams hands the mkcertCA removal the pair as well as the CA", () => {
   // memql#4071. `install.mkcert` writes in TWO directories -- the CA in CAROOT
   // and the front-door pair wherever --cert-file pointed -- and the uninstall

@@ -472,7 +472,10 @@ function check_requirements() {
 # THE FILE IS A SECRET. Whoever holds it can mint tokens a vendor accepts for
 # this cluster's rule. It is outside the repository, readable by its owner
 # only, never printed, and `make down PURGE=1` deletes it. A plain `make down`
-# keeps it, which is the point.
+# keeps it, which is the point. The installer's uninstall deletes it too, when
+# the install made it: a run that creates the key records its path as
+# `createdSigningKeyFile`, the install receipt keeps it, and the removal of the
+# cluster takes it back (scripts/install/remove-artifact.sh, kind=stack).
 #
 # NO KEY IS NOT A FAILURE. Without openssl the cluster is created as it always
 # was, with a key k3s generates and loses on recreation; the bring-up says so.
@@ -598,11 +601,21 @@ function create_cluster() {
 
     # The signing key, mounted on EVERY server so a recreated cluster is the
     # same issuer (see ensure_signing_key). Never printed: only its path is.
-    local signing_key=""
+    local signing_key="" signing_key_was_here=""
     local -a signing_key_args=()
+    [[ -s "$(signing_key_file)" ]] && signing_key_was_here=1
     if signing_key="$(ensure_signing_key)"; then
         signing_key_args=(--volume "${signing_key}:${SIGNING_KEY_MOUNT}@server:*")
         info "Token signing key: ${signing_key} (a secret; kept across recreation so keys given to a vendor stay good)."
+        # WHAT THIS RUN MADE, RECORDED NOW, for the installer's uninstall to take
+        # back (scripts/install/remove-artifact.sh, kind=stack, --signing-key).
+        # Only a key this run created: one that was already here -- kept by a
+        # `make down` -- holds the keys somebody gave a vendor, and uninstalling
+        # must not take what the install did not bring. Recorded at creation for
+        # the reason the cluster is (above): a later failure still names it.
+        if [[ -z "${signing_key_was_here}" ]]; then
+            cap_result_set createdSigningKeyFile "${signing_key}"
+        fi
     else
         warn "This cluster has no persistent token signing key (openssl is needed to make one)."
         warn "  It works as before. If it federates with a vendor, recreating it changes its keys,"
