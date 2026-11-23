@@ -183,6 +183,7 @@ describe("downloads tab", () => {
     const task = { state: "failed", error: "" } as unknown as UploadTask;
     expect(uploadLine(task, formatBytes).text).toBe("Upload failed");
     expect(uploadLine({ ...task, error: "Storage is full" }, formatBytes).text).toBe("Upload failed · Storage is full");
+    expect(uploadLine({ ...task, state: "done", totalBytes: 50 * 1024 * 1024 } as UploadTask, formatBytes).text).toBe(formatBytes(50 * 1024 * 1024));
   });
 
   it("keeps a finished upload on the list, newest first, and counts only the new batch on the ring (Jesús, Nov 23)", async () => {

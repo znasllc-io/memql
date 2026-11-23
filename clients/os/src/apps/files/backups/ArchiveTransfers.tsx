@@ -115,7 +115,8 @@ function TransferSecondary({ text, warn, progress }: { text: string; warn: boole
  *  and the resume note stay on the Browse placeholder where the files land. */
 export function uploadLine(task: UploadTask, bytes: (n: number) => string): { text: string; warn: boolean; progress: number | null } {
   if (task.state === "failed") return { text: task.error ? `Upload failed · ${task.error}` : "Upload failed", warn: true, progress: null };
-  if (task.state === "done") return { text: `Uploaded · ${bytes(task.totalBytes)}`, warn: false, progress: null };
+  // Landed: the size alone under the name (Jesús, Nov 23 2026).
+  if (task.state === "done") return { text: bytes(task.totalBytes), warn: false, progress: null };
   // A sending upload is its bar alone: speed and time left are the graph's
   // above the list (look A, Jesús, Nov 23). A folder drop still counts files.
   const files = task.kind === "tree" ? `${task.doneFiles} of ${task.totalFiles} files` : "";
