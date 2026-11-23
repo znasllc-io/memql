@@ -14,10 +14,12 @@ import { useAsk } from "../ask/AskProvider";
  * or goal was opened.
  *
  * `askAbout` opens Ask about one thing, for an explicit "Ask about this" the
- * person chose.
+ * person chose. It is undefined when the person cannot open Ask (canAsk,
+ * the test AskProvider's openAsk makes), so every "Ask about this" control is
+ * absent instead of a button that silently does nothing.
  */
 export function useWindowAsk(baseTag: string) {
-  const { openAsk } = useAsk();
+  const { canAsk, openAsk } = useAsk();
   const noted = useRef("");
   const askContext = useCallback((tag: string) => {
     noted.current = tag.trim();
@@ -27,7 +29,7 @@ export function useWindowAsk(baseTag: string) {
     () => (noted.current ? `${baseTag} ${noted.current}` : baseTag),
     [baseTag],
   );
-  return { askContext, askAbout, contextTag };
+  return { askContext, askAbout: canAsk ? askAbout : undefined, contextTag };
 }
 
 /** What Ask opens with for one window: transport context and a short label. */
