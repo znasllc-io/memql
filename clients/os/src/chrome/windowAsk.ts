@@ -1,6 +1,7 @@
 import { useCallback, useRef } from "react";
 
 import { useAsk } from "../ask/AskProvider";
+import { holds } from "../system/roles";
 
 /**
  * An app window's two Ask props (OsAppProps.askContext / askAbout).
@@ -14,10 +15,12 @@ import { useAsk } from "../ask/AskProvider";
  * or goal was opened.
  *
  * `askAbout` opens Ask about one thing, for an explicit "Ask about this" the
- * person chose.
+ * person chose. It is undefined when the person cannot open Ask (the same
+ * test as AskProvider's openAsk), so every "Ask about this" control is
+ * absent instead of a button that silently does nothing.
  */
 export function useWindowAsk(baseTag: string) {
-  const { openAsk } = useAsk();
+  const { canAsk, openAsk } = useAsk();
   const noted = useRef("");
   const askContext = useCallback((tag: string) => {
     noted.current = tag.trim();
@@ -27,7 +30,7 @@ export function useWindowAsk(baseTag: string) {
     () => (noted.current ? `${baseTag} ${noted.current}` : baseTag),
     [baseTag],
   );
-  return { askContext, askAbout, contextTag };
+  return { askContext, askAbout: canAsk && holds("read", "app:ask") ? askAbout : undefined, contextTag };
 }
 
 /** What Ask opens with for one window: transport context and a short label. */

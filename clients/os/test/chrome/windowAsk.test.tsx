@@ -48,7 +48,7 @@ describe("an app's Ask props", () => {
 
   it("askAbout opens Ask about the thing the person chose", () => {
     const { result } = renderHook(useHarness, { wrapper });
-    act(() => result.current.windowAsk.askAbout("app:files/browse file:notes.md"));
+    act(() => result.current.windowAsk.askAbout!("app:files/browse file:notes.md"));
     expect(result.current.ask.sheet.open).toBe(true);
     expect(result.current.ask.sheet.context).toBe("app:files/browse file:notes.md");
   });
