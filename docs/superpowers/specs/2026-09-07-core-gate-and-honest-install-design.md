@@ -355,3 +355,19 @@ That `seedDocument` still gates on `actorRole`; that `SetupGate` still retires t
 `component/auth`; that `executor.ts` still reports `preserved` and `ok` ignores it; that
 `presence.ts` still never asks k3d; the `--confirm=` convention in
 `scripts/lib/capability.sh`. All were read on 2026-09-07 at commit 907e385fb.
+
+## Amendment, 2026-11-23: an API key that can pay
+
+The gate keyed on the cluster's readiness alone, and a person's API key (the
+vendor accounts work, design record 2026-11-21-vendor-accounts-and-api-keys) is
+a way to a model that readiness does not count: the feed is the cluster's, the
+same for everybody, and a key is one person's. On a cluster with no machine, no
+app and no vendor account, the gate held everybody, and somebody who was not an
+owner or developer could not reach Settings to add a key. By the owner's
+decision the gate no longer holds somebody whose own key, or one lent to them,
+can pay (`inferenceStatus.keyAccount`), read whenever the gate would show and
+again when a window opened from it closes; an answer it cannot read keeps the
+gate. Both variants offer **Add an API key**, which opens Settings > API keys
+in its add wizard; somebody withheld from adding keys sees the variant as it
+was. The verdict itself, the rail and the setup widget are unchanged.
+

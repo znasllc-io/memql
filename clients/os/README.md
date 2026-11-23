@@ -37,7 +37,8 @@ not verified. `azure`, absent and unknown values retain hosted verification:
 email first, then mandatory passkey registration. Neither email verification nor
 an enrollment grant is an owner session. After both required steps, the existing
 `CoreGate` still controls inference onboarding and retains its owner/developer
-admission rules. Organization name is required; setup configures the existing
+admission rules; it does not hold somebody whose own API key can pay
+(`inferenceStatus.keyAccount`, `chrome/keyLetsIn.ts`), and it offers adding one. Organization name is required; setup configures the existing
 `self` account, stamps its owner, and ensures its account group and owner
 membership before sealing the claim or issuing a session. Every step is
 idempotent under the same claim lock. The optional “Title in organization” is
