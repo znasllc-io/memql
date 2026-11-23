@@ -132,13 +132,16 @@ export function clockLeft(seconds: number): string {
  * LOOK A (Jesús, Nov 23 2026, after Steam's Downloads, José's reference): while
  * this browser uploads, one live graph of the last minute's speed, a dashed
  * line at its peak, and the speed and time left for everything still sending
- * in big numbers. Speed is this browser's own measure (useUploadTasks); a
+ * in big numbers; frozen as the last upload left it while nothing sends.
+ * Speed is this browser's own measure (useUploadTasks); a
  * transfer a machine runs reports no timing, so it is not in the graph.
  */
 function UploadSpeed({ uploads }: { uploads: readonly UploadTask[] }) {
   const history = useUploadSpeedHistory();
   const sending = uploads.filter(task => task.state === "sending");
-  if (sending.length === 0) return null;
+  // Frozen, not gone, once nothing sends: the last graph stays (Jesús, Nov 23).
+  if (sending.length === 0 && history.length === 0) return null;
+  const idle = sending.length === 0;
   const rate = sending.reduce((sum, task) => sum + (task.bytesPerSecond ?? 0), 0);
   const remaining = sending.reduce((sum, task) => sum + Math.max(0, task.totalBytes - task.sentBytes), 0);
   // The live figure counts too: samples are a second apart, so the speed now can top the last sample.
@@ -155,8 +158,8 @@ function UploadSpeed({ uploads }: { uploads: readonly UploadTask[] }) {
       {peak > 0 ? <span className="os-transfer-peak">peak {formatBytes(peak)}/s</span> : null}
     </div>
     <div className="os-transfer-figures">
-      <span><strong>{rate > 0 ? `${formatBytes(rate)}/s` : "--"}</strong>speed</span>
-      <span><strong>{rate > 0 ? clockLeft(remaining / rate) : "--"}</strong>left</span>
+      <span><strong>{idle ? `${formatBytes(0)}/s` : rate > 0 ? `${formatBytes(rate)}/s` : "--"}</strong>speed</span>
+      <span><strong>{idle ? "Done" : rate > 0 ? clockLeft(remaining / rate) : "--"}</strong>{idle ? "nothing uploading" : "left"}</span>
     </div>
   </div>;
 }

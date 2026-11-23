@@ -111,7 +111,9 @@ function nextId(): string {
 // THE GRAPH (Jesús, Nov 23 2026, picked look A: Steam's live speed graph on
 // top of Downloads). One sample a second of every sending upload's speed
 // added together, the last minute kept. The ticker runs only while something
-// sends; a new burst after a quiet spell starts a fresh graph.
+// sends. When nothing does, the graph stays frozen as the last upload left it,
+// and the next upload carries it on rather than starting over (Jesús, same
+// day). It lives as long as the page.
 export const SPEED_HISTORY_SECONDS = 60;
 let historyNow: readonly number[] = [];
 let ticker: ReturnType<typeof setInterval> | null = null;
@@ -127,7 +129,6 @@ function tick(): void {
 }
 function startGraph(): void {
   if (ticker) return;
-  historyNow = [];
   ticker = setInterval(tick, 1000);
 }
 

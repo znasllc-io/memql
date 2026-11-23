@@ -157,6 +157,35 @@ describe("downloads tab", () => {
     expect(graph.querySelectorAll("rect")).toHaveLength(3);
   });
 
+  it("keeps the graph frozen once nothing uploads, and the next upload carries it on (Jesús, Nov 23)", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    let report: (p: { sentBytes: number; totalBytes: number }) => void = () => {};
+    let land: () => void = () => {};
+    const upload = () => ({ done: new Promise<never>((resolve) => { land = () => resolve(undefined as never); }), abort: vi.fn(), onProgress: (fn: typeof report) => { report = fn; } });
+    trackDeskUpload("a", new File(["x"], "a.bin"), upload() as never, null);
+    vi.setSystemTime(1_000); report({ sentBytes: 0, totalBytes: 10 });
+    vi.setSystemTime(2_000); report({ sentBytes: 5, totalBytes: 10 });
+    act(() => { vi.advanceTimersByTime(2_000); });
+    expect(renderHook(() => useUploadSpeedHistory()).result.current).toHaveLength(2);
+
+    // It lands: nothing sends, the ticker stops, the graph stays as it was.
+    await act(async () => { land(); await Promise.resolve(); await Promise.resolve(); });
+    act(() => { vi.advanceTimersByTime(5_000); });
+    expect(renderHook(() => useUploadSpeedHistory()).result.current).toHaveLength(2);
+
+    h.connection = fakeConnection({ transfers: [] });
+    render(<ArchiveTransfers machines={machines} refresh={0} onDownload={vi.fn()} uploads={[]} />);
+    const graph = screen.getByRole("group", { name: "Upload speed" });
+    expect(graph.textContent).toContain("Done");
+    expect(graph.querySelectorAll("rect")).toHaveLength(2);
+
+    // The next upload resumes the same graph rather than starting over.
+    trackDeskUpload("b", new File(["y"], "b.bin"), upload() as never, null);
+    act(() => { vi.advanceTimersByTime(1_000); });
+    expect(renderHook(() => useUploadSpeedHistory()).result.current).toHaveLength(3);
+    vi.useRealTimers();
+  });
+
   it("draws one row per transfer with a Backup pill, a bar and one button while moving", async () => {
     h.connection = fakeConnection({ transfers: [job as never, { ...job, id: "backup-002", name: "photos.zip", state: "error", failure: "connection lost" } as never] });
     const retry = vi.fn();
