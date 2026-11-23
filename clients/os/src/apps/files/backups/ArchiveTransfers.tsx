@@ -122,30 +122,39 @@ export function uploadLine(task: UploadTask, bytes: (n: number) => string): { te
   return { text: files, warn: false, progress: task.totalBytes > 0 ? Math.min(1, task.sentBytes / task.totalBytes) : 0 };
 }
 
-/** "0:13", "1:40", "1:05:00": time left the way Steam shows it. */
-export function clockLeft(seconds: number): string {
-  const s = Math.max(1, Math.round(seconds));
-  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
-  const two = (n: number) => String(n).padStart(2, "0");
-  return h > 0 ? `${h}:${two(m)}:${two(r)}` : `${m}:${two(r)}`;
-}
+/** How long the check shows once everything has landed, before the ring goes. */
+const CHECK_MS = 2000;
 
 /**
  * LOOK A (Jesús, Nov 23 2026, after Steam's Downloads, José's reference): while
  * this browser uploads, one live graph of the last minute's speed (plain bars,
- * no peak marker), and the speed and time left for everything still sending
- * in big numbers; frozen as the last upload left it while nothing sends.
- * Speed is this browser's own measure (useUploadTasks); a
- * transfer a machine runs reports no timing, so it is not in the graph.
+ * no peak marker) and, beside it, a ring that fills as the uploads progress
+ * with the speed inside it; no time left. When the last upload lands the ring
+ * shows a check for a moment, then goes, and the graph stays frozen as the
+ * upload left it (Jesús, same day). Speed is this browser's own measure
+ * (useUploadTasks); a transfer a machine runs reports no timing, so it is not
+ * here.
  */
 function UploadSpeed({ uploads }: { uploads: readonly UploadTask[] }) {
   const history = useUploadSpeedHistory();
-  const sending = uploads.filter(task => task.state === "sending");
-  // Frozen, not gone, once nothing sends: the last graph stays (Jesús, Nov 23).
-  if (sending.length === 0 && history.length === 0) return null;
-  const idle = sending.length === 0;
-  const rate = sending.reduce((sum, task) => sum + (task.bytesPerSecond ?? 0), 0);
-  const remaining = sending.reduce((sum, task) => sum + Math.max(0, task.totalBytes - task.sentBytes), 0);
+  const busy = uploads.some(task => task.state === "sending");
+  const [justDone, setJustDone] = useState(false);
+  const wasBusy = useRef(false);
+  useEffect(() => {
+    if (busy) { wasBusy.current = true; setJustDone(false); return; }
+    if (!wasBusy.current) return;
+    wasBusy.current = false;
+    setJustDone(true);
+    const timer = setTimeout(() => setJustDone(false), CHECK_MS);
+    return () => clearTimeout(timer);
+  }, [busy]);
+  if (!busy && history.length === 0) return null;
+  // Progress over everything on the list that has not failed: a file that
+  // landed counts as whole while it lingers.
+  const counted = uploads.filter(task => task.state !== "failed");
+  const total = counted.reduce((sum, task) => sum + task.totalBytes, 0);
+  const sent = counted.reduce((sum, task) => sum + (task.state === "done" ? task.totalBytes : task.sentBytes), 0);
+  const rate = uploads.reduce((sum, task) => sum + (task.state === "sending" ? task.bytesPerSecond ?? 0 : 0), 0);
   // Bars are scaled to the tallest sample; no peak label or highlight (Jesús, Nov 23:
   // not worth taking the graph off its plain design).
   const peak = Math.max(0, ...history);
@@ -159,10 +168,22 @@ function UploadSpeed({ uploads }: { uploads: readonly UploadTask[] }) {
         })}
       </svg>
     </div>
-    <div className="os-transfer-figures">
-      <span><strong>{idle ? `${formatBytes(0)}/s` : rate > 0 ? `${formatBytes(rate)}/s` : "--"}</strong>speed</span>
-      <span><strong>{idle ? "Done" : rate > 0 ? clockLeft(remaining / rate) : "--"}</strong>{idle ? "nothing uploading" : "left"}</span>
-    </div>
+    {busy ? <UploadRing progress={total > 0 ? Math.min(1, sent / total) : 0} rate={rate} />
+      : justDone ? <UploadRing progress={1} rate={0} done /> : null}
+  </div>;
+}
+
+function UploadRing({ progress, rate, done = false }: { progress: number; rate: number; done?: boolean }) {
+  const r = 30, around = 2 * Math.PI * r;
+  const [amount = "", unit = ""] = rate > 0 ? formatBytes(rate).split(" ") : [];
+  const label = done ? "Uploads done" : `Uploading, ${Math.round(progress * 100)}%${rate > 0 ? `, ${formatBytes(rate)}/s` : ""}`;
+  return <div className="os-transfer-ring" role="img" aria-label={label}>
+    <svg viewBox="0 0 72 72" aria-hidden="true">
+      <circle className="os-transfer-ring-track" cx="36" cy="36" r={r} />
+      <circle className="os-transfer-ring-fill" cx="36" cy="36" r={r} strokeDasharray={`${around * progress} ${around}`} transform="rotate(-90 36 36)" />
+      {done ? <path className="os-transfer-ring-check" d="M25 37 l8 8 l15 -17" /> : null}
+    </svg>
+    {!done && amount ? <span className="os-transfer-ring-speed" aria-hidden="true"><strong>{amount}</strong>{unit}/s</span> : null}
   </div>;
 }
 

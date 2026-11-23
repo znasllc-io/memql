@@ -6,7 +6,7 @@ vi.mock("../../src/live/connection", () => ({ useOsConnection: () => h.connectio
 import { ArchiveTransfers, DownloadSetup } from "../../src/apps/files/backups/ArchiveTransfers";
 import { StorageAllowance, lowStorage } from "../../src/apps/files/backups/StorageAllowance";
 import { formatStorageBytes, transferActions, transferLine, validArchive, absoluteBackupPath, type BackupTransfer } from "../../src/apps/files/backups/transfers";
-import { clockLeft, uploadLine } from "../../src/apps/files/backups/ArchiveTransfers";
+import { uploadLine } from "../../src/apps/files/backups/ArchiveTransfers";
 import { FILES_SECTIONS } from "../../src/apps/files/settings";
 import { trackDeskUpload, useUploadSpeedHistory, useUploadTasks, type UploadTask } from "../../src/apps/files/useUploadTasks";
 import { formatBytes } from "../../src/kit";
@@ -126,9 +126,7 @@ describe("downloads tab", () => {
     expect(uploadLine({ ...task, kind: "tree", doneFiles: 2, totalFiles: 3 }, b).text).toBe("2 of 3 files");
   });
 
-  it("measures speed, and look A draws the last minute, the speed and the time left, with no peak marker (Jesús, Nov 23)", async () => {
-    expect([clockLeft(0.2), clockLeft(13), clockLeft(100), clockLeft(3900)]).toEqual(["0:01", "0:13", "1:40", "1:05:00"]);
-
+  it("measures speed, and look A draws the last minute and a ring with the speed inside, no time left (Jesús, Nov 23)", async () => {
     // The measure: bytes since the last report over the time since it.
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
     vi.setSystemTime(1_000);
@@ -151,10 +149,28 @@ describe("downloads tab", () => {
     h.connection = fakeConnection({ transfers: [] });
     render(<ArchiveTransfers machines={machines} refresh={0} onDownload={vi.fn()} uploads={[task]} />);
     const graph = screen.getByRole("group", { name: "Upload speed" });
-    expect(graph.textContent).toContain(`${formatBytes(1_000_000)}/s`);
-    expect(graph.textContent).toContain("0:02");
+    // The ring: progress filled, the speed inside, no time left (Jesús, Nov 23).
+    expect(within(graph).getByRole("img", { name: `Uploading, 50%, ${formatBytes(1_000_000)}/s` })).toBeTruthy();
+    expect(graph.textContent).toContain(formatBytes(1_000_000).split(" ")[0]);
+    expect(graph.textContent).not.toContain("left");
     expect(graph.textContent).not.toContain("peak");
     expect(graph.querySelectorAll("rect")).toHaveLength(3);
+  });
+
+  it("shows a check when the last upload lands, then the ring goes and the graph stays (Jesús, Nov 23)", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+    const sending = { id: "up-1", label: "a.bin", kind: "file", sentBytes: 5, totalBytes: 10, doneFiles: 0, totalFiles: 1, state: "sending", error: "", failures: [], retry: null, abort: vi.fn(), dismiss: vi.fn(), bytesPerSecond: 2048 } as UploadTask;
+    trackDeskUpload("c", new File(["z"], "c.bin"), { done: new Promise<never>(() => {}), abort: vi.fn() } as never, null);
+    act(() => { vi.advanceTimersByTime(1_000); });
+    h.connection = fakeConnection({ transfers: [] });
+    const { rerender } = render(<ArchiveTransfers machines={machines} refresh={0} onDownload={vi.fn()} uploads={[sending]} />);
+    expect(screen.getByRole("img", { name: /^Uploading, 50%/ })).toBeTruthy();
+    rerender(<ArchiveTransfers machines={machines} refresh={0} onDownload={vi.fn()} uploads={[]} />);
+    expect(screen.getByRole("img", { name: "Uploads done" })).toBeTruthy();
+    act(() => { vi.advanceTimersByTime(2_000); });
+    expect(screen.queryByRole("img", { name: "Uploads done" })).toBeNull();
+    expect(screen.getByRole("group", { name: "Upload speed" }).querySelectorAll("rect").length).toBeGreaterThan(0);
+    vi.useRealTimers();
   });
 
   it("keeps the graph frozen once nothing uploads, and the next upload carries it on (Jesús, Nov 23)", async () => {
@@ -176,7 +192,8 @@ describe("downloads tab", () => {
     h.connection = fakeConnection({ transfers: [] });
     render(<ArchiveTransfers machines={machines} refresh={0} onDownload={vi.fn()} uploads={[]} />);
     const graph = screen.getByRole("group", { name: "Upload speed" });
-    expect(graph.textContent).toContain("Done");
+    // Opened after it landed: the frozen graph, no ring.
+    expect(within(graph).queryByRole("img")).toBeNull();
     expect(graph.querySelectorAll("rect")).toHaveLength(2);
 
     // The next upload resumes the same graph rather than starting over.

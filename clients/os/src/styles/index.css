@@ -7402,9 +7402,14 @@ a.os-button {
 }
 .os-transfer-graph svg { display: block; width: 100%; height: 100%; }
 .os-transfer-graph rect { fill: var(--os-accent); opacity: 0.85; }
-.os-transfer-figures { display: flex; flex-direction: column; gap: 10px; align-items: flex-end; min-width: 120px; }
-.os-transfer-figures span { display: flex; flex-direction: column; align-items: flex-end; font-size: var(--os-text-xs); color: var(--os-muted); }
-.os-transfer-figures strong { font-size: 24px; line-height: 1.1; font-weight: 600; color: var(--os-ink); font-variant-numeric: tabular-nums; }
+.os-transfer-ring { position: relative; flex: none; align-self: center; width: 72px; height: 72px; }
+.os-transfer-ring svg { display: block; width: 100%; height: 100%; }
+.os-transfer-ring circle { fill: none; stroke-width: 6; }
+.os-transfer-ring-track { stroke: var(--os-line); }
+.os-transfer-ring-fill { stroke: var(--os-accent); stroke-linecap: round; transition: stroke-dasharray 0.4s ease; }
+.os-transfer-ring-check { fill: none; stroke: var(--os-accent); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; }
+.os-transfer-ring-speed { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.15; font-size: var(--os-text-xs); color: var(--os-muted); }
+.os-transfer-ring-speed strong { font-size: var(--os-text-md); font-weight: 600; color: var(--os-ink); font-variant-numeric: tabular-nums; }
 
 /* The link and the row's actions share one line: the link takes a bounded
  * measure on the left and the buttons take the space that is left. An
