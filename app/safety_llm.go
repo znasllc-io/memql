@@ -9,7 +9,6 @@ import (
 	"github.com/znasllc-io/memql/component/safety"
 	"github.com/znasllc-io/memql/component/safety/llm"
 	"github.com/znasllc-io/memql/component/safety/recorder"
-	"github.com/znasllc-io/memql/core/common"
 	workspine "github.com/znasllc-io/memql/integrations/work"
 )
 
@@ -102,8 +101,11 @@ func (a *App) buildSafetyClassifier() safety.Classifier {
 	// registry. What changed is who hands it one -- the caller now declares a
 	// level and a modality and takes what the router returns, instead of
 	// looking the env-named provider up itself.
-	provider, _, err := memql.ResolveAITyped[common.ChatStructuredProvider](
-		context.Background(), a.engine, safetyClassifierResolveRequest(providerName))
+	//
+	// And it is the cluster's own job, said at the resolution and on every
+	// call (resolveForClusterJob): a check resolved for nobody would be refused
+	// the cluster's vendor account (owner decision 2026-11-23).
+	provider, err := resolveForClusterJob(safetyClassifierJob, safetyClassifierResolveRequest(providerName), a.routerStructured)
 	if err != nil {
 		a.Logger.Warn("safety classifier: no structured-output model is reachable; LLM layer disabled",
 			"component", "safety",

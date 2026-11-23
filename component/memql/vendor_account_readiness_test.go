@@ -99,7 +99,7 @@ func TestFederationAloneServesEveryone(t *testing.T) {
 	}{
 		"a person":               {personContext("ana"), "ana"},
 		"another person":         {personContext("ben"), "ben"},
-		"the cluster's own work": {context.Background(), ""},
+		"the cluster's own work": {auth.ContextForClusterWork(context.Background(), "safety-classifier"), ""},
 		"an automation":          {auth.ContextWithSystemActor(context.Background(), "sweep"), ""},
 	} {
 		t.Run(name, func(t *testing.T) {

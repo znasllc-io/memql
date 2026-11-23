@@ -36,6 +36,22 @@ func (r *Router) ResolveFor(ctx context.Context, req ResolveRequest) (memql.Reso
 			req.UserId = strings.TrimSpace(access.UserId)
 		}
 	}
+	// AND, FAILING THAT, THE RUN'S OWNER. A run's owner is a person recorded on
+	// the run row, and the run context carries them where no access context
+	// does: a step executing on a replica that did not take the request. The
+	// engine seam reads the owner there already (memql applyCallAttribution);
+	// a request built outside the engine -- the agent replier's -- must not be
+	// judged as nobody's where one built inside is the owner's. That mattered
+	// little while a call naming nobody was the cluster's own work; since the
+	// owner's decision of 2026-11-23 it is refused the cluster's account, so
+	// the two seams have to agree on who a run's call is for. An ownerless run
+	// (a recovered one) stays blank, and its automation actor, if any, was
+	// already read above.
+	if strings.TrimSpace(req.UserId) == "" {
+		if run, ok := common.RunFromContext(ctx); ok {
+			req.UserId = strings.TrimSpace(run.OwnerUserId)
+		}
+	}
 	// AND WHAT KIND OF CALLER IT WAS (memql#5581), from the same context and
 	// by the same belt-and-braces argument. The engine seam fills this for
 	// every call that reaches a model through it; a request built OUTSIDE the

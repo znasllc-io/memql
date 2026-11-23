@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -85,7 +86,9 @@ func TestLedgerRowNamesTheKindOfCallerEvenWithNoPerson(t *testing.T) {
 			&auth.AccessContext{UserId: "alice", Role: auth.RoleWriter}), "alice", auth.CallerKindUser},
 		{"the cluster's own sweep", auth.ContextWithAccess(context.Background(),
 			auth.MaintenanceActor(auth.AutomationOriginEngine, "auditEventRetentionSweep")), "", auth.CallerKindSystem},
-		{"nobody stamped anything", context.Background(), "", auth.CallerKindUnattributed},
+		// A job wired as the cluster's own carries no actor and is still the
+		// system's call, not nobody's (owner decision 2026-11-23).
+		{"a job wired as the cluster's own", auth.ContextForClusterWork(context.Background(), "safety-classifier"), "", auth.CallerKindSystem},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r, _ := levelRouter(t, airoute.LevelStrong, nil)
@@ -106,8 +109,8 @@ func TestLedgerRowNamesTheKindOfCallerEvenWithNoPerson(t *testing.T) {
 			if args["callerKind"] == "" {
 				t.Error("a blank caller kind is the one answer the field must never carry")
 			}
-			// The sweep and the unstamped call carry no user, which is now an
-			// answer rather than a gap.
+			// The sweep and the job carry no user, which is now an answer
+			// rather than a gap.
 			if tc.user == "" && args["userId"] != "" && args["userId"] != auth.AnonymousUserId {
 				if !strings.HasPrefix(fmt.Sprint(args["userId"]), "system:") {
 					t.Errorf("userId=%v, want none for %s", args["userId"], tc.name)
@@ -115,6 +118,43 @@ func TestLedgerRowNamesTheKindOfCallerEvenWithNoPerson(t *testing.T) {
 			}
 		})
 	}
+
+	// A CALL NOBODY STAMPED is still recorded as nobody's when a door serves
+	// it: a machine lent to cluster work may, and its row says
+	// `unattributed`, never blank and never the system.
+	t.Run("nobody stamped anything, served by a lent machine", func(t *testing.T) {
+		r, ledger := lentMachineRouter(t)
+		resolved, err := r.ResolveFor(context.Background(), ResolveRequest{Level: airoute.LevelStrong, Modality: airoute.ModalityChat})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// On the background lane, which keeps a ceiling of its own: see
+		// TestAnUnattributedClientRecordsEachCallsOwnCaller.
+		if _, err := resolved.Client.(common.ChatAIProvider).CallChat(memql.ContextWithBackgroundLane(context.Background()), nil); err != nil {
+			t.Fatal(err)
+		}
+		args := ledger.args(t)
+		if args["callerKind"] != auth.CallerKindUnattributed {
+			t.Errorf("callerKind=%v, want %q", args["callerKind"], auth.CallerKindUnattributed)
+		}
+		if user := fmt.Sprint(args["userId"]); user != "" && user != "<nil>" {
+			t.Errorf("userId=%v, want none", args["userId"])
+		}
+	})
+
+	// A CALL NOBODY STAMPED never reaches the vendor (owner decision
+	// 2026-11-23): it says neither whom it is for nor that it is the
+	// cluster's, so the cluster's account does not pay for it, and the
+	// refusal says the call is at fault.
+	t.Run("nobody stamped anything", func(t *testing.T) {
+		r, _ := levelRouter(t, airoute.LevelStrong, nil)
+		r.engine = &countingLedger{writes: make(chan string, 4)}
+		_, err := r.ResolveFor(context.Background(), ResolveRequest{Level: airoute.LevelStrong, Modality: airoute.ModalityChat})
+		var refusal *InferenceUnavailable
+		if !errors.As(err, &refusal) || !refusalSays(refusal, memql.ClusterAccountUnnamedReason) {
+			t.Fatalf("err = %v, want a refusal saying the call names nobody", err)
+		}
+	})
 }
 
 // An unrecognised caller kind is normalized rather than stored: the concept
@@ -223,6 +263,22 @@ func TestProviderRowOmitsCacheKind(t *testing.T) {
 	}
 	if strings.Contains(rendered, "cacheKind") {
 		t.Fatalf("cacheKind reached the mutation on a provider row: %s", rendered)
+	}
+}
+
+// A cache hit inside a run whose step carries no access context is the run
+// owner's, exactly as a call ResolveFor resolves there would be: the two
+// attribution belts read the same context the same way.
+func TestCacheServedRowInARunNamesTheRunsOwner(t *testing.T) {
+	r, _ := levelRouter(t, airoute.LevelStrong, nil)
+	ledger := &countingLedger{writes: make(chan string, 4)}
+	r.engine = ledger
+	ctx := common.ContextWithRun(context.Background(), common.RunContext{
+		RunId: "v1:work:run:r1", OwnerUserId: "alice", StepKey: "summarise", Mode: common.RunModeLive,
+	})
+	r.RecordCacheServed(ctx, ResolveRequest{Level: airoute.LevelStrong, Modality: airoute.ModalityChat}, cacheResolution(), airoute.CacheKindExact, 2)
+	if args := ledger.args(t); args["userId"] != "alice" {
+		t.Fatalf("userId=%v on a cache row inside alice's run, want alice", args["userId"])
 	}
 }
 

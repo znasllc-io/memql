@@ -153,9 +153,12 @@ func TestInferenceStatusIsExactlyOneRow(t *testing.T) {
 func TestACloudKeyOpensTheDoorWithNoFleet(t *testing.T) {
 	r := newProviderRegistry()
 	r.RegisterForTest("streamClaudeSonnet", "AnthropicStream", "claude-sonnet", &stubChatOnly{})
+	// A person the cluster's account pays for. A caller who names nobody is
+	// not paid for (owner decision 2026-11-23): vendor_account_cluster_test.go.
+	openToEverybody(r)
 	e := &MemQLEngine{providers: r}
 
-	nodes, err := e.evaluateInferenceStatusExpression(context.Background())
+	nodes, err := e.evaluateInferenceStatusExpression(userCtx("alice"))
 	if err != nil {
 		t.Fatalf("inferenceStatus: %v", err)
 	}

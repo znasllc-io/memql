@@ -170,8 +170,10 @@ func (s *streamSession) handleAgentGenerateTurn(envelope *memqlv1.MemqlClientMes
 	sink := &grpcAgentTurnSink{session: s, correlate: correlate, requestId: requestId}
 
 	// Use the stream's context so an aborted peer connection cancels the
-	// replier too.
-	ctx := s.stream.Context()
+	// replier too, with the caller on it (callerContext): a turn forwarded
+	// from the BFF carries the person it verified, and one arriving on a
+	// direct stream gets its own caller rather than naming nobody.
+	ctx, _ := s.callerContext()
 	// Re-hydrate cross-node provenance: AgentGenerateTurn typically
 	// arrives via AiForward from cognition. Any row the agent tool
 	// loop writes (utterances, tool side-effects) stamps the caller's

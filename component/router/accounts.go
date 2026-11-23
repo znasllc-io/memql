@@ -204,7 +204,12 @@ func noAccountReason(passedOver []memql.VendorAccountPassedOver) string {
 // closed to was refused a vendor's speech when no local model was online and
 // served it, on the cluster's account, when one was online and failed; the
 // same went for a vendor behind an app that failed. Embeddings do not ask,
-// here as in the walk. The cluster's own work is always paid.
+// here as in the walk. The cluster's own work is always paid when the call
+// says it is the cluster's (auth.ActsForTheCluster); a call that names nobody
+// is not (owner decision 2026-11-23). A client resolved once and kept, as the
+// safety check's is, is judged here with the request it was resolved for and
+// THIS call's context, which is why such a client says its job on every call
+// (app resolveForClusterJob).
 //
 // A record passed over here leaves no line of its own on the decision: the
 // lookup has no channel for a reason, as for a record that is unavailable.

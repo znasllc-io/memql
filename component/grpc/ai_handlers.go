@@ -324,28 +324,54 @@ func (s *streamSession) handleAiChat(envelope *memqlv1.MemqlClientMessage, msg *
 // envelope. Refresh both grant and membership memos without replacing or
 // widening the verified actor, and refuse if either authorization read failed.
 func (s *streamSession) askAccessContext() (context.Context, bool) {
-	ctx := s.stream.Context()
-	var actor *auth.AccessContext
-	_, forwarded := s.stream.(*forwardedStream)
-	if forwarded {
-		// HandleForwardedRequest already verified this one-envelope actor.
-		// Rebuilding it from claims would discard its ceiling and flags.
-		actor, _ = auth.AccessFromContext(ctx)
-	} else {
-		actor = s.ensureAccess(ctx)
-	}
+	ctx, actor := s.callerContext()
 	if actor == nil {
 		return ctx, false
-	}
-	ctx = auth.ContextWithAccess(ctx, actor)
-	if !forwarded {
-		// Local execution carries the same post-RotateAuth ceiling as a proxy.
-		ctx = s.bindQueryAuthority(ctx)
 	}
 	ctx, failures := s.service.engine.OrganizationReadContext(ctx)
 	subject, ok := auth.SubjectFromContext(ctx)
 	allowed := ok && subject.UserId != "" && auth.CapableFor(ctx, subject, auth.VerbRead, "app:ask")
 	return ctx, allowed && failures.Err() == nil
+}
+
+// callerContext is the stream's context with its caller on it, for a handler
+// that does work -- above all a model call -- on the node the envelope arrived
+// at. The actor is nil when the stream resolves none, and the context is then
+// the stream's own.
+//
+// WHY EVERY SUCH HANDLER NEEDS IT. The verifier interceptor stamps claims onto
+// the stream's context and nothing else; ensureAccess is what turns them into
+// the AccessContext the engine's gates and the model router read. A handler
+// that called a model on s.stream.Context() made a call naming nobody, which
+// the cluster's vendor account paid for as the cluster's own work until the
+// owner's decision of 2026-11-23, and refuses since. Ask's suggestions answered
+// on a BFF with no agent replica, a transcription opened on the node holding
+// the speech provider, and an agent turn arriving on a direct stream all did.
+//
+// A FORWARDED stream already carries the actor HandleForwardedRequest
+// verified for this one envelope; rebuilding it from claims would discard its
+// ceiling and flags, so it is read off the context as it is. A local stream
+// gets its actor from ensureAccess and the same post-RotateAuth ceiling a
+// proxy carries.
+//
+// Regression tests: caller_context_test.go; ask_access_test.go for Ask.
+func (s *streamSession) callerContext() (context.Context, *auth.AccessContext) {
+	ctx := s.stream.Context()
+	var actor *auth.AccessContext
+	_, forwarded := s.stream.(*forwardedStream)
+	if forwarded {
+		actor, _ = auth.AccessFromContext(ctx)
+	} else {
+		actor = s.ensureAccess(ctx)
+	}
+	if actor == nil {
+		return ctx, nil
+	}
+	ctx = auth.ContextWithAccess(ctx, actor)
+	if !forwarded {
+		ctx = s.bindQueryAuthority(ctx)
+	}
+	return ctx, actor
 }
 
 // chatCallContext binds the pin on the RECEIVING replica, after the complete
@@ -543,7 +569,9 @@ func (s *streamSession) handleAiSuggest(envelope *memqlv1.MemqlClientMessage, ms
 		schemaName := plan.SchemaName
 		postProcess := plan.PostProcess
 
-		ctx := s.stream.Context()
+		// The caller rides the call (callerContext): answered here, this is a
+		// model call for the person asking, never one naming nobody.
+		ctx, _ := s.callerContext()
 		// Prefer structured output: the provider enforces the JSON
 		// schema so parse / field-shape failures are eliminated
 		// before they reach the client. Falls back to regular chat
