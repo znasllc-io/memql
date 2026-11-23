@@ -367,7 +367,7 @@ describe("Shared with me", () => {
     const faceted = connection.callsNamed("libraryBrowseFacets").length;
 
     await click(within(rail()).getByRole("button", { name: "Shared with me" }));
-    expect(screen.getByRole("heading", { name: "Shared with me" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Shared with me" })).toBeNull(); // no repeated big title: the trail row names the place (Jesús, Nov 23)
     const budget = await screen.findByRole("button", { name: /Budget 2027\.xlsx/ });
     // Who shared it is a "Shared by" choice now, not a line under each file
     // (Jesús, Nov 23), so these tiles read like every other file.
@@ -584,14 +584,13 @@ describe("the Shared folder and the Sharing place (Nov 19 2026)", () => {
   const groupShare = shareRow({ id: "s-3", artifactId: "a-1", recipientUserId: "", recipientGroupId: "g-design", recipientDisplayName: "Design team", title: "brief.pdf", createdAt: "2026-11-17T12:00:00Z" });
   const people = () => screen.queryByRole("group", { name: /^Who has / });
 
-  it("shows one tile per file you are sharing, counted on the Head, and no people until one is picked", async () => {
+  it("shows one tile per file you are sharing, with no count on the Head, and no people until one is picked", async () => {
     const connection = connect({ artifacts: [brief, plan], shares: [...shares, groupShare] });
     await renderFiles();
     const browsed = connection.callsNamed("libraryArtifactsBrowse").length;
     const list = await openSharing();
-    const heading = screen.getByRole("heading", { name: "Sharing" });
-    // Three shares, two files: the Head counts files, as the tiles do.
-    expect(heading.parentElement?.querySelector(".os-head-meta")?.textContent).toBe("2");
+    // No title or count on the Head any more (Jesús, Nov 23): three shares, two tiles.
+    expect(document.querySelector(".os-head-meta")).toBeNull();
     const tiles = within(list).getAllByRole("listitem");
     // Newest first, as the Head's sort says.
     expect(tiles.map((tile) => tile.textContent)).toEqual([expect.stringContaining("plan.md"), expect.stringContaining("brief.pdf")]);

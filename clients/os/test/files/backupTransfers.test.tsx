@@ -175,6 +175,18 @@ describe("downloads tab", () => {
     vi.useRealTimers();
   });
 
+  it("turns the ring the error colour with an X when an upload fails, even with no graph yet (Jesús, Nov 23)", () => {
+    const failed = { id: "up-f", label: "big.bin", kind: "file", sentBytes: 0, totalBytes: 10, doneFiles: 0, totalFiles: 1, state: "failed", error: "storage limit reached", failures: [], retry: vi.fn(), abort: vi.fn(), dismiss: vi.fn() } as unknown as UploadTask;
+    h.connection = fakeConnection({ transfers: [] });
+    const { rerender } = render(<ArchiveTransfers machines={machines} refresh={0} onDownload={vi.fn()} uploads={[failed]} />);
+    const ring = screen.getByRole("img", { name: "Upload failed" });
+    expect(ring.hasAttribute("data-failed")).toBe(true);
+    expect(ring.querySelectorAll(".os-transfer-ring-check[data-on]")).toHaveLength(1);
+    // Dismissed: no failure left, so the error ring goes.
+    rerender(<ArchiveTransfers machines={machines} refresh={0} onDownload={vi.fn()} uploads={[]} />);
+    expect(screen.queryByRole("img", { name: "Upload failed" })).toBeNull();
+  });
+
   it("keeps the graph frozen once nothing uploads, and the next upload carries it on (Jesús, Nov 23)", async () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
     let report: (p: { sentBytes: number; totalBytes: number }) => void = () => {};

@@ -1310,8 +1310,11 @@ export function Panel({ children, label }: { children: ReactNode; label?: string
   );
 }
 
-export function Head({ title, meta, note, children, breadcrumbs, back, navigation = true, navigationKey }: {
+export function Head({ title, meta, note, children, breadcrumbs, back, navigation = true, navigationKey, hideTitle = false }: {
   title: string;
+  /** The trail row already names the page: draw no big title of its own (Jesús,
+   *  Nov 23 2026: Files read "Downloads" three times on one screen). */
+  hideTitle?: boolean;
   /** A quiet fact beside the title -- a count, a scope note. Muted, tabular. */
   meta?: ReactNode;
   /** What stopped arriving, on the title's line: a `HeadNote`. */
@@ -1333,7 +1336,7 @@ export function Head({ title, meta, note, children, breadcrumbs, back, navigatio
   // window's primary heading, and that is how Fleet came to show two.
   if (hosted) return (
     <div ref={root} className="os-head">
-      <h3 className="os-settings-title">{title}</h3>
+      {hideTitle ? null : <h3 className="os-settings-title">{title}</h3>}
       {meta !== undefined && meta !== null ? <span className="os-head-meta">{meta}</span> : null}
       {note}
       {children ? <div className="os-head-actions">{children}</div> : null}
@@ -1347,7 +1350,7 @@ export function Head({ title, meta, note, children, breadcrumbs, back, navigatio
   return <>
     {items.length ? <Breadcrumbs items={items} /> : null}
     <div ref={root} className="os-head">
-      <h3 className="os-settings-title">{title}</h3>
+      {hideTitle ? null : <h3 className="os-settings-title">{title}</h3>}
       {meta !== undefined && meta !== null ? <span className="os-head-meta">{meta}</span> : null}
       {note}
       {children || destination?.onSelect ? <div className="os-head-actions">

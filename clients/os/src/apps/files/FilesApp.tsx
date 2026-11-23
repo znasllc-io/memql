@@ -442,7 +442,7 @@ function DownloadsSection({ tasks, refresh, downloading, setDownloading, onStart
   if (downloading) return <DownloadSetup source={downloading} machines={machineList} onCancel={() => setDownloading(null)} onStarted={onStarted} />;
   return (
     <section className="os-app-section" aria-label="Downloads">
-      <Head title="Downloads" />
+      <Head title="Downloads" hideTitle />
       <ArchiveTransfers machines={machineList} refresh={refresh} onDownload={setDownloading} uploads={tasks} />
     </section>
   );

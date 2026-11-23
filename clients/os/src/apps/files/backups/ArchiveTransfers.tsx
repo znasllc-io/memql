@@ -148,7 +148,10 @@ function UploadSpeed({ uploads }: { uploads: readonly UploadTask[] }) {
     const timer = setTimeout(() => setJustDone(false), CHECK_MS);
     return () => clearTimeout(timer);
   }, [busy]);
-  if (!busy && history.length === 0) return null;
+  // Nothing sending and something on the list failed: the ring says so (Jesús,
+  // Nov 23 2026: errors as visual as progress), until it is retried or dismissed.
+  const failed = !busy && uploads.some(task => task.state === "failed");
+  if (!busy && !failed && history.length === 0) return null;
   // Progress over everything on the list that has not failed: a file that
   // landed counts as whole while it lingers.
   const counted = uploads.filter(task => task.state !== "failed");
@@ -169,22 +172,24 @@ function UploadSpeed({ uploads }: { uploads: readonly UploadTask[] }) {
       </svg>
     </div>
     {/* One ring, always mounted while the graph shows, so its fill and check fade between states. */}
-    <UploadRing progress={busy ? (total > 0 ? Math.min(1, sent / total) : 0) : justDone ? 1 : 0} rate={busy ? rate : 0} done={justDone} idle={!busy && !justDone} />
+    <UploadRing progress={busy ? (total > 0 ? Math.min(1, sent / total) : 0) : failed || justDone ? 1 : 0} rate={busy ? rate : 0} done={justDone && !failed} failed={failed} idle={!busy && !justDone && !failed} />
   </div>;
 }
 
 /** The ring beside the graph: filling while uploading, a check for a moment
  *  when the last one lands, then empty and grey, ready for the next upload
- *  (Jesús, Nov 23: it stays rather than disappearing). */
-function UploadRing({ progress, rate, done, idle }: { progress: number; rate: number; done: boolean; idle: boolean }) {
+ *  (Jesús, Nov 23: it stays rather than disappearing). A failed upload with
+ *  nothing else sending turns it the error colour with an X. */
+function UploadRing({ progress, rate, done, failed, idle }: { progress: number; rate: number; done: boolean; failed: boolean; idle: boolean }) {
   const r = 30, around = 2 * Math.PI * r;
   const [amount = "", unit = ""] = rate > 0 ? formatBytes(rate).split(" ") : [];
-  const label = idle ? "Nothing uploading" : done ? "Uploads done" : `Uploading, ${Math.round(progress * 100)}%${rate > 0 ? `, ${formatBytes(rate)}/s` : ""}`;
-  return <div className="os-transfer-ring" role="img" aria-label={label}>
+  const label = failed ? "Upload failed" : idle ? "Nothing uploading" : done ? "Uploads done" : `Uploading, ${Math.round(progress * 100)}%${rate > 0 ? `, ${formatBytes(rate)}/s` : ""}`;
+  return <div className="os-transfer-ring" data-failed={failed || undefined} role="img" aria-label={label}>
     <svg viewBox="0 0 72 72" aria-hidden="true">
       <circle className="os-transfer-ring-track" cx="36" cy="36" r={r} />
       <circle className="os-transfer-ring-fill" cx="36" cy="36" r={r} strokeDasharray={`${around * progress} ${around}`} transform="rotate(-90 36 36)" />
       <path className="os-transfer-ring-check" data-on={done || undefined} d="M25 37 l8 8 l15 -17" />
+      <path className="os-transfer-ring-check" data-on={failed || undefined} d="M27 27 l18 18 M45 27 l-18 18" />
     </svg>
     {amount ? <span className="os-transfer-ring-speed" aria-hidden="true"><strong>{amount}</strong>{unit}/s</span> : null}
   </div>;

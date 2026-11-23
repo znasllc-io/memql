@@ -160,11 +160,11 @@ describe("Files workspace navigation", () => {
   expect(screen.getByRole("button",{name:/paper.md/})).toBeTruthy();
   await click(within(rail).getByRole("button",{name:"Research"}));
   expect(within(rail).getByRole("button",{name:"Research"}).getAttribute("aria-current")).toBe("page");
-  expect(screen.getByRole("heading",{name:"Research"})).toBeTruthy();
+  expect(screen.queryByRole("heading",{name:"Research"})).toBeNull(); // no repeated big title: the trail row names the place (Jesús, Nov 23)
   await openDetails(/paper.md/);
   expect(screen.queryByRole("navigation",{name:"File locations"})).toBeNull();
   await click(screen.getByRole("button",{name:"Back to Research"}));
-  expect(screen.getByRole("heading",{name:"Research"})).toBeTruthy();
+  expect(screen.queryByRole("heading",{name:"Research"})).toBeNull(); // no repeated big title: the trail row names the place (Jesús, Nov 23)
   expect(screen.getByRole("button",{name:/paper.md/})).toBeTruthy();
  });
 

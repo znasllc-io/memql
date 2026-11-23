@@ -368,7 +368,7 @@ describe("the Downloads tab owns the transfers", () => {
   it("lists every transfer under Downloads", async () => {
     h.connection = fakeConnection({ machines, transfers: [transfer as never] });
     await renderFiles({ section: "downloads" });
-    expect(screen.getByRole("heading", { name: "Downloads" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Downloads" })).toBeNull(); // no repeated big title: the trail row names the place (Jesús, Nov 23)
     expect(await screen.findByText("backup.zip")).toBeTruthy();
     expect(await screen.findByText(/Backup from laptop · Uploading/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Search transfers" })).toBeTruthy();

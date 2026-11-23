@@ -2,7 +2,7 @@ import { Folder, Plus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { newShortId, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { Button, Caption, Head, RecordRow, listCount, LiveList, Notice, formatFreshness, useLiveView, useNow, type LiveListSource } from "../../../kit";
+import { Button, Caption, Head, RecordRow, LiveList, Notice, formatFreshness, useLiveView, useNow, type LiveListSource } from "../../../kit";
 import { InPlaceAsk } from "../../../kit/pressHold";
 import { flatten } from "../../../kit/rows";
 import { useMachines } from "../../../live/machines";
@@ -113,7 +113,7 @@ export function BackupsSection({ folders, files, source, writes, onTransferStart
       <Head
         title={editing ? "Edit backup" : "Backups"}
         back={editing ? {label: "Backups", onSelect: () => { setAdding(false); setEditingId(""); write.clearError(); }} : undefined}
-        meta={!editing ? listCount(source?.snapshot) : undefined}
+        hideTitle
       />
 
       {editing !== null ? (

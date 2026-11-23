@@ -48,7 +48,6 @@ import {
   Head,
   LiveList,
   Notice,
-  listCount,
   Select,
 } from "../../kit";
 import type { Breadcrumb } from "../../kit/Breadcrumbs";
@@ -803,9 +802,9 @@ export function BrowseSection({
   const now = Date.now();
   const visibleFolders = filter.type !== "all" && !foldersOnly ? []
     : browsedFolders.filter(folder => addedWithin(folder.createdAt, filter.added, now));
-  // The Head's meta is what the LIST is showing right now -- scoped folder,
-  // facets and search included -- never a different population's number
-  // beside the scope's name. Showing Folders, that is the folders.
+  // What the LIST is showing right now -- scoped folder, facets and search
+  // included -- read by the "nothing matches" line. The heading shows no count
+  // (Jesús, Nov 23 2026: the trail row names the place; no repeated title).
   const listedSnapshot = shared ? noticeList?.snapshot : sharingPlace ? (byOthers ? overseenList : outgoingList)?.snapshot : list?.snapshot;
   // Sharing counts FILES, as its tiles show them (one per file, however many
   // people have it), not the shares behind them.
@@ -911,7 +910,7 @@ export function BrowseSection({
       {/* Hidden, not unmounted, while the share view stands in its place, so
           the way back finds the files where they were. */}
       <div className="os-files-main" ref={mainRef} hidden={shareTarget !== null}>
-      <Head navigationKey={`browse:${filter.place}:${filter.folderId ?? ""}`} title={headTitle} breadcrumbs={headTrail} navigation={selected === null && shareTarget === null} back={filter.folderId ? {label: PLACE_TITLE[filter.place], onSelect: () => patch({folderId: tree.byId.get(filter.folderId!)?.folder.parentFolderId ?? ""})} : undefined} meta={listCount(listedSnapshot, listedCount) === undefined ? undefined : `${listedCount}${!shared && !sharingPlace && artifacts.hasMore ? "+" : ""}`}>
+      <Head navigationKey={`browse:${filter.place}:${filter.folderId ?? ""}`} title={headTitle} breadcrumbs={headTrail} navigation={selected === null && shareTarget === null} back={filter.folderId ? {label: PLACE_TITLE[filter.place], onSelect: () => patch({folderId: tree.byId.get(filter.folderId!)?.folder.parentFolderId ?? ""})} : undefined} hideTitle>
         {/* ONE ROW, THREE AREAS (José, Nov 19 2026; Jesús picked Draft A): the
             picked file's icons beside the title, one search button on the
             right, and Add apart at the far right.

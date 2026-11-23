@@ -107,7 +107,7 @@ describe("a desk folder is a desktop icon (epic memql#4842, #4847)", () => {
     await act(async () => {});
     const window = screen.getByRole("dialog", { name: "Files" });
     // The Head names the scope once: the folder, inside the Desktop place.
-    expect(within(window).getByRole("heading", { name: "Client videos" })).toBeTruthy();
+    expect(within(window).queryByRole("heading", { name: "Client videos" })).toBeNull(); // no repeated big title: the trail row names the place (Jesús, Nov 23)
     expect(within(window).getByText(/inside\.mp4/)).toBeTruthy();
     expect(within(window).queryByText(/outside\.txt/)).toBeNull();
   });

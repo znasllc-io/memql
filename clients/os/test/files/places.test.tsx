@@ -116,7 +116,7 @@ describe("the open intent", () => {
       consumeIntent: (id) => consumed.push(id),
     });
     expect(consumed).toEqual(["i-1"]);
-    expect(screen.getByRole("heading", { name: "Reports" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Reports" })).toBeNull(); // no repeated big title: the trail row names the place (Jesús, Nov 23)
     expect(screen.getByRole("button", { name: /filed\.pdf/ })).toBeTruthy();
   });
 
@@ -128,7 +128,7 @@ describe("the open intent", () => {
       consumeIntent: (id) => consumed.push(id),
     });
     expect(consumed).toEqual(["i-x"]);
-    expect(screen.getByRole("heading", { name: "Library" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Library" })).toBeNull(); // no repeated big title: the trail row names the place (Jesús, Nov 23)
   });
 });
 
@@ -158,7 +158,7 @@ describe("the Head line and its hidden search panel (José, Nov 19 2026)", () =>
       artifacts: [artifactRow({ id: "a-1", title: "one.bin" })],
     });
     await renderFiles();
-    expect(screen.getByRole("heading", { name: "Library" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Library" })).toBeNull(); // no repeated big title: the trail row names the place (Jesús, Nov 23)
     expect(screen.queryByRole("button", { name: /^Sort order/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "Refine files" })).toBeNull();
     expect(screen.getByRole("button", { name: "Add" })).toBeTruthy();
@@ -169,7 +169,7 @@ describe("the Head line and its hidden search panel (José, Nov 19 2026)", () =>
     expect(screen.queryByLabelText("Sort")).toBeNull();
 
     await click(screen.getByRole("button", { name: /one\.bin/ }));
-    const head = screen.getByRole("heading", { name: "Library" }).parentElement!;
+    const head = document.querySelector<HTMLElement>(".os-head")!;
     expect(within(head).getByRole("group", { name: "Selected: one.bin" })).toBeTruthy();
 
     // Open: Fleet's search bar (kind of file + search, no add), then Sort and Added.
