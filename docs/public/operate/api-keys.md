@@ -230,7 +230,10 @@ it is deliberately narrow. It pays for:
 
 - **the cluster's own work**, when the call says it is the cluster's: an
   automation, a sweep, a seed, a connector, the operator's stream, or one of
-  the cluster's jobs, such as the command-safety check;
+  the cluster's jobs, such as the command-safety check. That holds when a
+  person's action set the work off (an automation an event starts, the safety
+  check screening somebody's command): it is still the cluster's, and that
+  person's key is not used;
 - **a person's calls, only when that person may use it.**
 
 **A call that names nobody is refused.** A call has to say whom it is for, or

@@ -2252,6 +2252,22 @@ vendor account unless its owner said so, embeddings aside. Known limit: an
 operator who sets `MEMQL_STT_PROVIDER` to a direct OpenAI transcription path
 dials OpenAI with the cluster's bearer outside the router, for every caller;
 that variable is the operator's own choice and is not gated.
+A vendor passed over at the call for this reason leaves no line of its own:
+the person sees the error of the source that failed in front of it. Not
+verified against a real vendor. Tests: `vendor_account_cluster_test.go`,
+`cluster_account_gate_db_test.go`, in `component/router/accounts_test.go`
+`TestTheClustersAccountDoesNotPayForAPersonItIsClosedTo`,
+`TestTheVendorSurfacesWithNoKeyAskTheSameGate`,
+`TestEmbeddingsStayOnTheClustersAccountForEverybody` and
+`TestAPlainRecordNameResolvedAtTheCallAsksWhoTheClustersAccountPaysFor`; in
+`app/vision_for_caller_test.go`
+`TestAPictureIsDescribedByTheModelResolvedForItsCaller`; and across two
+replicas over one database, in `integrations/vendorkeys/hop_db_test.go`,
+`TestWhoTheClustersAccountPaysForIsReadOnTheOtherReplica` (granted and taken
+back through one replica, read on the other, a resolved call included) and
+`TestAKeyRemovedOnOneReplicaIsRefusedOnTheOther`. A fixture outside those
+packages that calls a vendor record for a person says who the account pays
+for (`SetClusterAccountGate`), because a registry a test builds has no gate.
 
 **A call that names nobody is not the cluster's work (owner decision,
 2026-11-23).** The rule above defined the cluster's own work by the ABSENCE of
@@ -2322,22 +2338,20 @@ that declares no capability (the `ai` builtin among them) checks no actor, so
 an anonymous caller may reach a model call; the cluster's account no longer
 pays for it, and whether it should be reachable at all is not settled here.
 Not run against a real vendor.
-A vendor passed over at the call for this reason leaves no line of its own:
-the person sees the error of the source that failed in front of it. Not
-verified against a real vendor. Tests: `vendor_account_cluster_test.go`,
-`cluster_account_gate_db_test.go`, in `component/router/accounts_test.go`
-`TestTheClustersAccountDoesNotPayForAPersonItIsClosedTo`,
-`TestTheVendorSurfacesWithNoKeyAskTheSameGate`,
-`TestEmbeddingsStayOnTheClustersAccountForEverybody` and
-`TestAPlainRecordNameResolvedAtTheCallAsksWhoTheClustersAccountPaysFor`; in
-`app/vision_for_caller_test.go`
-`TestAPictureIsDescribedByTheModelResolvedForItsCaller`; and across two
-replicas over one database, in `integrations/vendorkeys/hop_db_test.go`,
-`TestWhoTheClustersAccountPaysForIsReadOnTheOtherReplica` (granted and taken
-back through one replica, read on the other, a resolved call included) and
-`TestAKeyRemovedOnOneReplicaIsRefusedOnTheOther`. A fixture outside those
-packages that calls a vendor record for a person says who the account pays
-for (`SetClusterAccountGate`), because a registry a test builds has no gate.
+
+**The cluster pays for its own machinery, even when a person's action starts
+it (owner decision, 2026-11-23).** Trigger: a model call made by work the
+cluster runs as itself after somebody's action: an automation an event or a
+schedule starts (it runs as its own actor unless it inherits a person's,
+`component/automations` `installRunActor`), the command-safety check screening
+a person's command, repair. Path: such a call says it is the cluster's (its
+actor, or its named job), so the cluster's account pays when it reaches a
+vendor, and the person whose action set it off pays nothing and is not asked.
+Alternative offered and declined: charging the person who set it off (their
+key, or nothing for somebody without one). Why: these are what an owner or an
+admin switched on, they behave the same for everybody, and per-person payment
+would make them fail for anybody without a key. No code changed with the
+decision; the paths and tests are the section above's.
 
 **The record of a key-paid call that failed keeps the router's words, not the
 vendor's (owner decision, 2026-11-22).** `v1:router:call` is readable by every
