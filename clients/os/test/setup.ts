@@ -1,5 +1,8 @@
 import { configure, getConfig } from "@testing-library/react";
 
+import { beforeEach } from "vitest";
+
+import { resetUploadTasksForTest } from "../src/apps/files/useUploadTasks";
 import { setRoleLadder } from "../src/system/roles";
 import { installFakeIntersectionObserver } from "./intersectionObserver";
 import { installSeededAccess } from "./seededAccess";
@@ -215,3 +218,7 @@ if (!Blob.prototype.text) {
     });
   };
 }
+
+// THE UPLOAD LIST IS THE PAGE'S, NOT A RENDER'S (useUploadTasks: the desk and
+// Files share it), so a task one test left behind would show in the next.
+beforeEach(() => resetUploadTasksForTest());

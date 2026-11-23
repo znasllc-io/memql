@@ -14,6 +14,7 @@ import { useAuthSource } from "../auth/context";
 import { FileIcon } from "../items/FileIcon";
 import { FolderIcon } from "../items/FolderIcon";
 import { holdOf, useArrivalGlow, useDeskFileStates, type DeskLine, type Hold } from "../items/deskFileState";
+import { trackDeskUpload } from "../apps/files/useUploadTasks";
 import type { UploadProvider } from "../items/upload";
 import { accessAdmits, widgetById, widgetsFor } from "../system/registry";
 import { borderlessArea, halvesOf, placeWindows, type PlacementTokens, type Rect } from "../system/placement";
@@ -269,6 +270,9 @@ export function Desktop({
   );
 
   // ---- host-file drop -> upload provider (spec B) ----
+  // A retry pressed in Files > Downloads comes back through the desk, which
+  // owns the icon; retryUpload is declared below startUpload, hence the ref.
+  const retryRef = useRef<(itemId: string) => void>(() => {});
   const startUpload = useCallback(
     (file: File, preferred: GridPos, opts?: { existingItemId?: string; folderId?: string }) => {
       const itemId = opts?.existingItemId ?? `up-${Date.now()}-${file.name}`;
@@ -295,6 +299,7 @@ export function Desktop({
         pendingFiles.current.set(itemId, file);
       }
       const handle = uploads.upload(file, opts?.folderId ? { folderId: opts.folderId } : undefined);
+      trackDeskUpload(intoFolder ? `${itemId}:${opts?.folderId}` : itemId, file, handle, intoFolder ? null : () => retryRef.current(itemId));
       if (!intoFolder) stopUpload.current.set(itemId, handle.abort);
       handle.done
         .then((result) => {
@@ -339,6 +344,7 @@ export function Desktop({
     },
     [startUpload],
   );
+  retryRef.current = retryUpload;
 
   // An upload thrown in the Bin before it landed: nothing of it is in the
   // Library, so there is nothing for the Bin to keep. The upload stops and
@@ -603,17 +609,24 @@ export function Desktop({
 
   function itemMenuEntries(item: DesktopItem): MenuEntry[] {
     if (item.kind === "file") {
+      const hold = holds.get(item.id) ?? null;
       return [
-        holds.get(item.id) === "failed"
+        hold === "failed"
           ? { id: "open", label: "Try upload again", onSelect: () => retryUpload(item.id) }
           : {
               id: "open",
               label: "Open in VS Code",
               // Uploading or offline: an open is refused, never queued
               // (deskFileState.ts), so it is not offered.
-              disabled: (holds.get(item.id) ?? null) !== null,
+              disabled: hold !== null,
               onSelect: () => fileStates.ask(item.id, "open"),
             },
+        // A file still on its way, or stopped on it, has its transfer in Files >
+        // Downloads (José, Nov 20 2026: right-click it "and it should be able to
+        // take you to the downloads").
+        ...(hold === "uploading" || hold === "failed"
+          ? [{ id: "downloads", label: "Show in Downloads", onSelect: () => actions.openApp("files", "downloads") }]
+          : []),
         {
           id: "remove",
           label: "Remove from desk",

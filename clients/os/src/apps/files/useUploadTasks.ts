@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 
 import type { UploadHandle, UploadProvider } from "../../items/upload";
 import type { DroppedFile } from "../../items/folderDrop";
@@ -51,33 +51,85 @@ export interface UploadTasksApi {
   uploadTree: (files: readonly DroppedFile[], targetFolderId: string, label: string) => void;
 }
 
+// ONE LIST FOR THE PAGE (José, Nov 20 2026: a file still uploading on the
+// desk, right-clicked, "should be able to take you to the downloads"). The
+// desk's uploads (trackDeskUpload, Desktop.tsx) and the Files app's join the
+// same list, so Files > Downloads shows both, whenever the window opens.
+let tasksNow: UploadTask[] = [];
+const listeners = new Set<() => void>();
+let seq = 0;
+
+function setTasks(next: (ts: UploadTask[]) => UploadTask[]): void {
+  tasksNow = next(tasksNow);
+  for (const listener of listeners) listener();
+}
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+}
+function patch(id: string, p: Partial<UploadTask>): void {
+  setTasks((ts) => ts.map((t) => (t.id === id ? { ...t, ...p } : t)));
+}
+function remove(id: string): void {
+  setTasks((ts) => ts.filter((t) => t.id !== id));
+}
+function settleDone(id: string): void {
+  patch(id, { state: "done", error: "" });
+  setTimeout(() => remove(id), DONE_LINGER_MS);
+}
+function nextId(): string {
+  seq += 1;
+  return `up-${seq}`;
+}
+
+/** Tests start from an empty list: it outlives a render. */
+export function resetUploadTasksForTest(): void {
+  tasksNow = [];
+  seq = 0;
+}
+
+/**
+ * A file dropped on the desk, on the same list. `key` is its desk icon, so a
+ * retry replaces the icon's old line; `retry` goes back through the desk,
+ * which owns the icon (null where there is no icon: a drop onto a folder).
+ */
+export function trackDeskUpload(key: string, file: File, handle: UploadHandle, retry: (() => void) | null): void {
+  const id = `desk:${key}`;
+  setTasks((ts) => [
+    {
+      id,
+      label: file.name,
+      kind: "file",
+      sentBytes: 0,
+      totalBytes: file.size,
+      doneFiles: 0,
+      totalFiles: 1,
+      state: "sending",
+      error: "",
+      failures: [],
+      retry,
+      abort: () => handle.abort(),
+      dismiss: () => remove(id),
+    },
+    ...ts.filter((t) => t.id !== id),
+  ]);
+  handle.onProgress?.((p) => patch(id, { sentBytes: p.sentBytes, totalBytes: p.totalBytes }));
+  handle.done
+    .then(() => settleDone(id))
+    .catch((err: unknown) => patch(id, { state: "failed", error: describe(err) }));
+}
+
 export function useUploadTasks(
   provider: UploadProvider,
   /** Create one Library folder, answering its id -- the tree flow's port. */
   createFolder: (name: string, parentFolderId: string) => Promise<string>,
 ): UploadTasksApi {
-  const [tasks, setTasks] = useState<UploadTask[]>([]);
-  const seq = useRef(0);
-
-  const patch = useCallback((id: string, p: Partial<UploadTask>) => {
-    setTasks((ts) => ts.map((t) => (t.id === id ? { ...t, ...p } : t)));
-  }, []);
-  const remove = useCallback((id: string) => {
-    setTasks((ts) => ts.filter((t) => t.id !== id));
-  }, []);
-  const settleDone = useCallback(
-    (id: string) => {
-      patch(id, { state: "done", error: "" });
-      setTimeout(() => remove(id), DONE_LINGER_MS);
-    },
-    [patch, remove],
-  );
+  const tasks = useSyncExternalStore(subscribe, () => tasksNow);
 
   const uploadFiles = useCallback(
     (files: readonly File[], folderId: string) => {
       for (const file of files) {
-        seq.current += 1;
-        const id = `up-${seq.current}`;
+        const id = nextId();
         let handle: UploadHandle | null = null;
         const run = () => {
           patch(id, { state: "sending", error: "" });
@@ -117,13 +169,12 @@ export function useUploadTasks(
         run();
       }
     },
-    [provider, patch, remove, settleDone],
+    [provider],
   );
 
   const uploadTree = useCallback(
     (files: readonly DroppedFile[], targetFolderId: string, label: string) => {
-      seq.current += 1;
-      const id = `up-${seq.current}`;
+      const id = nextId();
       const totalBytes = files.reduce((sum, f) => sum + f.file.size, 0);
       const sentByFile = new Map<string, number>();
       const handles = new Set<UploadHandle>();
@@ -206,7 +257,7 @@ export function useUploadTasks(
       ]);
       run(files);
     },
-    [provider, createFolder, patch, remove, settleDone],
+    [provider, createFolder],
   );
 
   return { tasks, uploadFiles, uploadTree };

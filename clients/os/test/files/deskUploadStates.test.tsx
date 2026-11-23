@@ -113,6 +113,20 @@ describe("a file uploading onto the desk", () => {
     expect(opened).toHaveBeenCalledOnce();
   });
 
+  it("right-clicked while it uploads, offers Show in Downloads, which opens Files on Downloads with the upload listed", async () => {
+    const uploads = heldUploads();
+    const { button } = await dropOnDesk(uploads.provider);
+    fireEvent.contextMenu(button);
+    await act(async () => { fireEvent.click(screen.getByRole("menuitem", { name: "Show in Downloads" })); });
+    const downloads = await screen.findByRole("region", { name: "Downloads" });
+    expect(downloads.textContent).toContain("report.pdf");
+
+    // Once it lands, the desk's menu no longer offers it.
+    await uploads.land(0);
+    fireEvent.contextMenu(button);
+    expect(screen.queryByRole("menuitem", { name: "Show in Downloads" })).toBeNull();
+  });
+
   it("a failed upload is grey with a retry badge; opening it retries, and the retry that lands says Ready and opens nothing", async () => {
     const uploads = heldUploads();
     const { button, icon } = await dropOnDesk(uploads.provider);
