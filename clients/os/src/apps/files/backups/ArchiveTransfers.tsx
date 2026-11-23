@@ -71,7 +71,9 @@ export function ArchiveTransfers({ machines, refresh, onDownload, uploads = [] }
     <AutoRefresh resume={false} onRefresh={feed.reseed} enabled={visible && connection !== null} busy={feed.snapshot.state === "seeding" || feed.loadingMore} intervalMs={rows.some(row => !["complete", "bin", "cancelled", "deleted"].includes(row.state)) ? 3000 : 15000} />
     <Refine search={search} onSearch={setSearch} label="Search transfers" placeholder="Search transfers" />
     {feed.snapshot.state === "seeding" && !rows.length && !uploads.length ? <RecordListSkeleton label="Loading transfers" rows={3} /> : null}
-    {rows.length === 0 && (needle || uploads.length === 0) && !error && feed.snapshot.state !== "seeding" && <Caption>{needle ? "No transfers match." : "No transfers yet."}</Caption>}
+    {/* No "No transfers yet." line: an empty list says it (Jesús, Nov 23, the
+        no-needless-text rule). A search that finds nothing still says so. */}
+    {needle && rows.length === 0 && !error && feed.snapshot.state !== "seeding" && <Caption>No transfers match.</Caption>}
     {needle ? null : <UploadSpeed uploads={uploads} />}
     <RecordList label="Transfers">
     {needle ? null : uploads.map(task => <UploadLine key={task.id} task={task} />)}
@@ -130,8 +132,8 @@ export function clockLeft(seconds: number): string {
 
 /**
  * LOOK A (Jesús, Nov 23 2026, after Steam's Downloads, José's reference): while
- * this browser uploads, one live graph of the last minute's speed, a dashed
- * line at its peak, and the speed and time left for everything still sending
+ * this browser uploads, one live graph of the last minute's speed (plain bars,
+ * no peak marker), and the speed and time left for everything still sending
  * in big numbers; frozen as the last upload left it while nothing sends.
  * Speed is this browser's own measure (useUploadTasks); a
  * transfer a machine runs reports no timing, so it is not in the graph.
@@ -144,8 +146,9 @@ function UploadSpeed({ uploads }: { uploads: readonly UploadTask[] }) {
   const idle = sending.length === 0;
   const rate = sending.reduce((sum, task) => sum + (task.bytesPerSecond ?? 0), 0);
   const remaining = sending.reduce((sum, task) => sum + Math.max(0, task.totalBytes - task.sentBytes), 0);
-  // The live figure counts too: samples are a second apart, so the speed now can top the last sample.
-  const peak = Math.max(0, rate, ...history);
+  // Bars are scaled to the tallest sample; no peak label or highlight (Jesús, Nov 23:
+  // not worth taking the graph off its plain design).
+  const peak = Math.max(0, ...history);
   const n = SPEED_HISTORY_SECONDS;
   return <div className="os-transfer-speed" role="group" aria-label="Upload speed">
     <div className="os-transfer-graph">
@@ -155,7 +158,6 @@ function UploadSpeed({ uploads }: { uploads: readonly UploadTask[] }) {
           return <rect key={i} x={n - history.length + i + 0.12} y={100 - h} width={0.76} height={h} />;
         })}
       </svg>
-      {peak > 0 ? <span className="os-transfer-peak">peak {formatBytes(peak)}/s</span> : null}
     </div>
     <div className="os-transfer-figures">
       <span><strong>{idle ? `${formatBytes(0)}/s` : rate > 0 ? `${formatBytes(rate)}/s` : "--"}</strong>speed</span>

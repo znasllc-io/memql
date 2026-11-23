@@ -126,7 +126,7 @@ describe("downloads tab", () => {
     expect(uploadLine({ ...task, kind: "tree", doneFiles: 2, totalFiles: 3 }, b).text).toBe("2 of 3 files");
   });
 
-  it("measures speed, and look A draws the last minute with its peak, the speed and the time left (Jesús, Nov 23)", async () => {
+  it("measures speed, and look A draws the last minute, the speed and the time left, with no peak marker (Jesús, Nov 23)", async () => {
     expect([clockLeft(0.2), clockLeft(13), clockLeft(100), clockLeft(3900)]).toEqual(["0:01", "0:13", "1:40", "1:05:00"]);
 
     // The measure: bytes since the last report over the time since it.
@@ -153,7 +153,7 @@ describe("downloads tab", () => {
     const graph = screen.getByRole("group", { name: "Upload speed" });
     expect(graph.textContent).toContain(`${formatBytes(1_000_000)}/s`);
     expect(graph.textContent).toContain("0:02");
-    expect(graph.textContent).toContain(`peak ${formatBytes(1_000_000)}/s`);
+    expect(graph.textContent).not.toContain("peak");
     expect(graph.querySelectorAll("rect")).toHaveLength(3);
   });
 
