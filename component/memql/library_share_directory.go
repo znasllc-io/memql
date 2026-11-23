@@ -21,7 +21,9 @@ package memql
 //
 // GROUPS (Nov 20 2026). The groups offered are the organization groups the
 // caller is an active member of -- or every active group, custom ones too, for
-// a caller who sees everyone (fleet_share_directory.go). A group row carries
+// a caller who sees everyone (fleet_share_directory.go), minus any group with
+// nobody in it but the caller (Nov 23 2026: a share with it reaches no one, and
+// the picker offered it only to fail). A group row carries
 // how many active people it holds; asked with `groupId`, the builtin answers
 // the people a share with that group would reach instead: its active members
 // other than the caller, as person rows, and nothing for a group not offered.
@@ -84,6 +86,12 @@ func (e *MemQLEngine) evaluateLibraryShareDirectoryExpression(ctx context.Contex
 		}
 	}
 	for _, g := range groups {
+		// A group with nobody in it but the caller is not offered: a share with
+		// it would reach no one, and libraryShareFile refuses it anyway. Only
+		// the listing skips it; asked with its groupId, it still answers (empty).
+		if len(dir.members[g.Id]) == 0 {
+			continue
+		}
 		// A group's row id is prefixed so a person and a group sharing a short
 		// id can never collapse into one row in a client's collection.
 		if err := add("group:"+g.Id, map[string]any{"groupId": g.Id, "displayName": g.Name, "members": g.Members}); err != nil {

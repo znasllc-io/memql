@@ -1030,10 +1030,15 @@ func testGroupsOffered(t *testing.T, x *shareFixture) {
 	if _, err := x.shareWith(f.first, x.mike(), map[string]any{"artifactId": artifact, "recipientGroupId": orgA, "days": 7}); err != nil {
 		t.Fatalf("a member could not share with their own organization: %v", err)
 	}
-	// Bob's organization has nobody in it but bob: nobody to share with.
+	// Bob's organization has nobody in it but bob: nobody to share with, so it
+	// is not offered to him (adam, above, is offered it: bob is in it for him),
+	// and a share with it named anyway is refused.
+	if _, ok := x.groupRows(x.bob())[orgB]; ok {
+		t.Fatal("bob was offered a group with nobody in it but him")
+	}
 	bobs := x.file(x.bob(), "bob", "alone.txt", "alone")
 	if _, err := x.shareWith(f.first, x.bob(), map[string]any{"artifactId": bobs, "recipientGroupId": orgB, "days": 7}); err == nil ||
-		!strings.Contains(err.Error(), "nobody but you") {
+		!strings.Contains(err.Error(), "people and groups offered") {
 		t.Fatalf("a share with a group of one: %v", err)
 	}
 }
