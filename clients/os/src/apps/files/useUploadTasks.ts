@@ -27,6 +27,10 @@ export interface UploadTask {
   doneFiles: number;
   totalFiles: number;
   state: "sending" | "failed" | "done";
+  /** Landed a moment ago (DONE_LINGER_MS): Browse's placeholder has handed over to
+   *  the live row, but Downloads keeps the line until the page reloads, newest
+   *  first (Jesús, Nov 23 2026: a finished upload stays, new ones push it down). */
+  settled?: boolean;
   /** How fast it is going, smoothed over its progress reports; absent until two reports exist. */
   bytesPerSecond?: number;
   /** The refusal, verbatim. "" while sending and on success. */
@@ -118,7 +122,7 @@ function restart(id: string, p: Partial<UploadTask>): void {
 }
 function settleDone(id: string): void {
   patch(id, { state: "done", error: "" });
-  setTimeout(() => remove(id), DONE_LINGER_MS);
+  setTimeout(() => patch(id, { settled: true }), DONE_LINGER_MS);
 }
 function nextId(): string {
   seq += 1;

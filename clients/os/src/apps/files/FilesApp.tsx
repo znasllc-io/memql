@@ -112,6 +112,8 @@ export function FilesApp({
     [connection],
   );
   const { tasks, uploadFiles, uploadTree } = useUploadTasks(provider, createFolder);
+  // Browse shows a placeholder only until the landed row arrives; Downloads keeps them all.
+  const placeholderTasks = useMemo(() => tasks.filter((task) => !task.settled), [tasks]);
   // Bumped when Backups starts an archive or Downloads starts a download, so
   // the Downloads list re-reads on its next mount instead of showing its
   // cached page (ArchiveTransfers reseeds when this differs from 0 on mount).
@@ -418,7 +420,7 @@ export function FilesApp({
       onSelect={id => { clearDestination(); setSelectedId(id); }}
       confirmBeforeArchive={settings.confirmBeforeArchive}
       askAbout={askAbout}
-      tasks={tasks}
+      tasks={placeholderTasks}
       uploadFiles={uploadFiles}
       uploadTree={uploadTree}
     />

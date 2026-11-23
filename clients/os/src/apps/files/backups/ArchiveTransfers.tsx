@@ -22,7 +22,7 @@ const actionLabel: Record<TransferAction, string> = { pause: "Pause", resume: "R
 // with the status and the figures the transfer actually carries, and a thin
 // bar while bytes move. Neither source reports a speed or a time left, so the
 // line shows neither. This browser's own uploads (useUploadTasks) come first;
-// they drop off on their own once landed (DONE_LINGER_MS). Engine transfers
+// a finished one stays, newest first, until the page reloads. Engine transfers
 // keep the engine's rule: listed until removed, ten per page.
 //
 // ONE BUTTON PER ROW while bytes move (Pause, or Cancel for a browser upload,
@@ -155,7 +155,8 @@ function UploadSpeed({ uploads }: { uploads: readonly UploadTask[] }) {
   // grey ring when nothing has uploaded since the page loaded.
   // Progress over everything on the list that has not failed: a file that
   // landed counts as whole while it lingers.
-  const counted = uploads.filter(task => task.state !== "failed");
+  // Only this batch: finished lines that stay on the list (settled) are not part of it.
+  const counted = uploads.filter(task => task.state === "sending" || (task.state === "done" && !task.settled));
   const total = counted.reduce((sum, task) => sum + task.totalBytes, 0);
   const sent = counted.reduce((sum, task) => sum + (task.state === "done" ? task.totalBytes : task.sentBytes), 0);
   const rate = uploads.reduce((sum, task) => sum + (task.state === "sending" ? task.bytesPerSecond ?? 0 : 0), 0);

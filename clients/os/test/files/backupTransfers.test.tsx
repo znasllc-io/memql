@@ -185,6 +185,23 @@ describe("downloads tab", () => {
     expect(uploadLine({ ...task, error: "Storage is full" }, formatBytes).text).toBe("Upload failed · Storage is full");
   });
 
+  it("keeps a finished upload on the list, newest first, and counts only the new batch on the ring (Jesús, Nov 23)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+    const { result } = renderHook(() => useUploadTasks({ upload: vi.fn() } as never, vi.fn()));
+    await act(async () => { trackDeskUpload("old", new File(["x"], "old.bin"), { done: Promise.resolve(), abort: vi.fn() } as never, null); });
+    act(() => { vi.advanceTimersByTime(5_000); });
+    const old = result.current.tasks.find(task => task.label === "old.bin")!;
+    expect(old.state).toBe("done");
+    expect(old.settled).toBe(true);
+    act(() => { trackDeskUpload("new", new File(["yy"], "new.bin"), { done: new Promise<never>(() => {}), abort: vi.fn() } as never, null); });
+    expect(result.current.tasks.map(task => task.label).slice(0, 2)).toEqual(["new.bin", "old.bin"]);
+    h.connection = fakeConnection({ transfers: [] });
+    render(<ArchiveTransfers machines={machines} refresh={0} onDownload={vi.fn()} uploads={result.current.tasks} />);
+    expect(screen.getByText("old.bin")).toBeTruthy();
+    expect(screen.getByRole("img", { name: /^Uploading, 0%/ })).toBeTruthy();
+    vi.useRealTimers();
+  });
+
   it("keeps the graph and an empty grey ring on screen before anything uploads (Jesús, Nov 23)", () => {
     h.connection = fakeConnection({ transfers: [] });
     render(<ArchiveTransfers machines={machines} refresh={0} onDownload={vi.fn()} uploads={[]} />);
