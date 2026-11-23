@@ -88,7 +88,9 @@ Run **MemQL: Uninstall Local Cluster...**. The page lists exactly what will go,
 and nothing is removed until you press **Uninstall**:
 
 - **Will be removed:** the cluster, the downloaded MemQL files, and the local
-  addresses in `/etc/hosts` (which asks for your password).
+  addresses in `/etc/hosts` (which asks for your password). With the cluster
+  goes its token signing key (`~/.memql/k3d/<cluster>/service-account.key`)
+  when the install created it; a key kept from an earlier `make down` stays.
 - **Also remove:** switches for k3d, kubectl, the local certificate authority
   and mkcert. They start off, because other projects on your computer may use
   them. mkcert can only be removed together with the certificate authority.

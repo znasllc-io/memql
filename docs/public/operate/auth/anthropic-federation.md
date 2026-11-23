@@ -413,8 +413,8 @@ each time the cluster is created. `make up-refresh` therefore leaves the
 issuer and its keys unchanged, and what you pasted stays good. A cluster
 created before this existed gets the file the next time it is recreated; run
 `make federation-keys` and paste once more then. `make down PURGE=1` deletes
-the file. A machine without `openssl` creates the cluster without one and
-says so.
+the file, and so does uninstalling the local cluster when the install created
+it. A machine without `openssl` creates the cluster without one and says so.
 
 **That file is a secret.** Anyone who holds it can mint a token Anthropic
 accepts for this cluster's rule. It is readable by its owner only and is never
