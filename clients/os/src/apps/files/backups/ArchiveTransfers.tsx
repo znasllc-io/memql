@@ -151,7 +151,8 @@ function UploadSpeed({ uploads }: { uploads: readonly UploadTask[] }) {
   // Nothing sending and something on the list failed: the ring says so (Jesús,
   // Nov 23 2026: errors as visual as progress), until it is retried or dismissed.
   const failed = !busy && uploads.some(task => task.state === "failed");
-  if (!busy && !failed && history.length === 0) return null;
+  // ALWAYS SHOWN (Jesús, Nov 23 2026): the panel stays put, an empty graph and a
+  // grey ring when nothing has uploaded since the page loaded.
   // Progress over everything on the list that has not failed: a file that
   // landed counts as whole while it lingers.
   const counted = uploads.filter(task => task.state !== "failed");
@@ -187,7 +188,8 @@ function UploadRing({ progress, rate, done, failed, idle }: { progress: number; 
   return <div className="os-transfer-ring" data-failed={failed || undefined} role="img" aria-label={label}>
     <svg viewBox="0 0 72 72" aria-hidden="true">
       <circle className="os-transfer-ring-track" cx="36" cy="36" r={r} />
-      <circle className="os-transfer-ring-fill" cx="36" cy="36" r={r} strokeDasharray={`${around * progress} ${around}`} transform="rotate(-90 36 36)" />
+      {/* data-empty hides the fill: a zero-length dash with round caps still draws a green dot (Jesús, Nov 23). */}
+      <circle className="os-transfer-ring-fill" data-empty={progress <= 0 || undefined} cx="36" cy="36" r={r} strokeDasharray={`${around * progress} ${around}`} transform="rotate(-90 36 36)" />
       <path className="os-transfer-ring-check" data-on={done || undefined} d="M25 37 l8 8 l15 -17" />
       <path className="os-transfer-ring-check" data-on={failed || undefined} d="M27 27 l18 18 M45 27 l-18 18" />
     </svg>

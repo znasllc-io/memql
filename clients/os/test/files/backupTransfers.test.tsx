@@ -169,8 +169,9 @@ describe("downloads tab", () => {
     expect(screen.getByRole("img", { name: "Uploads done" })).toBeTruthy();
     act(() => { vi.advanceTimersByTime(2_000); });
     expect(screen.queryByRole("img", { name: "Uploads done" })).toBeNull();
-    // The ring stays, emptied and grey, ready for the next upload.
-    expect(screen.getByRole("img", { name: "Nothing uploading" })).toBeTruthy();
+    // The ring stays, emptied and grey, ready for the next upload, with no green left on it.
+    const idle = screen.getByRole("img", { name: "Nothing uploading" });
+    expect(idle.querySelector(".os-transfer-ring-fill")!.hasAttribute("data-empty")).toBe(true);
     expect(screen.getByRole("group", { name: "Upload speed" }).querySelectorAll("rect").length).toBeGreaterThan(0);
     vi.useRealTimers();
   });
@@ -182,6 +183,14 @@ describe("downloads tab", () => {
     const task = { state: "failed", error: "" } as unknown as UploadTask;
     expect(uploadLine(task, formatBytes).text).toBe("Upload failed");
     expect(uploadLine({ ...task, error: "Storage is full" }, formatBytes).text).toBe("Upload failed · Storage is full");
+  });
+
+  it("keeps the graph and an empty grey ring on screen before anything uploads (Jesús, Nov 23)", () => {
+    h.connection = fakeConnection({ transfers: [] });
+    render(<ArchiveTransfers machines={machines} refresh={0} onDownload={vi.fn()} uploads={[]} />);
+    const panel = screen.getByRole("group", { name: "Upload speed" });
+    expect(within(panel).getByRole("img", { name: "Nothing uploading" })).toBeTruthy();
+    expect(panel.querySelectorAll("rect")).toHaveLength(0);
   });
 
   it("turns the ring the error colour with an X when an upload fails, even with no graph yet (Jesús, Nov 23)", () => {
