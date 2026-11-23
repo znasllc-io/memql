@@ -108,6 +108,8 @@ export interface FakeSeed {
    *  active ones), and the notices of files shared with the caller
    *  (librarySharedWithMe). */
   shareDirectory?: Row[];
+  /** libraryShareDirectory asked with a groupId: who a share with it reaches. */
+  groupReach?: Record<string, Row[]>;
   shares?: Row[];
   /** What librarySharesOverseen answers: the shares the caller may see and stop. */
   overseen?: Row[];
@@ -168,7 +170,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         return rowsResult([{ folders: [...folders].map(([folderId, count]) => ({ folderId, count })), labelGroups: rows.map(row => row.labels ?? []) }]);
       }
       if (name === "clientAccountsAll") return rowsResult(seed.accounts ?? []);
-      if (name === "libraryShareDirectory") return rowsResult(seed.shareDirectory ?? []);
+      if (name === "libraryShareDirectory") return rowsResult(args.groupId ? seed.groupReach?.[String(args.groupId)] ?? [] : seed.shareDirectory ?? []);
       if (name === "librarySharesForArtifact") return rowsResult((seed.shares ?? []).filter(row => row.artifactId === args.artifactId && !row.revokedAt));
       if (name === "librarySharing") return rowsResult((seed.shares ?? []).filter(row => !row.revokedAt));
       if (name === "librarySharesOverseen") return rowsResult((seed.overseen ?? []).filter(row => !row.revokedAt));

@@ -65,10 +65,21 @@ export function useShareDirectory(enabled: boolean): { people: SharePerson[] | n
     paged: false,
     seed: async (_cursor, signal) => {
       const result = await connection.query.libraryShareDirectory({}, { signal });
+      // A GROUP WITH NOBODY BUT YOU IS NOT OFFERED: libraryShareFile refuses it
+      // ("nobody but you is in that group yet"). `members` counts every active
+      // person, you included, so 0 is nobody and 1 may be only you; for those
+      // the builtin, asked with the group, answers who a share would reach.
+      const reach = new Map(await Promise.all(result.rows()
+        .filter((row) => rowString(row, "groupId") !== "" && rowNumber(row, "members") === 1)
+        .map(async (row) => [rowString(row, "groupId"), (await connection.query.libraryShareDirectory({ groupId: rowString(row, "groupId") }, { signal })).rows().length] as const)));
+      const reaches = (row: Row) => {
+        const group = rowString(row, "groupId");
+        return group === "" || (rowNumber(row, "members") > 0 && reach.get(group) !== 0);
+      };
       // A group's row is keyed apart from a person's, so the two can never
       // share an id in the collection.
       return {
-        rows: result.rows().map((row) => ({ ...row, id: rowString(row, "userId") || `group:${rowString(row, "groupId")}` })),
+        rows: result.rows().filter(reaches).map((row) => ({ ...row, id: rowString(row, "userId") || `group:${rowString(row, "groupId")}` })),
         nextCursor: "",
       };
     },
