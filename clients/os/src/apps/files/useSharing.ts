@@ -120,6 +120,7 @@ export interface SharedNotice {
   id: string;
   shareId: string;
   artifactId: string;
+  sharerUserId: string;
   sharerDisplayName: string;
   title: string;
   mimeType: string;
@@ -136,6 +137,7 @@ export function noticeFromRow(raw: Row): SharedNotice {
     id: rowString(row, "id"),
     shareId: rowString(row, "shareId"),
     artifactId: rowString(row, "artifactId"),
+    sharerUserId: rowString(row, "sharerUserId"),
     sharerDisplayName: rowString(row, "sharerDisplayName"),
     title: rowString(row, "title"),
     mimeType: rowString(row, "mimeType"),
@@ -150,6 +152,26 @@ export function noticeFromRow(raw: Row): SharedNotice {
 /** Whether a notice still stands: not ended, and not past its time. */
 export function noticeStands(notice: SharedNotice, now = Date.now()): boolean {
   return notice.endedAt === "" && Date.parse(notice.expiresAt) > now;
+}
+
+/**
+ * The people with a standing share with the caller, for Shared with me's
+ * "Shared by" menu (Jesús, Nov 23: sort it by who shared it, the way Sharing
+ * does, instead of a "from" line under every file). One entry per person, under
+ * the name on their newest notice and never an email: shares made before the
+ * Nov 18 name fix stored one, and the part before the "@" is the name.
+ */
+export function noticeSharers(rows: readonly Row[]): Array<[string, string]> {
+  const people = new Map<string, { name: string; at: string }>();
+  for (const raw of rows) {
+    const notice = noticeFromRow(raw);
+    if (notice.sharerUserId === "" || !noticeStands(notice)) continue;
+    const seen = people.get(notice.sharerUserId);
+    if (seen && seen.at >= notice.createdAt) continue;
+    people.set(notice.sharerUserId, { name: notice.sharerDisplayName.split("@")[0]?.trim() || "Unnamed person", at: notice.createdAt });
+  }
+  return [...people.entries()].map(([id, person]): [string, string] => [id, person.name])
+    .sort((a, b) => a[1].localeCompare(b[1]) || a[0].localeCompare(b[0]));
 }
 
 /** The files shared with the caller, live, while the Shared with me place is open. */

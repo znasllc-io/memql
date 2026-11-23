@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The connection seam and the download, mocked at the MODULE so the real
@@ -360,7 +360,7 @@ describe("where Share is absent", () => {
 });
 
 describe("Shared with me", () => {
-  it("lists what was shared with you and from whom, and never reads your Library for it", async () => {
+  it("lists what was shared with you, with no \"from\" line on the files, and never reads your Library for it", async () => {
     const connection = connect({});
     await renderFiles();
     const browsed = connection.callsNamed("libraryArtifactsBrowse").length;
@@ -369,8 +369,10 @@ describe("Shared with me", () => {
     await click(within(rail()).getByRole("button", { name: "Shared with me" }));
     expect(screen.getByRole("heading", { name: "Shared with me" })).toBeTruthy();
     const budget = await screen.findByRole("button", { name: /Budget 2027\.xlsx/ });
-    expect(budget.textContent).toContain("from Dana Cole");
-    expect(screen.getByRole("button", { name: /Client brief\.pdf/ }).textContent).toContain("from Dana Cole");
+    // Who shared it is a "Shared by" choice now, not a line under each file
+    // (Jesús, Nov 23), so these tiles read like every other file.
+    expect(budget.textContent).not.toContain("from");
+    expect(screen.getByRole("button", { name: /Client brief\.pdf/ }).textContent).not.toContain("from");
     expect(screen.queryByRole("button", { name: /^brief\.pdf/ })).toBeNull();
     expect(connection.callsNamed("librarySharedWithMe")).toHaveLength(1);
     // A change to your own Library is not this place's news: nothing here
@@ -394,7 +396,44 @@ describe("Shared with me", () => {
     await click(within(rail()).getByRole("button", { name: "Shared with me" }));
     await screen.findByText("Nothing has been shared with you.");
     await emit(connection, "v1:library:shareNotice", noticeRow({ id: "n-3", artifactId: "sam-plan", sharerDisplayName: "Sam Lee", title: "Plan.md" }), "NODE_CREATED");
-    expect((await screen.findByRole("button", { name: /Plan\.md/ })).textContent).toContain("from Sam Lee");
+    expect((await screen.findByRole("button", { name: /Plan\.md/ })).textContent).not.toContain("from");
+    // ...and its sharer joins the "Shared by" menu as the file arrives.
+    expect(screen.getByLabelText("Shared by", { selector: "button" })).toBeTruthy();
+  });
+
+  it("narrows to one person with Shared by, under their newest name, never an email", async () => {
+    const mixed = [
+      noticeRow({ id: "n-1", artifactId: "dana-budget", sharerUserId: "u-dana", sharerDisplayName: "dana@example.test", title: "Budget 2027.xlsx", createdAt: "2026-11-18T10:00:00Z" }),
+      noticeRow({ id: "n-2", artifactId: "dana-brief", sharerUserId: "u-dana", sharerDisplayName: "Dana Cole", title: "Client brief.pdf", createdAt: "2026-11-19T10:00:00Z" }),
+      noticeRow({ id: "n-3", artifactId: "sam-plan", sharerUserId: "u-sam", sharerDisplayName: "Sam Lee", title: "Plan.md" }),
+      // An ended share's sharer is not offered.
+      noticeRow({ id: "n-4", artifactId: "old", sharerUserId: "u-gone", sharerDisplayName: "Gone Person", title: "old.pdf", endedAt: "2026-11-20T00:00:00Z" }),
+    ];
+    connect({ sharedWithMe: mixed });
+    await renderFiles();
+    await click(within(rail()).getByRole("button", { name: "Shared with me" }));
+    await screen.findByRole("button", { name: /Plan\.md/ });
+    const sharedBy = () => screen.getByLabelText("Shared by", { selector: "button" });
+    expect(sharedBy().textContent).toContain("Everyone");
+    expect(within(openSelect(sharedBy())).getAllByRole("option").map((o) => o.textContent)).toEqual(["Everyone", "Dana Cole", "Sam Lee"]);
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+
+    chooseOption(sharedBy(), "Sam Lee");
+    await waitFor(() => expect(screen.queryByRole("button", { name: /Budget 2027\.xlsx/ })).toBeNull());
+    expect(screen.getByRole("button", { name: /Plan\.md/ })).toBeTruthy();
+
+    chooseOption(sharedBy(), "Dana Cole");
+    expect(await screen.findByRole("button", { name: /Budget 2027\.xlsx/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Client brief\.pdf/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Plan\.md/ })).toBeNull();
+  });
+
+  it("offers no Shared by menu when nothing has been shared with you", async () => {
+    connect({ sharedWithMe: [] });
+    await renderFiles();
+    await click(within(rail()).getByRole("button", { name: "Shared with me" }));
+    await screen.findByText("Nothing has been shared with you.");
+    expect(screen.queryByLabelText("Shared by", { selector: "button" })).toBeNull();
   });
 
   it("offers exactly Download and Save to my Library, on the Head and on a right-click", async () => {

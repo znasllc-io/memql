@@ -34,7 +34,7 @@ import { Submenu } from "../../kit/Submenu";
 import { InPlaceAsk } from "../../kit/pressHold";
 import { FileFolders } from "./FileFolders";
 import { FilesRail } from "./Rail";
-import { noticeFromRow, outgoingFromRow, overseenSharers, shareFileCall, shareStands, useCanShareFiles, useSharedWithMe, useSharesOverseen, useSharing, useShareTitles, type OutgoingShare, type SharedNotice } from "./useSharing";
+import { noticeFromRow, noticeSharers, outgoingFromRow, overseenSharers, shareFileCall, shareStands, useCanShareFiles, useSharedWithMe, useSharesOverseen, useSharing, useShareTitles, type OutgoingShare, type SharedNotice } from "./useSharing";
 import { roleAdmits } from "../../system/roles";
 import { AutoRefresh } from "../../kit/AutoRefresh";
 import { SharingPlace } from "./SharingPlace";
@@ -657,11 +657,18 @@ export function BrowseSection({
   // rather than their Library.
   const shared = filter.place === "shared";
   const notices = useSharedWithMe(shared);
+  // "Shared by" narrows Shared with me to one person, as it does Sharing; who
+  // shared a file is no longer written under each one (Jesús, Nov 23). A
+  // person whose shares have all ended falls back to Everyone.
+  const [sharedWithMeBy, setSharedWithMeBy] = useState("everyone");
+  const noticeSharerList = shared ? noticeSharers(notices.snapshot.rows) : [];
+  const sharedByPerson = noticeSharerList.some(([id]) => id === sharedWithMeBy) ? sharedWithMeBy : "everyone";
   // The search panel asks Shared with me the same questions, over its notices.
-  const noticeList = useLiveView<Row, SharedNotice>(notices.source, `files:shared:${filter.search}|${filter.type}|${filter.added}|${filter.sort}`, (rows) => {
+  const noticeList = useLiveView<Row, SharedNotice>(notices.source, `files:shared:${sharedByPerson}:${filter.search}|${filter.type}|${filter.added}|${filter.sort}`, (rows) => {
     const now = Date.now();
     const needle = filter.search.trim().toLowerCase();
-    const byId = new Map(rows.map(noticeFromRow).filter((n) => n.id !== "" && n.title.toLowerCase().includes(needle)).map((n) => [n.id, n]));
+    const byId = new Map(rows.map(noticeFromRow).filter((n) => n.id !== "" && n.title.toLowerCase().includes(needle) &&
+      (sharedByPerson === "everyone" || n.sharerUserId === sharedByPerson)).map((n) => [n.id, n]));
     return [...byId.values()].map(noticeTile)
       .filter((tile) => (filter.type === "all" || fileKindOf(tile) === filter.type) && addedWithin(tile.createdAt, filter.added, now))
       .sort(compareRows(filter.sort, (tile) => byId.get(tile.id)?.size))
@@ -892,7 +899,7 @@ export function BrowseSection({
         tree={tree}
         place={filter.place}
         folderId={filter.folderId ?? ""}
-        onPlace={(place) => { onSelect(""); setPicked(""); setShareTarget(null); setSharedBy("me"); patch({ place, folderId: "", search: "" }); }}
+        onPlace={(place) => { onSelect(""); setPicked(""); setShareTarget(null); setSharedBy("me"); setSharedWithMeBy("everyone"); patch({ place, folderId: "", search: "" }); }}
         onFolder={(folderId) => { onSelect(""); setPicked(""); setShareTarget(null); patch({ place: "library", folderId, search: "" }); }}
         onFolderMenu={(x, y, node) => setFolderMenu({ x, y, node })}
       />
@@ -938,6 +945,15 @@ export function BrowseSection({
               <option value="me">Me</option>
               <option value="everyone">Everyone</option>
               {sharers.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+            </Select>
+          </span>
+        ) : null}
+        {shared && noticeSharerList.length > 0 ? (
+          <span className="os-files-sharedby">
+            <span aria-hidden="true">Shared by</span>
+            <Select id="files-shared-with-me-by" label="Shared by" value={sharedByPerson} onChange={setSharedWithMeBy}>
+              <option value="everyone">Everyone</option>
+              {noticeSharerList.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
             </Select>
           </span>
         ) : null}
@@ -1137,7 +1153,7 @@ export function BrowseSection({
             visibleFolders.length === 0 && foldersState !== "seeding" ? <Caption>{emptyText}</Caption> : null
           ) : shared ? (
             <LiveList<SharedNotice>
-              key={`shared|${filter.search}|${filter.type}|${filter.added}|${filter.sort}`}
+              key={`shared|${sharedByPerson}|${filter.search}|${filter.type}|${filter.added}|${filter.sort}`}
               source={noticeList}
               rowId={(n) => n.id}
               // A renewal moves expiresAt: the file is shared with you for longer.
@@ -1147,7 +1163,6 @@ export function BrowseSection({
               renderRow={(notice, tick) => (
                 <FileTile
                   row={noticeTile(notice)}
-                  caption={`from ${notice.sharerDisplayName || "someone"}`}
                   fixed
                   picked={picked === notice.id}
                   dim={false}
