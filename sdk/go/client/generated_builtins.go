@@ -6069,7 +6069,8 @@ type LibraryShareFileArgs struct {
 	// The group to share it with, as libraryShareDirectory names it. Give this or recipientUserId.
 	RecipientGroupId string
 	// How long the share lasts: 1, 7, 10 or 30. Give this or until.
-	Days int
+	Days    int
+	DaysSet bool // set true to send an explicit zero; nonzero values are always sent
 	// When the share ends, as an RFC 3339 instant (the Files app sends the end of the picked day in the sharer's own time zone): after now, and at most 90 days away. Give this or days.
 	Until string
 }
@@ -6099,7 +6100,7 @@ func LibraryShareFileBuild(args LibraryShareFileArgs) string {
 		b.WriteString("recipientGroupId: ")
 		b.WriteString(quoteMemQL(args.RecipientGroupId))
 	}
-	if args.Days != 0 {
+	if args.DaysSet || args.Days != 0 {
 		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
