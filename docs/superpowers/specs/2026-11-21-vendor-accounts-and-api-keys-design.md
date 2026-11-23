@@ -586,14 +586,37 @@ Decided by the owner after landing (2026-11-22):
     them in alone. Somebody withheld from adding keys sees what they saw
     before.
 
+- **The cluster's own work is said, never inferred.** Decision 2 was built on
+  the absence of a person: a blank acting id counted as the cluster's work, so
+  a path that lost its caller, and the anonymous reader, were paid by the
+  cluster's account with no permission asked. Offered "find them first, then
+  refuse", "refuse now" and "keep it", the owner chose the first (2026-11-23).
+  As built:
+  - A call is the cluster's own only when it says so: an id the engine mints
+    for its own actors (`system:`, `cluster:`, a connector), or a call that
+    names nobody under the cluster's own actor or a job wired as the
+    cluster's (`auth.ContextForClusterWork`). A call that names a person is
+    that person's, and one that names nobody under a person's context is
+    that person's too. Anything else is refused the cluster's account, with
+    "the call does not say whom it is for" on its record.
+  - The sweep found these paths naming nobody, and each now says whom it is
+    for: Ask's suggestions answered on a BFF with no agent replica, a
+    transcription opened on the speech node and an agent turn on a direct
+    stream (each takes its stream's caller); the command-safety check and the
+    healer, resolved once at start for nobody (each is a named job, at the
+    resolution and on every call, so the cluster keeps paying for them as it
+    did; whether it should is a separate question still open with the
+    owner); and a request built outside the engine inside a run (the router
+    now reads the run's owner, as the engine seam did).
+  - Left naming nobody, and so refused: the planner's responsibility intake,
+    which nothing subscribes, and the context-free `Router.Resolve*`
+    methods, which nothing in production calls.
+  - A job's name rather than the system actor, because the fleet reads the
+    acting id to choose machines: the system actor's `system:` id would have
+    taken the job off the machines lent to cluster work.
+
 Left open by the independent review, for the owner:
 
-- **What counts as the cluster's own work.** Decision 2 is built on the
-  absence of a person: a blank acting id, or a synthetic one. So a path that
-  loses its caller is paid by the cluster's account, and the only trace is
-  `callerKind: unattributed` on its decision row. A positive definition (a
-  system or synthetic actor, and nothing else) would fail closed, and would
-  refuse every Go call site that stamps no caller until each is stamped.
 - **A route with one vendor selector at every level does not degrade inside
   itself.** The walk skips a level whose list equals one already walked,
   which was sound before a selector read the level. API ships that shape.

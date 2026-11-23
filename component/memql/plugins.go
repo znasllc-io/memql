@@ -126,9 +126,11 @@ type PluginContext struct {
 	// serve the caller, the call returns an error on that picture.
 	//
 	// The getter takes no context, and a provider resolved inside it would be
-	// resolved for nobody, which is the cluster's own work: that is how every
-	// uploader's pictures came to be described on the cluster's account. An
-	// app that wires this field wires a per-call provider (app/plugins.go,
+	// resolved for nobody: that is how every uploader's pictures came to be
+	// described on the cluster's account, back when a call naming nobody
+	// counted as the cluster's own work. Since the owner's decision of
+	// 2026-11-23 such a call is refused that account instead. An app that
+	// wires this field wires a per-call provider (app/plugins.go,
 	// callerVision).
 	//
 	// THE NAME IS THE CONTRACT (epic memql#5127, design D2). It was

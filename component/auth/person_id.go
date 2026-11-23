@@ -49,6 +49,11 @@ func NamesNoPerson(id string) bool {
 // under the cluster's own context acts for that person; and borrowed authority
 // (ContextWithUserActor) is not Synthetic at all -- its UserId is a real
 // person's.
+//
+// It answers who CANNOT be served as a person. Who the cluster's vendor
+// account pays for without asking is the narrower ActsForTheCluster
+// (cluster_work.go): a call this reports as nobody's is not, by that alone,
+// the cluster's own work.
 func ActsForNoPerson(ctx context.Context, id string) bool {
 	if NamesNoPerson(id) {
 		return true

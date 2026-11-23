@@ -372,13 +372,16 @@ func TestALedgerRowWithNoFootprintRendersAnEmptyList(t *testing.T) {
 }
 
 // A CLIENT RESOLVED ONCE AT BOOT WRITES EACH CALL AS ITS OWN. The safety
-// classifier and the work healer resolve their structured client once, with
-// context.Background(), and keep it for the life of the process. Every row
-// they wrote shared that resolution's request id and its caller kind --
-// "unattributed" -- even when the call ran for a person. Each call now gets a
-// request id of its own after the first, and a caller kind the resolution
-// could not know is read from the call's own context. Routing is untouched:
-// neither field decides anything.
+// classifier resolves its structured client once and keeps it for the life of
+// the process, and so would the work healer, were it wired. Every row such a
+// client wrote shared that resolution's request id. Each call now gets a
+// request id of its own after the first.
+//
+// AND THE CLIENT IS THE CLUSTER'S JOB, said at the resolution (owner decision
+// 2026-11-23): it resolves under auth.ContextForClusterWork, so the cluster's
+// account pays for it as the cluster's own work, and every call it makes is
+// recorded as the system's, whoever it screens for. Resolved for nobody, a
+// client like this would be refused the cluster's account.
 func TestAStructuredClientResolvedOnceWritesEachCallAsItsOwn(t *testing.T) {
 	providers := registryOpenToEverybody()
 	providers.RegisterWithParamsForTest("streamClaudeSonnet", "AnthropicStream", "claude-sonnet",
@@ -388,7 +391,10 @@ func TestAStructuredClientResolvedOnceWritesEachCallAsItsOwn(t *testing.T) {
 	ledger := &countingLedger{writes: make(chan string, 4)}
 	r.engine = ledger
 
-	resolved, err := r.ResolveFor(context.Background(), structuredTriageRequest())
+	if _, err := r.ResolveFor(context.Background(), structuredTriageRequest()); err == nil {
+		t.Fatal("a client resolved for nobody was paid by the cluster's account")
+	}
+	resolved, err := r.ResolveFor(auth.ContextForClusterWork(context.Background(), "safety-classifier"), structuredTriageRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -404,10 +410,23 @@ func TestAStructuredClientResolvedOnceWritesEachCallAsItsOwn(t *testing.T) {
 	if first["requestId"] == second["requestId"] {
 		t.Errorf("two calls on one boot-resolved client share request id %v", first["requestId"])
 	}
-	if first["callerKind"] != auth.CallerKindUser {
-		t.Errorf("a person's call on a boot-resolved client recorded callerKind %v, want %q", first["callerKind"], auth.CallerKindUser)
+	for name, row := range map[string]map[string]any{"a person's command": first, "an automation's": second} {
+		if row["callerKind"] != auth.CallerKindSystem {
+			t.Errorf("the job's call for %s recorded callerKind %v, want %q", name, row["callerKind"], auth.CallerKindSystem)
+		}
 	}
-	if second["callerKind"] != auth.CallerKindSystem {
-		t.Errorf("an automation's call on a boot-resolved client recorded callerKind %v, want %q", second["callerKind"], auth.CallerKindSystem)
+}
+
+// A caller kind the resolution could not know is read from each call's own
+// context: a client resolved where nobody stamped anything records what each
+// call says. One the resolution did know -- a job of the cluster's -- is kept.
+func TestEachCallOnAResolvedClientSaysWhoItWasFor(t *testing.T) {
+	alice := auth.ContextWithUserActor(context.Background(), "alice")
+	var p perCall
+	if got := p.request(alice, ResolveRequest{CallerKind: auth.CallerKindUnattributed}).CallerKind; got != auth.CallerKindUser {
+		t.Errorf("an unattributed resolution called for a person recorded %q, want %q", got, auth.CallerKindUser)
+	}
+	if got := p.request(alice, ResolveRequest{CallerKind: auth.CallerKindSystem}).CallerKind; got != auth.CallerKindSystem {
+		t.Errorf("the cluster's job called for a person recorded %q, want %q", got, auth.CallerKindSystem)
 	}
 }

@@ -159,7 +159,8 @@ this order:
 
 | The call | Accounts, in order |
 |---|---|
-| Has no person behind it (a schedule, a sweep, a seed, a synthetic identity) | the cluster's account only |
+| Is the cluster's own work, and says so (a schedule, a sweep, a seed, an automation, a connector, the operator's stream, or a job the cluster runs for everyone, such as the command-safety check) | the cluster's account only |
+| Says neither whom it is for nor that it is the cluster's (code that lost track of who started it, or an anonymous visitor) | none: the call is refused, and the record says it names nobody |
 | Runs under a person's authority borrowed for a **visitor** (a shopper form, an access-code call, a deployed workflow acting for somebody who is not a user) | the cluster's account, when the person whose authority is borrowed may use it. Never a key |
 | Was made on a route the person **chose** (a route picked in Ask, a route of their own, a policy named as a route), or on a source they pinned themselves | their default key at the vendor, then keys lent to them (the key added earliest first), then the cluster's account **when they may use it** |
 | Anything else: **Auto**, and every call nobody chose a route for | the same order, counting only keys whose owner turned on **Let Auto use this key** |
@@ -186,7 +187,7 @@ when:
 - the key's owner is no longer an active user of the cluster;
 - lending is paused, for that person or for everyone;
 - for the cluster's account: the cluster has not signed in with that vendor,
-  or the account does not pay for this person's calls.
+  the account does not pay for this person's calls, or the call names nobody.
 
 A reason never names a key. The decision record is readable by every signed-in
 person, so it says "an API key was refused by Anthropic" and carries the key's
@@ -227,8 +228,17 @@ Model access on a cluster is bring-your-own: a machine, an app, a key. The
 cluster's own account at a vendor is the one exception its owner can make, and
 it is deliberately narrow. It pays for:
 
-- **the cluster's own work**: every call no person is behind;
+- **the cluster's own work**, when the call says it is the cluster's: an
+  automation, a sweep, a seed, a connector, the operator's stream, or one of
+  the cluster's jobs, such as the command-safety check;
 - **a person's calls, only when that person may use it.**
+
+**A call that names nobody is refused.** A call has to say whom it is for, or
+that it is the cluster's own work. One that says neither (code that lost track
+of who started it, or an anonymous visitor) is not paid by the cluster's
+account, and its decision record says the call does not say whom it is for. A
+call made inside a person's run is that person's, even where the run's step
+carries no session of theirs: the run names its owner.
 
 | Capability | Lets a person |
 |---|---|
@@ -263,8 +273,6 @@ the cluster's account does not pay for this person's calls.
   the direct OpenAI transcription paths sends everybody's live transcription
   to OpenAI on the cluster's account. That variable is the operator's own
   choice of who pays; leave it unset to have transcription follow this rule.
-  And a call that reaches the router naming no person at all counts as the
-  cluster's own work; its decision row reads `callerKind: unattributed`.
 
 A cluster with no vendor account connected is unaffected: nothing is asked.
 

@@ -456,7 +456,7 @@ func TestTheStrongestVendorIsTheHighestRankAtTheCallsLevel(t *testing.T) {
 		airoute.LevelStrong:    {"astra", "opus", "sonnet"},
 		airoute.LevelFast:      {"sonnet", "haiku"},
 	} {
-		_, resolved, err := r.ResolveChat(ResolveRequest{Level: level})
+		_, resolved, err := r.resolveChat(clusterJob(), ResolveRequest{Level: level})
 		if err != nil {
 			t.Fatalf("%s: %v", level, err)
 		}
@@ -473,7 +473,7 @@ func TestTheCheapestVendorIsThePriceOrderAtTheCallsLevel(t *testing.T) {
 		airoute.LevelStrong:    {"sonnet", "opus", "astra"},
 		airoute.LevelFast:      {"haiku", "sonnet"},
 	} {
-		_, resolved, err := r.ResolveChat(ResolveRequest{Level: level})
+		_, resolved, err := r.resolveChat(clusterJob(), ResolveRequest{Level: level})
 		if err != nil {
 			t.Fatalf("%s: %v", level, err)
 		}
@@ -490,7 +490,7 @@ func TestTheCheapestVendorIsThePriceOrderAtTheCallsLevel(t *testing.T) {
 // that say what happened.
 func TestTheDecisionNamesARecordWithNoLevelAndNotTheOnesForOtherLevels(t *testing.T) {
 	r := jobRouter(t, "federation:strongest", jobCatalog...)
-	_, resolved, err := r.ResolveChat(ResolveRequest{Level: airoute.LevelReasoning})
+	_, resolved, err := r.resolveChat(clusterJob(), ResolveRequest{Level: airoute.LevelReasoning})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -518,7 +518,7 @@ func TestTheDecisionNamesARecordWithNoLevelAndNotTheOnesForOtherLevels(t *testin
 // source) is readable from the record of the call.
 func TestASelectorWithNoRecordAtTheLevelSaysSo(t *testing.T) {
 	r := jobRouter(t, "federation:strongest", jobRecordSpec{"haiku", "Anthropic", "fast", 300, 0.1, 0.5})
-	_, _, err := r.ResolveChat(ResolveRequest{Level: airoute.LevelReasoning})
+	_, _, err := r.resolveChat(clusterJob(), ResolveRequest{Level: airoute.LevelReasoning})
 	var refusal *InferenceUnavailable
 	if !errors.As(err, &refusal) {
 		t.Fatalf("err = %v, want a refusal", err)
@@ -537,7 +537,7 @@ func TestASelectorWithNoRecordAtTheLevelSaysSo(t *testing.T) {
 // A record that declares no level still resolves by its own name.
 func TestARecordWithNoLevelStillServesByName(t *testing.T) {
 	r := jobRouter(t, "federation:legacy", jobCatalog...)
-	_, resolved, err := r.ResolveChat(ResolveRequest{Level: airoute.LevelReasoning})
+	_, resolved, err := r.resolveChat(clusterJob(), ResolveRequest{Level: airoute.LevelReasoning})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -628,7 +628,7 @@ func TestAVendorSelectorChoosesForTheLevelARuleRaisedTheCallTo(t *testing.T) {
 			}
 			r := New(providers, policies, testRules(t, raise, defaultRule("p")), nil, nil)
 
-			_, resolved, err := r.ResolveChat(ResolveRequest{Level: airoute.LevelStrong, PromptName: "agentReply"})
+			_, resolved, err := r.resolveChat(clusterJob(), ResolveRequest{Level: airoute.LevelStrong, PromptName: "agentReply"})
 			if err != nil {
 				t.Fatalf("ResolveChat: %v", err)
 			}
@@ -640,7 +640,7 @@ func TestAVendorSelectorChoosesForTheLevelARuleRaisedTheCallTo(t *testing.T) {
 				t.Fatalf("served by %q, want %q: the decision says reasoning and the record must serve it", resolved.ProviderName, want)
 			}
 			// A call the rule does not match is still served at its own level.
-			_, plain, err := r.ResolveChat(ResolveRequest{Level: airoute.LevelStrong})
+			_, plain, err := r.resolveChat(clusterJob(), ResolveRequest{Level: airoute.LevelStrong})
 			if err != nil || plain.ProviderName != "sonnet" {
 				t.Fatalf("an unmatched strong call got %q, %v; want sonnet", plain.ProviderName, err)
 			}

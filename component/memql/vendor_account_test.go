@@ -558,8 +558,11 @@ func TestVendorAccountsForNoPersonIsClusterOnly(t *testing.T) {
 		ctx    context.Context
 		userId string
 	}{
-		"no acting person":      {context.Background(), ""},
-		"an automation":         {context.Background(), "system:automation:nightly"},
+		// A call that names nobody at all is not here: it is the cluster's
+		// work only when it says so (owner decision 2026-11-23,
+		// vendor_account_cluster_test.go), and it never asks for keys either.
+		"a job of the cluster's": {auth.ContextForClusterWork(context.Background(), "safety-classifier"), ""},
+		"an automation":          {context.Background(), "system:automation:nightly"},
 		"the cluster's actor":   {auth.ContextWithSystemActor(context.Background(), "sweep"), ""},
 		"the operator's stream": {context.Background(), "cluster:operator"},
 	} {
@@ -654,11 +657,15 @@ func TestVendorAccountUsableResolvesNothingForAStranger(t *testing.T) {
 	if _, ok := reg.VendorAccountUsable(context.Background(), VendorAccountQuery{}, entry, "key:k1"); ok {
 		t.Error("a key resolved for a call with no acting person")
 	}
-	if a, ok := reg.VendorAccountUsable(context.Background(), VendorAccountQuery{}, entry, "cluster"); !ok || a.Kind != VendorAccountCluster {
-		t.Error("the cluster's account did not resolve on a cluster that has one")
+	own := auth.ContextWithSystemActor(context.Background(), "sweep")
+	if a, ok := reg.VendorAccountUsable(own, VendorAccountQuery{}, entry, "cluster"); !ok || a.Kind != VendorAccountCluster {
+		t.Error("the cluster's account did not resolve for the cluster's own work on a cluster that has one")
 	}
-	if _, ok := reg.VendorAccountUsable(context.Background(), VendorAccountQuery{}, vendorEntry(VendorOpenAI, false, ""), "cluster"); ok {
+	if _, ok := reg.VendorAccountUsable(own, VendorAccountQuery{}, vendorEntry(VendorOpenAI, false, ""), "cluster"); ok {
 		t.Error("the cluster's account resolved on a cluster that has none")
+	}
+	if _, ok := reg.VendorAccountUsable(context.Background(), VendorAccountQuery{}, entry, "cluster"); ok {
+		t.Error("the cluster's account resolved for a call that names nobody")
 	}
 }
 

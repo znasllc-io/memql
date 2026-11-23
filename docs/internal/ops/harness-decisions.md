@@ -2248,15 +2248,65 @@ every person's uploads. It is now resolved per call, with the uploader's
 context.
 
 Invariant: no call the router resolves FOR A PERSON is paid by the cluster's
-vendor account unless its owner said so, embeddings aside. Known limits. An
+vendor account unless its owner said so, embeddings aside. Known limit: an
 operator who sets `MEMQL_STT_PROVIDER` to a direct OpenAI transcription path
 dials OpenAI with the cluster's bearer outside the router, for every caller;
-that variable is the operator's own choice and is not gated. And the
-cluster's own work is defined by the ABSENCE of a person (a blank acting id,
-or a synthetic one), so a path that loses its caller is paid by the cluster's
-account; its decision row reads `callerKind: unattributed`, which is how such
-a path is found. Refusing an unattributed call instead would stop every Go
-call site that stamps no caller, and how many there are was not measured.
+that variable is the operator's own choice and is not gated.
+
+**A call that names nobody is not the cluster's work (owner decision,
+2026-11-23).** The rule above defined the cluster's own work by the ABSENCE of
+a person, so a path that lost its caller, and the anonymous reader, were paid
+by the cluster's account with no permission asked; the only trace was
+`callerKind: unattributed`. Offered "find them first, then refuse", "refuse
+now" or "keep it", the owner chose the first. Trigger: the cluster's account
+is about to pay for a call (`ClusterAccountClosedTo`). Evidence: the call's
+acting id and its context. Path, in order (`auth.ActsForTheCluster`,
+`component/auth/cluster_work.go`): an id the engine mints for its own actors
+(`system:`, `cluster:`, a connector) is the cluster's; a call that names
+nobody is the cluster's when its context carries the cluster's own actor or a
+job wired as the cluster's (`auth.ContextForClusterWork`); a call that names
+nobody under a person's context is that person's, judged by the gate; anything
+else is refused with `ClusterAccountUnnamedReason`, and the gate is not asked.
+A call that names a person is that person's whatever its context carries.
+Alternatives not taken: refusing before the sweep (would have stopped the
+paths below unannounced), and keeping the absence rule (the owner's
+bring-your-own rule leaked through every lost caller). Why a JOB and not the
+system actor for wired work: `ContextWithSystemActor` puts a `system:` id on
+the call, and the fleet reads the acting id to choose machines (blank reaches
+the machines lent to cluster work, a named id only its own), so the job would
+have lost the shared machines it reaches today; the job's name claims the work
+and leaves the id blank, and it records `callerKind: system`.
+
+The sweep, before the flip, traced every production path to a model (the
+engine's prompt entry points, the router's direct callers, the stream
+handlers, the boot-wired layers). Fixed: Ask's suggestions answered on a BFF
+with no agent replica, a transcription opened on the node holding the speech
+provider and an agent turn on a direct stream read the stream's context, which
+carries claims and no access context, so they named nobody; they now take the
+caller (`callerContext`, `component/grpc/ai_handlers.go`). The safety check
+resolved its model at start for nobody and kept it, and was judged at each
+call by the caller it screened; it and the healer now resolve and call as
+named jobs (`resolveForClusterJob`, `app/ai_call_sites.go`). A request built
+outside the engine inside a run (the agent replier's) is the run owner's: the
+router reads `RunContext.OwnerUserId` when no access context names anybody,
+as the engine seam already did (`component/router/resolve_for.go`). Left as
+they are: the planner's responsibility intake, which nothing subscribes, and
+the context-free `Router.Resolve*` methods, which nothing in production calls;
+both name nobody and would be refused. Fallback: a path the sweep missed fails
+with the reason on its decision row instead of spending quietly. Invariant:
+the cluster's account pays unasked only for work that says it is the
+cluster's. Tests: `TestActsForTheClusterOnlyWhenTheCallSaysSo`
+(`component/auth`), `TestACallThatNamesNobodyIsNotPaidByTheClustersAccount`
+and `TestACallThatNamesNobodyIsJudgedByThePersonItsContextCarries`
+(`component/memql`), `TestResolveForReadsTheRunsOwnerWhenNoActorIsOnTheContext`
+and `TestAStructuredClientResolvedOnceWritesEachCallAsItsOwn`
+(`component/router`), `TestAClusterJobResolvesAndCallsAsTheJob` (`app`),
+`caller_context_test.go` (`component/grpc`). Known limits: read in the code
+and not tested, an anonymous stream may send `ExecuteQuery`, and a builtin
+that declares no capability (the `ai` builtin among them) checks no actor, so
+an anonymous caller may reach a model call; the cluster's account no longer
+pays for it, and whether it should be reachable at all is not settled here.
+Not run against a real vendor.
 A vendor passed over at the call for this reason leaves no line of its own:
 the person sees the error of the source that failed in front of it. Not
 verified against a real vendor. Tests: `vendor_account_cluster_test.go`,

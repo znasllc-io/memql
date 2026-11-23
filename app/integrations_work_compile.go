@@ -9,7 +9,6 @@ import (
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/healing"
 	"github.com/znasllc-io/memql/component/memql"
-	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/integrations/planner"
 	workintegration "github.com/znasllc-io/memql/integrations/work"
 )
@@ -154,8 +153,12 @@ func (a *App) wireWorkHealer(pi *planner.PlannerIntegration, work *workintegrati
 	// It named `DefaultProviderName()`, which is the registry's default
 	// dressed as a choice, and that default is exactly what the rules decide
 	// now. So the request names no provider at all.
-	provider, _, err := memql.ResolveAITyped[common.ChatStructuredProvider](
-		context.Background(), a.engine, healingPatchResolveRequest())
+	//
+	// Repair is the cluster's own job, said at the resolution and on every
+	// call (resolveForClusterJob): resolved for nobody it would be refused the
+	// cluster's vendor account (owner decision 2026-11-23), and wiring this
+	// later would then find the layer off with no word of why.
+	provider, err := resolveForClusterJob(workHealerJob, healingPatchResolveRequest(), a.routerStructured)
 	if err != nil {
 		a.Logger.Warn("work healer not subscribed: no structured-output model is reachable on this node, so a precondition miss will be recorded and not proposed against",
 			"component", "work",

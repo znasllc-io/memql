@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -85,7 +86,9 @@ func TestLedgerRowNamesTheKindOfCallerEvenWithNoPerson(t *testing.T) {
 			&auth.AccessContext{UserId: "alice", Role: auth.RoleWriter}), "alice", auth.CallerKindUser},
 		{"the cluster's own sweep", auth.ContextWithAccess(context.Background(),
 			auth.MaintenanceActor(auth.AutomationOriginEngine, "auditEventRetentionSweep")), "", auth.CallerKindSystem},
-		{"nobody stamped anything", context.Background(), "", auth.CallerKindUnattributed},
+		// A job wired as the cluster's own carries no actor and is still the
+		// system's call, not nobody's (owner decision 2026-11-23).
+		{"a job wired as the cluster's own", auth.ContextForClusterWork(context.Background(), "safety-classifier"), "", auth.CallerKindSystem},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r, _ := levelRouter(t, airoute.LevelStrong, nil)
@@ -106,8 +109,8 @@ func TestLedgerRowNamesTheKindOfCallerEvenWithNoPerson(t *testing.T) {
 			if args["callerKind"] == "" {
 				t.Error("a blank caller kind is the one answer the field must never carry")
 			}
-			// The sweep and the unstamped call carry no user, which is now an
-			// answer rather than a gap.
+			// The sweep and the job carry no user, which is now an answer
+			// rather than a gap.
 			if tc.user == "" && args["userId"] != "" && args["userId"] != auth.AnonymousUserId {
 				if !strings.HasPrefix(fmt.Sprint(args["userId"]), "system:") {
 					t.Errorf("userId=%v, want none for %s", args["userId"], tc.name)
@@ -115,6 +118,20 @@ func TestLedgerRowNamesTheKindOfCallerEvenWithNoPerson(t *testing.T) {
 			}
 		})
 	}
+
+	// A CALL NOBODY STAMPED never reaches the vendor (owner decision
+	// 2026-11-23): it says neither whom it is for nor that it is the
+	// cluster's, so the cluster's account does not pay for it, and the
+	// refusal says the call is at fault.
+	t.Run("nobody stamped anything", func(t *testing.T) {
+		r, _ := levelRouter(t, airoute.LevelStrong, nil)
+		r.engine = &countingLedger{writes: make(chan string, 4)}
+		_, err := r.ResolveFor(context.Background(), ResolveRequest{Level: airoute.LevelStrong, Modality: airoute.ModalityChat})
+		var refusal *InferenceUnavailable
+		if !errors.As(err, &refusal) || !refusalSays(refusal, memql.ClusterAccountUnnamedReason) {
+			t.Fatalf("err = %v, want a refusal saying the call names nobody", err)
+		}
+	})
 }
 
 // An unrecognised caller kind is normalized rather than stored: the concept

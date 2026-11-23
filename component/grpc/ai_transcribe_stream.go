@@ -130,8 +130,11 @@ func (s *streamSession) handleAiTranscribeStreamStart(
 
 	// Use a long-lived context so the STT provider's goroutines outlive
 	// any per-envelope dispatch. The cancel is stored on transcribeStream
-	// and fires on End or on cleanupTranscribeStreams.
-	sessCtx, cancel := context.WithTimeout(context.WithoutCancel(s.stream.Context()), 10*time.Minute)
+	// and fires on End or on cleanupTranscribeStreams. It carries the caller
+	// (callerContext): the session's model call is the person's, never one
+	// naming nobody.
+	callerCtx, _ := s.callerContext()
+	sessCtx, cancel := context.WithTimeout(context.WithoutCancel(callerCtx), 10*time.Minute)
 
 	// Outbound sink for this stream's Delta/Complete messages. On a mesh worker
 	// the durable substrate is the delivery path (memql#1266): translate each

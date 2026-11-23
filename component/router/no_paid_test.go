@@ -54,10 +54,13 @@ func TestNoPaidCeilingCoversEmbeddingAndCallTimeFallback(t *testing.T) {
 	}
 	// Fallback/consent uses providerLookup after selection and must enforce
 	// the same ceiling even when a registered vendor is otherwise available.
-	if _, _, ok := r.providerLookup(context.Background(), ResolveRequest{NoPaidProviders: true}, "paidChat", modalityChat); ok {
+	// Both under a job of the cluster's, so the account would pay and only the
+	// ceiling can refuse: a bare context names nobody and is refused the
+	// cluster's account whatever the ceiling says.
+	if _, _, ok := r.providerLookup(clusterJob(), ResolveRequest{NoPaidProviders: true}, "paidChat", modalityChat); ok {
 		t.Fatal("call-time fallback escaped the ceiling")
 	}
-	if _, _, ok := r.providerLookup(context.Background(), ResolveRequest{}, "paidChat", modalityChat); !ok {
+	if _, _, ok := r.providerLookup(clusterJob(), ResolveRequest{}, "paidChat", modalityChat); !ok {
 		t.Fatal("invalid chat control")
 	}
 	if cloud.calls != 0 {

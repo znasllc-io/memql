@@ -70,9 +70,19 @@ func CallerKinds() []string {
 // It never returns "". An unstamped or nil context is CallerKindUnattributed,
 // which is the fail-honest direction: a missing answer reads as missing rather
 // than as the cluster having acted.
+//
+// A context with no access context but a JOB of the cluster's
+// (ContextForClusterWork) is CallerKindSystem: the job is a stamp a Go caller
+// wired on purpose, which is the claim the comment above asks for, and the
+// cluster's vendor account pays for it as the cluster's own work
+// (ActsForTheCluster). An access context still answers first, so a job run for
+// a person records the person.
 func CallerKindFromContext(ctx context.Context) string {
 	access, ok := AccessFromContext(ctx)
 	if !ok || access == nil {
+		if _, job := ClusterWorkFromContext(ctx); job {
+			return CallerKindSystem
+		}
 		return CallerKindUnattributed
 	}
 	switch {

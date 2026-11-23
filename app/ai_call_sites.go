@@ -28,11 +28,17 @@ package app
 // absent from it. The vision getter is the opposite: it is a CALLBACK,
 // resolved per call, because a file uploaded an hour after boot must see the
 // fleet as it is then.
+//
+// Both boot-resolved layers are the CLUSTER'S OWN JOBS, and say so at the
+// resolution and on every call (resolveForClusterJob, below): a call that
+// names nobody is refused the cluster's vendor account since the owner's
+// decision of 2026-11-23.
 
 import (
 	"context"
 	"fmt"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/airoute"
 	"github.com/znasllc-io/memql/core/common"
@@ -117,6 +123,75 @@ func healingPatchResolveRequest() airoute.ResolveRequest {
 		Modality: airoute.ModalityStructured,
 		Needs:    airoute.Needs{Structured: true},
 	}
+}
+
+// The cluster's own jobs among these call sites, by the name each claims its
+// work under (auth.ContextForClusterWork).
+const (
+	safetyClassifierJob = "safety-classifier"
+	workHealerJob       = "work-healer"
+)
+
+// resolveForClusterJob resolves a structured client for one of the cluster's
+// OWN JOBS, and hands back a client every call of which is that job's.
+//
+// WHY BOTH HALVES SAY IT (owner decision 2026-11-23). The cluster's vendor
+// account pays for the cluster's own work without asking anybody, and only a
+// call that SAYS it is the cluster's counts as such: a call that names nobody
+// is refused the account (component/memql vendor_account_cluster.go). The
+// safety check and the healer resolve their model once, when the node starts,
+// with no caller, and serve every later caller:
+//
+//   - THE RESOLUTION is made under the job's name, or it would name nobody and
+//     a vendor model would be passed over at start, leaving the layer off on a
+//     cluster whose only model is its vendor account.
+//   - EVERY CALL carries the job's name too. The router judges the account
+//     again when a call is made, from that call's context
+//     (component/router accounts.go, accountAtCall), and the context is the
+//     caller's: the person whose command the safety check screens. Judged as
+//     theirs, the check would be paid by them, or refused for them; it is the
+//     cluster's work, which the owner's rule pays for as such.
+//
+// The job's name, not the system actor: ContextWithSystemActor would put a
+// `system:` id on the call, and the fleet reads an acting id to choose
+// machines -- a blank one reaches the machines owners lent to cluster work, a
+// named one only that name's own -- so the job would lose the shared machines
+// it reaches today. The name claims the work and leaves the id blank.
+//
+// resolve is the router seam (memql.ResolveAITyped in production); a test
+// hands its own. A resolution error comes back as it is, and the layer the
+// caller builds stays off, as it always did.
+//
+// Regression tests: cluster_jobs_test.go.
+func resolveForClusterJob(
+	job string,
+	req airoute.ResolveRequest,
+	resolve func(context.Context, airoute.ResolveRequest) (common.ChatStructuredProvider, error),
+) (common.ChatStructuredProvider, error) {
+	provider, err := resolve(auth.ContextForClusterWork(context.Background(), job), req)
+	if err != nil {
+		return nil, err
+	}
+	return clusterJobStructured{inner: provider, job: job}, nil
+}
+
+// clusterJobStructured is a structured client every call of which is one of
+// the cluster's own jobs. The call's context is otherwise left as its caller
+// made it: the caller's deadline, cancellation and identity ride along, and
+// the identity still decides what the call records about who asked.
+type clusterJobStructured struct {
+	inner common.ChatStructuredProvider
+	job   string
+}
+
+func (c clusterJobStructured) CallChatStructured(ctx context.Context, messages []common.ChatMessage, schema common.StructuredSchema) (string, error) {
+	return c.inner.CallChatStructured(auth.ContextForClusterWork(ctx, c.job), messages, schema)
+}
+
+// routerStructured is resolveForClusterJob's production seam.
+func (a *App) routerStructured(ctx context.Context, req airoute.ResolveRequest) (common.ChatStructuredProvider, error) {
+	provider, _, err := memql.ResolveAITyped[common.ChatStructuredProvider](ctx, a.engine, req)
+	return provider, err
 }
 
 // callerVision is a vision provider that is RESOLVED WHEN IT IS CALLED, for
