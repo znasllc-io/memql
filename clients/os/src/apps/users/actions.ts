@@ -173,6 +173,11 @@ export interface RoleDraft {
   accountId: string;
 }
 
+/** The busyKey of adding or removing one person from one group. Keyed on
+ *  both, so a person's page marks only the group row being changed, and a
+ *  group's page only the person -- not every row sharing the person's id. */
+export const membershipKey = (groupId: string, userId: string) => `membership:${groupId}:${userId}`;
+
 export function useUsersActions(): UsersActions {
   const connection = useOsConnection();
   const [busyKey, setBusyKey] = useState("");
@@ -354,7 +359,7 @@ export function useUsersActions(): UsersActions {
 
   const groupMemberAdd = useCallback(
     async (groupId: string, userId: string) =>
-      (await runQuery(userId, (q) =>
+      (await runQuery(membershipKey(groupId, userId), (q) =>
         q.groupMemberAdd({ groupId, userId }),
       )) !== null,
     [runQuery],
@@ -362,7 +367,7 @@ export function useUsersActions(): UsersActions {
 
   const groupMemberRemove = useCallback(
     async (groupId: string, userId: string) =>
-      (await runQuery(userId, (q) =>
+      (await runQuery(membershipKey(groupId, userId), (q) =>
         q.groupMemberRemove({ groupId, userId }),
       )) !== null,
     [runQuery],

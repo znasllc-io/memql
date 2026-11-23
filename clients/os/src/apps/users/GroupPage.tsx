@@ -25,7 +25,7 @@ import { ActionBar, type Act } from "../../kit/ActionBar";
 import { useLiveView } from "../../live/liveView";
 import { AccountChip } from "../accounts/AccountPicker";
 import { accountIsArchived, accountName, type AccountRow } from "../accounts/rows";
-import type { UsersActions } from "./actions";
+import { membershipKey, type UsersActions } from "./actions";
 import { PeoplePicker } from "./pickers";
 import { RefusalLine } from "./PersonPage";
 import {
@@ -174,7 +174,7 @@ export function GroupPage({
               exclude={memberIds}
               onPick={(userId) => void actions.groupMemberAdd(group.id, userId)}
               label={`Somebody to add to ${group.name}`}
-              busyId={actions.busyKey}
+              busyId={people.find((p) => actions.busyKey === membershipKey(group.id, p.id))?.id}
             />
             <RefusalLine actions={actions} />
           </Panel>
@@ -220,7 +220,7 @@ export function GroupPage({
                     archived || !canUpdate ? null : (
                       <Button
                         onClick={() => void actions.groupMemberRemove(group.id, membership.userId)}
-                        busy={actions.busyKey === membership.userId}
+                        busy={actions.busyKey === membershipKey(group.id, membership.userId)}
                         busyLabel="Removing..."
                         ariaLabel={`Remove ${person ? personName(person) : "this person"} from ${group.name}`}
                       >

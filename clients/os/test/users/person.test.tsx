@@ -338,6 +338,28 @@ describe("the groups panel", () => {
     });
   });
 
+  it("marks only the group being removed as Removing...", async () => {
+    // The busy state was keyed on the person, so removing Ada from one group
+    // (or any other write about her) drew "Removing..." on every group row.
+    const connection = seed({
+      groupsAll: [
+        groupRow({ id: "g-acme", name: "Acme", kind: "account", accountId: "acct-acme" }),
+        groupRow({ id: "g-beta", name: "Beta" }),
+      ],
+      groupsForUser: {
+        "v1:identity:user:ada": [
+          membershipRow({ id: "m1", groupId: "g-acme", userId: "v1:identity:user:ada" }),
+          membershipRow({ id: "m2", groupId: "g-beta", userId: "v1:identity:user:ada" }),
+        ],
+      },
+    });
+    connection.query.groupMemberRemove.mockImplementation(() => new Promise(() => {}));
+    await openAda(connection);
+    await click(await screen.findByRole("button", { name: "Remove from Acme" }));
+    expect(screen.getByRole("button", { name: "Remove from Acme" }).textContent).toBe("Removing...");
+    expect(screen.getByRole("button", { name: "Remove from Beta" }).textContent).toBe("Remove");
+  });
+
   it("says the standing rule instead of rows for staff", async () => {
     // The standing staff are a RULE, not rows (epic memql#5165, D6): no query
     // returns those memberships, so a list here would be empty or invented.
