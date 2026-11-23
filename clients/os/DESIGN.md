@@ -525,7 +525,8 @@ the selected batch in one write, retain it on failure, and exclude entries that
 already have access. Options toggle checkmarks and never save on click.
 Use `kit/AnchoredPicker` to join the popup to the text field, escape scroll and
 transform clipping, follow the field as its window moves, and flip above when
-space below is tight. Keep keyboard position distinct from checked state.
+space below is tight. The list is never narrower than 240px (within the
+screen), so a field squeezed by a half-desk window still shows whole names. Keep keyboard position distinct from checked state.
 
 ## Record lists
 

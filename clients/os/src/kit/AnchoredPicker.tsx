@@ -2,6 +2,9 @@ import { osScale } from "../system/scale";
 import { useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 
+/** The narrowest the list draws, in CSS pixels, however narrow its field. */
+const MIN_LIST_WIDTH = 240;
+
 /** A joined search popup that escapes window scrolling and transformed desks. */
 export function AnchoredPicker({ anchor, owner, popupRef, onClose, children }: {
   anchor: RefObject<HTMLInputElement | null>;
@@ -44,9 +47,11 @@ export function AnchoredPicker({ anchor, owner, popupRef, onClose, children }: {
         lastRect = signature;
         const below = Math.max(0, topEdge + height - rect.bottom - 8), above = Math.max(0, rect.top - topEdge - 8);
         const up = below < 280 && above > below;
-        const popupWidth = Math.min(rect.width, Math.max(0, width - 16));
         // Measured in screen pixels; drawn in the zoomed page's CSS pixels.
         const s = osScale();
+        // At least MIN_LIST_WIDTH, so a field squeezed by a half-desk window
+        // does not wrap every name to a letter per line; never past the viewport.
+        const popupWidth = Math.min(Math.max(rect.width, MIN_LIST_WIDTH * s), Math.max(0, width - 16));
         popup.style.left = `${Math.max(leftEdge + 8, Math.min(rect.left, leftEdge + width - popupWidth - 8)) / s}px`;
         popup.style.width = `${popupWidth / s}px`;
         popup.style.maxHeight = `${Math.min(320 * s, up ? above : below) / s}px`;
