@@ -268,6 +268,23 @@ func TestAddSavesAUseOnlyKey(t *testing.T) {
 	require.Equal(t, "good", d.state(card["id"].(string))["state"])
 }
 
+// addThroughTheGate adds a key the way a client does: the builtin, called
+// through the engine, so the dispatch asks for the part before the handler
+// runs. registerForDispatch has to have been called.
+func (d *desk) addThroughTheGate(ctx context.Context) error {
+	d.t.Helper()
+	call, err := langparser.RenderCall("vendorKeyAdd", map[string]any{"vendor": "anthropic", "label": "Personal", "key": deskAnthropicKey})
+	require.NoError(d.t, err)
+	res, err := d.eng.Execute(ctx, "builtin "+call)
+	if err != nil {
+		return err
+	}
+	rows := memql.MaterializeRows(res)
+	require.Len(d.t, rows, 1)
+	d.keys = append(d.keys, memql.BareShortId(fmt.Sprint(rows[0]["id"])))
+	return nil
+}
+
 // K4 as the owner settled it on 2026-11-22: API keys are bring-your-own for
 // everybody. Every predefined role holds the part, so any signed-in person
 // adds a key of their own. It is still a part: a role that holds nothing is
@@ -276,18 +293,7 @@ func TestAddSavesAUseOnlyKey(t *testing.T) {
 func TestEveryRoleAddsAKeyAndADenyStopsOnePerson(t *testing.T) {
 	d := newDesk(t, "everyone")
 	registerForDispatch(t, d)
-	add := func(ctx context.Context) error {
-		call, err := langparser.RenderCall("vendorKeyAdd", map[string]any{"vendor": "anthropic", "label": "Personal", "key": deskAnthropicKey})
-		require.NoError(t, err)
-		res, err := d.eng.Execute(ctx, "builtin "+call)
-		if err != nil {
-			return err
-		}
-		rows := memql.MaterializeRows(res)
-		require.Len(t, rows, 1)
-		d.keys = append(d.keys, memql.BareShortId(fmt.Sprint(rows[0]["id"])))
-		return nil
-	}
+	add := d.addThroughTheGate
 
 	for _, role := range []auth.Role{auth.RoleOwner, auth.RoleDeveloper, auth.RoleAdmin, auth.RoleWriter, auth.RoleReader} {
 		person := d.member("any"+string(role), role)
@@ -315,6 +321,78 @@ func TestEveryRoleAddsAKeyAndADenyStopsOnePerson(t *testing.T) {
 	require.Error(t, err, "a person denied the part added a key")
 	require.Contains(t, err.Error(), "app:settings/apikeys")
 	require.NoError(t, add(session(will, auth.RoleWriter)), "one person's deny stopped somebody else")
+}
+
+// THE OWNER'S DECISION, 2026-11-22: a person whose role is scoped to one
+// organization adds a key of their own as well. Such a role was barred from
+// every part of Settings but Access, whatever its rows or a grant said,
+// because every other part was cluster configuration. A person's own API key
+// is not.
+//
+// Through the real rows and the real gate: a custom role written with an
+// account and the part, a role catalog loaded from those rows the way a node
+// loads it at start, and the dispatch that asks before an add runs. The same
+// role is also written with the cluster's vendor account, which stays barred.
+func TestAPersonWithAnOrganizationRoleAddsAKeyOfTheirOwn(t *testing.T) {
+	d := newDesk(t, "orgrole")
+	registerForDispatch(t, d)
+
+	// A catalog loaded from rows becomes the process's one catalog. Put back
+	// what was there, so no other test reads this test's roles.
+	previous := auth.InstalledCapabilityCatalog()
+	t.Cleanup(func() { auth.SetCapabilityCatalog(previous) })
+
+	slug := fmt.Sprintf("vk-org-%d", time.Now().UnixNano()%1_000_000_000_000)
+	account := "vk-acct-" + d.suffix
+	// The rows are written as the cluster itself, the way the seed materializer
+	// writes a role: the role guard reads its writer's rank from the catalog,
+	// and on a database with no roles yet every person ranks nothing.
+	asTheCluster := auth.ContextWithInternalOrigin(auth.ContextWithSystemActor(context.Background(), "vendor-keys-roles"))
+	seed := func(query string) {
+		t.Helper()
+		_, err := d.eng.Execute(asTheCluster, query)
+		require.NoError(t, err, query)
+	}
+	seed(fmt.Sprintf(`mutation createRole(roleId: %s, slug: %s, name: "Client staff", rank: 73, accountId: %s, predefined: false, active: true)`,
+		langparser.QuoteString(slug), langparser.QuoteString(slug), langparser.QuoteString(account)))
+	capabilityIds := []string{}
+	for _, resource := range []string{"app:settings", "app:settings/apikeys", memql.ClusterAccountPart} {
+		verb := auth.VerbExecute
+		if resource == "app:settings" {
+			verb = auth.VerbRead
+		}
+		id := fmt.Sprintf("cap-%s-%s-%s", slug, verb, strings.NewReplacer(":", "-", "/", "-").Replace(resource))
+		capabilityIds = append(capabilityIds, id)
+		seed(fmt.Sprintf(`mutation createCapability(capabilityId: %s, roleSlug: %s, verb: %s, resourceType: %s, predefined: false, active: true)`,
+			langparser.QuoteString(id), langparser.QuoteString(slug), langparser.QuoteString(verb), langparser.QuoteString(resource)))
+	}
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = d.db.NewDelete().TableExpr(`"MemoryNodes"`).Where("id = ?", "v1:rbac:role:"+slug).Exec(ctx)
+		for _, id := range capabilityIds {
+			_, _ = d.db.NewDelete().TableExpr(`"MemoryNodes"`).Where("id = ?", "v1:rbac:capability:"+id).Exec(ctx)
+		}
+	})
+
+	// A second engine over the same database loads the catalog from the rows,
+	// as a node does when it starts, and installs it for the process.
+	other, otherDB, err := newEngine(sharedBoot.dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = otherDB.Close() })
+	require.NoError(t, other.ReloadCapabilityCatalog(seedContext()))
+	role := auth.Role(slug)
+	require.Equal(t, account, memql.BareShortId(auth.RoleAccountScope(role)), "the role did not load as an organization's")
+
+	oriel := d.member("oriel", role)
+	require.NoError(t, d.addThroughTheGate(session(oriel, role)),
+		"a person whose organization role holds the part could not add a key of their own")
+
+	// The cluster's vendor account is still not an organization role's to hold,
+	// whatever its rows say.
+	subject := auth.Subject{Role: role, UserId: oriel}
+	require.True(t, auth.CapableFor(context.Background(), subject, auth.VerbExecute, "app:settings/apikeys"))
+	require.False(t, auth.CapableFor(context.Background(), subject, auth.VerbExecute, memql.ClusterAccountPart),
+		"an organization role reached the cluster's vendor account through its own rows")
 }
 
 // THE OWNER'S WORDS, 2026-11-22: a key's owner uses and manages it whatever

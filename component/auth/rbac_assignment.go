@@ -257,8 +257,49 @@ func IsClusterOperator(role Role) bool {
 	return RoleAccountScope(role) == "" && RoleRank(role) >= RoleRank(RoleAdmin) && RoleRank(RoleAdmin) > 0
 }
 
+// The parts of Settings a role scoped to one organization may hold. Every
+// other part of Settings is cluster configuration and stays barred to such a
+// role, whatever its rows or a grant say.
+const (
+	// An organization's administrator decides who in their organization may
+	// open what.
+	settingsAccessPart = "app:settings/access"
+	// Adding an API key of one's own (see ScopedRoleMayUse).
+	settingsApiKeysPart = "app:settings/apikeys"
+)
+
+// scopedRoleSettingsPart reports whether a part of Settings is one an
+// organization role may hold.
+func scopedRoleSettingsPart(resource string) bool {
+	return resource == settingsAccessPart || resource == settingsApiKeysPart
+}
+
 // ScopedRoleMayUse bounds grants as well as role capabilities: a grant is not
 // permission to turn an organization administrator into a cluster operator.
+//
+// SETTINGS IS BARRED PART BY PART, AND THE API KEYS PART IS NOT BARRED (owner
+// decision, 2026-11-22). The bar on Settings was written when every part of it
+// was cluster configuration. The API keys part is a person's own: the key is
+// theirs, it spends their money, and nothing about it configures the cluster.
+// The owner's rule is that model access is bring-your-own for everybody, so a
+// person whose role is scoped to one organization adds a key like anybody
+// else. Before, such a person was refused whatever their role's rows or a
+// grant said, and no operator could change that.
+//
+// NOT BARRED IS NOT GRANTED. A custom role, an organization's among them,
+// holds the part only when its author wrote it into the role, or an operator
+// granted it to the person or to a group. Lifting the bar hands out nothing.
+// A deny by name still withholds it.
+//
+// EVERY OTHER PART OF SETTINGS STAYS BARRED, the cluster's own vendor account
+// (`app:settings/clusteraccount`) among them: that one spends the cluster
+// owner's money, and an organization role is not a cluster operator. A part
+// added to Settings later is barred here until it is listed above, which is
+// the direction a forgotten entry should fail in.
+//
+// Regression tests: TestAnOrganizationRoleMayHoldTheApiKeysPartAndNoOtherNewPartOfSettings
+// (organization_scope_test.go), and through the rows and the real gate,
+// integrations/vendorkeys TestAPersonWithAnOrganizationRoleAddsAKeyOfTheirOwn.
 func ScopedRoleMayUse(role Role, resource string) bool {
 	if resource == "app:fleet" || strings.HasPrefix(resource, "app:fleet/") {
 		return MayManageFleet(role)
@@ -271,7 +312,7 @@ func ScopedRoleMayUse(role Role, resource string) bool {
 			return false
 		}
 	}
-	if strings.HasPrefix(resource, "app:settings/") && resource != "app:settings/access" {
+	if strings.HasPrefix(resource, "app:settings/") && !scopedRoleSettingsPart(resource) {
 		return false
 	}
 	switch resource {

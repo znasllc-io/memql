@@ -1041,7 +1041,12 @@ person's own grant ("Remove" for a group's). A grant to a person counts in
 every organization they are in, so a pair's acts are drawn once, never per
 organization, and withheld only where they change nothing in any of them.
 None is offered on a pair a role's limit bars, to a viewer whose role lacks
-`update` on `principal`, or for the viewer themselves. When the read refuses
+`update` on `principal`, or for the viewer themselves. An organization
+role's limit covers the cluster's own surfaces, whatever the role's rows or a
+grant say: Cluster, Concepts, Logs and Setup; every part of Settings except
+Access and Add API keys (a person's own key is not cluster configuration);
+and the principal, role, admission, deployment and construct resources
+(`auth.ScopedRoleMayUse`). When the read refuses
 -- a viewer below admin or holding an organization's role, or a person who
 outranks the viewer -- a notice stands in place of that person's answers.
 The governance refusal codes of a write render beside the row that asked.

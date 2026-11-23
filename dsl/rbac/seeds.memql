@@ -671,6 +671,10 @@ seed capability cap-owner-read-app-settings-pipelines { roleSlug: "owner"  verb:
 // bring-your-own for everybody, so any signed-in person adds a key of their own. Withholding it
 // is a deny in Users > Access.
 //
+// A role an operator authored holds it when its author wrote it in, and that includes a role
+// scoped to one organization: this is the one part of Settings besides Access such a role is not
+// barred from (auth.ScopedRoleMayUse, owner decision 2026-11-22). Nothing seeds it there.
+//
 // There is no `read` beside it. Settings > API keys carries no floor of its own, so it opens for
 // everybody who opens Settings, and a person sees, changes, lends and removes the keys they own
 // whatever their role holds. Those acts are their owner's and need no part.
