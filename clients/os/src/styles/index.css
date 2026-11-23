@@ -2399,6 +2399,11 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
 }
 /* Inside the panel the column is the MAIN axis, so the controls' row-flex
  * basis would stretch them tall; pin them to the control line instead. */
+/* Near the window's left edge it opens rightward (Refine measures it). */
+.os-refine-panel[data-align="start"] {
+  right: auto;
+  left: 0;
+}
 .os-refine-panel .os-input,
 .os-refine-panel .os-select-wrap {
   flex: none;

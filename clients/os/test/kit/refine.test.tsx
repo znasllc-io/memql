@@ -138,3 +138,35 @@ it('draws its own search button, focuses the field and returns focus on Escape',
  expect(screen.queryByPlaceholderText('Find Fleet')).toBeNull();
  expect(document.activeElement).toBe(trigger);
 });
+
+describe("Refine's panel near the window's left edge (Jesús, Nov 23 2026: Downloads cut it off)", () => {
+  // jsdom lays nothing out, so the two boxes the check compares are given.
+  const box = (left: number) => ({ left, right: left + 264, top: 0, bottom: 40, width: 264, height: 40, x: left, y: 0, toJSON: () => ({}) }) as DOMRect;
+  function inWindow() {
+    return render(
+      <div className="os-window">
+        <Harness />
+      </div>,
+    );
+  }
+
+  it("opens rightward when leftward would leave the window", () => {
+    const spy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("os-window") ? box(100) : box(this.classList.contains("os-refine-panel") ? 40 : 200);
+    });
+    inWindow();
+    fireEvent.click(screen.getByRole("button", { name: "Refine files" }));
+    expect(document.querySelector(".os-refine-panel")?.getAttribute("data-align")).toBe("start");
+    spy.mockRestore();
+  });
+
+  it("keeps opening leftward where there is room", () => {
+    const spy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("os-window") ? box(0) : box(600);
+    });
+    inWindow();
+    fireEvent.click(screen.getByRole("button", { name: "Refine files" }));
+    expect(document.querySelector(".os-refine-panel")?.hasAttribute("data-align")).toBe(false);
+    spy.mockRestore();
+  });
+});

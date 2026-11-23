@@ -1097,6 +1097,19 @@ export function Refine({
     if (open) rootRef.current?.querySelector("input")?.focus();
   }, [open]);
 
+  // The panel opens leftward from the button's right edge, which suits the
+  // usual place, the right end of a Head. Where the control sits near the
+  // window's left edge (Files > Downloads), that ran the panel off the window
+  // and it was cut (Jesús, Nov 23 2026): then it opens rightward instead.
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const [alignStart, setAlignStart] = useState(false);
+  useLayoutEffect(() => {
+    if (!open) { setAlignStart(false); return; }
+    const panel = panelRef.current;
+    const frame = panel?.closest(".os-window") ?? document.documentElement;
+    if (panel && panel.getBoundingClientRect().left < frame.getBoundingClientRect().left) setAlignStart(true);
+  }, [open]);
+
   return (
     <div ref={rootRef} className="os-refine" role="group" aria-label={label} data-os-page-context={search || chips.length ? JSON.stringify({ search, filters: chips.map(chip => chip.label) }) : undefined} onPointerDownCapture={(event) => { pointerWithin.current = event.nativeEvent; }}>
       {chips.map((chip) => (
@@ -1126,7 +1139,7 @@ export function Refine({
         {iconOnly ? null : <span className="os-refine-open-text">{search !== "" ? search : placeholder}</span>}
       </button>
       {open ? (
-        <div className="os-refine-panel">
+        <div ref={panelRef} className="os-refine-panel" data-align={alignStart ? "start" : undefined}>
           <Input
             id={`refine-search-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
             label={placeholder}
