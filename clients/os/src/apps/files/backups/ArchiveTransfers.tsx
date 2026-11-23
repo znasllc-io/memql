@@ -130,8 +130,8 @@ const CHECK_MS = 2000;
  * this browser uploads, one live graph of the last minute's speed (plain bars,
  * no peak marker) and, beside it, a ring that fills as the uploads progress
  * with the speed inside it; no time left. When the last upload lands the ring
- * shows a check for a moment, then goes, and the graph stays frozen as the
- * upload left it (Jesús, same day). Speed is this browser's own measure
+ * shows a check for a moment, then empties to grey and stays, and the graph
+ * stays frozen as the upload left it (Jesús, same day). Speed is this browser's own measure
  * (useUploadTasks); a transfer a machine runs reports no timing, so it is not
  * here.
  */
@@ -168,22 +168,25 @@ function UploadSpeed({ uploads }: { uploads: readonly UploadTask[] }) {
         })}
       </svg>
     </div>
-    {busy ? <UploadRing progress={total > 0 ? Math.min(1, sent / total) : 0} rate={rate} />
-      : justDone ? <UploadRing progress={1} rate={0} done /> : null}
+    {/* One ring, always mounted while the graph shows, so its fill and check fade between states. */}
+    <UploadRing progress={busy ? (total > 0 ? Math.min(1, sent / total) : 0) : justDone ? 1 : 0} rate={busy ? rate : 0} done={justDone} idle={!busy && !justDone} />
   </div>;
 }
 
-function UploadRing({ progress, rate, done = false }: { progress: number; rate: number; done?: boolean }) {
+/** The ring beside the graph: filling while uploading, a check for a moment
+ *  when the last one lands, then empty and grey, ready for the next upload
+ *  (Jesús, Nov 23: it stays rather than disappearing). */
+function UploadRing({ progress, rate, done, idle }: { progress: number; rate: number; done: boolean; idle: boolean }) {
   const r = 30, around = 2 * Math.PI * r;
   const [amount = "", unit = ""] = rate > 0 ? formatBytes(rate).split(" ") : [];
-  const label = done ? "Uploads done" : `Uploading, ${Math.round(progress * 100)}%${rate > 0 ? `, ${formatBytes(rate)}/s` : ""}`;
+  const label = idle ? "Nothing uploading" : done ? "Uploads done" : `Uploading, ${Math.round(progress * 100)}%${rate > 0 ? `, ${formatBytes(rate)}/s` : ""}`;
   return <div className="os-transfer-ring" role="img" aria-label={label}>
     <svg viewBox="0 0 72 72" aria-hidden="true">
       <circle className="os-transfer-ring-track" cx="36" cy="36" r={r} />
       <circle className="os-transfer-ring-fill" cx="36" cy="36" r={r} strokeDasharray={`${around * progress} ${around}`} transform="rotate(-90 36 36)" />
-      {done ? <path className="os-transfer-ring-check" d="M25 37 l8 8 l15 -17" /> : null}
+      <path className="os-transfer-ring-check" data-on={done || undefined} d="M25 37 l8 8 l15 -17" />
     </svg>
-    {!done && amount ? <span className="os-transfer-ring-speed" aria-hidden="true"><strong>{amount}</strong>{unit}/s</span> : null}
+    {amount ? <span className="os-transfer-ring-speed" aria-hidden="true"><strong>{amount}</strong>{unit}/s</span> : null}
   </div>;
 }
 

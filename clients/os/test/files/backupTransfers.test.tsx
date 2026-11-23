@@ -157,7 +157,7 @@ describe("downloads tab", () => {
     expect(graph.querySelectorAll("rect")).toHaveLength(3);
   });
 
-  it("shows a check when the last upload lands, then the ring goes and the graph stays (Jesús, Nov 23)", () => {
+  it("shows a check when the last upload lands, then the ring empties to grey and stays, with the graph (Jesús, Nov 23)", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
     const sending = { id: "up-1", label: "a.bin", kind: "file", sentBytes: 5, totalBytes: 10, doneFiles: 0, totalFiles: 1, state: "sending", error: "", failures: [], retry: null, abort: vi.fn(), dismiss: vi.fn(), bytesPerSecond: 2048 } as UploadTask;
     trackDeskUpload("c", new File(["z"], "c.bin"), { done: new Promise<never>(() => {}), abort: vi.fn() } as never, null);
@@ -169,6 +169,8 @@ describe("downloads tab", () => {
     expect(screen.getByRole("img", { name: "Uploads done" })).toBeTruthy();
     act(() => { vi.advanceTimersByTime(2_000); });
     expect(screen.queryByRole("img", { name: "Uploads done" })).toBeNull();
+    // The ring stays, emptied and grey, ready for the next upload.
+    expect(screen.getByRole("img", { name: "Nothing uploading" })).toBeTruthy();
     expect(screen.getByRole("group", { name: "Upload speed" }).querySelectorAll("rect").length).toBeGreaterThan(0);
     vi.useRealTimers();
   });
@@ -192,8 +194,8 @@ describe("downloads tab", () => {
     h.connection = fakeConnection({ transfers: [] });
     render(<ArchiveTransfers machines={machines} refresh={0} onDownload={vi.fn()} uploads={[]} />);
     const graph = screen.getByRole("group", { name: "Upload speed" });
-    // Opened after it landed: the frozen graph, no ring.
-    expect(within(graph).queryByRole("img")).toBeNull();
+    // Opened after it landed: the frozen graph and an empty grey ring.
+    expect(within(graph).getByRole("img", { name: "Nothing uploading" })).toBeTruthy();
     expect(graph.querySelectorAll("rect")).toHaveLength(2);
 
     // The next upload resumes the same graph rather than starting over.
