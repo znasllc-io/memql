@@ -17,7 +17,6 @@ import {
   PeerRowReadOnly,
   Subhead,
   formatFreshness,
-  formatMoment,
   roleRungOf,
   useNow,
 } from "../../kit";
@@ -334,7 +333,6 @@ export function PersonPage({
           <Facts>
             <Fact label="Signs in with" value={person.signInPolicy === "passkey_only" ? "A passkey only" : "A link or a passkey"} />
             <Fact label="Last seen" value={formatFreshness(person.lastSeenAt, now)} title={person.lastSeenAt || undefined} />
-            <Fact label="Joined" value={formatMoment(person.createdAt)} />
             {person.sharedMailbox ? <Fact label="Mailbox" value={<Chip>shared</Chip>} /> : null}
           </Facts>
 

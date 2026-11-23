@@ -180,6 +180,9 @@ describe("opening a person", () => {
     expect(screen.queryByRole("button", { name: "Deactivate" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Add to a group" })).toBeNull();
     expect(screen.getByText("Signs in with")).toBeTruthy();
+    // No "Joined": the client only sees the newest version's time, which is the
+    // last change to the person, not when they joined.
+    expect(screen.queryByText("Joined")).toBeNull();
   });
 
   it.each(["admin", "owner"])("%s can read sessions and manage lower-ranked people", async role => {
