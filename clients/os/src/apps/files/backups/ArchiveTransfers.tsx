@@ -141,7 +141,8 @@ function UploadSpeed({ uploads }: { uploads: readonly UploadTask[] }) {
   if (sending.length === 0) return null;
   const rate = sending.reduce((sum, task) => sum + (task.bytesPerSecond ?? 0), 0);
   const remaining = sending.reduce((sum, task) => sum + Math.max(0, task.totalBytes - task.sentBytes), 0);
-  const peak = Math.max(0, ...history);
+  // The live figure counts too: samples are a second apart, so the speed now can top the last sample.
+  const peak = Math.max(0, rate, ...history);
   const n = SPEED_HISTORY_SECONDS;
   return <div className="os-transfer-speed" role="group" aria-label="Upload speed">
     <div className="os-transfer-graph">
