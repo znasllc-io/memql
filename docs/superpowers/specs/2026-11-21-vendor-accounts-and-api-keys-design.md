@@ -565,6 +565,27 @@ Decided by the owner after landing (2026-11-22):
   given the part and opening Settings, by its author or by a grant. The
   cluster's vendor account stays barred to it.
 
+- **An API key that can pay lets its holder past the setup screen.** On a
+  cluster with no machine, no app and no vendor account, MemQL OS held
+  everybody at "Set up this cluster", and somebody who was not an owner or
+  developer could not even reach Settings to add a key. The owner's decision
+  (2026-11-23), as built:
+  - The screen holds only while the cluster's inference readiness is
+    `unconfigured` AND the person's own `inferenceStatus.keyAccount` is not
+    true: no key of theirs, or lent to them, can pay on a route they choose.
+    The cluster's readiness is unchanged; a key lets its holder in, nobody
+    else.
+  - That answer is read when the screen would show, inside the bounded first
+    wait, and again each time the screen would come back after a window
+    closes. An unanswered or refused read keeps the screen: the cluster's
+    verdict stands.
+  - The screen offers "Add an API key", which opens Settings > API keys
+    straight into the add wizard. For somebody who is not an owner or
+    developer it is the act beside the one sentence they had; for an owner or
+    developer it is a quiet line under the cluster's doors, saying a key lets
+    them in alone. Somebody withheld from adding keys sees what they saw
+    before.
+
 Left open by the independent review, for the owner:
 
 - **What counts as the cluster's own work.** Decision 2 is built on the

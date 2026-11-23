@@ -39,7 +39,12 @@ export const API_KEYS_ADD_PART = "app:settings/apikeys";
 
 type View = { kind: "list" } | { kind: "add" } | { kind: "key"; id: string };
 
-export function ApiKeysSection({ active = true }: { active?: boolean }) {
+export function ApiKeysSection({ active = true, intent, consumeIntent }: {
+  active?: boolean;
+  /** `{ addKey: true }` opens the add wizard: the setup screen's act. */
+  intent?: { id: string; payload: Record<string, unknown> };
+  consumeIntent?: (intentId: string) => void;
+}) {
   const keys = useVendorKeys();
   const { access } = useSession();
   // Asking for every key is a cluster owner's question. The cluster is the
@@ -63,6 +68,16 @@ export function ApiKeysSection({ active = true }: { active?: boolean }) {
     }
     shownBefore.current = active;
   }, [active, keys.reload]);
+
+  // OPENED TO ADD A KEY: the setup screen's "Add an API key" (CoreGate) lands
+  // in the wizard, not on a list that asks for one more press. Only for
+  // somebody who may add one; the request is used up either way, so it is
+  // never acted on twice.
+  useEffect(() => {
+    if (!intent || intent.payload["addKey"] !== true) return;
+    if (mayAdd) setView({ kind: "add" });
+    consumeIntent?.(intent.id);
+  }, [intent, mayAdd, consumeIntent]);
 
   const toList = () => setView({ kind: "list" });
 

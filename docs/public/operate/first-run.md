@@ -37,16 +37,34 @@ serves a qualifying model but is asleep is a configured door: the OS opens, and
 a call that needs it parks with a report naming the machine. Configuration
 opens the OS; presence decides a call.
 
+**An API key that can pay lets its holder past it.** Model access is
+bring-your-own, so somebody whose own key, or a key lent to them, can pay for a
+vendor's models on a route they choose is not held, whatever the cluster's
+verdict. The cluster's readiness is unchanged and so is everybody else's gate:
+a key lets in the person it pays for. The gate asks for this person's answer
+(`inferenceStatus`, `keyAccount`) whenever it would show, and again when a
+window opened from it closes; an answer it cannot read keeps the gate.
+([API keys](api-keys.md))
+
 ### Two variants
 
 An **owner** or a **developer** gets the rail of core stops, with the inference
-stop already open on its three doors, and Sign out under a rule beneath it.
+stop already open on its three doors, then a quiet line, *An API key of your
+own lets you in, and nobody else*, with **Add an API key**, and Sign out under
+a rule beneath it.
 
-Everybody else gets one sentence — *An owner or developer has to set up
-inference before anyone can use it* — a line saying the page opens by itself
-once they have, and Sign out. **It does not name the owner.** A person's name
-is not the cluster's to publish, and the sentence is exactly as actionable
-without one.
+Everybody else who may add a key (every predefined role may) gets one
+sentence — *An owner or developer has to set up inference. Until then, an API
+key of your own lets you in* — with **Add an API key**, a line saying the page
+opens by itself once they have, and Sign out. Somebody withheld from adding
+keys gets the sentence it always was: *An owner or developer has to set up
+inference before anyone can use it*. **It does not name the owner.** A
+person's name is not the cluster's to publish, and the sentence is exactly as
+actionable without one.
+
+**Add an API key** opens Settings > API keys straight into its add wizard, and
+the gate steps aside while that window is open, as for its other acts. Closing
+the window asks again whether a key of theirs can pay.
 
 ### What it does when it cannot say
 

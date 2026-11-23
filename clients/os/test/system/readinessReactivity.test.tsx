@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { QueryClient, type AccessSummary } from "@znasllc-io/memql-sdk-core/client";
+import { QueryClient, Result, type AccessSummary } from "@znasllc-io/memql-sdk-core/client";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 vi.mock("../../src/live/connection", () => ({
@@ -188,7 +188,30 @@ describe("the core gate, mounted by the real shell", () => {
     });
   });
 
-  it("gives a reader the sentence, and no rail", async () => {
+  it("lets a reader whose own API key can pay through to the desk", async () => {
+    // Owner decision 2026-11-23: a key that can pay is a way in, for its
+    // holder, that the cluster's readiness does not count. Through the real
+    // Shell, so the gate's read reaches the connection it mounts.
+    const { connection, openReadiness } = fakeConnection([readinessRow("ai", "unconfigured")]);
+    connection.query.getMyAccess = vi.fn(async () => summary("reader"));
+    const named = connection.query.executeNamed.bind(connection.query);
+    connection.query.executeNamed = vi.fn(async (name: string, ...rest: unknown[]) =>
+      name === "inferenceStatus"
+        ? new Result({ data: [{ id: "v1:platform:inferenceStatus:self", keyAccount: true }] } as never)
+        : (named as (...args: unknown[]) => Promise<unknown>)(name, ...rest)) as never;
+    h.connection = connection;
+    mountShell();
+    openReadiness();
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Launcher" })).toBeTruthy();
+    });
+    expect(screen.queryByText("MemQL is not set up yet")).toBeNull();
+  });
+
+  it("gives a reader the sentence, a way in with a key of their own, and no rail", async () => {
+    // A reader may add an API key of their own (owner decisions 2026-11-22 and
+    // 2026-11-23), so the sentence says so and offers the act.
     const { connection, openReadiness } = fakeConnection([readinessRow("ai", "unconfigured")]);
     connection.query.getMyAccess = vi.fn(async () => summary("reader"));
     h.connection = connection;
@@ -197,9 +220,10 @@ describe("the core gate, mounted by the real shell", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText("An owner or developer has to set up inference before anyone can use it."),
+        screen.getByText("An owner or developer has to set up inference. Until then, an API key of your own lets you in."),
       ).toBeTruthy();
     });
+    expect(screen.getByRole("button", { name: "Add an API key" })).toBeTruthy();
     expect(screen.queryByRole("list", { name: "Set up this cluster" })).toBeNull();
     expect(screen.getByRole("button", { name: "Sign out" })).toBeTruthy();
   });

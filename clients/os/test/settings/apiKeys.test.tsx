@@ -205,6 +205,26 @@ describe("what a person may do", () => {
     expect(screen.getByRole("heading", { name: "Personal" })).toBeTruthy();
   });
 
+  // The setup screen's "Add an API key" opens this section asking to add one
+  // (owner decision 2026-11-23), so the act lands where it says.
+  it("opens straight into adding a key when it was opened to add one", async () => {
+    use();
+    const consumeIntent = vi.fn();
+    await renderKeys("user", { intent: { id: "intent-1", payload: { addKey: true } }, consumeIntent });
+    expect(screen.getByRole("heading", { name: "Add an API key" })).toBeTruthy();
+    expect(screen.getByRole("radiogroup", { name: "Vendor" })).toBeTruthy();
+    expect(consumeIntent).toHaveBeenCalledWith("intent-1");
+  });
+
+  it("opens on the list for somebody withheld from adding, and still uses up the request", async () => {
+    use();
+    const consumeIntent = vi.fn();
+    await renderKeys("user", { intent: { id: "intent-2", payload: { addKey: true } }, consumeIntent }, [API_KEYS_ADD_PART]);
+    expect(screen.queryByRole("radiogroup", { name: "Vendor" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "API keys" })).toBeTruthy();
+    expect(consumeIntent).toHaveBeenCalledWith("intent-2");
+  });
+
   it("tells a person with no keys and no way to add one what they will see here", async () => {
     use();
     await renderKeys("user", {}, [API_KEYS_ADD_PART]);

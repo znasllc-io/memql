@@ -12535,6 +12535,16 @@ button.os-cluster-mesh-peer:focus-visible {
   margin: 14px 0 0;
 }
 
+/* An owner's or developer's own way in, under the rail and outside it: a
+   quiet line and a plain button, never one of the cluster's doors. */
+.os-core-gate-key {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 14px;
+}
+
 /* The way out, under its own hairline: an escape, never one of the acts in the
    rail (rule 6 -- an action is never seated among the things it is not). */
 .os-core-gate-out {
