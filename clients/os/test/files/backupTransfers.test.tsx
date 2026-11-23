@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 vi.mock("../../src/live/connection", () => ({ useOsConnection: () => h.connection }));
 import { ArchiveTransfers, DownloadSetup } from "../../src/apps/files/backups/ArchiveTransfers";
-import { StorageAllowance } from "../../src/apps/files/backups/StorageAllowance";
+import { StorageAllowance, lowStorage } from "../../src/apps/files/backups/StorageAllowance";
 import { formatStorageBytes, transferActions, transferLine, validArchive, absoluteBackupPath, type BackupTransfer } from "../../src/apps/files/backups/transfers";
 import { uploadLine } from "../../src/apps/files/backups/ArchiveTransfers";
 import { FILES_SECTIONS } from "../../src/apps/files/settings";
@@ -69,6 +69,17 @@ describe("resumable backup controls", () => {
     fireEvent.change(screen.getByLabelText("Storage allowance in GB"), { target: { value: "0" } });
     expect(screen.getByRole("button", { name: "Save allowance" })).toBeTruthy();
   });
+});
+it("Backups shows storage only when it runs low", async () => {
+  const GB = 1_000_000_000, base = { used: 0, reserved: 0, clusterUsed: 0, clusterReserved: 0, clusterLimit: 5000 * GB };
+  expect(lowStorage({ ...base, available: 10 * GB, limit: 10 * GB, exempt: false })).toBeNull();
+  expect(lowStorage({ ...base, available: 0.5 * GB, limit: 10 * GB, exempt: false })).toBe("Storage is almost full: 500 MB left.");
+  expect(lowStorage({ ...base, available: 0, limit: 10 * GB, exempt: false })).toBe("Storage is full. New backups can't copy anything.");
+  expect(lowStorage({ ...base, available: 0, limit: 0, exempt: true })).toBeNull();
+  expect(lowStorage({ ...base, clusterUsed: 4900 * GB, available: 0, limit: 0, exempt: true })).toMatch(/almost full/);
+  h.connection = fakeConnection(); const view = render(<StorageAllowance alertsOnly />);
+  await new Promise((r) => setTimeout(r, 50));
+  expect(view.container.textContent).toBe("");
 });
 it("limits archive input and exposes only legal state transitions", () => {
   for (const name of ["a.zip", "a.tar", "a.tar.gz", "a.TGZ"]) expect(validArchive(name)).toBe(true);

@@ -235,10 +235,11 @@ describe("pausing", () => {
 });
 
 describe("the empty state", () => {
-  it("invites the person to act rather than reporting an absence", async () => {
+  it("is just the title and the button: no absence sentence, no storage figures", async () => {
     h.connection = fakeConnection({ backups: [] });
     await renderFiles({ section: "backups" });
-    expect(screen.getByText(/No folders are backed up yet/)).toBeTruthy();
+    expect(screen.queryByText(/No folders are backed up yet/)).toBeNull();
+    expect(screen.queryByText(/stored|reserved|available/)).toBeNull();
     expect(screen.getByRole("button", { name: "Back up a folder" })).toBeTruthy();
   });
 });

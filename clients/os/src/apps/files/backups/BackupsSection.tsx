@@ -148,13 +148,14 @@ export function BackupsSection({ folders, files, source, writes, onTransferStart
         />
       ) : null}
 
-      {!editing && <StorageAllowance />}
+      {/* Only a warning when space runs low (Jesús + José, Nov 22: no standing
+          storage text; a power user asks Ask for the figures). */}
+      {!editing && <StorageAllowance alertsOnly />}
       {!editing ? <LiveList<BackupRow>
         source={source}
         rowId={(backup) => backup.id}
         fingerprint={backupFingerprint}
         label="Backups"
-        emptyText="No folders are backed up yet."
         renderRow={(backup) => (
           <BackupLine
             backup={backup}
