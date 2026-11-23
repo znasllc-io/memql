@@ -1,14 +1,14 @@
 import { scrollNextPage } from "../scrollNextPage";
-import { fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 vi.mock("../../src/live/connection", () => ({ useOsConnection: () => h.connection }));
 import { ArchiveTransfers, DownloadSetup } from "../../src/apps/files/backups/ArchiveTransfers";
 import { StorageAllowance, lowStorage } from "../../src/apps/files/backups/StorageAllowance";
 import { formatStorageBytes, transferActions, transferLine, validArchive, absoluteBackupPath, type BackupTransfer } from "../../src/apps/files/backups/transfers";
-import { timeLeft, uploadLine } from "../../src/apps/files/backups/ArchiveTransfers";
+import { clockLeft, uploadLine } from "../../src/apps/files/backups/ArchiveTransfers";
 import { FILES_SECTIONS } from "../../src/apps/files/settings";
-import { trackDeskUpload, useUploadTasks, type UploadTask } from "../../src/apps/files/useUploadTasks";
+import { trackDeskUpload, useUploadSpeedHistory, useUploadTasks, type UploadTask } from "../../src/apps/files/useUploadTasks";
 import { formatBytes } from "../../src/kit";
 import { fakeConnection } from "./harness";
 import { machineFromRow } from "../../src/apps/fleet/rows";
@@ -120,29 +120,41 @@ describe("downloads tab", () => {
     expect(transferLine({ ...job, state: "error", failure: "connection lost" }, "Laptop", b)).toMatchObject({ text: "Upload failed · connection lost · progress is kept", warn: true, progress: null });
     expect(transferLine({ ...job, state: "paused", desiredState: "paused" }, "Laptop", b)).toMatchObject({ text: "Backup from Laptop · Paused · 4 B of 12 B", progress: null });
     const task = { id: "up-1", label: "a.bin", kind: "file", sentBytes: 5, totalBytes: 10, doneFiles: 0, totalFiles: 1, state: "sending", error: "", failures: [], retry: null, abort: vi.fn(), dismiss: vi.fn() } as UploadTask;
-    expect(uploadLine(task, b)).toEqual({ text: "Uploading · 5 B of 10 B", warn: false, progress: 0.5 });
+    // A sending upload is its bar alone: speed and time left are the graph's (look A).
+    expect(uploadLine(task, b)).toEqual({ text: "", warn: false, progress: 0.5 });
     expect(uploadLine({ ...task, state: "failed", error: "Over quota" }, b)).toMatchObject({ text: "Upload failed · Over quota", warn: true });
-    expect(uploadLine({ ...task, kind: "tree", doneFiles: 2, totalFiles: 3 }, b).text).toBe("Uploading · 2 of 3 files · 5 B of 10 B");
+    expect(uploadLine({ ...task, kind: "tree", doneFiles: 2, totalFiles: 3 }, b).text).toBe("2 of 3 files");
   });
 
-  it("adds speed and time left once an upload has a measure, never before (José, Nov 20)", async () => {
-    const b = (n: number) => `${n} B`;
-    const task = { id: "up-1", label: "a.bin", kind: "file", sentBytes: 100, totalBytes: 1000, doneFiles: 0, totalFiles: 1, state: "sending", error: "", failures: [], retry: null, abort: vi.fn(), dismiss: vi.fn() } as UploadTask;
-    expect(uploadLine(task, b).text).toBe("Uploading · 100 B of 1000 B");
-    expect(uploadLine({ ...task, bytesPerSecond: 50 }, b).text).toBe("Uploading · 100 B of 1000 B · 50 B/s · 18 s left");
-    expect([timeLeft(0.2), timeLeft(42), timeLeft(600), timeLeft(7500)]).toEqual(["1 s", "42 s", "10 min", "2 h 5 min"]);
+  it("measures speed, and look A draws the last minute with its peak, the speed and the time left (Jesús, Nov 23)", async () => {
+    expect([clockLeft(0.2), clockLeft(13), clockLeft(100), clockLeft(3900)]).toEqual(["0:01", "0:13", "1:40", "1:05:00"]);
 
     // The measure: bytes since the last report over the time since it.
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    vi.setSystemTime(1_000);
     let report: (p: { sentBytes: number; totalBytes: number }) => void = () => {};
     const handle = { done: new Promise<never>(() => {}), abort: vi.fn(), onProgress: (fn: typeof report) => { report = fn; } };
-    const clock = vi.spyOn(Date, "now").mockReturnValue(1_000);
     trackDeskUpload("icon-1", new File(["x"], "big.bin"), handle as never, null);
     report({ sentBytes: 0, totalBytes: 4_000_000 });
-    clock.mockReturnValue(3_000);
+    vi.setSystemTime(3_000);
     report({ sentBytes: 2_000_000, totalBytes: 4_000_000 });
     const { result } = renderHook(() => useUploadTasks({ upload: vi.fn() } as never, vi.fn()));
-    expect(result.current.tasks.find((t) => t.id === "desk:icon-1")?.bytesPerSecond).toBe(1_000_000);
-    clock.mockRestore();
+    const task = result.current.tasks.find((t) => t.id === "desk:icon-1")!;
+    expect(task.bytesPerSecond).toBe(1_000_000);
+
+    // One sample a second while it sends.
+    act(() => { vi.advanceTimersByTime(3_000); });
+    const history = renderHook(() => useUploadSpeedHistory()).result.current;
+    expect(history).toEqual([1_000_000, 1_000_000, 1_000_000]);
+    vi.useRealTimers();
+
+    h.connection = fakeConnection({ transfers: [] });
+    render(<ArchiveTransfers machines={machines} refresh={0} onDownload={vi.fn()} uploads={[task]} />);
+    const graph = screen.getByRole("group", { name: "Upload speed" });
+    expect(graph.textContent).toContain(`${formatBytes(1_000_000)}/s`);
+    expect(graph.textContent).toContain("0:02");
+    expect(graph.textContent).toContain(`peak ${formatBytes(1_000_000)}/s`);
+    expect(graph.querySelectorAll("rect")).toHaveLength(3);
   });
 
   it("draws one row per transfer with a Backup pill, a bar and one button while moving", async () => {

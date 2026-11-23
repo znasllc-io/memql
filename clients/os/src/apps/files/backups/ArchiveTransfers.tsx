@@ -7,7 +7,7 @@ import { useOsConnection } from "../../../live/connection";
 import { Wizard } from "../../../kit/Wizard";
 import { machineName, type MachineRow } from "../../fleet/rows";
 import { absoluteBackupPath, transferActions, transferLabel, transferLine, transferMoving, type BackupTransfer, type TransferAction } from "./transfers";
-import type { UploadTask } from "../useUploadTasks";
+import { SPEED_HISTORY_SECONDS, useUploadSpeedHistory, type UploadTask } from "../useUploadTasks";
 
 import { usePagedCollection } from "../../../live/useLiveCollection";
 import { LiveReadVisibility } from "../../../live/useGraphRevision";
@@ -72,6 +72,7 @@ export function ArchiveTransfers({ machines, refresh, onDownload, uploads = [] }
     <Refine search={search} onSearch={setSearch} label="Search transfers" placeholder="Search transfers" />
     {feed.snapshot.state === "seeding" && !rows.length && !uploads.length ? <RecordListSkeleton label="Loading transfers" rows={3} /> : null}
     {rows.length === 0 && (needle || uploads.length === 0) && !error && feed.snapshot.state !== "seeding" && <Caption>{needle ? "No transfers match." : "No transfers yet."}</Caption>}
+    {needle ? null : <UploadSpeed uploads={uploads} />}
     <RecordList label="Transfers">
     {needle ? null : uploads.map(task => <UploadLine key={task.id} task={task} />)}
     {rows.map(job => {
@@ -113,20 +114,50 @@ function TransferSecondary({ text, warn, progress }: { text: string; warn: boole
 export function uploadLine(task: UploadTask, bytes: (n: number) => string): { text: string; warn: boolean; progress: number | null } {
   if (task.state === "failed") return { text: `Upload failed · ${task.error}`, warn: true, progress: null };
   if (task.state === "done") return { text: `Uploaded · ${bytes(task.totalBytes)}`, warn: false, progress: null };
-  const files = task.kind === "tree" ? `${task.doneFiles} of ${task.totalFiles} files · ` : "";
-  // Speed and time left once there is a measure (useUploadTasks), as José
-  // asked on Nov 20; never a guess before it.
-  const rate = task.bytesPerSecond ?? 0;
-  const speed = rate > 0 ? ` · ${bytes(rate)}/s · ${timeLeft((task.totalBytes - task.sentBytes) / rate)} left` : "";
-  return { text: `Uploading · ${files}${bytes(task.sentBytes)} of ${bytes(task.totalBytes)}${speed}`, warn: false, progress: task.totalBytes > 0 ? Math.min(1, task.sentBytes / task.totalBytes) : 0 };
+  // A sending upload is its bar alone: speed and time left are the graph's
+  // above the list (look A, Jesús, Nov 23). A folder drop still counts files.
+  const files = task.kind === "tree" ? `${task.doneFiles} of ${task.totalFiles} files` : "";
+  return { text: files, warn: false, progress: task.totalBytes > 0 ? Math.min(1, task.sentBytes / task.totalBytes) : 0 };
 }
 
-/** "8 s", "4 min", "2 h 5 min": whole units, for a figure that moves. */
-export function timeLeft(seconds: number): string {
+/** "0:13", "1:40", "1:05:00": time left the way Steam shows it. */
+export function clockLeft(seconds: number): string {
   const s = Math.max(1, Math.round(seconds));
-  if (s < 60) return `${s} s`;
-  if (s < 3600) return `${Math.round(s / 60)} min`;
-  return `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} min`;
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
+  const two = (n: number) => String(n).padStart(2, "0");
+  return h > 0 ? `${h}:${two(m)}:${two(r)}` : `${m}:${two(r)}`;
+}
+
+/**
+ * LOOK A (Jesús, Nov 23 2026, after Steam's Downloads, José's reference): while
+ * this browser uploads, one live graph of the last minute's speed, a dashed
+ * line at its peak, and the speed and time left for everything still sending
+ * in big numbers. Speed is this browser's own measure (useUploadTasks); a
+ * transfer a machine runs reports no timing, so it is not in the graph.
+ */
+function UploadSpeed({ uploads }: { uploads: readonly UploadTask[] }) {
+  const history = useUploadSpeedHistory();
+  const sending = uploads.filter(task => task.state === "sending");
+  if (sending.length === 0) return null;
+  const rate = sending.reduce((sum, task) => sum + (task.bytesPerSecond ?? 0), 0);
+  const remaining = sending.reduce((sum, task) => sum + Math.max(0, task.totalBytes - task.sentBytes), 0);
+  const peak = Math.max(0, ...history);
+  const n = SPEED_HISTORY_SECONDS;
+  return <div className="os-transfer-speed" role="group" aria-label="Upload speed">
+    <div className="os-transfer-graph">
+      <svg viewBox={`0 0 ${n} 100`} preserveAspectRatio="none" aria-hidden="true">
+        {history.map((value, i) => {
+          const h = peak > 0 ? Math.max(1.5, (value / peak) * 88) : 0;
+          return <rect key={i} x={n - history.length + i + 0.12} y={100 - h} width={0.76} height={h} />;
+        })}
+      </svg>
+      {peak > 0 ? <span className="os-transfer-peak">peak {formatBytes(peak)}/s</span> : null}
+    </div>
+    <div className="os-transfer-figures">
+      <span><strong>{rate > 0 ? `${formatBytes(rate)}/s` : "--"}</strong>speed</span>
+      <span><strong>{rate > 0 ? clockLeft(remaining / rate) : "--"}</strong>left</span>
+    </div>
+  </div>;
 }
 
 function UploadLine({ task }: { task: UploadTask }) {

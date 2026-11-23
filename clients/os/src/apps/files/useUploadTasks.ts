@@ -97,6 +97,7 @@ function progress(id: string, sentBytes: number, rest: Partial<UploadTask> = {})
 function restart(id: string, p: Partial<UploadTask>): void {
   samples.delete(id);
   patch(id, { ...p, bytesPerSecond: undefined });
+  startGraph();
 }
 function settleDone(id: string): void {
   patch(id, { state: "done", error: "" });
@@ -107,11 +108,42 @@ function nextId(): string {
   return `up-${seq}`;
 }
 
+// THE GRAPH (Jesús, Nov 23 2026, picked look A: Steam's live speed graph on
+// top of Downloads). One sample a second of every sending upload's speed
+// added together, the last minute kept. The ticker runs only while something
+// sends; a new burst after a quiet spell starts a fresh graph.
+export const SPEED_HISTORY_SECONDS = 60;
+let historyNow: readonly number[] = [];
+let ticker: ReturnType<typeof setInterval> | null = null;
+function tick(): void {
+  const sending = tasksNow.filter((t) => t.state === "sending");
+  if (sending.length === 0) {
+    if (ticker) clearInterval(ticker);
+    ticker = null;
+    return;
+  }
+  historyNow = [...historyNow, sending.reduce((sum, t) => sum + (t.bytesPerSecond ?? 0), 0)].slice(-SPEED_HISTORY_SECONDS);
+  for (const listener of listeners) listener();
+}
+function startGraph(): void {
+  if (ticker) return;
+  historyNow = [];
+  ticker = setInterval(tick, 1000);
+}
+
+/** The last minute of upload speed, one sample a second, newest last. */
+export function useUploadSpeedHistory(): readonly number[] {
+  return useSyncExternalStore(subscribe, () => historyNow);
+}
+
 /** Tests start from an empty list: it outlives a render. */
 export function resetUploadTasksForTest(): void {
   tasksNow = [];
   seq = 0;
   samples.clear();
+  if (ticker) clearInterval(ticker);
+  ticker = null;
+  historyNow = [];
 }
 
 /**
@@ -140,6 +172,7 @@ export function trackDeskUpload(key: string, file: File, handle: UploadHandle, r
     ...ts.filter((t) => t.id !== id),
   ]);
   samples.delete(id);
+  startGraph();
   handle.onProgress?.((p) => progress(id, p.sentBytes, { totalBytes: p.totalBytes }));
   handle.done
     .then(() => settleDone(id))
