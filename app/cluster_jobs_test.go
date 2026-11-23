@@ -3,9 +3,13 @@ package app
 import (
 	"context"
 	"errors"
+	"io"
+	"log/slog"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/safety"
 	"github.com/znasllc-io/memql/core/airoute"
 	"github.com/znasllc-io/memql/core/common"
 )
@@ -44,6 +48,15 @@ func TestAClusterJobResolvesAndCallsAsTheJob(t *testing.T) {
 			if got, ok := auth.ClusterWorkFromContext(resolvedUnder); !ok || got != job {
 				t.Fatalf("resolved under job %q, %v; want %q", got, ok, job)
 			}
+			// A context that names nobody: a resolution reads the acting id
+			// off the context, and a call that names a person is theirs
+			// whatever the stamp says.
+			if _, ok := auth.AccessFromContext(resolvedUnder); ok {
+				t.Fatal("the job resolved under somebody's access context")
+			}
+			if _, ok := common.RunFromContext(resolvedUnder); ok {
+				t.Fatal("the job resolved inside a run, whose owner the resolution would read")
+			}
 
 			alice := auth.ContextWithUserActor(context.Background(), "alice")
 			if _, err := provider.CallChatStructured(alice, nil, common.StructuredSchema{}); err != nil {
@@ -57,6 +70,55 @@ func TestAClusterJobResolvesAndCallsAsTheJob(t *testing.T) {
 				t.Fatal("the call lost its caller's context")
 			}
 		})
+	}
+}
+
+// safetyJobModel is the router and the model in one, remembering the context
+// of the resolution and of each call.
+type safetyJobModel struct {
+	resolved chan context.Context
+	called   chan context.Context
+}
+
+func (m *safetyJobModel) ResolveFor(ctx context.Context, _ airoute.ResolveRequest) (memql.ResolvedProvider, error) {
+	m.resolved <- ctx
+	return memql.ResolvedProvider{Client: m}, nil
+}
+
+func (m *safetyJobModel) CallChatStructured(ctx context.Context, _ []common.ChatMessage, _ common.StructuredSchema) (string, error) {
+	m.called <- ctx
+	return "", errors.New("fixture: no verdict")
+}
+
+// The safety check the node actually builds is the cluster's job: its model is
+// resolved under the job's name, and a check it runs for a person's command
+// reaches the model as the job, not as that person.
+func TestTheSafetyCheckIsWiredAsTheClustersJob(t *testing.T) {
+	t.Setenv(EnvSafetyLLMProvider, "fixture")
+	model := &safetyJobModel{resolved: make(chan context.Context, 1), called: make(chan context.Context, 1)}
+	engine := &memql.MemQLEngine{}
+	engine.SetAIResolver(model)
+	a := &App{engine: engine, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+
+	classifier := a.buildSafetyClassifier()
+	select {
+	case ctx := <-model.resolved:
+		if job, ok := auth.ClusterWorkFromContext(ctx); !ok || job != safetyClassifierJob {
+			t.Fatalf("the check's model was resolved under job %q, %v; want %q", job, ok, safetyClassifierJob)
+		}
+	default:
+		t.Fatal("the check resolved no model: the layer is off")
+	}
+
+	alice := auth.ContextWithUserActor(context.Background(), "alice")
+	_, _ = classifier.Classify(alice, safety.ActionDescriptor{})
+	select {
+	case ctx := <-model.called:
+		if !auth.ActsForTheCluster(ctx, "") {
+			t.Fatal("the check it ran for alice's command reached the model as hers, not the cluster's")
+		}
+	default:
+		t.Fatal("the check never reached its model")
 	}
 }
 

@@ -398,11 +398,14 @@ func TestAStructuredClientResolvedOnceWritesEachCallAsItsOwn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := callStructured(t, auth.ContextWithUserActor(context.Background(), "alice"), resolved.Client); err != nil {
+	// Every call carries the job too, as app's clusterJobStructured stamps it:
+	// the account is judged again at the call, from that call's own context.
+	asJob := func(ctx context.Context) context.Context { return auth.ContextForClusterWork(ctx, "safety-classifier") }
+	if _, err := callStructured(t, asJob(auth.ContextWithUserActor(context.Background(), "alice")), resolved.Client); err != nil {
 		t.Fatal(err)
 	}
 	first := ledger.args(t)
-	if _, err := callStructured(t, sweepContext(), resolved.Client); err != nil {
+	if _, err := callStructured(t, asJob(sweepContext()), resolved.Client); err != nil {
 		t.Fatal(err)
 	}
 	second := ledger.args(t)
@@ -414,6 +417,56 @@ func TestAStructuredClientResolvedOnceWritesEachCallAsItsOwn(t *testing.T) {
 		if row["callerKind"] != auth.CallerKindSystem {
 			t.Errorf("the job's call for %s recorded callerKind %v, want %q", name, row["callerKind"], auth.CallerKindSystem)
 		}
+	}
+	// Without the stamp, a call on that client names nobody, and the
+	// cluster's account does not pay for it.
+	if _, err := callStructured(t, auth.ContextWithUserActor(context.Background(), "alice"), resolved.Client); err == nil {
+		t.Fatal("a call on the job's client, without the job's stamp, was paid by the cluster's account")
+	}
+}
+
+// lentMachineRouter is a router whose one door is a machine lent to cluster
+// work: the fleet reads a blank acting id as cluster work, so it serves a call
+// that names nobody, which the cluster's vendor account would not pay for.
+func lentMachineRouter(t *testing.T) (*Router, *countingLedger) {
+	t.Helper()
+	providers := registryOpenToEverybody()
+	providers.SetFleetInference(&stubFleetInference{models: []memql.FleetModel{fleetModel("qwen3.5:4b", true)}})
+	policies := memql.NewPolicyRegistryForTest(map[string][]string{"local": {memql.FleetReferencePrefix + "qwen3.5:4b"}})
+	r := New(providers, policies, testRules(t, defaultRule("local")), nil, nil)
+	ledger := &countingLedger{writes: make(chan string, 4)}
+	r.engine = ledger
+	return r, ledger
+}
+
+// A client resolved where nobody stamped anything, and served by a machine
+// lent to cluster work, writes each call as the caller that call says it is,
+// through the wrapper and onto the ledger.
+//
+// The calls ride the BACKGROUND lane, which has a per-window ceiling of its
+// own: the process-wide guard admits 20 interactive local calls in 10 seconds
+// (memql ai_guard.go), and this package's other fleet tests spend that budget
+// within one window. The lane decides nothing these tests check.
+func TestAnUnattributedClientRecordsEachCallsOwnCaller(t *testing.T) {
+	r, ledger := lentMachineRouter(t)
+	resolved, err := r.ResolveFor(context.Background(), structuredTriageRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lane := memql.ContextWithBackgroundLane
+	if _, err := callStructured(t, lane(auth.ContextWithUserActor(context.Background(), "alice")), resolved.Client); err != nil {
+		t.Fatal(err)
+	}
+	first := ledger.args(t)
+	if _, err := callStructured(t, lane(sweepContext()), resolved.Client); err != nil {
+		t.Fatal(err)
+	}
+	second := ledger.args(t)
+	if first["callerKind"] != auth.CallerKindUser {
+		t.Errorf("a person's call recorded callerKind %v, want %q", first["callerKind"], auth.CallerKindUser)
+	}
+	if second["callerKind"] != auth.CallerKindSystem {
+		t.Errorf("an automation's call recorded callerKind %v, want %q", second["callerKind"], auth.CallerKindSystem)
 	}
 }
 

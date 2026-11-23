@@ -2261,13 +2261,20 @@ by the cluster's account with no permission asked; the only trace was
 now" or "keep it", the owner chose the first. Trigger: the cluster's account
 is about to pay for a call (`ClusterAccountClosedTo`). Evidence: the call's
 acting id and its context. Path, in order (`auth.ActsForTheCluster`,
-`component/auth/cluster_work.go`): an id the engine mints for its own actors
-(`system:`, `cluster:`, a connector) is the cluster's; a call that names
-nobody is the cluster's when its context carries the cluster's own actor or a
-job wired as the cluster's (`auth.ContextForClusterWork`); a call that names
-nobody under a person's context is that person's, judged by the gate; anything
-else is refused with `ClusterAccountUnnamedReason`, and the gate is not asked.
-A call that names a person is that person's whatever its context carries.
+`component/auth/cluster_work.go`): an id minted for the cluster's own actors
+(`system:`, `cluster:`, a connector; an operator's service-account token may
+carry a `system:` subject too) is the cluster's; a call that names nobody is
+the cluster's when its context carries the cluster's own actor or a job wired
+as the cluster's (`auth.ContextForClusterWork`); anything else that names
+nobody is refused with `ClusterAccountUnnamedReason`, and the gate is not
+asked; a person is judged by the gate. A call that names a person is that
+person's whatever its context carries, a job's stamp included, so a job
+resolves under a context that names nobody. WHO A CALL IS FOR IS WHAT ITS
+REQUEST NAMES: the seams that build a request fill an empty acting id first
+(the router from the access context, then the run's owner; the engine the
+same), and the rule does not read a person off the context again, because
+the keys are asked about by the id alone and reading the person there would
+offer the cluster's account while leaving their own keys out.
 Alternatives not taken: refusing before the sweep (would have stopped the
 paths below unannounced), and keeping the absence rule (the owner's
 bring-your-own rule leaked through every lost caller). Why a JOB and not the
@@ -2285,23 +2292,31 @@ provider and an agent turn on a direct stream read the stream's context, which
 carries claims and no access context, so they named nobody; they now take the
 caller (`callerContext`, `component/grpc/ai_handlers.go`). The safety check
 resolved its model at start for nobody and kept it, and was judged at each
-call by the caller it screened; it and the healer now resolve and call as
-named jobs (`resolveForClusterJob`, `app/ai_call_sites.go`). A request built
-outside the engine inside a run (the agent replier's) is the run owner's: the
-router reads `RunContext.OwnerUserId` when no access context names anybody,
-as the engine seam already did (`component/router/resolve_for.go`). Left as
-they are: the planner's responsibility intake, which nothing subscribes, and
-the context-free `Router.Resolve*` methods, which nothing in production calls;
-both name nobody and would be refused. Fallback: a path the sweep missed fails
-with the reason on its decision row instead of spending quietly. Invariant:
+call by the caller it screened; it now resolves and calls as a named job
+(`resolveForClusterJob`, `app/ai_call_sites.go`), and the healer, which is not
+wired today (`wireWorkHealer` has no caller), is written the same way for when
+it is. A request built outside the engine inside a run (the agent replier's)
+is the run owner's: the router reads `RunContext.OwnerUserId` when no access
+context names anybody, as the engine seam already did
+(`component/router/resolve_for.go`), and so does the cache-hit record
+(`cache_served.go`). Left as they are: the planner's responsibility intake,
+which nothing subscribes, and the context-free `Router.Resolve*` methods,
+which nothing in production calls; both name nobody and would be refused.
+Fallback: a path the sweep missed fails with the reason on its decision row
+when it reaches a vendor, instead of spending quietly; a machine lent to
+cluster work may still serve it, because the fleet reads a blank acting id as
+cluster work, and its row then reads `callerKind: unattributed`. Invariant:
 the cluster's account pays unasked only for work that says it is the
 cluster's. Tests: `TestActsForTheClusterOnlyWhenTheCallSaysSo`
 (`component/auth`), `TestACallThatNamesNobodyIsNotPaidByTheClustersAccount`
-and `TestACallThatNamesNobodyIsJudgedByThePersonItsContextCarries`
-(`component/memql`), `TestResolveForReadsTheRunsOwnerWhenNoActorIsOnTheContext`
-and `TestAStructuredClientResolvedOnceWritesEachCallAsItsOwn`
-(`component/router`), `TestAClusterJobResolvesAndCallsAsTheJob` (`app`),
-`caller_context_test.go` (`component/grpc`). Known limits: read in the code
+and `TestARequestThatNamesNobodyIsNotPaidUnderAPersonsContext`
+(`component/memql`), `TestResolveForReadsTheRunsOwnerWhenNoActorIsOnTheContext`,
+`TestAJobsStampDoesNotPayForAPersonItsContextNames`,
+`TestAStructuredClientResolvedOnceWritesEachCallAsItsOwn` and
+`TestCacheServedRowInARunNamesTheRunsOwner` (`component/router`),
+`TestAClusterJobResolvesAndCallsAsTheJob` and
+`TestTheSafetyCheckIsWiredAsTheClustersJob` (`app`), `caller_context_test.go`
+(`component/grpc`). Known limits: read in the code
 and not tested, an anonymous stream may send `ExecuteQuery`, and a builtin
 that declares no capability (the `ai` builtin among them) checks no actor, so
 an anonymous caller may reach a model call; the cluster's account no longer

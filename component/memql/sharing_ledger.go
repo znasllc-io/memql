@@ -124,7 +124,7 @@ func LedgerCallFromRow(row map[string]any) LedgerCall {
 // everybody else's, because the total answers "how busy has this machine
 // been". The SPLIT answers the other question (design G4) -- how much of it
 // was lent -- and it needs the owner to know which calls were theirs. A call
-// with no acting person (the cluster's own work) is neither.
+// with no acting person is neither.
 func FoldLedger(machineId, ownerUserId, week string, calls []LedgerCall) LedgerEntry {
 	entry := LedgerEntry{MachineId: machineId, Week: week, ByLevel: map[string]int{}}
 	people := map[string]struct{}{}

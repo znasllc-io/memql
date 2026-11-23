@@ -124,15 +124,16 @@ func (o *observedStructured) CallChatStructuredWithUsage(ctx context.Context, me
 // ledger.
 //
 // A wrapper is usually resolved for one call and dropped. Two are not: the
-// safety classifier and the work healer resolve their structured client once
-// at boot, with context.Background(), and keep it. Every row they wrote then
-// shared the boot resolution's request id and its caller kind --
-// "unattributed", because a background context has no actor -- whoever the
-// call actually ran for. So each call after the first gets a request id of
-// its own (the first keeps the resolution's, which the one-call case relies
-// on), and a caller kind the resolution could not know is read from the
-// call's own context. Neither field decides routing, so the walk is the one
-// the resolution chose.
+// safety classifier, and the work healer were it wired, resolve their
+// structured client once at boot and keep it. Every row such a client wrote
+// shared the boot resolution's request id. So each call after the first gets a
+// request id of its own (the first keeps the resolution's, which the one-call
+// case relies on). And a caller kind the resolution could not know --
+// "unattributed", a resolution nobody stamped -- is read from the call's own
+// context; one it did know is kept. Both of those clients now resolve as
+// named cluster jobs (app resolveForClusterJob, owner decision 2026-11-23), so
+// their resolutions record "system" and every call they make keeps it.
+// Neither field decides routing, so the walk is the one the resolution chose.
 type perCall struct{ used atomic.Bool }
 
 func (p *perCall) request(ctx context.Context, req ResolveRequest) ResolveRequest {

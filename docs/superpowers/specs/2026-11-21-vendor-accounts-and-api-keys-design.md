@@ -592,22 +592,30 @@ Decided by the owner after landing (2026-11-22):
   cluster's account with no permission asked. Offered "find them first, then
   refuse", "refuse now" and "keep it", the owner chose the first (2026-11-23).
   As built:
-  - A call is the cluster's own only when it says so: an id the engine mints
-    for its own actors (`system:`, `cluster:`, a connector), or a call that
+  - A call is the cluster's own only when it says so: an id minted for the
+    cluster's own actors (`system:`, `cluster:`, a connector), or a call that
     names nobody under the cluster's own actor or a job wired as the
     cluster's (`auth.ContextForClusterWork`). A call that names a person is
-    that person's, and one that names nobody under a person's context is
-    that person's too. Anything else is refused the cluster's account, with
-    "the call does not say whom it is for" on its record.
+    that person's, whatever its context carries, a job's stamp included.
+    Anything else is refused the cluster's account, with "the call does not
+    say whom it is for" on its record. Who a call is for is what its request
+    names: the seams that build a request fill it from the context and the
+    run's owner first, and the rule does not read a person off the context
+    again (that would offer the cluster's account while leaving the person's
+    own keys out).
   - The sweep found these paths naming nobody, and each now says whom it is
     for: Ask's suggestions answered on a BFF with no agent replica, a
     transcription opened on the speech node and an agent turn on a direct
-    stream (each takes its stream's caller); the command-safety check and the
-    healer, resolved once at start for nobody (each is a named job, at the
-    resolution and on every call, so the cluster keeps paying for them as it
-    did; whether it should is a separate question still open with the
-    owner); and a request built outside the engine inside a run (the router
-    now reads the run's owner, as the engine seam did).
+    stream (each takes its stream's caller); the command-safety check,
+    resolved once at start for nobody (a named job now, at the resolution
+    and on every call, so the cluster keeps paying for it as it did; whether
+    it should is a separate question still open with the owner), and the
+    healer, written the same way though nothing wires it today; and a request
+    built outside the engine inside a run (the router, and its cache-hit
+    record, now read the run's owner, as the engine seam did).
+  - A machine lent to cluster work may still serve a call that names nobody:
+    the fleet reads a blank acting id as cluster work. Who lent what is not
+    this decision; the vendor account is.
   - Left naming nobody, and so refused: the planner's responsibility intake,
     which nothing subscribes, and the context-free `Router.Resolve*`
     methods, which nothing in production calls.

@@ -33,10 +33,19 @@ package memql
 // names the call site's fault rather than a person's. Before the flip, every
 // production path that reached a model naming nobody was found and made to say
 // one or the other (the design record lists them); a path missed by that sweep
-// now fails with that reason on its decision row instead of spending quietly.
-// A request that names nobody but runs under a person's own context is that
-// person's call, exactly as the router reads it (resolve_for.go fills an empty
-// acting id from the context), and is judged by their permission.
+// now fails with that reason on its decision row instead of spending quietly
+// at a vendor. (A machine lent to cluster work may still serve it: the fleet
+// reads a blank acting id as the cluster's, which is a question of who lent
+// what, not of who pays.)
+//
+// WHO A CALL IS FOR IS WHAT ITS REQUEST NAMES. The seams that build a request
+// fill an empty acting id before the account is asked: the router from the
+// context's actor and then the run's owner (resolve_for.go), the engine the
+// same way (ai_attribution.go). So a blank id here means nobody said, whatever
+// the context carries, and it is not read off the context again: a person
+// read that way would be offered the cluster's account while their own keys,
+// which are asked about by the id alone (keysServe), stayed out -- the
+// bring-your-own order reversed.
 //
 // WHO IS JUDGED. The person the call is FOR, by the rows: their stored role,
 // their groups and their grants. Never the role a context happens to carry.
@@ -125,38 +134,22 @@ func (r *ProviderRegistry) installedClusterAccountGate() ClusterAccountGate {
 // call made for actingUserId, or "" when it may.
 //
 // In order: a call that says it is the cluster's own work is paid and the gate
-// is not asked about it. A call that names nobody is read as the person on its
-// context, when it runs under one. A call that still names nobody, or names
-// the anonymous reader, is refused (ClusterAccountUnnamedReason) and nobody is
-// asked. A person is judged by the gate.
+// is not asked about it. A call that names nobody, or names the anonymous
+// reader, is refused (ClusterAccountUnnamedReason) and nobody is asked. A
+// person is judged by the gate.
 func (r *ProviderRegistry) ClusterAccountClosedTo(ctx context.Context, actingUserId string) string {
 	actingUserId = strings.TrimSpace(actingUserId)
 	if auth.ActsForTheCluster(ctx, actingUserId) {
 		return ""
 	}
-	person := actingUserId
-	if person == "" {
-		person = personOnContext(ctx)
-	}
-	if person == "" || auth.NamesNoPerson(person) {
+	if actingUserId == "" || auth.NamesNoPerson(actingUserId) {
 		return ClusterAccountUnnamedReason
 	}
 	gate := r.installedClusterAccountGate()
-	if gate == nil || !gate(ctx, person) {
+	if gate == nil || !gate(ctx, actingUserId) {
 		return ClusterAccountClosedReason
 	}
 	return ""
-}
-
-// personOnContext is the person a context runs under, or "" when it carries
-// none: no actor, the anonymous reader, or one of the cluster's own (which
-// ActsForTheCluster has already answered for).
-func personOnContext(ctx context.Context) string {
-	ac, ok := auth.AccessFromContext(ctx)
-	if !ok || ac == nil || ac.IsAnonymous || ac.Synthetic || ac.ConnectorName != "" {
-		return ""
-	}
-	return strings.TrimSpace(ac.UserId)
 }
 
 // clusterAccountAnswer is ClusterAccountClosedTo for one person, asked at most

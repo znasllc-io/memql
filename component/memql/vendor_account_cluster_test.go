@@ -173,31 +173,32 @@ func TestACallThatNamesNobodyIsNotPaidByTheClustersAccount(t *testing.T) {
 	}
 }
 
-// A request that names nobody, made under a person's own context, is that
-// person's call: the router fills an empty acting id from the context, and
-// the account rule reads it the same way. It is judged by their permission,
-// never paid unasked.
-func TestACallThatNamesNobodyIsJudgedByThePersonItsContextCarries(t *testing.T) {
+// A REQUEST THAT NAMES NOBODY IS NOBODY'S, whatever its context carries. The
+// seams that build a request fill its acting id from the context before the
+// account is asked (the router's ResolveFor, the engine's
+// applyCallAttribution), so a blank id here means nobody said. Reading the
+// person off the context instead would hand them the cluster's account while
+// their own keys, which are asked about by the id alone, stayed out: the
+// bring-your-own order reversed.
+func TestARequestThatNamesNobodyIsNotPaidUnderAPersonsContext(t *testing.T) {
 	reg := newProviderRegistry()
 	gate := openTo("olga")
 	reg.SetClusterAccountGate(gate.gate)
 	entry := vendorEntry(VendorAnthropic, true, "")
 
-	if accounts, _ := reg.VendorAccountsFor(personContext("olga"), VendorAccountQuery{}, entry); refsOf(accounts) != "cluster" {
-		t.Fatalf("accounts = %q, want the cluster's account for a person who may use it", refsOf(accounts))
-	}
-	accounts, passed := reg.VendorAccountsFor(personContext("ana"), VendorAccountQuery{}, entry)
+	accounts, passed := reg.VendorAccountsFor(personContext("olga"), VendorAccountQuery{}, entry)
 	if len(accounts) != 0 {
-		t.Fatalf("accounts = %q, want nothing for a person the cluster's account is closed to", refsOf(accounts))
+		t.Fatalf("accounts = %q, want nothing: the request names nobody", refsOf(accounts))
 	}
-	if reason, _ := clusterPassedOver(passed); reason != ClusterAccountClosedReason {
-		t.Fatalf("reason = %q, want %q", reason, ClusterAccountClosedReason)
+	if reason, _ := clusterPassedOver(passed); reason != ClusterAccountUnnamedReason {
+		t.Fatalf("reason = %q, want %q", reason, ClusterAccountUnnamedReason)
 	}
-	gate.mu.Lock()
-	asked := append([]string(nil), gate.asked...)
-	gate.mu.Unlock()
-	if strings.Join(asked, " ") != "olga ana" {
-		t.Fatalf("the gate was asked about %q, want each person the context carried", asked)
+	if gate.asks() != 0 {
+		t.Fatalf("the gate was asked %d times about a request that names nobody", gate.asks())
+	}
+	// The same person, named, is judged by their permission.
+	if accounts, _ := reg.VendorAccountsFor(personContext("olga"), VendorAccountQuery{ActingUserId: "olga"}, entry); refsOf(accounts) != "cluster" {
+		t.Fatalf("accounts = %q, want the cluster's account for a person who may use it", refsOf(accounts))
 	}
 }
 

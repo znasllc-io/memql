@@ -75,8 +75,11 @@ func CallerKinds() []string {
 // (ContextForClusterWork) is CallerKindSystem: the job is a stamp a Go caller
 // wired on purpose, which is the claim the comment above asks for, and the
 // cluster's vendor account pays for it as the cluster's own work
-// (ActsForTheCluster). An access context still answers first, so a job run for
-// a person records the person.
+// (ActsForTheCluster). An access context still answers first: a context
+// carrying both a person and a job says the person. A job resolved for nobody
+// and called for a person (the safety check) still records the system on every
+// call, because the router keeps a caller kind its resolution knew and re-reads
+// only one it did not (component/router fallback_structured.go, perCall).
 func CallerKindFromContext(ctx context.Context) string {
 	access, ok := AccessFromContext(ctx)
 	if !ok || access == nil {

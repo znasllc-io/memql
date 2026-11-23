@@ -25,11 +25,14 @@ import (
 //
 // # What says so
 //
-//   - The call's id is one the engine mints for itself and the identity
-//     service never does: a system actor (`system:`, which covers an
-//     automation's `system:automation:<name>` and the maintenance principal),
-//     one of the cluster's named principals (`cluster:`, among them the
-//     operator credential's stream subject), or a connector.
+//   - The call's id is one minted for the cluster's own actors, never for a
+//     person: a system actor (`system:`, which covers an automation's
+//     `system:automation:<name>` and the maintenance principal), one of the
+//     cluster's named principals (`cluster:`, among them the operator
+//     credential's stream subject), or a connector. A service-account token
+//     an operator mints for a machine (the deploy gate's, say) may carry a
+//     `system:` subject too, and its calls are the cluster's for the same
+//     reason: an operator holds it, and no person does.
 //   - Or the call names nobody, and its context carries the cluster's own
 //     actor (a Synthetic one, or a connector), or a JOB a Go caller wired as
 //     the cluster's own with ContextForClusterWork.
@@ -64,6 +67,15 @@ type clusterWorkKey struct{}
 // safety check, the healer). It is not a way to make a person's call free: a
 // call that names a person stays that person's whatever this stamp says
 // (ActsForTheCluster).
+//
+// STAMP IT ON A CONTEXT THAT NAMES NOBODY. A resolution fills the call's
+// acting id from the person on its context before the account is asked (the
+// router's ResolveFor, the engine's applyCallAttribution), and from then on
+// the call names that person. So a job resolves under a bare context, as
+// app's resolveForClusterJob does, and it is a CALL made later on that
+// resolution, whose request names nobody, that the stamp on its own context
+// claims for the job. A job resolved under a person's context is that
+// person's call (router TestAJobsStampDoesNotPayForAPersonItsContextNames).
 //
 // A blank job returns ctx unchanged, matching ContextWithSystemActor: a caller
 // that cannot say which job it is claims nothing.

@@ -119,6 +119,29 @@ func TestLedgerRowNamesTheKindOfCallerEvenWithNoPerson(t *testing.T) {
 		})
 	}
 
+	// A CALL NOBODY STAMPED is still recorded as nobody's when a door serves
+	// it: a machine lent to cluster work may, and its row says
+	// `unattributed`, never blank and never the system.
+	t.Run("nobody stamped anything, served by a lent machine", func(t *testing.T) {
+		r, ledger := lentMachineRouter(t)
+		resolved, err := r.ResolveFor(context.Background(), ResolveRequest{Level: airoute.LevelStrong, Modality: airoute.ModalityChat})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// On the background lane, which keeps a ceiling of its own: see
+		// TestAnUnattributedClientRecordsEachCallsOwnCaller.
+		if _, err := resolved.Client.(common.ChatAIProvider).CallChat(memql.ContextWithBackgroundLane(context.Background()), nil); err != nil {
+			t.Fatal(err)
+		}
+		args := ledger.args(t)
+		if args["callerKind"] != auth.CallerKindUnattributed {
+			t.Errorf("callerKind=%v, want %q", args["callerKind"], auth.CallerKindUnattributed)
+		}
+		if user := fmt.Sprint(args["userId"]); user != "" && user != "<nil>" {
+			t.Errorf("userId=%v, want none", args["userId"])
+		}
+	})
+
 	// A CALL NOBODY STAMPED never reaches the vendor (owner decision
 	// 2026-11-23): it says neither whom it is for nor that it is the
 	// cluster's, so the cluster's account does not pay for it, and the
@@ -240,6 +263,22 @@ func TestProviderRowOmitsCacheKind(t *testing.T) {
 	}
 	if strings.Contains(rendered, "cacheKind") {
 		t.Fatalf("cacheKind reached the mutation on a provider row: %s", rendered)
+	}
+}
+
+// A cache hit inside a run whose step carries no access context is the run
+// owner's, exactly as a call ResolveFor resolves there would be: the two
+// attribution belts read the same context the same way.
+func TestCacheServedRowInARunNamesTheRunsOwner(t *testing.T) {
+	r, _ := levelRouter(t, airoute.LevelStrong, nil)
+	ledger := &countingLedger{writes: make(chan string, 4)}
+	r.engine = ledger
+	ctx := common.ContextWithRun(context.Background(), common.RunContext{
+		RunId: "v1:work:run:r1", OwnerUserId: "alice", StepKey: "summarise", Mode: common.RunModeLive,
+	})
+	r.RecordCacheServed(ctx, ResolveRequest{Level: airoute.LevelStrong, Modality: airoute.ModalityChat}, cacheResolution(), airoute.CacheKindExact, 2)
+	if args := ledger.args(t); args["userId"] != "alice" {
+		t.Fatalf("userId=%v on a cache row inside alice's run, want alice", args["userId"])
 	}
 }
 

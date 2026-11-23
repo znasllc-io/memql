@@ -1284,6 +1284,28 @@ func clusterJob() context.Context {
 	return auth.ContextForClusterWork(context.Background(), "router-test")
 }
 
+// A JOB'S STAMP NEVER PAYS FOR A PERSON. A resolution fills the acting id from
+// the person on its context before the account is asked, and a call that names
+// a person is that person's whatever the stamp says (auth.ActsForTheCluster).
+// So a job resolves under a context that names nobody, as
+// app.resolveForClusterJob does; one resolved under a person's context is
+// judged as that person, here somebody the account is closed to.
+func TestAJobsStampDoesNotPayForAPersonItsContextNames(t *testing.T) {
+	f := newAccountFixture(t, []string{"claude"}, nil, claudeRecord)
+	f.clusterAccountClosedTo(alice)
+	req := autoRequest(airoute.ModalityChat)
+	req.UserId = ""
+
+	_, err := f.router.ResolveFor(auth.ContextForClusterWork(personCtx(alice), "router-test"), req)
+	var refusal *InferenceUnavailable
+	if !errors.As(err, &refusal) || !refusalSays(refusal, memql.ClusterAccountClosedReason) {
+		t.Fatalf("err = %v, want her call refused: the cluster's account is closed to her, stamp or no stamp", err)
+	}
+	if _, err := f.router.ResolveFor(clusterJob(), req); err != nil {
+		t.Fatalf("the job, resolved for nobody, was refused: %v", err)
+	}
+}
+
 // refusalSays reports whether any door of a refusal carries the reason.
 func refusalSays(refusal *InferenceUnavailable, reason string) bool {
 	for _, door := range refusal.Doors {

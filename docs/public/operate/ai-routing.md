@@ -720,10 +720,12 @@ cluster's, one model for everybody.
 **Who a call is for is read from the call.** The request names a person, or
 its context does: a signed-in session, borrowed authority, or the owner of the
 run the call is part of. A call is the cluster's own work only when it says
-so: an id the engine mints for its own actors, the cluster's own actor on its
-context, or a job the cluster wired as its own (the command-safety check and
-repair). A call that says neither is refused the cluster's account with
-"the call does not say whom it is for", a fault of the code that made it.
+so: an id minted for the cluster's own actors, the cluster's own actor on its
+context, or a job the cluster wired as its own (the command-safety check). A
+call that says neither is refused the cluster's account with "the call does
+not say whom it is for", a fault of the code that made it. A machine lent to
+cluster work may still serve such a call: the fleet counts a call with no
+acting person as cluster work.
 
 **The cluster's account is judged per person, from rows.** Whether it pays is
 `execute app:settings/clusteraccount` for the person the call is for (their
@@ -772,9 +774,11 @@ cluster wired as its own (the command-safety check); `unattributed` is a Go
 call site that established no caller at all, which is the one honest answer for a
 context nobody stamped. It is DERIVED from the context where the request is built,
 never supplied by a caller, and **nothing routes on it**: no `@when` key reads it,
-because a rule that did would turn evidence into an input. An `unattributed` row
-at a vendor is a refusal: the cluster's account does not pay for a call that
-names nobody ([which account pays](#which-account-pays-for-a-vendor-call)).
+because a rule that did would turn evidence into an input. At a vendor, a call
+with no `userId` and an `unattributed` caller is a refusal: the cluster's account
+does not pay for a call that names nobody
+([which account pays](#which-account-pays-for-a-vendor-call)). An `unattributed`
+row that does name a user is a step of that user's run, attributed from the run.
 
 **`cacheKind` is how you tell a cache hit from a provider call.** The exact-hash
 response cache is consulted AFTER the router resolves -- its key folds in the
