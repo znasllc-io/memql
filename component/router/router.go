@@ -95,6 +95,15 @@ func New(providers *memql.ProviderRegistry, policies *memql.PolicyRegistry, rule
 	}
 }
 
+// THE CONTEXT-FREE Resolve* METHODS BELOW NAME NOBODY. Each resolves under
+// context.Background(), so a request that leaves UserId blank says neither
+// whom it is for nor that it is the cluster's own work, and since the owner's
+// decision of 2026-11-23 the cluster's vendor account does not pay for such a
+// call (memql ClusterAccountClosedTo). Nothing in production calls them: every
+// model call reaches the router through ResolveFor with its own context. A
+// caller that wants the cluster's account names a person in the request, or
+// resolves through ResolveFor under the context of the work it is doing.
+
 // ResolveStreamWithTools picks a provider chain for a streaming
 // chat-with-tools call and returns a wrapped provider. On pre-flight
 // error the wrapper automatically advances down the fallback chain,

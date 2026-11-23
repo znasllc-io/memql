@@ -37,6 +37,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/core/airoute"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // RecordCacheServed satisfies memql.AICacheRecorder.
@@ -61,6 +62,13 @@ func (r *Router) RecordCacheServed(
 	if strings.TrimSpace(req.UserId) == "" {
 		if access, ok := auth.AccessFromContext(ctx); ok && access != nil {
 			req.UserId = strings.TrimSpace(access.UserId)
+		}
+	}
+	// Then the run's owner, as ResolveFor reads them (resolve_for.go): a cache
+	// hit inside a person's run is theirs, as a served call there would be.
+	if strings.TrimSpace(req.UserId) == "" {
+		if run, ok := common.RunFromContext(ctx); ok {
+			req.UserId = strings.TrimSpace(run.OwnerUserId)
 		}
 	}
 	if strings.TrimSpace(req.CallerKind) == "" {

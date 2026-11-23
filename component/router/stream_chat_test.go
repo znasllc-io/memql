@@ -86,7 +86,7 @@ func TestPlainChatFallbackDoesNotReplayStartedCalls(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			first := &plainRefusalStream{chunks: tc.chunks}
 			second := &plainRefusalStream{chunks: []common.StreamChunk{{Content: "replayed", Done: true}}}
-			ch, err := plainRefusalFallback(first, second).CallChatStream(context.Background(), nil)
+			ch, err := plainRefusalFallback(first, second).CallChatStream(clusterJob(), nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -110,7 +110,7 @@ func TestPlainChatFallbackPreservesLastRefusalAndCancellation(t *testing.T) {
 		first := &plainRefusalStream{chunks: []common.StreamChunk{{Error: refusal, Done: true}}}
 		f := plainRefusalFallback(first, &plainRefusalStream{})
 		f.chain = f.chain[:1]
-		ch, err := f.CallChatStream(context.Background(), nil)
+		ch, err := f.CallChatStream(clusterJob(), nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -128,7 +128,7 @@ func TestPlainChatFallbackPreservesLastRefusalAndCancellation(t *testing.T) {
 	t.Run("cancel", func(t *testing.T) {
 		first := &plainRefusalStream{wait: true}
 		second := &plainRefusalStream{}
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(clusterJob())
 		defer cancel()
 		ch, err := plainRefusalFallback(first, second).CallChatStream(ctx, nil)
 		if err != nil {

@@ -1266,9 +1266,54 @@ func TestTheVendorSurfacesWithNoKeyAskTheSameGate(t *testing.T) {
 	// The cluster's own work is served as it always was.
 	own := autoRequest(airoute.ModalityVision)
 	own.UserId = ""
-	if _, _, err := f.router.resolveDirect(context.Background(), own, modalityVision); err != nil {
+	if _, _, err := f.router.resolveDirect(clusterJob(), own, modalityVision); err != nil {
 		t.Fatalf("the cluster's own picture was refused: %v", err)
 	}
+	// A picture that names nobody is not the cluster's work (owner decision
+	// 2026-11-23), and the refusal says the call is at fault.
+	_, _, err = f.router.resolveDirect(context.Background(), own, modalityVision)
+	if !errors.As(err, &refusal) || !refusalSays(refusal, memql.ClusterAccountUnnamedReason) {
+		t.Fatalf("err = %v, want a refusal saying the call names nobody", err)
+	}
+}
+
+// clusterJob is the cluster's own work, SAID: a job wired as the cluster's
+// (auth.ContextForClusterWork). A bare context names nobody, and the cluster's
+// account does not pay for it (owner decision 2026-11-23).
+func clusterJob() context.Context {
+	return auth.ContextForClusterWork(context.Background(), "router-test")
+}
+
+// A JOB'S STAMP NEVER PAYS FOR A PERSON. A resolution fills the acting id from
+// the person on its context before the account is asked, and a call that names
+// a person is that person's whatever the stamp says (auth.ActsForTheCluster).
+// So a job resolves under a context that names nobody, as
+// app.resolveForClusterJob does; one resolved under a person's context is
+// judged as that person, here somebody the account is closed to.
+func TestAJobsStampDoesNotPayForAPersonItsContextNames(t *testing.T) {
+	f := newAccountFixture(t, []string{"claude"}, nil, claudeRecord)
+	f.clusterAccountClosedTo(alice)
+	req := autoRequest(airoute.ModalityChat)
+	req.UserId = ""
+
+	_, err := f.router.ResolveFor(auth.ContextForClusterWork(personCtx(alice), "router-test"), req)
+	var refusal *InferenceUnavailable
+	if !errors.As(err, &refusal) || !refusalSays(refusal, memql.ClusterAccountClosedReason) {
+		t.Fatalf("err = %v, want her call refused: the cluster's account is closed to her, stamp or no stamp", err)
+	}
+	if _, err := f.router.ResolveFor(clusterJob(), req); err != nil {
+		t.Fatalf("the job, resolved for nobody, was refused: %v", err)
+	}
+}
+
+// refusalSays reports whether any door of a refusal carries the reason.
+func refusalSays(refusal *InferenceUnavailable, reason string) bool {
+	for _, door := range refusal.Doors {
+		if strings.Contains(door.Reason, reason) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestEmbeddingsStayOnTheClustersAccountForEverybody(t *testing.T) {
@@ -1317,8 +1362,12 @@ func TestAVendorRecordThatTakesNoKeyStillAsksWhoTheClustersAccountPaysFor(t *tes
 	if _, resolved, err := r.resolveChat(personCtx(bob), ResolveRequest{UserId: bob}); err != nil || resolved.ProviderName != "plain" {
 		t.Fatalf("a person the account pays for got %q, %v", resolved.ProviderName, err)
 	}
-	if _, resolved, err := r.resolveChat(context.Background(), ResolveRequest{}); err != nil || resolved.ProviderName != "plain" {
+	if _, resolved, err := r.resolveChat(clusterJob(), ResolveRequest{}); err != nil || resolved.ProviderName != "plain" {
 		t.Fatalf("the cluster's own work got %q, %v", resolved.ProviderName, err)
+	}
+	_, _, err = r.resolveChat(context.Background(), ResolveRequest{})
+	if !errors.As(err, &refusal) || !refusalSays(refusal, memql.ClusterAccountUnnamedReason) {
+		t.Fatalf("err = %v, want a refusal: a call that names nobody is not the cluster's work", err)
 	}
 }
 
@@ -1353,8 +1402,14 @@ func TestAPlainRecordNameResolvedAtTheCallAsksWhoTheClustersAccountPaysFor(t *te
 	// The cluster's own work resolves as it always did.
 	own := req
 	own.UserId = ""
-	if _, _, ok := f.router.providerLookup(context.Background(), own, "claude", modalityVision); !ok {
+	if _, _, ok := f.router.providerLookup(clusterJob(), own, "claude", modalityVision); !ok {
 		t.Error("the cluster's own picture was refused at the call")
+	}
+	// A call that names nobody is not the cluster's work, at the call either.
+	for name, mod := range surfaces {
+		if _, _, ok := f.router.providerLookup(context.Background(), own, "claude", mod); ok {
+			t.Errorf("%s: the cluster's account was spent at the call for a call that names nobody", name)
+		}
 	}
 	// Embeddings are never asked: the memory space is the cluster's.
 	entry, _ := f.providers.Entry("claude")

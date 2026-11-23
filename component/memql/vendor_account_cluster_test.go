@@ -104,10 +104,14 @@ func TestTheClustersOwnWorkIsPaidWithoutAskingAnybody(t *testing.T) {
 		ctx    context.Context
 		userId string
 	}{
-		"no acting person":      {context.Background(), ""},
-		"an automation":         {context.Background(), "system:automation:nightly"},
-		"the cluster's actor":   {auth.ContextWithSystemActor(context.Background(), "sweep"), ""},
-		"the operator's stream": {context.Background(), "cluster:operator"},
+		"an automation":                    {context.Background(), "system:automation:nightly"},
+		"the cluster's actor":              {auth.ContextWithSystemActor(context.Background(), "sweep"), ""},
+		"the operator's stream":            {context.Background(), "cluster:operator"},
+		"a connector":                      {auth.ContextWithConnectorActor(context.Background(), "shopify"), ""},
+		"a job wired as the cluster's own": {auth.ContextForClusterWork(context.Background(), "safety-classifier"), ""},
+		// The safety check screens a person's command; the check is the
+		// cluster's work, whoever it screens for.
+		"a job wired as the cluster's own, run for a person": {auth.ContextForClusterWork(personContext("ana"), "safety-classifier"), ""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			reg := newProviderRegistry()
@@ -124,6 +128,80 @@ func TestTheClustersOwnWorkIsPaidWithoutAskingAnybody(t *testing.T) {
 	}
 }
 
+// A CALL THAT NAMES NOBODY IS NOT THE CLUSTER'S WORK (owner decision
+// 2026-11-23). A context nobody stamped, and the anonymous reader, say neither
+// whom the call is for nor that it is the cluster's, so the cluster's account
+// does not pay for them, and nobody is asked: there is nobody to ask about.
+// The reason says why without naming anybody, on a record every signed-in
+// person can read.
+func TestACallThatNamesNobodyIsNotPaidByTheClustersAccount(t *testing.T) {
+	for name, tc := range map[string]struct {
+		ctx    context.Context
+		userId string
+	}{
+		"nobody stamped anything":       {context.Background(), ""},
+		"the anonymous reader":          {auth.ContextWithAnonymousActor(context.Background()), auth.AnonymousUserId},
+		"the anonymous reader, unnamed": {auth.ContextWithAnonymousActor(context.Background()), ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			reg := newProviderRegistry()
+			gate := openTo()
+			reg.SetClusterAccountGate(gate.gate)
+			entry := vendorEntry(VendorOpenAI, true, "")
+			q := VendorAccountQuery{ActingUserId: tc.userId}
+
+			accounts, passed := reg.VendorAccountsFor(tc.ctx, q, entry)
+			if len(accounts) != 0 {
+				t.Fatalf("accounts = %q, want nothing: the call says neither whom it is for nor that it is the cluster's", refsOf(accounts))
+			}
+			if reason, skipped := clusterPassedOver(passed); !skipped || reason != ClusterAccountUnnamedReason {
+				t.Fatalf("passed over = %+v, want the cluster's account with the reason the call names nobody", passed)
+			}
+			if _, ok := reg.VendorAccountUsable(tc.ctx, q, entry, VendorAccountCluster); ok {
+				t.Fatal("the cluster's account was spent at the call for a call that names nobody")
+			}
+			if reg.ClusterAccountClosedTo(tc.ctx, tc.userId) != ClusterAccountUnnamedReason {
+				t.Fatalf("closed reason = %q, want %q", reg.ClusterAccountClosedTo(tc.ctx, tc.userId), ClusterAccountUnnamedReason)
+			}
+			if gate.asks() != 0 {
+				t.Fatalf("the gate was asked %d times about a call that names nobody", gate.asks())
+			}
+		})
+	}
+	if strings.Contains(ClusterAccountUnnamedReason, "anonymous") {
+		t.Fatalf("the reason names a kind of caller: %q", ClusterAccountUnnamedReason)
+	}
+}
+
+// A REQUEST THAT NAMES NOBODY IS NOBODY'S, whatever its context carries. The
+// seams that build a request fill its acting id from the context before the
+// account is asked (the router's ResolveFor, the engine's
+// applyCallAttribution), so a blank id here means nobody said. Reading the
+// person off the context instead would hand them the cluster's account while
+// their own keys, which are asked about by the id alone, stayed out: the
+// bring-your-own order reversed.
+func TestARequestThatNamesNobodyIsNotPaidUnderAPersonsContext(t *testing.T) {
+	reg := newProviderRegistry()
+	gate := openTo("olga")
+	reg.SetClusterAccountGate(gate.gate)
+	entry := vendorEntry(VendorAnthropic, true, "")
+
+	accounts, passed := reg.VendorAccountsFor(personContext("olga"), VendorAccountQuery{}, entry)
+	if len(accounts) != 0 {
+		t.Fatalf("accounts = %q, want nothing: the request names nobody", refsOf(accounts))
+	}
+	if reason, _ := clusterPassedOver(passed); reason != ClusterAccountUnnamedReason {
+		t.Fatalf("reason = %q, want %q", reason, ClusterAccountUnnamedReason)
+	}
+	if gate.asks() != 0 {
+		t.Fatalf("the gate was asked %d times about a request that names nobody", gate.asks())
+	}
+	// The same person, named, is judged by their permission.
+	if accounts, _ := reg.VendorAccountsFor(personContext("olga"), VendorAccountQuery{ActingUserId: "olga"}, entry); refsOf(accounts) != "cluster" {
+		t.Fatalf("accounts = %q, want the cluster's account for a person who may use it", refsOf(accounts))
+	}
+}
+
 // A registry nobody installed a gate on gives the cluster's account to no
 // person. The engine installs its gate when it starts; this is what a
 // registry built some other way does, and it is the narrowing direction.
@@ -133,8 +211,12 @@ func TestWithNoGateTheClustersAccountServesOnlyItsOwnWork(t *testing.T) {
 	if accounts, _ := reg.VendorAccountsFor(personContext("ana"), VendorAccountQuery{ActingUserId: "ana", Chosen: true}, entry); len(accounts) != 0 {
 		t.Fatalf("accounts = %q for a person, with no gate installed", refsOf(accounts))
 	}
-	if accounts, _ := reg.VendorAccountsFor(context.Background(), VendorAccountQuery{}, entry); refsOf(accounts) != "cluster" {
+	own := auth.ContextWithSystemActor(context.Background(), "sweep")
+	if accounts, _ := reg.VendorAccountsFor(own, VendorAccountQuery{}, entry); refsOf(accounts) != "cluster" {
 		t.Fatalf("accounts = %q for the cluster's own work, with no gate installed", refsOf(accounts))
+	}
+	if accounts, _ := reg.VendorAccountsFor(context.Background(), VendorAccountQuery{}, entry); len(accounts) != 0 {
+		t.Fatalf("accounts = %q for a call that names nobody, with no gate installed", refsOf(accounts))
 	}
 }
 
@@ -169,8 +251,11 @@ func TestTheClustersAccountIsJudgedAgainAtTheCall(t *testing.T) {
 	if _, ok := reg.VendorAccountUsable(personContext("ana"), VendorAccountQuery{ActingUserId: "ana", Chosen: true}, entry, VendorAccountCluster); ok {
 		t.Fatal("the cluster's account was spent at the call for a person who may not use it")
 	}
-	if _, ok := reg.VendorAccountUsable(context.Background(), VendorAccountQuery{}, entry, VendorAccountCluster); !ok {
+	if _, ok := reg.VendorAccountUsable(auth.ContextWithSystemActor(context.Background(), "sweep"), VendorAccountQuery{}, entry, VendorAccountCluster); !ok {
 		t.Fatal("the cluster's account was refused at the call to the cluster's own work")
+	}
+	if _, ok := reg.VendorAccountUsable(context.Background(), VendorAccountQuery{}, entry, VendorAccountCluster); ok {
+		t.Fatal("the cluster's account was spent at the call for a call that names nobody")
 	}
 	if _, ok := reg.VendorAccountUsable(personContext("olga"), VendorAccountQuery{ActingUserId: "olga", Chosen: true}, vendorEntry(VendorAnthropic, false, ""), VendorAccountCluster); ok {
 		t.Fatal("an account the cluster does not have was usable")
@@ -247,9 +332,13 @@ func TestTheVendorDoorOpensOnTheClustersAccountOnlyForThoseWhoMayUseIt(t *testin
 	if ana.Cluster || ana.Chosen || ana.Auto || ana.ChosenStreams || ana.AutoStreams {
 		t.Fatalf("door = %+v, want the vendor door shut for a person who may not use the cluster's account and has no key", ana)
 	}
-	own := reg.VendorDoorFor(context.Background(), "")
+	own := reg.VendorDoorFor(auth.ContextWithSystemActor(context.Background(), "sweep"), "")
 	if !own.Cluster || !own.Chosen || !own.Auto {
 		t.Fatalf("door = %+v, want the cluster's account to serve the cluster's own work", own)
+	}
+	nobody := reg.VendorDoorFor(context.Background(), "")
+	if !nobody.ClusterSetUp || nobody.Cluster || nobody.Chosen || nobody.Auto {
+		t.Fatalf("door = %+v, want the cluster's account set up and shut to a call that names nobody", nobody)
 	}
 
 	// A key of her own opens it again, on a route she chooses.

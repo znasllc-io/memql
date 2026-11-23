@@ -154,6 +154,39 @@ func TestResolveForExpiredRequestDoesNotReadCatalog(t *testing.T) {
 	}
 }
 
+// A REQUEST BUILT OUTSIDE THE ENGINE, INSIDE A RUN, IS THE RUN OWNER'S. A run's
+// owner is a person recorded on the run row, and the run context carries them
+// where no access context does -- a step executing on a replica that did not
+// take the request. The engine seam already reads the owner there
+// (memql applyCallAttribution); the router fills the same way, so a request
+// the agent replier builds for itself is not judged as nobody's -- which, now
+// that a call naming nobody is refused the cluster's account (owner decision
+// 2026-11-23), would refuse a person's own run.
+func TestResolveForReadsTheRunsOwnerWhenNoActorIsOnTheContext(t *testing.T) {
+	fleet := &authenticatedFleet{}
+	ctx := common.ContextWithRun(context.Background(), common.RunContext{
+		RunId: "v1:work:run:r1", OwnerUserId: "alice", StepKey: "reply", Mode: common.RunModeLive,
+	})
+	resolved, err := authenticatedRouter(t, fleet).ResolveFor(ctx, ResolveRequest{Level: airoute.LevelStrong, Modality: airoute.ModalityChat})
+	if err != nil {
+		t.Fatalf("the run owner's call was refused: %v", err)
+	}
+	if resolved.Resolution.ProviderName != "fleet:qwen3.8:27b" {
+		t.Fatalf("resolved %q, want the run owner's own machine", resolved.Resolution.ProviderName)
+	}
+	for _, visit := range fleet.visits {
+		if visit.user != "alice" {
+			t.Fatalf("the catalog was read for %q, want the run's owner", visit.user)
+		}
+	}
+	// An access context still answers first: a run's step under its owner's
+	// own session reads the session.
+	fleet = &authenticatedFleet{}
+	if _, err := authenticatedRouter(t, fleet).ResolveFor(auth.ContextWithUserActor(ctx, "bob"), ResolveRequest{Level: airoute.LevelStrong, Modality: airoute.ModalityChat}); err == nil {
+		t.Fatal("a call under bob's own context was served alice's machine")
+	}
+}
+
 func TestResolveForPreservesExplicitUserAndDoesNotWidenAnonymousCatalog(t *testing.T) {
 	for _, explicit := range []string{"", "bob"} {
 		fleet := &authenticatedFleet{}

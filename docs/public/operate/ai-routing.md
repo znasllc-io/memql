@@ -676,7 +676,8 @@ An [**API key**](api-keys.md) is a person's.
 
 | The call | Accounts, in order |
 |---|---|
-| Has no person behind it (a schedule, a sweep, a seed, a synthetic identity) | the cluster's account only |
+| Is the cluster's own work, and says so (a schedule, a sweep, a seed, an automation, a connector, the operator's stream, or a job the cluster runs for everyone, such as the command-safety check) | the cluster's account only |
+| Says neither whom it is for nor that it is the cluster's (code that lost track of who started it, or an anonymous visitor) | none: the call is refused, and the record says it names nobody |
 | Runs under a person's authority borrowed for a visitor (a shopper form, an access-code call) | the cluster's account, when the person whose authority is borrowed may use it. Never a key |
 | Was made on a route its person chose, or a source they pinned themselves | their default key at the vendor, then keys lent to them (the key added earliest first), then the cluster's account when they may use it |
 | Anything else: Auto, and every call nobody chose a route for | the same order, counting only keys whose owner turned on **Let Auto use this key** |
@@ -715,6 +716,16 @@ does not pay for, a picture, speech, transcription or an image at a vendor is
 passed over like a shut door, with that reason in `considered`. Embeddings are
 paid by the cluster's account for every caller: the memory space is the
 cluster's, one model for everybody.
+
+**Who a call is for is read from the call.** The request names a person, or
+its context does: a signed-in session, borrowed authority, or the owner of the
+run the call is part of. A call is the cluster's own work only when it says
+so: an id minted for the cluster's own actors, the cluster's own actor on its
+context, or a job the cluster wired as its own (the command-safety check). A
+call that says neither is refused the cluster's account with "the call does
+not say whom it is for", a fault of the code that made it. A machine lent to
+cluster work may still serve such a call: the fleet counts a call with no
+acting person as cluster work.
 
 **The cluster's account is judged per person, from rows.** Whether it pays is
 `execute app:settings/clusteraccount` for the person the call is for (their
@@ -758,11 +769,16 @@ cluster whose only open door is a signed-in Claude Code read as ordinary chat tu
 say two very different things at once -- "a person made this call and nobody wrote
 down which one" and "no person made this call at all, it was a boot seed or a
 retention sweep" -- so every unattributed row had to be read as a possible gap.
-`system` is the cluster acting and correctly has no user; `unattributed` is a Go
+`system` is the cluster acting and correctly has no user, including a job the
+cluster wired as its own (the command-safety check); `unattributed` is a Go
 call site that established no caller at all, which is the one honest answer for a
 context nobody stamped. It is DERIVED from the context where the request is built,
 never supplied by a caller, and **nothing routes on it**: no `@when` key reads it,
-because a rule that did would turn evidence into an input.
+because a rule that did would turn evidence into an input. At a vendor, a call
+with no `userId` and an `unattributed` caller is a refusal: the cluster's account
+does not pay for a call that names nobody
+([which account pays](#which-account-pays-for-a-vendor-call)). An `unattributed`
+row that does name a user is a step of that user's run, attributed from the run.
 
 **`cacheKind` is how you tell a cache hit from a provider call.** The exact-hash
 response cache is consulted AFTER the router resolves -- its key folds in the

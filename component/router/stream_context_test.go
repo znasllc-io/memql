@@ -100,7 +100,7 @@ func TestStreamFallbackDoesNotReplayStartedCalls(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			first := &refusalStream{chunks: tc.chunks}
 			second := &refusalStream{chunks: []common.StreamToolChunk{{Content: "replayed", Done: true}}}
-			ch, err := refusalFallback(first, second).CallChatStreamWithTools(context.Background(), nil, nil)
+			ch, err := refusalFallback(first, second).CallChatStreamWithTools(clusterJob(), nil, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -124,7 +124,7 @@ func TestStreamFallbackPreservesLastRefusalAndCancellation(t *testing.T) {
 		first := &refusalStream{chunks: []common.StreamToolChunk{{Error: refusal, Done: true}}}
 		f := refusalFallback(first, &refusalStream{})
 		f.chain = f.chain[:1]
-		ch, err := f.CallChatStreamWithTools(context.Background(), nil, nil)
+		ch, err := f.CallChatStreamWithTools(clusterJob(), nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -142,7 +142,7 @@ func TestStreamFallbackPreservesLastRefusalAndCancellation(t *testing.T) {
 	t.Run("cancel", func(t *testing.T) {
 		first := &refusalStream{wait: true}
 		second := &refusalStream{}
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(clusterJob())
 		defer cancel()
 		ch, err := refusalFallback(first, second).CallChatStreamWithTools(ctx, nil, nil)
 		if err != nil {
@@ -177,7 +177,7 @@ func TestAStreamRetriedAfterARefusalNamesTheRefusedSourceOnTheServedRow(t *testi
 	ledger := &countingLedger{writes: make(chan string, 8)}
 	f.router.engine = ledger
 
-	ch, err := f.CallChatStreamWithTools(context.Background(), nil, nil)
+	ch, err := f.CallChatStreamWithTools(clusterJob(), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

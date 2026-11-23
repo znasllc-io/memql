@@ -222,7 +222,8 @@ func VendorOfEntry(e *ProviderConfigEntry) string {
 }
 
 // keysServe reports whether a key may pay for this query at all, before any
-// row is read: never for the cluster's own work, and never for a visitor.
+// row is read: never for a call no person is behind (the cluster's own work,
+// or a call that names nobody), and never for a visitor.
 func keysServe(ctx context.Context, q VendorAccountQuery) bool {
 	return !q.ForVisitor && !auth.ActsForNoPerson(ctx, q.ActingUserId)
 }
@@ -452,7 +453,9 @@ type VendorPayer struct {
 // actingUserId is the person the answer is for. Blank, a synthetic actor's id,
 // or a context that borrowed a person's authority for a visitor is a call no
 // key pays for: the answer is then the cluster's account alone, and the keys
-// are not read.
+// are not read. That account opens only where ClusterAccountClosedTo says so:
+// for the cluster's own work when the call says it is the cluster's, and never
+// for a call that names nobody.
 //
 // THE CLUSTER'S HALF is two questions. Is the account set up: the predicate it
 // always was (federationReadiness, the one the Providers page reads), which is
