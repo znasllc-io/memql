@@ -634,6 +634,15 @@ Decided by the owner after landing (2026-11-22):
   code: an automation runs as its own actor unless it inherits a person's,
   and the safety check and the healer are named cluster jobs.
 
+- **A visitor's call is judged by the site's publisher.** A shopper form, an
+  access-code call and a deployed workflow run under the borrowed authority
+  of the person who published the site or deployed the workflow; no key ever
+  pays for them (K8 line 2), and the cluster's account pays only when that
+  person may use it. Asked with "always pay for visitors" and "never pay for
+  visitors" as the alternatives, the owner kept it (2026-11-23): otherwise
+  anyone who can publish a site could spend the cluster's account through a
+  public form. No code changed.
+
 Left open by the independent review, for the owner:
 
 - **A route with one vendor selector at every level does not degrade inside

@@ -2233,7 +2233,13 @@ transcription and images, and any record whose client takes no key, so the
 rule does not depend on what kind of client a record has
 (`clusterAccountGated`). Embeddings are never asked: the memory space is the
 cluster's, one model for everybody. A visitor's call is judged by the person
-whose authority it borrows.
+whose authority it borrows: the person who published the site (a shopper
+form, an access code) or deployed the workflow. Owner decision, 2026-11-23,
+asked against paying for every visitor whoever published the site and against
+paying for none: kept, because a publisher the owner has not allowed could
+otherwise spend his account by putting a public form in front of it. Cost:
+such a site's visitors get no vendor model until the owner allows its
+publisher; machines the publisher owns or was lent still serve them.
 
 Two paths reached a vendor without being walked, and each now asks. A PLAIN
 record name resolved at the call (`accountAtCall`,

@@ -258,8 +258,11 @@ the cluster's account does not pay for this person's calls.
   about them now: their role, their groups and their grants. Work continued on
   a person's behalf (a run, an agent, an app session) is judged by that
   person, never by the stand-in role such work runs under. A visitor's call is
-  judged by the person whose authority it borrows. A person who is no longer
-  an active user holds nothing.
+  judged by the person whose authority it borrows, the one who published the
+  site or deployed the workflow: a site published by somebody who may not use
+  the cluster's account gets no vendor model for its visitors until the
+  cluster owner allows that person. A person who is no longer an active user
+  holds nothing.
 - **It is asked again when the call is made.** A permission taken away between
   choosing a model and calling it is not spent.
 - **It covers every kind of vendor call MemQL routes for a person**, not only
