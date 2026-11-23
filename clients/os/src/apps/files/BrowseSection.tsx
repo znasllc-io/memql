@@ -1525,11 +1525,10 @@ function UploadPlaceholder({ task }: { task: UploadTask }) {
         </p>
       ) : null}
       {task.state === "failed" && task.kind === "file" ? (
-        // THE SERVER'S SENTENCE, VERBATIM. The client duplicates no limit:
-        // over-cap and over-quota arrive as the engine's own words, which
-        // name both numbers.
+        // A FEW PLAIN WORDS (failureReason): the engine's full sentence,
+        // which names the numbers, is in the logs (Jesús, Nov 23 2026).
         <p className="os-files-up-note" role="alert">
-          {task.error}
+          {task.error || "Upload failed"}
         </p>
       ) : null}
       {task.state === "failed" && task.kind === "tree" ? (
@@ -1540,7 +1539,7 @@ function UploadPlaceholder({ task }: { task: UploadTask }) {
           {task.failures.map((failure) => (
             <div key={failure.name} className="os-files-up-actions">
               <span className="os-files-up-note">
-                {failure.name} -- {failure.error}
+                {failure.name}{failure.error ? ` -- ${failure.error}` : ""}
               </span>
               <Button onClick={failure.retry}>Try again</Button>
             </div>

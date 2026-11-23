@@ -8,7 +8,7 @@ import { StorageAllowance, lowStorage } from "../../src/apps/files/backups/Stora
 import { formatStorageBytes, transferActions, transferLine, validArchive, absoluteBackupPath, type BackupTransfer } from "../../src/apps/files/backups/transfers";
 import { uploadLine } from "../../src/apps/files/backups/ArchiveTransfers";
 import { FILES_SECTIONS } from "../../src/apps/files/settings";
-import { trackDeskUpload, useUploadSpeedHistory, useUploadTasks, type UploadTask } from "../../src/apps/files/useUploadTasks";
+import { failureReason, trackDeskUpload, useUploadSpeedHistory, useUploadTasks, type UploadTask } from "../../src/apps/files/useUploadTasks";
 import { formatBytes } from "../../src/kit";
 import { fakeConnection } from "./harness";
 import { machineFromRow } from "../../src/apps/fleet/rows";
@@ -173,6 +173,15 @@ describe("downloads tab", () => {
     expect(screen.getByRole("img", { name: "Nothing uploading" })).toBeTruthy();
     expect(screen.getByRole("group", { name: "Upload speed" }).querySelectorAll("rect").length).toBeGreaterThan(0);
     vi.useRealTimers();
+  });
+
+  it("says why an upload failed in a few plain words, the full sentence going to the logs (Jesús, Nov 23)", () => {
+    expect(failureReason("storage limit reached; stored files, the Bin and unfinished transfers all count (334 bytes available, 600 required)")).toBe("Storage is full");
+    expect(failureReason("TypeError: Failed to fetch")).toBe("Connection lost");
+    expect(failureReason("upload is not complete: 0 bytes are staged of the declared 2344379152 -- read GET /artifacts/uploads/x")).toBe("");
+    const task = { state: "failed", error: "" } as unknown as UploadTask;
+    expect(uploadLine(task, formatBytes).text).toBe("Upload failed");
+    expect(uploadLine({ ...task, error: "Storage is full" }, formatBytes).text).toBe("Upload failed · Storage is full");
   });
 
   it("turns the ring the error colour with an X when an upload fails, even with no graph yet (Jesús, Nov 23)", () => {

@@ -114,7 +114,7 @@ function TransferSecondary({ text, warn, progress }: { text: string; warn: boole
 /** This browser's own upload, in the same row. A tree drop's per-file retries
  *  and the resume note stay on the Browse placeholder where the files land. */
 export function uploadLine(task: UploadTask, bytes: (n: number) => string): { text: string; warn: boolean; progress: number | null } {
-  if (task.state === "failed") return { text: `Upload failed · ${task.error}`, warn: true, progress: null };
+  if (task.state === "failed") return { text: task.error ? `Upload failed · ${task.error}` : "Upload failed", warn: true, progress: null };
   if (task.state === "done") return { text: `Uploaded · ${bytes(task.totalBytes)}`, warn: false, progress: null };
   // A sending upload is its bar alone: speed and time left are the graph's
   // above the list (look A, Jesús, Nov 23). A folder drop still counts files.

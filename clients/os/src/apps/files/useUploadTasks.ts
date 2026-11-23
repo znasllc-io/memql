@@ -41,8 +41,25 @@ export interface UploadTask {
 
 const DONE_LINGER_MS = 1200;
 
-function describe(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+/**
+ * WHY AN UPLOAD FAILED, IN A FEW PLAIN WORDS (Jesús, Nov 23 2026: "super short,
+ * just to let the user know why it failed and nothing else"). The engine's full
+ * sentence goes to the logs (console.warn is captured into Logs, logs/capture.ts);
+ * the row shows only this. An unrecognised cause says nothing beyond
+ * "Upload failed".
+ */
+export function failureReason(message: string): string {
+  if (/storage limit/i.test(message)) return "Storage is full";
+  if (/too large|exceeds the|maximum (file )?size/i.test(message)) return "File is too large";
+  if (/sign(ed)? ?in|unauthori[sz]ed|\b401\b|token expired/i.test(message)) return "Signed out";
+  if (/network|failed to fetch|load failed|connection|offline|timed? ?out/i.test(message)) return "Connection lost";
+  return "";
+}
+
+function describe(err: unknown, label: string): string {
+  const message = err instanceof Error ? err.message : String(err);
+  console.warn(`Upload failed: ${label}: ${message}`);
+  return failureReason(message);
 }
 
 export interface UploadTasksApi {
@@ -177,7 +194,7 @@ export function trackDeskUpload(key: string, file: File, handle: UploadHandle, r
   handle.onProgress?.((p) => progress(id, p.sentBytes, { totalBytes: p.totalBytes }));
   handle.done
     .then(() => settleDone(id))
-    .catch((err: unknown) => patch(id, { state: "failed", error: describe(err) }));
+    .catch((err: unknown) => patch(id, { state: "failed", error: describe(err, file.name) }));
 }
 
 export function useUploadTasks(
@@ -204,7 +221,7 @@ export function useUploadTasks(
           );
           handle.done
             .then(() => settleDone(id))
-            .catch((err: unknown) => patch(id, { state: "failed", error: describe(err) }));
+            .catch((err: unknown) => patch(id, { state: "failed", error: describe(err, file.name) }));
         };
         setTasks((ts) => [
           {
@@ -285,7 +302,7 @@ export function useUploadTasks(
             error: `${result.failures.length} of ${batch.length} did not land.`,
             failures: result.failures.map((f) => ({
               name: [...f.dirPath, f.file.name].join("/"),
-              error: f.error,
+              error: describe(f.error, [...f.dirPath, f.file.name].join("/")),
               // The retry re-runs ONLY this file, into folders the first run
               // already resolved -- no duplicate siblings.
               retry: () => run([{ file: f.file, dirPath: f.dirPath }]),
