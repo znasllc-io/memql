@@ -773,6 +773,9 @@ connector seals its secrets under it).
 Anthropic or OpenAI only, added in Settings > API keys behind `execute
 app:settings/apikeys`, which EVERY predefined role holds (bring-your-own is for
 everybody; a deny withholds it), in a person's own session and never in a run.
+An organization-scoped role MAY hold it (`auth.ScopedRoleMayUse`: the one part
+of Settings besides Access such a role is not barred from, owner decision
+2026-11-22); like any authored role it holds it only when given it.
 The section itself has no floor: a key's owner lists and manages it whatever
 their role holds. It is
 checked by listing the vendor's models (no prompt, no charge), sealed under

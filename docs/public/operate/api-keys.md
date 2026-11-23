@@ -47,6 +47,14 @@ of that part in **Users > Access**
 ([grants](auth/access-model.md#grants-to-people-and-groups)). A role an
 operator authored holds the part only if it was given it.
 
+**A role scoped to one organization may hold it too.** Such a role is barred
+from every other part of Settings but Access, because those are cluster
+configuration; a person's own key is not. Like any authored role it holds the
+part only when it was given it. To let an organization's people add keys, give
+their group two things in **Users > Access**, or write both into the role:
+opening **Settings**, and **Settings: Add API keys**. The cluster's vendor
+account stays out of an organization role's reach, whatever is granted.
+
 **Settings > API keys** itself has no capability of its own. It opens for
 everybody who can open Settings, and it is what a user or a viewer finds
 there. So a person always reaches the keys they own: they see, rename, check,

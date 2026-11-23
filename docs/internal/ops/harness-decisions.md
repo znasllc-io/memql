@@ -2181,6 +2181,30 @@ store) is not on either list and still moves; it carries no credential and was
 not part of the decision. Tests: `TestAPersonsSourceAccessNeverChangesHands`,
 `TestTransferLeavesAPersonsSourceAccessWhereItIs`.
 
+**An organization role may add its holder's own API key (owner decision,
+2026-11-22).** `auth.ScopedRoleMayUse` barred a role scoped to one
+organization from every part of Settings but Access, whatever its rows or a
+grant said: the rule dates from 2026-09-22, when every part of Settings was
+cluster configuration. Part 2 added a part that is a person's own
+(`app:settings/apikeys`) and did not revisit the bar, so "everyone adds their
+own key" held for the five predefined roles only, and no operator could change
+that for a client's staff. The owner's answer when asked: let them. Path: the
+bar now exempts that one part (`scopedRoleSettingsPart`,
+`component/auth/rbac_assignment.go`), so the role level and the grant levels
+are consulted as for any role. Not barred is not granted: an authored role
+holds the part when its author wrote it in, or through a grant to the person
+or a group, and a deny still withholds it. Alternatives not taken: having
+every authored role hold the part without a row (the rows are the truth of
+what a role holds), and exempting `app:settings/clusteraccount` as well (that
+one spends the cluster owner's money; not asked, still barred). Invariant: a
+part added to Settings later is barred to organization roles until it is
+listed. Tests:
+`TestAnOrganizationRoleMayHoldTheApiKeysPartAndNoOtherNewPartOfSettings`
+(`component/auth`), and through real rows, a catalog loaded from them and the
+dispatch gate, `TestAPersonWithAnOrganizationRoleAddsAKeyOfTheirOwn`
+(`integrations/vendorkeys`). Known limit: an organization's people still need
+opening Settings and the part given to them; nothing grants either by default.
+
 **The cluster's own vendor account is not a pool for everybody (owner
 decision, 2026-11-22).** The first build offered it to every person as the
 last account of every vendor call (K8). The owner's rule is bring-your-own for

@@ -556,6 +556,15 @@ What the builder decided where this record left it open, and what was cut.
 - **U5.** Which account paid is said in a call's detail in History, not on the
   list row. A key the reader cannot list reads "an API key".
 
+Decided by the owner after landing (2026-11-22):
+
+- **A role scoped to one organization may hold the API keys part.** Such a
+  role was barred from every part of Settings but Access, so decision 3
+  ("everyone adds") was true of the five predefined roles only. The bar now
+  exempts `app:settings/apikeys` and nothing else; the role still has to be
+  given the part and opening Settings, by its author or by a grant. The
+  cluster's vendor account stays barred to it.
+
 Left open by the independent review, for the owner:
 
 - **What counts as the cluster's own work.** Decision 2 is built on the
