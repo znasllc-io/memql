@@ -1,14 +1,14 @@
 import { scrollNextPage } from "../scrollNextPage";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 vi.mock("../../src/live/connection", () => ({ useOsConnection: () => h.connection }));
 import { ArchiveTransfers, DownloadSetup } from "../../src/apps/files/backups/ArchiveTransfers";
 import { StorageAllowance, lowStorage } from "../../src/apps/files/backups/StorageAllowance";
 import { formatStorageBytes, transferActions, transferLine, validArchive, absoluteBackupPath, type BackupTransfer } from "../../src/apps/files/backups/transfers";
-import { uploadLine } from "../../src/apps/files/backups/ArchiveTransfers";
+import { timeLeft, uploadLine } from "../../src/apps/files/backups/ArchiveTransfers";
 import { FILES_SECTIONS } from "../../src/apps/files/settings";
-import type { UploadTask } from "../../src/apps/files/useUploadTasks";
+import { trackDeskUpload, useUploadTasks, type UploadTask } from "../../src/apps/files/useUploadTasks";
 import { formatBytes } from "../../src/kit";
 import { fakeConnection } from "./harness";
 import { machineFromRow } from "../../src/apps/fleet/rows";
@@ -123,6 +123,26 @@ describe("downloads tab", () => {
     expect(uploadLine(task, b)).toEqual({ text: "Uploading · 5 B of 10 B", warn: false, progress: 0.5 });
     expect(uploadLine({ ...task, state: "failed", error: "Over quota" }, b)).toMatchObject({ text: "Upload failed · Over quota", warn: true });
     expect(uploadLine({ ...task, kind: "tree", doneFiles: 2, totalFiles: 3 }, b).text).toBe("Uploading · 2 of 3 files · 5 B of 10 B");
+  });
+
+  it("adds speed and time left once an upload has a measure, never before (José, Nov 20)", async () => {
+    const b = (n: number) => `${n} B`;
+    const task = { id: "up-1", label: "a.bin", kind: "file", sentBytes: 100, totalBytes: 1000, doneFiles: 0, totalFiles: 1, state: "sending", error: "", failures: [], retry: null, abort: vi.fn(), dismiss: vi.fn() } as UploadTask;
+    expect(uploadLine(task, b).text).toBe("Uploading · 100 B of 1000 B");
+    expect(uploadLine({ ...task, bytesPerSecond: 50 }, b).text).toBe("Uploading · 100 B of 1000 B · 50 B/s · 18 s left");
+    expect([timeLeft(0.2), timeLeft(42), timeLeft(600), timeLeft(7500)]).toEqual(["1 s", "42 s", "10 min", "2 h 5 min"]);
+
+    // The measure: bytes since the last report over the time since it.
+    let report: (p: { sentBytes: number; totalBytes: number }) => void = () => {};
+    const handle = { done: new Promise<never>(() => {}), abort: vi.fn(), onProgress: (fn: typeof report) => { report = fn; } };
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_000);
+    trackDeskUpload("icon-1", new File(["x"], "big.bin"), handle as never, null);
+    report({ sentBytes: 0, totalBytes: 4_000_000 });
+    clock.mockReturnValue(3_000);
+    report({ sentBytes: 2_000_000, totalBytes: 4_000_000 });
+    const { result } = renderHook(() => useUploadTasks({ upload: vi.fn() } as never, vi.fn()));
+    expect(result.current.tasks.find((t) => t.id === "desk:icon-1")?.bytesPerSecond).toBe(1_000_000);
+    clock.mockRestore();
   });
 
   it("draws one row per transfer with a Backup pill, a bar and one button while moving", async () => {

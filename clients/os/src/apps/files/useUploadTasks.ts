@@ -27,6 +27,8 @@ export interface UploadTask {
   doneFiles: number;
   totalFiles: number;
   state: "sending" | "failed" | "done";
+  /** How fast it is going, smoothed over its progress reports; absent until two reports exist. */
+  bytesPerSecond?: number;
   /** The refusal, verbatim. "" while sending and on success. */
   error: string;
   /** Per-file refusals of a tree drop; the aggregate lists exactly these. */
@@ -71,7 +73,30 @@ function patch(id: string, p: Partial<UploadTask>): void {
   setTasks((ts) => ts.map((t) => (t.id === id ? { ...t, ...p } : t)));
 }
 function remove(id: string): void {
+  samples.delete(id);
   setTasks((ts) => ts.filter((t) => t.id !== id));
+}
+
+// SPEED (José, Nov 20 2026: Downloads shows "the status of the download and
+// the speed"). Measured here, from this browser's own progress reports: the
+// bytes sent since the last report over the time since it, smoothed so one
+// slow chunk does not swing the figure. A retry starts the measure again.
+const samples = new Map<string, { at: number; bytes: number; rate?: number }>();
+const SMOOTHING = 0.3;
+function progress(id: string, sentBytes: number, rest: Partial<UploadTask> = {}): void {
+  const now = Date.now();
+  const last = samples.get(id);
+  let rate = last?.rate;
+  if (last && now > last.at && sentBytes >= last.bytes) {
+    const instant = ((sentBytes - last.bytes) * 1000) / (now - last.at);
+    rate = rate === undefined ? instant : rate * (1 - SMOOTHING) + instant * SMOOTHING;
+  }
+  samples.set(id, { at: now, bytes: sentBytes, ...(rate !== undefined ? { rate } : {}) });
+  patch(id, { sentBytes, ...rest, ...(rate !== undefined ? { bytesPerSecond: rate } : {}) });
+}
+function restart(id: string, p: Partial<UploadTask>): void {
+  samples.delete(id);
+  patch(id, { ...p, bytesPerSecond: undefined });
 }
 function settleDone(id: string): void {
   patch(id, { state: "done", error: "" });
@@ -86,6 +111,7 @@ function nextId(): string {
 export function resetUploadTasksForTest(): void {
   tasksNow = [];
   seq = 0;
+  samples.clear();
 }
 
 /**
@@ -113,7 +139,8 @@ export function trackDeskUpload(key: string, file: File, handle: UploadHandle, r
     },
     ...ts.filter((t) => t.id !== id),
   ]);
-  handle.onProgress?.((p) => patch(id, { sentBytes: p.sentBytes, totalBytes: p.totalBytes }));
+  samples.delete(id);
+  handle.onProgress?.((p) => progress(id, p.sentBytes, { totalBytes: p.totalBytes }));
   handle.done
     .then(() => settleDone(id))
     .catch((err: unknown) => patch(id, { state: "failed", error: describe(err) }));
@@ -132,11 +159,10 @@ export function useUploadTasks(
         const id = nextId();
         let handle: UploadHandle | null = null;
         const run = () => {
-          patch(id, { state: "sending", error: "" });
+          restart(id, { state: "sending", error: "" });
           handle = provider.upload(file, folderId !== "" ? { folderId } : undefined);
           handle.onProgress?.((p) =>
-            patch(id, {
-              sentBytes: p.sentBytes,
+            progress(id, p.sentBytes, {
               totalBytes: p.totalBytes,
               ...(p.resumedChunks !== undefined ? { resumedChunks: p.resumedChunks } : {}),
               ...(p.totalChunks !== undefined ? { totalChunks: p.totalChunks } : {}),
@@ -184,11 +210,11 @@ export function useUploadTasks(
       const report = () => {
         let sent = 0;
         for (const bytes of sentByFile.values()) sent += bytes;
-        patch(id, { sentBytes: sent });
+        progress(id, sent);
       };
 
       const run = (batch: readonly DroppedFile[]) => {
-        patch(id, { state: "sending", error: "", failures: [] });
+        restart(id, { state: "sending", error: "", failures: [] });
         void uploadDroppedTree(batch, targetFolderId, {
           createFolder,
           knownFolders,

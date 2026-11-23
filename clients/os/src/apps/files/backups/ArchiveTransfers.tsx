@@ -114,7 +114,19 @@ export function uploadLine(task: UploadTask, bytes: (n: number) => string): { te
   if (task.state === "failed") return { text: `Upload failed · ${task.error}`, warn: true, progress: null };
   if (task.state === "done") return { text: `Uploaded · ${bytes(task.totalBytes)}`, warn: false, progress: null };
   const files = task.kind === "tree" ? `${task.doneFiles} of ${task.totalFiles} files · ` : "";
-  return { text: `Uploading · ${files}${bytes(task.sentBytes)} of ${bytes(task.totalBytes)}`, warn: false, progress: task.totalBytes > 0 ? Math.min(1, task.sentBytes / task.totalBytes) : 0 };
+  // Speed and time left once there is a measure (useUploadTasks), as José
+  // asked on Nov 20; never a guess before it.
+  const rate = task.bytesPerSecond ?? 0;
+  const speed = rate > 0 ? ` · ${bytes(rate)}/s · ${timeLeft((task.totalBytes - task.sentBytes) / rate)} left` : "";
+  return { text: `Uploading · ${files}${bytes(task.sentBytes)} of ${bytes(task.totalBytes)}${speed}`, warn: false, progress: task.totalBytes > 0 ? Math.min(1, task.sentBytes / task.totalBytes) : 0 };
+}
+
+/** "8 s", "4 min", "2 h 5 min": whole units, for a figure that moves. */
+export function timeLeft(seconds: number): string {
+  const s = Math.max(1, Math.round(seconds));
+  if (s < 60) return `${s} s`;
+  if (s < 3600) return `${Math.round(s / 60)} min`;
+  return `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} min`;
 }
 
 function UploadLine({ task }: { task: UploadTask }) {
