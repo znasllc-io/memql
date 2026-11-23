@@ -9723,7 +9723,7 @@ func RouteDeleteBuild(args RouteDeleteArgs) string {
 	return b.String()
 }
 
-// RouteReset -- Restore the cluster's Local or Apps route to MemQL's default. Owner or developer, with the revision from routesForActor.
+// RouteReset -- Restore the cluster's Local, Apps or API route to MemQL's default. Owner or developer, with the revision from routesForActor.
 type RouteResetArgs struct {
 	Id       string
 	Revision int
@@ -9749,7 +9749,7 @@ func RouteResetBuild(args RouteResetArgs) string {
 	return b.String()
 }
 
-// RouteSave -- Save a route. Without an id, create one of your own (name required). With your own route's id, change it. With `local` or `apps`, change that route for the whole cluster: owner or developer, and the revision from routesForActor. Each job holds one to four sources -- fleet:, app: or federation: -- in the order they are tried. Search and memory is never a route's: every route uses the cluster's embedding model.
+// RouteSave -- Save a route. Without an id, create one of your own (name required). With your own route's id, change it. With `local`, `apps` or `api`, change that route for the whole cluster: owner or developer, and the revision from routesForActor. Each job holds one to four sources -- fleet:, app: or federation: -- in the order they are tried; API lists federation: sources only. Search and memory is never a route's: every route uses the cluster's embedding model.
 type RouteSaveArgs struct {
 	Id          string
 	Name        string
@@ -9821,7 +9821,7 @@ func RouterListPoliciesBuild(args RouterListPoliciesArgs) string {
 	return "builtin routerListPolicies()"
 }
 
-// RoutesForActor -- The routes this person can pick for a message in Ask -- Auto, Local and Apps, then their own -- each saying whether it can serve every job for them right now, and why not when it cannot. One row: {routes, revision}. The revision is the routing document's, for routeSave and routeReset.
+// RoutesForActor -- The routes this person can pick for a message in Ask -- Auto, Local, Apps and API, then their own -- each saying whether it can serve every job for them right now, and why not when it cannot. One row: {routes, revision}. The revision is the routing document's, for routeSave and routeReset.
 type RoutesForActorArgs struct {
 }
 

@@ -509,7 +509,17 @@ func (r *Router) resolveChain(ctx context.Context, req ResolveRequest, mod provi
 			for _, e := range removed {
 				report.noteConsidered(e, doorFor(e), "excluded by rule "+rule.Name)
 			}
-			winner, err := r.walkChain(walkCtx, levelReq, mod, chain, rule.Excludes, report, rule.Policy)
+			// THE WALK IS MADE AT THE LEVEL THE RULE SERVES THE CALL AT. A rule
+			// may raise it (`@level`), and everything the walk asks by level
+			// follows: a vendor selector chooses among the records that
+			// declare the level (selectors.go), and a winner's client is bound
+			// to it. Walking at the level the caller declared served a strong
+			// call a rule raised to reasoning with a record that declares only
+			// strong, under a decision that said reasoning. The rule itself
+			// was matched on the declared level, above, and stays so.
+			walkReq := levelReq
+			walkReq.Level = effective
+			winner, err := r.walkChain(walkCtx, walkReq, mod, chain, rule.Excludes, report, rule.Policy)
 			if err != nil {
 				return nil, Resolved{}, err
 			}
@@ -834,7 +844,7 @@ func (r *Router) walkChain(
 			sawLocalDoor = true
 		}
 
-		candidates, err := r.expandEntry(ctx, req, rawEntry, report)
+		candidates, err := r.expandEntry(ctx, req, mod, rawEntry, report)
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
@@ -930,6 +940,18 @@ func (r *Router) walkChain(
 				report.note(cand.Name, why)
 				continue
 			}
+			// A vendor candidate whose accounts are not composed below is the
+			// cluster's account or nothing, and that account is not a pool
+			// for everybody (accounts.go, clusterAccountGated): a picture,
+			// speech, transcription, an image, and any record whose client
+			// takes no key. Asked here, beside WHO PAYS, after every gate that
+			// stands in front of a vendor. Embeddings are never asked.
+			if cand.Door == DoorFederation && !paidByAccount && clusterAccountGated(mod) {
+				if closed := r.providers.ClusterAccountClosedTo(ctx, req.UserId); closed != "" {
+					report.note(cand.Name, closed)
+					continue
+				}
+			}
 			// WHO PAYS, asked last: after the run's no-paid-providers ceiling,
 			// the cost ceiling, the context floor and the modality check, each
 			// exactly where it was (design record R7). A key is a paid
@@ -996,7 +1018,7 @@ func (r *Router) remainingNames(
 	}
 	discard := &doorReporter{}
 	for _, entry := range laterEntries {
-		cands, err := r.expandEntry(ctx, req, entry, discard)
+		cands, err := r.expandEntry(ctx, req, mod, entry, discard)
 		if err != nil {
 			continue
 		}

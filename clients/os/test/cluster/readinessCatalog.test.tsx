@@ -69,5 +69,27 @@ describe("the vendor door, by what pays", () => {
     mountDoors({ federationConfigured: true, keyAccount: true });
     await screen.findByText("This cluster can reach a model through workload-identity federation and an API key of yours.");
   });
+
+  // Owner decision 2026-11-22: the cluster's own account is not a pool for
+  // everybody. `federationConfigured` says it is SET UP; `clusterAccountOpen`
+  // says it pays for THIS reader. A reader it is closed to is not told the
+  // cluster's federation serves them.
+  it("does not name federation to a reader the cluster's account does not pay for", async () => {
+    mountDoors({ federationConfigured: true, clusterAccountOpen: false, keyAccount: true });
+    await screen.findByText("This cluster can reach a model through an API key of yours.");
+    expect(screen.queryByText(/workload-identity federation/)).toBeNull();
+  });
+
+  it("tells a reader with no door, on a cluster whose account is closed to them, to ask its owner", async () => {
+    mountDoors({ eligible: false, doorsOpen: [], federationConfigured: true, clusterAccountOpen: false, keyAccount: false });
+    await screen.findByText(/ask the cluster's owner to let the cluster's vendor account pay for your calls \(Users -> Access\)/);
+    // The account IS set up: sending them to set it up would be wrong.
+    expect(screen.queryByText(/set up Anthropic or OpenAI workload-identity federation/)).toBeNull();
+  });
+
+  it("names federation to a reader it does pay for", async () => {
+    mountDoors({ federationConfigured: true, clusterAccountOpen: true, keyAccount: false });
+    await screen.findByText("This cluster can reach a model through workload-identity federation.");
+  });
 });
 

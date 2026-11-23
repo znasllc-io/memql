@@ -14,7 +14,7 @@ import (
 
 func TestPlainChatGrowingContextRetriesBeforeFirstOutput(t *testing.T) {
 	f := &streamingContextFleet{contextFleet{models: []memql.FleetModel{sizedModel("small", 3000000000, 8192), sizedModel("large", 8000000000, 65536)}}}
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	providers.SetFleetInference(f)
 	r := New(providers, memql.NewPolicyRegistryForTest(map[string][]string{"p": {memql.FleetFastest}}), testRules(t, defaultRule("p")), nil, nil)
 	p, _, err := r.resolveStreamChat(context.Background(), ResolveRequest{UserId: "alice", Needs: airoute.Needs{MinContextTokens: 8192}})
@@ -66,7 +66,7 @@ func (p *plainRefusalStream) CallChatStream(ctx context.Context, _ []common.Chat
 	return ch, nil
 }
 func plainRefusalFallback(first, second *plainRefusalStream) *fallbackStreamChat {
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	providers.RegisterForTest("first", "OpenAI", "first", first)
 	providers.RegisterForTest("second", "OpenAI", "second", second)
 	return &fallbackStreamChat{router: New(providers, nil, nil, nil, nil), chain: []string{"first", "second"}}

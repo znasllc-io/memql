@@ -5486,6 +5486,7 @@
         "appEligible",
         "appSessionsInstalled",
         "cloudConfigured",
+        "clusterAccountOpen",
         "doorsOpen",
         "eligible",
         "eligibleModelIds",

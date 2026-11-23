@@ -276,6 +276,16 @@ describe("the pure half", () => {
     // A part is `execute`; a floored section is `read`, named as the section.
     expect(rows.find((r) => r.resource === "app:deployables/publish")?.verb).toBe("execute");
     expect(rows.find((r) => r.resource === "app:settings/cluster")).toMatchObject({ verb: "read", label: "Cluster facts and sign-in policy" });
+    // TWO PARTS OF SETTINGS SAY WHAT THEY GRANT, not where they sit (owner
+    // decisions 2026-11-22). The API keys section opens for everybody, so its
+    // part is the act of adding: a row reading "API keys" would tell an
+    // operator a deny hides the section. And the cluster's vendor account has
+    // no section at all: its bare part word would read as nothing.
+    expect(rows.find((r) => r.resource === "app:settings/apikeys")).toMatchObject({ verb: "execute", label: "Add API keys" });
+    expect(rows.find((r) => r.resource === "app:settings/clusteraccount")).toMatchObject({
+      verb: "execute",
+      label: "Use the cluster's vendor account",
+    });
     // Every app's parts come right after its door.
     for (let i = deployables + 1; i < rows.length && rows[i]!.appId === "deployables"; i++) expect(rows[i]!.part).not.toBe("");
     // A resource only a grant names is kept, so a deny on it can be lifted.

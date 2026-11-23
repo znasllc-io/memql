@@ -214,7 +214,9 @@ idempotent and honors the same `SERVERS`/`AGENTS`/`REVISION` overrides as
 `make up`. Its teardown differs from `make down PURGE=1` in one thing: it
 keeps the cluster's token signing key (`~/.memql/k3d/<cluster>/service-account.key`),
 so the recreated cluster is the same issuer and public keys already given to a
-vendor stay good. `make down PURGE=1` deletes that key.
+vendor stay good. `make down PURGE=1` deletes that key, and so does the
+editor's **Uninstall Local Cluster** when its install created the key; a key
+kept from before the install is left where it is.
 
 ### The calls media server
 

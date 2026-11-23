@@ -131,10 +131,15 @@ export function VendorsSection({
           words (design record 2026-11-21-vendor-accounts-and-api-keys, U6 as
           amended 2026-11-22). No control goes there: the tab is one along. It
           used to say there was no API key anywhere, which stopped being true. */}
+      {/* WHOSE CALLS IT PAYS FOR is said here, where the account is set up
+          (owner decision 2026-11-22): the cluster's account is not a pool for
+          everybody, and an owner connecting a vendor must not believe they are
+          opening that vendor to the whole cluster. */}
       <p className="os-caption">
         Ids from each vendor&apos;s own console, for the cluster&apos;s own account.
-        No API key is entered here. A key of your own is added under API keys.
-        A vendor bills per call.
+        It pays for the cluster&apos;s own work, and for a person&apos;s calls only when you
+        allow them in Users, under Access. No API key is entered here. A key of
+        your own is added under API keys. A vendor bills per call.
       </p>
       <RoutingIsInFleet tab="routes" />
 

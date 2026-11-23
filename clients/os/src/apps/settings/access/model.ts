@@ -54,6 +54,24 @@ import { roleHolds } from "../../users/rows";
 // drawn for every resource, from its own grant on the row's pair or none, so
 // its grant under another verb reads there as "Not granted by this group".
 
+/**
+ * Resources whose row says what they GRANT, in place of a section's name or
+ * the seeds' bare word.
+ *
+ * - `app:settings/cluster` kept its grant when its section split in two.
+ * - `app:settings/apikeys` is the act of ADDING a key. Settings > API keys
+ *   opens for everybody, so a row reading "API keys" would tell an operator
+ *   that denying it hides the section; it stops a person adding keys and
+ *   nothing else.
+ * - `app:settings/clusteraccount` has no section behind it: it is whether the
+ *   cluster's own vendor account pays for a person's model calls.
+ */
+const RESOURCE_LABELS: Record<string, string> = {
+  "app:settings/cluster": "Cluster facts and sign-in policy",
+  "app:settings/apikeys": "Add API keys",
+  "app:settings/clusteraccount": "Use the cluster's vendor account",
+};
+
 /** The engine's five verbs; opening an app is `read`, a part is `execute`. */
 export const OPEN_VERB = "read";
 export const PART_VERB = "execute";
@@ -164,7 +182,7 @@ export function accessResources(
         appId: app.id,
         part,
         verb: verbFor(catalog, resource) ?? (isSection ? OPEN_VERB : PART_VERB),
-        label: resource === "app:settings/cluster" ? "Cluster facts and sign-in policy" : isSection ? section.name : part,
+        label: RESOURCE_LABELS[resource] ?? (isSection ? section.name : part),
         ...(destination ? { displayAppId: destination.id } : {}),
       });
     }

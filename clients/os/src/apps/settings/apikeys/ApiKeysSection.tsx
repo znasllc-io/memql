@@ -39,7 +39,12 @@ export const API_KEYS_ADD_PART = "app:settings/apikeys";
 
 type View = { kind: "list" } | { kind: "add" } | { kind: "key"; id: string };
 
-export function ApiKeysSection({ active = true }: { active?: boolean }) {
+export function ApiKeysSection({ active = true, intent, consumeIntent }: {
+  active?: boolean;
+  /** `{ addKey: true }` opens the add wizard: the setup screen's act. */
+  intent?: { id: string; payload: Record<string, unknown> };
+  consumeIntent?: (intentId: string) => void;
+}) {
   const keys = useVendorKeys();
   const { access } = useSession();
   // Asking for every key is a cluster owner's question. The cluster is the
@@ -63,6 +68,16 @@ export function ApiKeysSection({ active = true }: { active?: boolean }) {
     }
     shownBefore.current = active;
   }, [active, keys.reload]);
+
+  // OPENED TO ADD A KEY: the setup screen's "Add an API key" (CoreGate) lands
+  // in the wizard, not on a list that asks for one more press. Only for
+  // somebody who may add one; the request is used up either way, so it is
+  // never acted on twice.
+  useEffect(() => {
+    if (!intent || intent.payload["addKey"] !== true) return;
+    if (mayAdd) setView({ kind: "add" });
+    consumeIntent?.(intent.id);
+  }, [intent, mayAdd, consumeIntent]);
 
   const toList = () => setView({ kind: "list" });
 
@@ -140,7 +155,7 @@ export function ApiKeysSection({ active = true }: { active?: boolean }) {
       <PageHelp title="API keys">
         <p>An API key pays for Anthropic or OpenAI models with an account of your own. It is sealed in this cluster when you add it, and nothing shows it again.</p>
         <p>A route you choose in Ask spends your default key at the model's vendor. Auto spends a key only after you turn on "Let Auto use this key" on that key. You can lend a key to named people and groups, who then pay for their calls with it.</p>
-        <p>The cluster never spends a key for its own work. The cluster's own vendor account is set up under Vendors.</p>
+        <p>The cluster never spends a key for its own work. The cluster's own vendor account is set up under Vendors, and pays for your calls only if the cluster's owner allowed that.</p>
         <p>Every call a key pays for checks it, and a key nothing used for a day is checked by listing the vendor's models, which sends no prompt and costs nothing.</p>
       </PageHelp>
       <AutoRefresh enabled={active} busy={keys.busy !== ""} onRefresh={keys.reload} />

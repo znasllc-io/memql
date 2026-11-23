@@ -37,7 +37,8 @@ not verified. `azure`, absent and unknown values retain hosted verification:
 email first, then mandatory passkey registration. Neither email verification nor
 an enrollment grant is an owner session. After both required steps, the existing
 `CoreGate` still controls inference onboarding and retains its owner/developer
-admission rules. Organization name is required; setup configures the existing
+admission rules; it does not hold somebody whose own API key can pay
+(`inferenceStatus.keyAccount`, `chrome/keyLetsIn.ts`), and it offers adding one. Organization name is required; setup configures the existing
 `self` account, stamps its owner, and ensures its account group and owner
 membership before sealing the claim or issuing a session. Every step is
 idempotent under the same claim lock. The optional “Title in organization” is
@@ -415,6 +416,18 @@ reach it, so the section sits beside Vendors with NO floor of its own. It is
 the one Settings section a user or a viewer holds, which is what puts Settings
 on their desktop. Adding a key is the part (`execute app:settings/apikeys`,
 seeded on every predefined role).
+
+**"The cluster's account is set up" and "it pays for me" are two facts**
+(owner decision 2026-11-22). `inferenceStatus.federationConfigured` is the
+first and is the same for everybody. `clusterAccountOpen` is the second: the
+cluster's vendor account pays for the cluster's own work, and for a person only
+when its owner allowed them (`execute app:settings/clusteraccount`). Every
+surface that says a vendor can serve THE READER reads the second through
+`clusterAccountPaysFor` (`src/apps/settings/routingFacts.ts`), which falls
+back to the first on an engine that predates the rule. The Access editor names
+the part by what it grants ("Use the cluster's vendor account"), as it names
+`app:settings/apikeys` "Add API keys": neither has a section to be named
+after.
 
 **API keys is deliberately NOT a live surface.** A key's rows publish no graph
 event, by design: an event carries the whole row, the sealed value included, to
@@ -2153,7 +2166,7 @@ one goal or several, split off a new request, ask which goal is meant, or offer
 to stop a goal. With no active
 goal there is no call and intake runs as before. A message with attachments, or
 over 4,000 characters, goes to intake too. The call runs under the person's own
-route (Auto, Local, Apps or theirs) and appears in Activity as "Routing
+route (Auto, Local, Apps, API or theirs) and appears in Activity as "Routing
 message". If routing is unavailable, or its answer is invalid twice, the
 message goes to intake and Activity records the fallback. Retrying a turn id
 returns its saved outcome and never routes or delivers a second time.

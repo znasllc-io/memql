@@ -3,17 +3,27 @@ package memql
 // routes.go -- a PERSON'S ROUTE (design record 2026-10-18-routes).
 //
 // A route is how a person decides, for one message in Ask, which sources do
-// each job. Four kinds ship:
+// each job. Five kinds ship:
 //
 //   - AUTO is no route at all: the rules decide every call, and Auto ranks the
 //     general shipped chains by measured speed, reliability, cost and quality
 //     (routes_auto.go). It is the zero value everywhere.
-//   - LOCAL and APPS are built-in routes with a job list each. An owner or a
-//     developer may change either for the whole cluster; the change is an
-//     OVERRIDE in the routing document, beside the policy and rule overrides
-//     and under the same revision, and Restore default removes it.
+//   - LOCAL, APPS and API are built-in routes with a job list each. An owner
+//     or a developer may change any of them for the whole cluster; the change
+//     is an OVERRIDE in the routing document, beside the policy and rule
+//     overrides and under the same revision, and Restore default removes it.
 //   - A PERSON'S OWN routes are v1:router:route rows, named by their owner and
 //     private to them.
+//
+// # API lists vendor models only
+//
+// API (design record 2026-11-21-vendor-accounts-and-api-keys, R4) is the route
+// a person picks to be answered by Anthropic's or OpenAI's models, paid by an
+// API key of theirs or by the cluster's account where that pays for them. Its
+// job list may name `federation:` sources and nothing else, on the shipped
+// default and on every saved change (ValidateBuiltinRouteJobs): a route named
+// API that listed a local model or an app would say something untrue. Local
+// and Apps carry no such rule; an owner may put any source on them, as before.
 //
 // # The jobs
 //
@@ -56,15 +66,29 @@ const (
 	RouteIdAuto  = "auto"
 	RouteIdLocal = "local"
 	RouteIdApps  = "apps"
+	RouteIdApi   = "api"
 )
 
-// The route kinds, as routesForActor reports them.
+// The route kinds, as routesForActor reports them. A client that does not
+// know a kind drops the row, so a kind is added in the engine and in every
+// client that draws routes in one change.
 const (
 	RouteKindAuto   = "auto"
 	RouteKindLocal  = "local"
 	RouteKindApps   = "apps"
+	RouteKindApi    = "api"
 	RouteKindCustom = "custom"
 )
+
+// builtinRouteOrder is the order the built-in routes are listed in, on every
+// surface: Auto, then the three with a job list.
+var builtinRouteOrder = []string{RouteIdAuto, RouteIdLocal, RouteIdApps, RouteIdApi}
+
+// BuiltinRouteIds returns the built-in route ids in the order they are listed.
+func BuiltinRouteIds() []string { return append([]string(nil), builtinRouteOrder...) }
+
+// vendorSourcePrefix starts every source that names a vendor's models.
+const vendorSourcePrefix = "federation:"
 
 // The route scopes: a built-in route is the cluster's, a person's own is theirs.
 const (
@@ -126,45 +150,61 @@ func (j RouteJobs) IsZero() bool {
 	return len(j.Fast) == 0 && len(j.Strong) == 0 && len(j.Reasoning) == 0
 }
 
-// builtinRouteDefaults are Local's and Apps' shipped job lists. Auto has none.
+// builtinRouteDefaults are Local's, Apps' and API's shipped job lists. Auto
+// has none.
 //
 // Local is the fleet's own ordering, fastest for quick tasks and strongest for
 // the rest -- which includes models shared with the person, because the
 // router's fleet selectors expand over the person's whole catalog. Apps is the
 // wildcard app door at every level: the machine maps each level to its app's
 // own model and effort (Haiku, Sonnet or Opus for Claude Code; low, medium or
-// high effort for Codex) through its apps.levels.
+// high effort for Codex) through its apps.levels. API is the strongest vendor
+// model at every level, which is the strongest record that DECLARES the level
+// (provider_job.go): a quick task gets the strongest quick model, not the
+// strongest model there is.
 var builtinRouteDefaults = map[string]RouteJobs{
 	RouteIdLocal: {Fast: []string{"fleet:fastest"}, Strong: []string{"fleet:strongest"}, Reasoning: []string{"fleet:strongest"}},
 	RouteIdApps:  {Fast: []string{AppWildcard}, Strong: []string{AppWildcard}, Reasoning: []string{AppWildcard}},
+	RouteIdApi: {
+		Fast:      []string{vendorSourcePrefix + VendorSelectorStrongest},
+		Strong:    []string{vendorSourcePrefix + VendorSelectorStrongest},
+		Reasoning: []string{vendorSourcePrefix + VendorSelectorStrongest},
+	},
 }
 
 var builtinRouteNames = map[string]string{
 	RouteIdAuto:  "Auto",
 	RouteIdLocal: "Local",
 	RouteIdApps:  "Apps",
+	RouteIdApi:   "API",
 }
+
+// apiRouteDescriptionKeyOnly is API's line for a person the cluster's own
+// vendor account does not pay for, or on a cluster that has none
+// (apiRouteDescription).
+const apiRouteDescriptionKeyOnly = "Vendor models, paid by an API key"
 
 var builtinRouteDescriptions = map[string]string{
 	RouteIdAuto:  "The best balance of speed, reliability and cost for each job",
 	RouteIdLocal: "Local models for everything",
 	RouteIdApps:  "Claude Code or Codex, with your embedding model",
+	RouteIdApi:   "Vendor models, paid by an API key or the cluster's account",
 }
 
-// IsBuiltinRouteId reports whether id names Auto, Local or Apps.
+// IsBuiltinRouteId reports whether id names Auto, Local, Apps or API.
 func IsBuiltinRouteId(id string) bool {
 	_, ok := builtinRouteNames[strings.TrimSpace(id)]
 	return ok
 }
 
 // IsEditableBuiltinRoute reports whether id names a built-in route with a job
-// list, which is Local or Apps. Auto has no jobs to edit.
+// list, which is Local, Apps or API. Auto has no jobs to edit.
 func IsEditableBuiltinRoute(id string) bool {
 	_, ok := builtinRouteDefaults[strings.TrimSpace(id)]
 	return ok
 }
 
-// BuiltinRouteDefault returns Local's or Apps' shipped job list.
+// BuiltinRouteDefault returns Local's, Apps' or API's shipped job list.
 func BuiltinRouteDefault(id string) (RouteJobs, bool) {
 	j, ok := builtinRouteDefaults[strings.TrimSpace(id)]
 	if !ok {
@@ -263,6 +303,27 @@ func ValidateRouteJobs(j RouteJobs) error {
 	return nil
 }
 
+// ValidateBuiltinRouteJobs is ValidateRouteJobs plus what one built-in route
+// adds to it. Only API adds anything: every source must name a vendor's
+// models. It is asked on every save of a cluster route (SaveRouteOverride), so
+// the rule holds whichever caller reaches the routing document.
+func ValidateBuiltinRouteJobs(id string, j RouteJobs) error {
+	if err := ValidateRouteJobs(j); err != nil {
+		return err
+	}
+	if strings.TrimSpace(id) != RouteIdApi {
+		return nil
+	}
+	for _, sources := range [][]string{j.Fast, j.Strong, j.Reasoning} {
+		for _, raw := range sources {
+			if entry := strings.TrimSpace(raw); !strings.HasPrefix(entry, vendorSourcePrefix) {
+				return fmt.Errorf("API lists vendor models only; %q is not one", entry)
+			}
+		}
+	}
+	return nil
+}
+
 func validateRouteEntry(entry string) error {
 	switch {
 	case entry == "":
@@ -336,7 +397,7 @@ func (b AutoBalance) Validate() error {
 	return nil
 }
 
-// RouteOverride returns the cluster override for Local or Apps, when this
+// RouteOverride returns the cluster override for Local, Apps or API, when this
 // registry (normally a per-decision snapshot) carries one.
 func (r *PolicyRegistry) RouteOverride(id string) (RouteJobs, bool) {
 	if r == nil {
@@ -365,7 +426,7 @@ func (r *PolicyRegistry) AutoBalanceSetting() (AutoBalance, bool) {
 	return *r.auto, true
 }
 
-// SetRouteOverrideForTest installs a Local or Apps override on a registry with
+// SetRouteOverrideForTest installs a built-in route's override on a registry with
 // no store. Test-only in intent; the router's tests use it.
 func (r *PolicyRegistry) SetRouteOverrideForTest(id string, jobs RouteJobs) {
 	r.mu.Lock()
@@ -427,13 +488,13 @@ func (r *PolicyRegistry) RouteConfiguration(ctx context.Context) (RouteDocument,
 	return out, nil
 }
 
-// SaveRouteOverride changes Local or Apps for the whole cluster.
+// SaveRouteOverride changes Local, Apps or API for the whole cluster.
 func (r *PolicyRegistry) SaveRouteOverride(ctx context.Context, expected int64, id string, jobs RouteJobs) error {
 	if !IsEditableBuiltinRoute(id) {
-		return fmt.Errorf("%q is not a built-in route with jobs; only Local and Apps can be changed for the cluster", id)
+		return fmt.Errorf("%q is not a built-in route with jobs; only Local, Apps and API can be changed for the cluster", id)
 	}
 	jobs = normalizeRouteJobs(jobs)
-	if err := ValidateRouteJobs(jobs); err != nil {
+	if err := ValidateBuiltinRouteJobs(id, jobs); err != nil {
 		return err
 	}
 	return r.changeDocument(ctx, expected, func(doc *PolicyDocument) error {
@@ -445,10 +506,10 @@ func (r *PolicyRegistry) SaveRouteOverride(ctx context.Context, expected int64, 
 	})
 }
 
-// ResetRouteOverride restores Local or Apps to MemQL's default.
+// ResetRouteOverride restores Local, Apps or API to MemQL's default.
 func (r *PolicyRegistry) ResetRouteOverride(ctx context.Context, expected int64, id string) error {
 	if !IsEditableBuiltinRoute(id) {
-		return fmt.Errorf("%q is not a built-in route with jobs; only Local and Apps have a default to restore", id)
+		return fmt.Errorf("%q is not a built-in route with jobs; only Local, Apps and API have a default to restore", id)
 	}
 	return r.changeDocument(ctx, expected, func(doc *PolicyDocument) error {
 		delete(doc.Routes, id)

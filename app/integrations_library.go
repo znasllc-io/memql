@@ -52,7 +52,7 @@ func (a *App) wireLibraryIntegration(uploader server.FileUploader, bucket string
 // too, file sharing Nov 18) are both configured here, so the two cannot drift.
 func (a *App) configureLibraryReading(lib *library.Integration) {
 	lib.SetLogger(a.Logger)
-	lib.SetExtractor(fileprocessor.NewDefaultProcessor(a.resolveVisionProvider(context.Background())))
+	lib.SetExtractor(a.libraryExtractor())
 	// The work spine's journal (epic memql#4970, spec section G): the pass
 	// becomes a system-origin goal with one run per attempt and a step per
 	// stage, which is what the Training app's feed reads. Absent, the pass
@@ -69,4 +69,15 @@ func (a *App) configureLibraryReading(lib *library.Integration) {
 		a.Logger,
 		strings.TrimSpace(os.Getenv("MEMQL_NODE_ID")),
 	))
+}
+
+// libraryExtractor is the text extractor an upload to the Library is read
+// with. Its vision provider resolves when a picture is described, for the
+// person who uploaded it (callerVision, ai_call_sites.go): resolved here, once,
+// it would be resolved for nobody, and the cluster's vendor account would
+// describe every uploader's pictures.
+//
+// Regression test: transport_artifacts_vision_test.go.
+func (a *App) libraryExtractor() *fileprocessor.DefaultProcessor {
+	return fileprocessor.NewDefaultProcessor(a.visionForCaller())
 }

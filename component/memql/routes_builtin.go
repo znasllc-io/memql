@@ -59,7 +59,7 @@ func (e *MemQLEngine) routesForActorBuiltin(ctx context.Context, _ map[string]an
 }
 
 // routeSummaries is every route this person can pick, with readiness: Auto,
-// Local, Apps, then their own by name.
+// Local, Apps, API, then their own by name.
 func (e *MemQLEngine) routeSummaries(ctx context.Context, owner string) ([]routeSummaryJSON, int64, error) {
 	if e == nil || e.policies == nil {
 		return nil, 0, fmt.Errorf("routing is not configured on this node")
@@ -70,7 +70,7 @@ func (e *MemQLEngine) routeSummaries(ctx context.Context, owner string) ([]route
 	}
 	readiness := e.routeReadinessFor(ctx)
 	var out []routeSummaryJSON
-	for _, id := range []string{RouteIdAuto, RouteIdLocal, RouteIdApps} {
+	for _, id := range builtinRouteOrder {
 		var override *RouteJobs
 		if j, ok := doc.Routes[id]; ok {
 			c := j.Clone()
@@ -201,7 +201,7 @@ func (e *MemQLEngine) routeDeleteBuiltin(ctx context.Context, args map[string]an
 	return singleVirtualRow(RouteConceptID, spec.Id, map[string]any{"id": spec.Id, "status": "deleted"})
 }
 
-// routeResetBuiltin restores Local or Apps to the shipped default.
+// routeResetBuiltin restores Local, Apps or API to the shipped default.
 func (e *MemQLEngine) routeResetBuiltin(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	if _, err := routeCaller(ctx); err != nil {
 		return nil, err
@@ -426,10 +426,28 @@ type routeReadiness struct {
 	// embeddingReachable is true when an embedding model could serve this
 	// person now: the bound one, or one that would be bound automatically.
 	embeddingReachable bool
+	// vendorOrder answers a vendor selector at a level: the catalog's records
+	// that declare the level, in the selector's order
+	// (ProviderRegistry.VendorRecordsFor). Nil reads as a catalog with no
+	// vendor record.
+	vendorOrder func(level airoute.Level, selector string) []string
+}
+
+// newRouteReadiness pairs one person's doors with the catalog their vendor
+// sources are answered from.
+func newRouteReadiness(doors inferenceDoors, providers *ProviderRegistry) routeReadiness {
+	r := routeReadiness{doors: doors}
+	if providers != nil {
+		r.vendorOrder = func(level airoute.Level, selector string) []string {
+			ordered, _ := providers.VendorRecordsFor(level, selector)
+			return ordered
+		}
+	}
+	return r
 }
 
 func (e *MemQLEngine) routeReadinessFor(ctx context.Context) routeReadiness {
-	r := routeReadiness{doors: e.inferenceDoors(ctx)}
+	r := newRouteReadiness(e.inferenceDoors(ctx), e.providers)
 	if binding, err := e.ReadEmbedderBinding(ctx); err == nil && binding.Valid() {
 		r.embedder = binding.ProviderRef
 	}
@@ -468,6 +486,9 @@ func (r routeReadiness) summarize(spec RouteSpec) routeSummaryJSON {
 		}
 		return out
 	}
+	if spec.Kind == RouteKindApi {
+		out.Description = apiRouteDescription(r.doors)
+	}
 	ready := true
 	reason := ""
 	for _, job := range []struct {
@@ -477,7 +498,7 @@ func (r routeReadiness) summarize(spec RouteSpec) routeSummaryJSON {
 		sources := spec.Jobs.For(job.key)
 		serves := ""
 		for _, entry := range sources {
-			if label, ok := r.servesNow(entry); ok {
+			if label, ok := r.servesNow(job.key, entry); ok {
 				serves = label
 				break
 			}
@@ -499,9 +520,23 @@ func (r routeReadiness) summarize(spec RouteSpec) routeSummaryJSON {
 	return out
 }
 
-// servesNow says whether one source can serve this person now, and how to
-// name it on the route page ("Serves now: Claude Code").
-func (r routeReadiness) servesNow(entry string) (string, bool) {
+// apiRouteDescription is API's one line for the person reading it. It names
+// the cluster's account only when the cluster has one AND it pays for them
+// (vendor_account_cluster.go): to anybody else the route is paid by an API
+// key, and a line promising an account they cannot use would send them
+// looking for it.
+func apiRouteDescription(d inferenceDoors) string {
+	if d.ClusterFederation && d.ClusterAccountOpen {
+		return builtinRouteDescriptions[RouteIdApi]
+	}
+	return apiRouteDescriptionKeyOnly
+}
+
+// servesNow says whether one source can serve this person at one job now, and
+// how to name it on the route page ("Serves now: Claude Code"). The level
+// matters to a vendor source only: a vendor selector chooses among the records
+// that declare it.
+func (r routeReadiness) servesNow(level airoute.Level, entry string) (string, bool) {
 	d := r.doors
 	switch {
 	case entry == "fleet:strongest" || entry == "fleet:fastest":
@@ -533,18 +568,51 @@ func (r routeReadiness) servesNow(entry string) (string, bool) {
 				return appDisplayName(a), true
 			}
 		}
-	case strings.HasPrefix(entry, "federation:"):
-		// Federation is this person's answer for a route they choose: the
-		// cluster's account, or a key of theirs (A8).
-		if d.Federation {
-			switch strings.TrimPrefix(entry, "federation:") {
-			case "cheapest":
-				return "Cheapest vendor", true
-			case "strongest":
-				return "Strongest vendor", true
-			}
-			return strings.TrimPrefix(entry, "federation:"), true
+	case strings.HasPrefix(entry, vendorSourcePrefix):
+		return r.vendorServesNow(level, strings.TrimPrefix(entry, vendorSourcePrefix))
+	}
+	return "", false
+}
+
+// vendorServesNow answers a vendor source for one job (design record
+// 2026-11-21-vendor-accounts-and-api-keys, R6): the first record, in the
+// selector's order at this level or the one record the source names, that has
+// an account for THIS person on a route they choose.
+//
+// WHY PER RECORD AND PER LEVEL, where one flag used to answer. "A vendor can
+// serve" was true for every job as soon as any account could pay at any
+// record. A person whose only key is at one vendor, on a route whose job names
+// a model of the other, was told the job was ready and then refused at the
+// call. The answer here is the one the router's walk would reach: the same
+// order (VendorRecordsFor) over the same accounts (VendorDoor.Payers, the
+// composition a call uses).
+//
+// The account is named by its KIND. The row is read by the person whose route
+// it is, about their own key or one lent to them, so the kind is enough, and a
+// key's name or fingerprint never rides this sentence.
+func (r routeReadiness) vendorServesNow(level airoute.Level, source string) (string, bool) {
+	var candidates []string
+	switch source {
+	case VendorSelectorStrongest, VendorSelectorCheapest:
+		if r.vendorOrder != nil {
+			candidates = r.vendorOrder(level, source)
 		}
+	default:
+		candidates = []string{source}
+	}
+	for _, record := range candidates {
+		payer, ok := r.doors.VendorPayers[record]
+		if !ok {
+			continue
+		}
+		paidBy := "the cluster's account"
+		if payer.Account.Kind == VendorAccountKey {
+			paidBy = "a key lent to you"
+			if owner := BareShortId(payer.Account.OwnerUserId); owner != "" && owner == BareShortId(r.doors.ActingUserId) {
+				paidBy = "your API key"
+			}
+		}
+		return payer.Model + ", paid by " + paidBy, true
 	}
 	return "", false
 }
@@ -563,6 +631,19 @@ func (r routeReadiness) unreadyReason(sources []string, job string) string {
 	case allFleet:
 		return "No local model reachable"
 	case allVendors:
+		// The cluster HAS an account and it does not pay for this person
+		// (vendor_account_cluster.go). "A vendor account" is then nothing
+		// they can add; a key is.
+		// The person HAS an account that pays at some vendor model, and none
+		// of the models this job can use is one of them: a catalog with no
+		// record for the job, or a job that names the other vendor's model.
+		// Sending them to add a key they already have would be wrong.
+		if len(r.doors.VendorPayers) > 0 {
+			return job + " needs a vendor model your account can pay for"
+		}
+		if r.doors.ClusterFederation && !r.doors.ClusterAccountOpen {
+			return "Needs an API key. The cluster's vendor account is not open to you"
+		}
 		return "Needs an API key or a vendor account"
 	}
 	return job + ": nothing can serve it now"

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { chooseOption } from "../selectControl";
+import { builtinReply } from "./harness";
 
 // Fleet > Routing > History (was Settings -> Decisions; epic memql#5153, D2,
 // and the routing redesign of 2026-09-28).
@@ -439,5 +440,67 @@ describe("History: bounded retained pages", () => {
     await scrollNextPage();
     await waitFor(() => expect(rowCount()).toBe(25));
     expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
+  });
+});
+
+describe("History: which account paid for a vendor call", () => {
+  const paid = (over: Record<string, unknown>) => wireDecision({ billing: "metered", door: "federation", ...over });
+  /** The reader's own keys and the ones lent to them, as the keys read answers. */
+  const keysOf = (mine: Record<string, unknown>[], lent: Record<string, unknown>[] = []) => ({
+    vendorKeysForActor: async () => builtinReply("vendorKeysForActor", [{ id: "vendorKeys", mine, lent }]),
+  });
+
+  function usePaid(decisions: Record<string, unknown>[], more: Record<string, unknown> = {}) {
+    const made = routingConnection({ decisions, rules: shippedRules() }, more as never);
+    h.connection = made.connection;
+    calls = made.calls;
+    state = made.state;
+  }
+  const detailOf = (model: string) => {
+    fireEvent.click(within(rowFor(model)).getByRole("button"));
+    return rowFor(model).querySelector(".os-decision-detail") as HTMLElement;
+  };
+
+  it("names the cluster's account, a key of the reader's by its name, and any other key only as a key", async () => {
+    usePaid(
+      [
+        paid({ id: "d-1", model: "gpt-5.6-sol", accountKind: "cluster" }),
+        paid({ id: "d-2", model: "claude-opus-5-5", accountKind: "key", accountKeyId: "k1", accountKeyOwnerUserId: "me" }),
+        paid({ id: "d-3", model: "claude-sonnet-5-5", accountKind: "key", accountKeyId: "k7", accountKeyOwnerUserId: "ben" }),
+        paid({ id: "d-4", model: "claude-haiku-5-5", accountKind: "key", accountKeyId: "k9", accountKeyOwnerUserId: "somebody-else" }),
+      ],
+      keysOf([{ id: "k1", vendor: "anthropic", label: "Research", relation: "mine" }], [{ id: "k7", vendor: "anthropic", label: "Team key", relation: "lent", ownerName: "Ben" }]),
+    );
+    await renderHistory();
+    expect(within(detailOf("gpt-5.6-sol")).getByText("Paid by the cluster's account.")).toBeTruthy();
+    expect(within(detailOf("claude-opus-5-5")).getByText("Paid by your API key Research.")).toBeTruthy();
+    expect(within(detailOf("claude-sonnet-5-5")).getByText("Paid by Team key, an API key lent to you.")).toBeTruthy();
+    // A key the reader cannot list is never named, by label or by id.
+    const other = detailOf("claude-haiku-5-5");
+    expect(within(other).getByText("Paid by an API key.")).toBeTruthy();
+    expect(other.textContent).not.toContain("k9");
+  });
+
+  it("says nothing about an account for a call no account paid for", async () => {
+    usePaid([wireDecision({ id: "d-1", model: "qwen3-coder", door: "local", billing: "local" }), wireDecision({ id: "d-2", model: "claude-code", door: "app", billing: "subscription" })]);
+    await renderHistory();
+    expect(within(detailOf("qwen3-coder")).queryByText(/^Paid by /)).toBeNull();
+    expect(within(detailOf("claude-code")).queryByText(/^Paid by /)).toBeNull();
+  });
+
+  it("still says a key paid when the reader's keys cannot be read, or the cluster has no such read", async () => {
+    usePaid([paid({ id: "d-1", model: "claude-opus-5-5", accountKind: "key", accountKeyId: "k1", accountKeyOwnerUserId: "me" })], {
+      vendorKeysForActor: async () => {
+        throw new Error("the keys could not be read");
+      },
+    });
+    await renderHistory();
+    expect(within(detailOf("claude-opus-5-5")).getByText("Paid by an API key.")).toBeTruthy();
+  });
+
+  it("says the API route by name when that is the route a call was sent on", async () => {
+    usePaid([paid({ id: "d-1", model: "claude-opus-5-5", route: "api", accountKind: "cluster" })]);
+    await renderHistory();
+    expect(within(detailOf("claude-opus-5-5")).getByText("Sent on the API route.")).toBeTruthy();
   });
 });

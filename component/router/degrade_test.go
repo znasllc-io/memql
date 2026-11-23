@@ -28,7 +28,7 @@ import (
 func levelRouter(t *testing.T, higher airoute.Level, higherRule *memql.RuleConfig) (*Router, *countingCloud) {
 	t.Helper()
 	cloud := &countingCloud{}
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	providers.RegisterWithParamsForTest("streamClaudeSonnet", "AnthropicStream", "claude-sonnet",
 		map[string]any{"contextWindow": 200000}, cloud)
 	policies := memql.NewPolicyRegistryForTest(map[string][]string{
@@ -126,7 +126,7 @@ func TestConsideredIsKeptOnSuccess(t *testing.T) {
 // `fast` IS THE FLOOR. It does not degrade further, and the report says so
 // rather than leaving an exhausted chain unexplained.
 func TestDegrade_FastDoesNotDegradeFurther(t *testing.T) {
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	policies := memql.NewPolicyRegistryForTest(map[string][]string{"deadChain": {"nobodyRegisteredThis"}})
 	r := New(providers, policies, testRules(t, defaultRule("deadChain")), nil, nil)
 
@@ -152,7 +152,7 @@ func TestDegrade_FastDoesNotDegradeFurther(t *testing.T) {
 // in the index it was about to be written to, and nothing downstream can tell.
 func TestDegrade_EmbeddingsNeverDegrades(t *testing.T) {
 	cloud := &countingCloud{}
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	providers.RegisterWithParamsForTest("streamClaudeSonnet", "AnthropicStream", "claude-sonnet",
 		map[string]any{"contextWindow": 200000}, cloud)
 	policies := memql.NewPolicyRegistryForTest(map[string][]string{
@@ -236,7 +236,7 @@ func TestPark_ReturnsTheRefusalWithTheDoorReport(t *testing.T) {
 func TestExplicitProviderStillWins(t *testing.T) {
 	cloud := &countingCloud{}
 	pinned := &countingCloud{}
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	providers.RegisterWithParamsForTest("ruleWouldPick", "AnthropicStream", "claude-sonnet",
 		map[string]any{"contextWindow": 200000}, cloud)
 	providers.RegisterWithParamsForTest("pinnedByTheCaller", "OpenAI", "gpt",
@@ -296,7 +296,7 @@ func TestExcludeRemovesAConcreteModelFromResolution(t *testing.T) {
 		sizedModel("big", 70_000_000_000, 131072),
 		sizedModel("small", 8_000_000_000, 131072),
 	}
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	providers.SetFleetInference(&stubFleetInference{models: models})
 	policies := memql.NewPolicyRegistryForTest(map[string][]string{"p": {memql.FleetStrongest}})
 
@@ -339,7 +339,7 @@ func TestExcludeRemovesAConcreteModelFromResolution(t *testing.T) {
 // undo the exclusion an operator wrote.
 func TestEmptyChainAfterExclude_OnUnavailableDecides(t *testing.T) {
 	cloud := &countingCloud{}
-	providers := memql.NewProviderRegistryForTest()
+	providers := registryOpenToEverybody()
 	providers.RegisterWithParamsForTest("streamClaudeSonnet", "AnthropicStream", "claude-sonnet",
 		map[string]any{"contextWindow": 200000}, cloud)
 	policies := memql.NewPolicyRegistryForTest(map[string][]string{

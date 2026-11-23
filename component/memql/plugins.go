@@ -118,8 +118,18 @@ type PluginContext struct {
 	// part-way, which is the reason this session exists.
 	OpenMaintenanceSession func(ctx context.Context) (*sql.Conn, func(), error)
 
-	// ResolveVisionProvider RESOLVES a vision-capable provider through the
-	// router, or returns nil when no door to one is open.
+	// ResolveVisionProvider hands out a vision-capable provider that RESOLVES
+	// THROUGH THE ROUTER WHEN IT IS CALLED, with that call's context. So a
+	// plug-in may keep what it is handed: who is having a picture described is
+	// read on each call, and decides which accounts may pay for it (owner
+	// decision 2026-11-22, vendor_account_cluster.go). When no source can
+	// serve the caller, the call returns an error on that picture.
+	//
+	// The getter takes no context, and a provider resolved inside it would be
+	// resolved for nobody, which is the cluster's own work: that is how every
+	// uploader's pictures came to be described on the cluster's account. An
+	// app that wires this field wires a per-call provider (app/plugins.go,
+	// callerVision).
 	//
 	// THE NAME IS THE CONTRACT (epic memql#5127, design D2). It was
 	// `VisionProvider`, which is the name of the registry accessor it used to

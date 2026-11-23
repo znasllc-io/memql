@@ -228,6 +228,12 @@ func TestAFailedAppDoorsReasonReadsBackThroughTheDecisionList(t *testing.T) {
 	}
 
 	providers := memql.NewProviderRegistryForTest()
+	// The person here is somebody the cluster's vendor account pays for, so
+	// the vendor behind the app can serve them. A registry a test builds has
+	// no gate, which pays for no person (owner decision 2026-11-22,
+	// component/memql vendor_account_cluster.go); without this line the vendor
+	// is passed over at the call and the app's refusal is all there is.
+	providers.SetClusterAccountGate(func(context.Context, string) bool { return true })
 	apps := &refusingClaudeCode{}
 	providers.SetAppInference(apps)
 	providers.RegisterWithParamsForTest("streamClaudeSonnet", "AnthropicStream", "claude-sonnet",

@@ -1,4 +1,4 @@
-// Routes as a person picks them in Ask: Auto, Local, Apps and their own
+// Routes as a person picks them in Ask: Auto, Local, Apps, API and their own
 // (design record 2026-10-18-routes-design.md). A route decides which source
 // serves each JOB, and a job is a level named for what it does.
 //
@@ -20,8 +20,18 @@
 // everywhere, and offers the way to add one when the cluster has none.
 //
 // THE READS ARE FEATURE-DETECTED. A cluster without the routes builtins still
-// opens this page: the three built-in routes are drawn from their shipped
-// definitions, read-only, and say that saving needs a newer cluster.
+// opens this page: the three built-in routes it has are drawn from their
+// shipped definitions, read-only, and say that saving needs a newer cluster.
+//
+// ===========================================================================
+// API LISTS VENDOR MODELS ONLY
+// ===========================================================================
+// API (design record 2026-11-21-vendor-accounts-and-api-keys, R4) is the
+// built-in route answered by Anthropic's and OpenAI's models, paid by an API
+// key or by the cluster's account where that pays for the reader. The cluster
+// refuses any other source on it, so its page offers none (JobBoard's
+// `vendorsOnly`). It is drawn only when the cluster reports it: an engine that
+// predates it has no such route, so the shipped fallback below leaves it out.
 
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -54,7 +64,7 @@ export const JOB_MEANING: Record<JobId, string> = {
 /** A route holds at most this many sources per job (the engine's ceiling). */
 export const MAX_JOB_SOURCES = 4;
 
-export type RouteKind = "auto" | "local" | "apps" | "custom";
+export type RouteKind = "auto" | "local" | "apps" | "api" | "custom";
 
 export interface RouteJob {
   job: JobId;
@@ -96,16 +106,28 @@ export const SHIPPED_JOBS: Record<"local" | "apps", JobSources> = {
 export const EMPTY_JOBS: JobSources = { fast: [], strong: [], reasoning: [] };
 
 /** The built-ins in the order a person meets them. */
-export const BUILT_IN_ORDER: readonly string[] = ["auto", "local", "apps"];
+export const BUILT_IN_ORDER: readonly string[] = ["auto", "local", "apps", "api"];
+
+/** The built-in routes with a job list the cluster's owner or a developer may change and restore. */
+export type EditableBuiltIn = "local" | "apps" | "api";
+export function isEditableBuiltIn(id: string): id is EditableBuiltIn {
+  return id === "local" || id === "apps" || id === "api";
+}
 
 /** One line per built-in, used when the engine's own description is absent. */
 export const BUILT_IN_DESCRIPTIONS: Record<string, string> = {
   auto: "Picks the best balance of speed, cost and quality for every call",
   local: "Local models for everything",
   apps: "Claude Code or Codex, with your embedding model",
+  // The engine says who pays for the reader (an API key, or that and the
+  // cluster's account); this is the line that is true for everybody.
+  api: "Vendor models, paid by an API key",
 };
 
-const KINDS: readonly RouteKind[] = ["auto", "local", "apps", "custom"];
+/** A built-in's name when the engine sends none. */
+const BUILT_IN_NAMES: Record<string, string> = { auto: "Auto", local: "Local", apps: "Apps", api: "API" };
+
+const KINDS: readonly RouteKind[] = ["auto", "local", "apps", "api", "custom"];
 
 function str(row: Row, key: string): string {
   const v = row[key];
@@ -136,12 +158,12 @@ export function routeModeFrom(raw: Row): RouteMode | null {
   const id = str(row, "id").trim();
   if (id === "") return null;
   const declared = str(row, "kind") as RouteKind;
-  const kind: RouteKind = KINDS.includes(declared) ? declared : id === "auto" || id === "local" || id === "apps" ? (id as RouteKind) : "custom";
+  const kind: RouteKind = KINDS.includes(declared) ? declared : id === "auto" || isEditableBuiltIn(id) ? (id as RouteKind) : "custom";
   const jobs = (Array.isArray(row["jobs"]) ? (row["jobs"] as unknown[]) : []).map(jobFrom).filter((j): j is RouteJob => j !== null);
   const scope = str(row, "scope") === "personal" || (kind === "custom" && str(row, "scope") !== "cluster") ? "personal" : "cluster";
   return {
     id,
-    name: str(row, "name").trim() || (kind === "custom" ? id : kind.charAt(0).toUpperCase() + kind.slice(1)),
+    name: str(row, "name").trim() || (kind === "custom" ? id : BUILT_IN_NAMES[kind] ?? kind),
     kind,
     scope,
     description: str(row, "description").trim() || BUILT_IN_DESCRIPTIONS[kind] || "",
@@ -194,7 +216,7 @@ export function routeModesFrom(rows: readonly Row[]): { routes: RouteMode[]; rev
   return { routes: orderRouteModes(routes), revision: rows.reduce((max, r) => Math.max(max, revisionOf(r)), 0) };
 }
 
-/** Auto, Local, Apps, then the person's own routes by name. */
+/** Auto, Local, Apps, API, then the person's own routes by name. */
 export function orderRouteModes(routes: readonly RouteMode[]): RouteMode[] {
   const rank = (r: RouteMode) => (BUILT_IN_ORDER.includes(r.id) && r.scope === "cluster" ? BUILT_IN_ORDER.indexOf(r.id) : 99);
   return [...routes].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
@@ -382,7 +404,7 @@ export function routeNameProblem(name: string, taken: readonly string[], own = "
   if (trimmed.length > 40) return "Forty characters at most";
   const lower = trimmed.toLowerCase();
   if (lower !== own.trim().toLowerCase() && taken.some((t) => t.trim().toLowerCase() === lower)) return "You have a route with that name";
-  if (["auto", "local", "apps"].includes(lower)) return "That name is a built-in route";
+  if (BUILT_IN_ORDER.includes(lower)) return "That name is a built-in route";
   return "";
 }
 

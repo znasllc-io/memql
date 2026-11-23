@@ -4,7 +4,9 @@ import { Button, Rail, type Stop } from "../kit";
 import { EntryLayout } from "../kit/EntryLayout";
 import { EntryPending, useEntryTransition } from "../kit/EntryPending";
 import { bootFinished, bootReached } from "../kit/BootCurtain";
-import { canConfigure } from "../kit/ReadinessStates";
+import { canConfigure, useAppReach } from "../kit/ReadinessStates";
+import { API_KEYS_ADD_PART } from "../apps/settings/apikeys/ApiKeysSection";
+import { holds } from "../system/roles";
 import { useSetupFacts } from "../apps/setup/context";
 import { InferenceStop } from "../apps/setup/InferenceStop";
 import { ModuleStop } from "../apps/setup/ModuleStop";
@@ -12,6 +14,7 @@ import { PasskeyStop } from "../apps/setup/PasskeyStop";
 import { PASSKEY_STOP, drawnState, type SetupStop } from "../apps/setup/stops";
 import type { ModuleId } from "../system/modules";
 import { useSession } from "./access";
+import { useKeyLetsIn } from "./keyLetsIn";
 import { useOs } from "./state";
 import { Mark } from "./Mark";
 
@@ -50,6 +53,19 @@ import { Mark } from "./Mark";
 // change with no reload, and a door that is configured but not live -- a
 // laptop asleep -- lifts it: configuration opens the OS, presence decides a
 // call.
+//
+// ===========================================================================
+// AN API KEY THAT CAN PAY LETS ITS HOLDER IN (owner decision 2026-11-23)
+// ===========================================================================
+// Model access is bring-your-own, and a person's API key is a way to a model
+// that the cluster's readiness does not count: the feed is the cluster's, the
+// same for everybody, and a key is one person's. So the verdict alone no
+// longer holds somebody whose own key, or one lent to them, can pay: that is
+// asked of `inferenceStatus` for them (useKeyLetsIn) whenever this would
+// show. The cluster's verdict is unchanged, and so is everybody else's
+// screen. The screen also offers adding one: Settings > API keys, opened
+// straight into its add wizard. Somebody withheld from adding keys (the
+// `app:settings/apikeys` part) is offered nothing they cannot finish.
 export function CoreGate({ onSignOut, children, waitForReadiness = true }: {
   onSignOut: () => void; children: ReactNode; waitForReadiness?: boolean;
 }) {
@@ -62,8 +78,16 @@ export function CoreGate({ onSignOut, children, waitForReadiness = true }: {
   const [entered, setEntered] = useState(false);
   const [waitExpired, setWaitExpired] = useState(false);
   const unconfigured = readiness?.of("ai")?.state === "unconfigured";
+  const windowsOpen = Object.keys(state.shell.windows).length > 0;
+  const keyAnswer = useKeyLetsIn(unconfigured, windowsOpen);
+  const settings = useAppReach("settings");
+  // Adding a key is offered only where it can be finished: the part, and a
+  // Settings window with its API keys section to open.
+  const addKey = holds("execute", API_KEYS_ADD_PART) && settings.canOpenWindows && settings.sections.includes("apikeys")
+    ? () => settings.open("apikeys", { addKey: true })
+    : undefined;
   const resolving = readiness != null && (!readiness.loaded ||
-    (unconfigured && (ladderLoaded !== true || access === null || (canConfigure(role) && facts?.known !== true))));
+    (unconfigured && (ladderLoaded !== true || access === null || keyAnswer === "unknown" || (canConfigure(role) && facts?.known !== true))));
   const waiting = waitForReadiness && !entered && !waitExpired && resolving && Object.keys(state.shell.windows).length === 0;
   useEffect(() => {
     if (!waiting) { setEntered(true); return; }
@@ -76,8 +100,10 @@ export function CoreGate({ onSignOut, children, waitForReadiness = true }: {
   useEffect(() => { if (!entryTransition.show) bootFinished(); }, [entryTransition.show]);
   if (entryTransition.show) return <EntryPending leaving={entryTransition.leaving} />;
 
-  // Only a reported unconfigured verdict holds the desktop after entry.
+  // Only a reported unconfigured verdict holds the desktop after entry, and
+  // not for somebody whose own API key can pay.
   if (readiness?.of("ai")?.state !== "unconfigured") return <>{children}</>;
+  if (keyAnswer === "yes") return <>{children}</>;
 
   // A HOLD, NOT A PRISON. The gate's own acts OPEN AN APP -- Fleet to pair a
   // machine, Settings to set a provider up -- and a window is drawn by the
@@ -90,7 +116,7 @@ export function CoreGate({ onSignOut, children, waitForReadiness = true }: {
   // condition: the stored document never carries windows (state.tsx), so a
   // boot always starts with none, and nothing behind the gate can open one --
   // the only way this is non-empty is an act the person took on this screen.
-  if (Object.keys(state.shell.windows).length > 0) return <>{children}</>;
+  if (windowsOpen) return <>{children}</>;
 
   // FAIL-CLOSED ON THE LADDER AND ON THE IDENTITY, and only here, where it is
   // the whole question. The cluster IS unconfigured -- that much is decided --
@@ -110,7 +136,7 @@ export function CoreGate({ onSignOut, children, waitForReadiness = true }: {
   const feed = readiness!;
   const couldNotCheck = feed.of("ai")?.unknown.length ?? 0;
 
-  if (!canConfigure(role)) return <ToldVariant onSignOut={onSignOut} />;
+  if (!canConfigure(role)) return <ToldVariant onSignOut={onSignOut} addKey={addKey} />;
 
   // If the initial wait expires before the passkey read completes, the known
   // setup heading can still appear. The rail needs its own facts and must not
@@ -164,6 +190,16 @@ export function CoreGate({ onSignOut, children, waitForReadiness = true }: {
             onOpenStop={(id) => setOverride(id)}
           />
         ) : null}
+        {/* A PERSON'S OWN WAY IN, under the cluster's doors and not among
+            them: a key sets nothing up for anybody else, which the line says,
+            so it is not one of the stop's doors and the button is not its
+            primary act. */}
+        {addKey ? (
+          <div className="os-core-gate-key">
+            <p className="os-core-gate-note">An API key of your own lets you in, and nobody else.</p>
+            <Button onClick={addKey}>Add an API key</Button>
+          </div>
+        ) : null}
         {/* The way out, and it is not one of the acts above. An owner held on
             a surface whose only exit is closing the tab is a small trap; a
             Sign out seated among the stops would read as one of them (rule
@@ -209,7 +245,7 @@ export function CoreGate({ onSignOut, children, waitForReadiness = true }: {
  * readiness feed is live and this component re-renders on it, which is what
  * the "lifts on a feed change" case asserts.
  */
-function ToldVariant({ onSignOut }: { onSignOut: () => void }) {
+function ToldVariant({ onSignOut, addKey }: { onSignOut: () => void; addKey?: () => void }) {
   return (
     <EntryLayout><main className="os-core-gate" data-os-core-gate="told">
       <div className="os-core-gate-column">
@@ -217,9 +253,21 @@ function ToldVariant({ onSignOut }: { onSignOut: () => void }) {
           <Mark className="os-ask-mark" />
         </span>
         <h1 className="os-core-gate-head">MemQL is not set up yet</h1>
-        <p className="os-core-gate-body">
-          An owner or developer has to set up inference before anyone can use it.
-        </p>
+        {/* WITH A KEY TO ADD, THE SENTENCE SAYS SO, AND THE ACT IS THE ONE
+            THING HERE A PERSON CAN DO (owner decision 2026-11-23). Without the
+            part, the sentence is what it always was. */}
+        {addKey ? (
+          <>
+            <p className="os-core-gate-body">
+              An owner or developer has to set up inference. Until then, an API key of your own lets you in.
+            </p>
+            <Button tone="primary" onClick={addKey}>Add an API key</Button>
+          </>
+        ) : (
+          <p className="os-core-gate-body">
+            An owner or developer has to set up inference before anyone can use it.
+          </p>
+        )}
         <p className="os-core-gate-note">This page opens by itself once they have.</p>
         <div className="os-core-gate-out">
           <Button onClick={onSignOut}>Sign out</Button>

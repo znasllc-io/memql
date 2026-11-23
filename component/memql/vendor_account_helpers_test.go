@@ -3,6 +3,7 @@ package memql
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -28,6 +29,8 @@ type accountVendorRequest struct {
 	Method string
 	Path   string
 	Header http.Header
+	// Body is what the request carried.
+	Body []byte
 	// At is when the stand-in received the request.
 	At time.Time
 }
@@ -76,8 +79,9 @@ func newAccountVendor(t *testing.T, vendor string) *accountVendor {
 }
 
 func (v *accountVendor) serve(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(r.Body)
 	v.mu.Lock()
-	v.requests = append(v.requests, accountVendorRequest{Method: r.Method, Path: r.URL.Path, Header: r.Header.Clone(), At: time.Now()})
+	v.requests = append(v.requests, accountVendorRequest{Method: r.Method, Path: r.URL.Path, Header: r.Header.Clone(), Body: body, At: time.Now()})
 	answer := accountVendorAnswer{Status: http.StatusOK}
 	if len(v.next) > 0 {
 		answer, v.next = v.next[0], v.next[1:]

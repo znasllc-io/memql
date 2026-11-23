@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readTheBar } from "../readTheBar";
 
@@ -1090,3 +1090,56 @@ describe("model availability through a BFF catalog", () => {
     expect(screen.queryByText("your fleet offers no models")).toBeNull();
   });
 });
+
+// Fleet > Model library > Inference sources, third line (design record
+// 2026-11-21-vendor-accounts-and-api-keys, U7): worded for vendors, and it
+// says whether the cluster's account and a key of the reader's can serve.
+describe("the vendors line among the inference sources", () => {
+  const vendorsLine = () => {
+    const name = screen.getByText("Vendors", { selector: ".os-fleet-door-name" });
+    return name.parentElement as HTMLElement;
+  };
+  const shown = async (row: Record<string, unknown>) => {
+    h.connection = fakeConnection({ inferenceStatus: [{ ...DOORS, ...row }] });
+    render(withSession(<ModelsSection />));
+    await screen.findByText("Vendors", { selector: ".os-fleet-door-name" });
+    return vendorsLine();
+  };
+
+  it("is named Vendors, not for one way an account is set up", async () => {
+    await shown({});
+    expect(screen.queryByText("Federation", { selector: ".os-fleet-door-name" })).toBeNull();
+  });
+
+  it("says where each account is set up when neither can serve", async () => {
+    const line = await shown({ federationConfigured: false, keyAccount: false });
+    expect(within(line).getByText("Unavailable")).toBeTruthy();
+    expect(within(line).getByText("no account yet: add an API key in Settings, or connect the cluster's account under Vendors")).toBeTruthy();
+  });
+
+  it("says a key of the reader's can serve", async () => {
+    const line = await shown({ keyAccount: true, doorsOpen: ["local", "federation"] });
+    expect(within(line).getByText("Available")).toBeTruthy();
+    expect(within(line).getByText("an API key of yours")).toBeTruthy();
+  });
+
+  it("says the cluster's account is not the reader's to spend, and what they can do", async () => {
+    const line = await shown({ federationConfigured: true, clusterAccountOpen: false, keyAccount: false });
+    expect(within(line).getByText("Unavailable")).toBeTruthy();
+    expect(within(line).getByText("the cluster's vendor account does not pay for your calls; add an API key in Settings")).toBeTruthy();
+  });
+
+  // The sentence above the three lines, when nothing can serve. An API key is
+  // the one source a person with no machine and no app can add by themselves,
+  // so the sentence that tells them what to do has to name it.
+  it("names an API key among the ways to get a source when there is none", async () => {
+    await shown({
+      eligible: false, doorsOpen: [], localEligible: false, localModelCount: 0, eligibleModelIds: [],
+      appEligible: false, federationConfigured: false, clusterAccountOpen: false, keyAccount: false,
+    });
+    expect(screen.getByText(
+      "No inference source is available. Connect a model or a signed-in app, or add an API key in Settings, to run tasks that need inference.",
+    )).toBeTruthy();
+  });
+});
+

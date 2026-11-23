@@ -671,6 +671,10 @@ seed capability cap-owner-read-app-settings-pipelines { roleSlug: "owner"  verb:
 // bring-your-own for everybody, so any signed-in person adds a key of their own. Withholding it
 // is a deny in Users > Access.
 //
+// A role an operator authored holds it when its author wrote it in, and that includes a role
+// scoped to one organization: this is the one part of Settings besides Access such a role is not
+// barred from (auth.ScopedRoleMayUse, owner decision 2026-11-22). Nothing seeds it there.
+//
 // There is no `read` beside it. Settings > API keys carries no floor of its own, so it opens for
 // everybody who opens Settings, and a person sees, changes, lends and removes the keys they own
 // whatever their role holds. Those acts are their owner's and need no part.
@@ -684,6 +688,16 @@ seed capability cap-admin-execute-app-settings-apikeys { roleSlug: "admin"  verb
 seed capability cap-user-execute-app-settings-apikeys { roleSlug: "user"  verb: "execute"  resourceType: "app:settings/apikeys"  predefined: true }
 @description("viewer: add an API key of one's own in Settings > API keys.")
 seed capability cap-viewer-execute-app-settings-apikeys { roleSlug: "viewer"  verb: "execute"  resourceType: "app:settings/apikeys"  predefined: true }
+
+// ---- app:settings/clusteraccount -- have the cluster's own vendor account pay for one's calls (owner decision 2026-11-22) ----
+// The cluster's account at a vendor bills the organization its owner connected, and it is not a
+// pool for everybody: model access here is bring-your-own. It pays for the cluster's own work, and
+// for a person's calls only when that person holds this part. OWNER ONLY, by decision: the owner
+// has it from the start and gives it to a person or a group in Users > Access. Everybody else pays
+// with an API key, a machine or an app of their own. The engine judges the person a call is FOR,
+// from their stored role and grants (component/memql vendor_account_cluster.go).
+@description("owner: have the cluster's own vendor account pay for one's model calls.")
+seed capability cap-owner-execute-app-settings-clusteraccount { roleSlug: "owner"  verb: "execute"  resourceType: "app:settings/clusteraccount"  predefined: true }
 
 // ---- app:bin (registry floor: no floor) ----
 @description("owner: open the bin app -- reproduces the OS registry floor no floor (memql#5300).")

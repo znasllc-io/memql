@@ -17,7 +17,7 @@ export function SettingsApp({ sectionId, intent, consumeIntent }: OsAppProps) {
   if (sectionId === "connections") return <ConnectionsPanel appId="settings" intent={intent} consumeIntent={consumeIntent} />;
   if (sectionId === "data") return <OriginsSection />;
   if (sectionId === "providers") return <VendorsSection intent={intent} consumeIntent={consumeIntent} />;
-  if (sectionId === "apikeys") return <ApiKeysSection />;
+  if (sectionId === "apikeys") return <ApiKeysSection intent={intent} consumeIntent={consumeIntent} />;
   if (sectionId === "levels") return <LevelsSection />;
   if (sectionId === "rules") return <RoutingMovedSection what="rules" />;
   if (sectionId === "decisions") return <RoutingMovedSection what="decisions" />;

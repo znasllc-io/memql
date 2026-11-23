@@ -31,6 +31,14 @@ import (
 // They fail against a resolver that remembers rows, which is the single-node
 // assumption being ruled out: replace Store.ActiveKeysAtVendor's read with a
 // remembered slice and both replica tests go red.
+//
+// WHO THE CLUSTER'S ACCOUNT PAYS FOR CROSSES THE SAME HOP (owner decision
+// 2026-11-22, component/memql vendor_account_cluster.go). When a key stops
+// paying, the next account is the cluster's, and that one pays for a person
+// only when its owner allowed them. That permission is a row too, so each
+// replica here asks its OWN engine, and a test grants or withdraws it through
+// one replica and reads the answer on the other. A gate that remembered its
+// answer would keep serving a person the owner had just shut out.
 
 // hopVendor stands in for one vendor text record on a replica. It serves a
 // chat turn, and bound to an account it says who paid.
@@ -69,6 +77,7 @@ func (v *hopVendor) CallChat(context.Context, []common.ChatMessage) (string, err
 // replica is one node: its own resolver over its own engine, the registry that
 // asks it, and the router that walks the registry.
 type replica struct {
+	eng      *memql.MemQLEngine
 	store    *Store
 	resolver *Resolver
 	router   *router.Router
@@ -81,10 +90,17 @@ const hopRoute = "chosenRoute"
 // cluster has an account at the vendor on this node.
 func newReplica(t *testing.T, w *world, eng *memql.MemQLEngine, clusterAccount bool) *replica {
 	t.Helper()
-	r := &replica{paid: &hopCalls{}}
+	r := &replica{eng: eng, paid: &hopCalls{}}
 	r.store, r.resolver = w.over(eng)
 
 	providers := memql.NewProviderRegistryForTest()
+	// Who the cluster's account pays for is this replica's own engine's
+	// answer, read from the rows on every call. The engine installs that gate
+	// on its own registry when it boots; this registry is the test's, so it
+	// asks the engine's.
+	providers.SetClusterAccountGate(func(ctx context.Context, user string) bool {
+		return eng.Providers().ClusterAccountClosedTo(ctx, user) == ""
+	})
 	providers.RegisterWithParamsForTest("claude", "anthropic", "claude-sonnet",
 		map[string]any{"contextWindow": 200000},
 		&hopVendor{paid: r.paid, paidBy: memql.VendorAccount{Kind: memql.VendorAccountCluster, Vendor: memql.VendorAnthropic}})
@@ -116,8 +132,13 @@ func (r *replica) resolve(t *testing.T, user string) (memql.ResolvedProvider, er
 
 func (r *replica) call(t *testing.T, user string, resolved memql.ResolvedProvider) {
 	t.Helper()
+	require.NoError(t, r.tryCall(user, resolved))
+}
+
+// tryCall makes the call a resolution stands for and reports how it ended.
+func (r *replica) tryCall(user string, resolved memql.ResolvedProvider) error {
 	_, err := resolved.Client.(common.ChatAIProvider).CallChat(actorContext(user), []common.ChatMessage{{Role: "user", Content: "hello"}})
-	require.NoError(t, err)
+	return err
 }
 
 func twoReplicas(t *testing.T, w *world, clusterAccount bool) (a, b *replica) {
@@ -126,11 +147,24 @@ func twoReplicas(t *testing.T, w *world, clusterAccount bool) (a, b *replica) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = otherDB.Close() })
 	require.NotSame(t, w.eng, other)
+	// A process reads grants through one engine (auth.SetGrantSource), as a
+	// node does. Every test here serves its calls on b, so b's engine is the
+	// reader: a permission written through a is read by an engine that never
+	// wrote it.
+	previousGrants, previousMembers := auth.InstalledGrantSource(), auth.InstalledMembershipSource()
+	other.InstallGrantResolution()
+	t.Cleanup(func() { auth.SetGrantSource(previousGrants); auth.SetMembershipSource(previousMembers) })
 	return newReplica(t, w, w.eng, clusterAccount), newReplica(t, w, other, clusterAccount)
 }
 
 // M6: a key removed through one replica is refused on the other, at once, and
 // that includes a call the other replica had already resolved to the key.
+//
+// What happens to that call then is the owner's decision about the cluster's
+// account: it pays for a person the owner allowed, and for nobody else. So the
+// removed key leaves a person who was not allowed with nothing to pay with,
+// and the call is refused; it is never quietly moved onto the cluster's
+// account.
 func TestAKeyRemovedOnOneReplicaIsRefusedOnTheOther(t *testing.T) {
 	w := newWorld(t, "hop-remove")
 	alice := w.person("alice")
@@ -153,16 +187,73 @@ func TestAKeyRemovedOnOneReplicaIsRefusedOnTheOther(t *testing.T) {
 	require.NoError(t, a.store.Remove(context.Background(), key, alice))
 
 	// The call B had already resolved does not spend it: the account is judged
-	// again when the call is made, and the cluster's account pays.
+	// again when the call is made. Nobody allowed alice the cluster's account,
+	// so nothing pays and the call fails.
+	require.Error(t, b.tryCall(alice, pending), "a call resolved to a key that was then removed was served anyway")
+	require.Equal(t, []string{"key:" + key}, b.paid.list(),
+		"a key removed through another replica, or the cluster's account, paid for a call that was already resolved here")
+
+	// And a new resolution on B offers neither the key nor the cluster's
+	// account, and says why.
+	_, err = b.resolve(t, alice)
+	require.Error(t, err, "a person with no key and no permission was served on the other replica")
+	require.Contains(t, err.Error(), "no account can pay for this call")
+	require.Contains(t, err.Error(), memql.ClusterAccountClosedReason)
+}
+
+// The same removal, for a person the owner allowed the cluster's account: the
+// call the other replica had already resolved to the key is paid by the
+// cluster's account instead, and so is the next one.
+func TestARemovedKeyFallsToTheClustersAccountForAPersonItPaysFor(t *testing.T) {
+	w := newWorld(t, "hop-remove-allowed")
+	alice := w.person("alice")
+	key := w.key(alice, "mine")
+	a, b := twoReplicas(t, w, true)
+	w.allowClusterAccount(a.eng, alice)
+
+	pending, err := b.resolve(t, alice)
+	require.NoError(t, err)
+	require.Equal(t, key, pending.Resolution.Decision.AccountKeyId, "a person's own key did not come before the cluster's account")
+	require.NoError(t, a.store.Remove(context.Background(), key, alice))
+
 	b.call(t, alice, pending)
-	require.Equal(t, []string{"key:" + key, memql.VendorAccountCluster}, b.paid.list(),
+	require.Equal(t, []string{memql.VendorAccountCluster}, b.paid.list(),
 		"a key removed through another replica paid for a call that was already resolved here")
 
-	// And a new resolution on B does not offer it.
 	after, err := b.resolve(t, alice)
 	require.NoError(t, err)
 	require.Equal(t, memql.VendorAccountCluster, after.Resolution.Decision.AccountKind)
 	require.Empty(t, after.Resolution.Decision.AccountKeyId)
+}
+
+// Who the cluster's account pays for is read on every replica, on every call:
+// the owner allowing a person through one replica opens it on the other, and
+// taking that back shuts it there, with nothing in between to tell it.
+func TestWhoTheClustersAccountPaysForIsReadOnTheOtherReplica(t *testing.T) {
+	w := newWorld(t, "hop-cluster-account")
+	alice := w.person("alice")
+	a, b := twoReplicas(t, w, true)
+
+	_, err := b.resolve(t, alice)
+	require.Error(t, err, "the cluster's account paid for a person nobody allowed")
+	require.Contains(t, err.Error(), memql.ClusterAccountClosedReason)
+
+	w.allowClusterAccount(a.eng, alice)
+	resolved, err := b.resolve(t, alice)
+	require.NoError(t, err, "a permission granted through one replica was not read on the other")
+	require.Equal(t, memql.VendorAccountCluster, resolved.Resolution.Decision.AccountKind)
+
+	// B resolves the next call to the cluster's account, and before it is made
+	// the owner takes the permission back through A.
+	pending, err := b.resolve(t, alice)
+	require.NoError(t, err)
+	w.withdrawClusterAccount(a.eng, alice)
+
+	require.Error(t, b.tryCall(alice, pending), "the cluster's account paid a call for a person it had been shut to since the call was resolved")
+	require.Empty(t, b.paid.list())
+	_, err = b.resolve(t, alice)
+	require.Error(t, err, "a permission taken back through one replica still served on the other")
+	require.Contains(t, err.Error(), memql.ClusterAccountClosedReason)
 }
 
 // On a cluster with no account at the vendor, the key is all there is: once it
@@ -192,6 +283,9 @@ func TestAStateWrittenOnOneReplicaIsReadOnTheOther(t *testing.T) {
 	lent := w.key(bob, "lent")
 	w.lend(bob, lent, people(alice))
 	a, b := twoReplicas(t, w, true)
+	// Alice is somebody the cluster's account pays for, so a key that stops
+	// paying leaves her call served and the record can say why the key did not.
+	w.allowClusterAccount(a.eng, alice)
 
 	resolved, err := b.resolve(t, alice)
 	require.NoError(t, err)

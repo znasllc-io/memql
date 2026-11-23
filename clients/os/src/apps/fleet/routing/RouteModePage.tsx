@@ -6,6 +6,8 @@ import { PageHelp } from "../../../kit/pageHelp";
 import { ActivityTarget } from "../../../kit/SemanticActivity";
 import { JobBoard } from "./JobBoard";
 import {
+  EDITABLE_JOBS,
+  isEditableBuiltIn,
   jobSourcesOf,
   jobsComplete,
   routeModeBar,
@@ -26,7 +28,8 @@ import { STALE_SENTENCE } from "./vocabulary";
 // It REPLACES the list (DESIGN.md rule 11), with `<- Routes` in the trail, and
 // the bar on the window's floor carries every act that changes the route
 // (rule 12): Discard changes and Save while there are changes; Restore
-// default on a changed built-in; Delete on a route of yours -- each present
+// default on a changed built-in (Local, Apps or API); Delete on a route of
+// yours -- each present
 // only where it is legal, and Restore and Delete ask first, in the bar.
 //
 // A DRAFT OUTLIVES THE PAGE. The list holds it (`draft` / `onDraft`), so going
@@ -34,7 +37,7 @@ import { STALE_SENTENCE } from "./vocabulary";
 // "Unsaved" meanwhile.
 //
 // WHO MAY CHANGE IT is the route's own answer: a route of yours always, a
-// built-in for an owner or developer. Anyone else sees the jobs and what
+// built-in (Local, Apps or API) for an owner or developer. Anyone else sees the jobs and what
 // serves them, with no tray and no acts -- the bar says who can.
 
 export interface RouteModeDraft {
@@ -133,7 +136,7 @@ export function RouteModePage({
   }
 
   async function restore() {
-    if (busy !== "" || (route.id !== "local" && route.id !== "apps")) return;
+    if (busy !== "" || !isEditableBuiltIn(route.id)) return;
     setBusy("restoring");
     setError(null);
     try {
@@ -226,6 +229,11 @@ export function RouteModePage({
             facts={facts}
             embedder={embedder}
             readOnly={!changes}
+            vendorsOnly={route.kind === "api"}
+            reported={Object.fromEntries(EDITABLE_JOBS.flatMap((job) => {
+              const read = route.jobs.find((j) => j.job === job);
+              return read === undefined ? [] : [[job, read]];
+            }))}
             onAnnounce={setAnnouncement}
             onAddMachine={onAddMachine}
             onOpenModels={onOpenModels}

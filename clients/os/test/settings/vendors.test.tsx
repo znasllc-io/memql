@@ -602,6 +602,15 @@ describe("Settings -> Vendors: no key is entered here", () => {
     expect(container.textContent).not.toMatch(/anywhere else/i);
   });
 
+  // Owner decision 2026-11-22: the cluster's account is not a pool for
+  // everybody. The page that sets it up says whose calls it pays for, so an
+  // owner connecting a vendor knows it is not opening that vendor to the
+  // whole cluster.
+  it("says whose calls the cluster's account pays for, and where to allow somebody", async () => {
+    const { container } = await renderDoors();
+    expect(container.textContent).toMatch(/It pays for the cluster's own work, and for a person's calls only when you allow them in Users, under Access\./);
+  });
+
   it("says where a person's own key goes in words, and adds no control for the section beside it", async () => {
     // API keys is the next section of this same app (owner decision
     // 2026-11-22), one tab along. A second control to an adjacent tab would be

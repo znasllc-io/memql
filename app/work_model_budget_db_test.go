@@ -234,6 +234,7 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 					e.SetRunCeilingGuard(&checkpointEstimateGuard{RunCeilings: work.NewRunCeilings(e, e.Logger), calls: &estimatedCalls, wall: &estimatedWall, start: &started})
 					e.SetModelCallJournal(work.NewModelJournal(e))
 					registry := memql.NewProviderRegistryForTest()
+					clusterAccountPaysForThePeopleHere(registry)
 					registry.RegisterWithParamsForTest("fixture", "OpenAI", "fixture", map[string]any{"contextWindow": 200000}, providers[n])
 					rules := memql.NewRuleRegistry()
 					require.NoError(t, rules.Register(&memql.RuleConfig{Name: memql.DefaultRuleName, Policy: "fixture", Locked: true, OnUnavailable: memql.OnUnavailableDegrade, SourceFile: "dsl/rules/rules.memql"}))

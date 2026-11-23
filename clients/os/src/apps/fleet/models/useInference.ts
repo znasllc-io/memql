@@ -5,6 +5,7 @@ import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { useOsConnection } from "../../../live/connection";
 import { useReading } from "../../../cluster/reading";
 import { boolOr, stringsOf } from "../../../kit";
+import { clusterAccountPaysFor } from "../../settings/routingFacts";
 import { useRoutingPolicy } from "../routing/useRoutingPolicy";
 import type { RankedModel } from "./ordering";
 import type { ModelProfile } from "./catalog";
@@ -44,8 +45,10 @@ export interface DoorsReading {
   runnableApps: string[];
   appSessionsInstalled: boolean;
   cloudConfigured: boolean;
-  /** The cluster's own account at a vendor. */
+  /** The cluster's own account at a vendor is set up. */
   federationConfigured: boolean;
+  /** That account pays for this reader (it is not a pool for everybody). */
+  clusterAccountOpen: boolean;
   /** This reader has an API key that can pay for a vendor model. */
   keyAccount: boolean;
   fleetInferenceInstalled: boolean;
@@ -153,6 +156,7 @@ export function doorsFromRow(row: Row | null): DoorsReading | null {
     appSessionsInstalled: boolOr(row, "appSessionsInstalled", false),
     cloudConfigured: boolOr(row, "cloudConfigured", false),
     federationConfigured: boolOr(row, "federationConfigured", false),
+    clusterAccountOpen: clusterAccountPaysFor(row),
     keyAccount: boolOr(row, "keyAccount", false),
     fleetInferenceInstalled: boolOr(row, "fleetInferenceInstalled", false),
     fleetCatalogInstalled: boolOr(row, "fleetCatalogInstalled", false),

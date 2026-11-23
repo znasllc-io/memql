@@ -128,9 +128,9 @@ export function studioMachine(over: Row = {}): Row {
 
 /** One route as `routesForActor` answers it. */
 export function routeModeRow(over: Row & { id: string }): Row {
-  const kind = (over.kind as string | undefined) ?? (["auto", "local", "apps"].includes(over.id) ? over.id : "custom");
+  const kind = (over.kind as string | undefined) ?? (["auto", "local", "apps", "api"].includes(over.id) ? over.id : "custom");
   return {
-    name: kind === "custom" ? over.id : kind.charAt(0).toUpperCase() + kind.slice(1),
+    name: kind === "custom" ? over.id : kind === "api" ? "API" : kind.charAt(0).toUpperCase() + kind.slice(1),
     kind,
     scope: kind === "custom" ? "personal" : "cluster",
     description: "",
@@ -281,7 +281,7 @@ export function routingConnection(seed: { machines?: Row[]; federationConfigured
       if (state.saveError) throw state.saveError;
       const id = typeof args.id === "string" ? args.id : "";
       const jobs = routeJobs(args.fast as string[], args.strong as string[], args.reasoning as string[]);
-      if (id === "local" || id === "apps") {
+      if (id === "local" || id === "apps" || id === "api") {
         if (args.revision !== state.revision) throw new Error(`routing changed since revision ${String(args.revision)}; refresh and review before saving`);
         state.revision += 1;
         state.modes = state.modes.map((m) => (m.id === id ? { ...m, jobs, customized: true } : m));
@@ -301,7 +301,10 @@ export function routingConnection(seed: { machines?: Row[]; federationConfigured
     routeReset: async (args) => {
       if (args.revision !== state.revision) throw new Error(`routing changed since revision ${String(args.revision)}; refresh and review before saving`);
       state.revision += 1;
-      const shipped = shippedRouteModes().find((m) => m.id === args.id)!;
+      const shipped =
+        args.id === "api"
+          ? { jobs: routeJobs(["federation:strongest"], ["federation:strongest"], ["federation:strongest"]) }
+          : shippedRouteModes().find((m) => m.id === args.id)!;
       state.modes = state.modes.map((m) => (m.id === args.id ? { ...m, jobs: shipped.jobs, customized: false } : m));
       return builtinReply("routeReset", [state.modes.find((m) => m.id === args.id)!]);
     },

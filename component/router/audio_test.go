@@ -23,7 +23,7 @@ func TestAudioNeedsNoChatContextAtSelectionOrDispatch(t *testing.T) {
 			model.AudioIn = true
 			model.AudioOut = true
 			fleet := &audioContextFleet{contextFleet{models: []memql.FleetModel{model}}}
-			providers := memql.NewProviderRegistryForTest()
+			providers := registryOpenToEverybody()
 			providers.SetFleetInference(fleet)
 			r := New(providers, memql.NewPolicyRegistryForTest(map[string][]string{"p": {memql.FleetFastest}}), testRules(t, defaultRule("p")), nil, nil)
 			resolved, err := r.ResolveFor(context.Background(), ResolveRequest{UserId: "alice", Level: airoute.LevelFast, Modality: modality, Needs: airoute.Needs{MinContextTokens: 8192}})

@@ -87,6 +87,9 @@ func TestAPersonWithAKeyAndNoFederationCanBeServed(t *testing.T) {
 // on any route, with no key anywhere.
 func TestFederationAloneServesEveryone(t *testing.T) {
 	reg := newProviderRegistry()
+	// Everyone who may use the cluster's account, which here is everybody.
+	// Who may is vendor_account_cluster_test.go's subject.
+	openToEverybody(reg)
 	reg.setEntry(federatedOpenAI(vendorRecord("gpt", VendorOpenAI, true, "")))
 	reg.SetVendorKeys(noKeys())
 
@@ -124,8 +127,9 @@ func TestNeitherMeansTheVendorDoorIsShut(t *testing.T) {
 		t.Fatalf("door = %+v, want everything shut", door)
 	}
 
-	readiness := routeReadiness{doors: (&MemQLEngine{providers: reg}).inferenceDoors(personContext("ana")), embeddingReachable: true}
-	if _, ok := readiness.servesNow("federation:cheapest"); ok {
+	readiness := newRouteReadiness((&MemQLEngine{providers: reg}).inferenceDoors(personContext("ana")), reg)
+	readiness.embeddingReachable = true
+	if _, ok := readiness.servesNow(airoute.LevelFast, "federation:cheapest"); ok {
 		t.Fatal("a vendor source serves now with no account that can pay")
 	}
 	vendorsOnly := RouteSpec{Id: "mine", Name: "Mine", Kind: RouteKindCustom, Jobs: RouteJobs{
@@ -291,9 +295,19 @@ func TestInferenceStatusTellsAKeyFromTheClustersAccount(t *testing.T) {
 	federated := newProviderRegistry()
 	federated.setEntry(federatedOpenAI(vendorRecord("gpt", VendorOpenAI, true, "")))
 	federated.SetVendorKeys(noKeys())
-	everyone := status(federated, personContext("ben"))
-	if everyone["federationConfigured"] != true || everyone["keyAccount"] != false || everyone["eligible"] != true {
-		t.Fatalf("status = %v, want the cluster's account and no key", everyone)
+	federated.SetClusterAccountGate(openTo("ben").gate)
+	allowed := status(federated, personContext("ben"))
+	if allowed["federationConfigured"] != true || allowed["clusterAccountOpen"] != true || allowed["keyAccount"] != false || allowed["eligible"] != true {
+		t.Fatalf("status = %v, want the cluster's account, open to him, and no key", allowed)
+	}
+	// The same cluster, asked by a person its account is closed to: it is set
+	// up, it is not theirs to spend, and with no key they have no vendor.
+	closed := status(federated, personContext("ana"))
+	if closed["federationConfigured"] != true || closed["clusterAccountOpen"] != false || closed["eligible"] != false {
+		t.Fatalf("status = %v, want a cluster account that is set up and closed to her, and nothing open", closed)
+	}
+	if doors, _ := closed["doorsOpen"].([]any); len(doors) != 0 {
+		t.Fatalf("doorsOpen = %v for a person the cluster's account is closed to", closed["doorsOpen"])
 	}
 }
 
@@ -307,7 +321,20 @@ func TestRouteReadinessCountsAKeyOnlyWhereItMayBeSpent(t *testing.T) {
 		Reasoning: []string{"federation:strongest"},
 	}}
 
-	keyNotOnForAuto := routeReadiness{doors: inferenceDoors{Federation: true, KeyAccount: true}, embeddingReachable: true}
+	// A catalog whose records declare a job, and a person whose key at
+	// Anthropic is not switched on for Auto.
+	reg := apiCatalog(nil)
+	autoKeys := keysHeldBy("ana", keyAccount(VendorAnthropic, "k1", "ana"))
+	reg.SetVendorKeys(autoKeys)
+	readinessOf := func() routeReadiness {
+		r := newRouteReadiness((&MemQLEngine{providers: reg}).inferenceDoors(personContext("ana")), reg)
+		r.embeddingReachable = true
+		return r
+	}
+	keyNotOnForAuto := readinessOf()
+	if d := keyNotOnForAuto.doors; !d.Federation || d.FederationAuto || !d.KeyAccount {
+		t.Fatalf("doors = %+v, want a key that serves a chosen route and not Auto", d)
+	}
 	// The reason points at the switch: this person has added a source, and
 	// "needs a source" would send them looking for another one.
 	if s := keyNotOnForAuto.summarize(auto); s.Ready || s.Reason != "An API key you can use is off for Auto" {
@@ -325,7 +352,8 @@ func TestRouteReadinessCountsAKeyOnlyWhereItMayBeSpent(t *testing.T) {
 		}
 	}
 
-	keyOnForAuto := routeReadiness{doors: inferenceDoors{Federation: true, FederationAuto: true, KeyAccount: true}, embeddingReachable: true}
+	autoKeys.autoUsable = &[]VendorAccount{keyAccount(VendorAnthropic, "k1", "ana")}
+	keyOnForAuto := readinessOf()
 	if s := keyOnForAuto.summarize(auto); !s.Ready {
 		t.Fatalf("Auto = not ready (%q); want ready once the key is on for Auto", s.Reason)
 	}

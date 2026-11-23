@@ -211,6 +211,50 @@ describe("the route and Where menus", () => {
     expect(apps.textContent).toContain("No app is ready on your machines");
   });
 
+  it("offers API after Apps with the cluster's own line, shown and not choosable while nothing can pay", async () => {
+    const routes = routeOptionsFrom({ routes: [
+      { id: "auto", name: "Auto", kind: "auto", scope: "cluster", ready: true },
+      { id: "local", name: "Local", kind: "local", scope: "cluster", ready: true },
+      { id: "apps", name: "Apps", kind: "apps", scope: "cluster", ready: true },
+      { id: "api", name: "API", kind: "api", scope: "cluster", description: "Vendor models, paid by an API key", ready: false, reason: "Needs an API key or a vendor account" },
+      { id: "r1", name: "Emergency", kind: "custom", scope: "personal", ready: true },
+    ] });
+    const { t, sent } = transport(routes);
+    render(<AskSurface transport={t} variant="sheet" availability={READY} />);
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("combobox", { name: "Route" }));
+    const list = screen.getByRole("listbox", { name: "Route" });
+    expect(within(list).getAllByRole("option").map(option => option.querySelector(".os-select-option-label")?.textContent)).toEqual(["Auto", "Local", "Apps", "API", "Emergency"]);
+    const api = within(list).getByRole("option", { name: /API/ });
+    // Shown, with what it is and why it cannot serve, and not choosable
+    // (DESIGN.md rule 5): choosing never opens a warning.
+    expect(api.getAttribute("aria-disabled")).toBe("true");
+    expect(api.textContent).toContain("Vendor models, paid by an API key");
+    expect(api.textContent).toContain("Needs an API key or a vendor account");
+    fireEvent.click(api);
+    expect(screen.queryByRole("alert")).toBeNull();
+    fireEvent.change(field(), { target: { value: "go" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await act(async () => {});
+    expect(sent[0]?.options?.routing).toEqual({ source: "", level: "" });
+  });
+
+  it("sends route:api once API can serve and is chosen", async () => {
+    const routes = routeOptionsFrom({ routes: [
+      { id: "auto", name: "Auto", kind: "auto", scope: "cluster", ready: true },
+      { id: "api", name: "API", kind: "api", scope: "cluster", description: "Vendor models, paid by an API key", ready: true, reason: "" },
+    ] });
+    const { t, sent } = transport(routes);
+    render(<AskSurface transport={t} variant="sheet" availability={READY} />);
+    await act(async () => {});
+    choose("Route", "API");
+    fireEvent.change(field(), { target: { value: "go" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await act(async () => {});
+    expect(sent[0]?.options?.routing).toEqual({ source: "route:api", level: "" });
+    expect(routeIdFromSource("route:api")).toBe("api");
+  });
+
   it("keeps Auto choosable when the cluster says nothing can answer, and says why", async () => {
     const routes = routeOptionsFrom({ routes: [
       { id: "auto", name: "Auto", kind: "auto", scope: "cluster", ready: false, reason: "Needs an embedding model" },

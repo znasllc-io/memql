@@ -125,8 +125,15 @@ export interface InferenceReading {
   appEligible: boolean;
   runnableApps: string[];
   appSessionsInstalled: boolean;
-  /** The CLUSTER'S OWN account at a vendor: its workload identity federation. */
+  /** The CLUSTER'S OWN account at a vendor is SET UP: its workload identity federation. The same for everybody. */
   federationConfigured: boolean;
+  /**
+   * That account pays for THIS reader. It is not a pool for everybody (owner
+   * decision 2026-11-22): it pays for the cluster's own work, and for a person
+   * only when its owner allowed them. An engine that does not report the field
+   * predates the rule, and the account then paid for everybody.
+   */
+  clusterAccountOpen: boolean;
   /** This reader has an API key that can pay for a vendor model on a route they choose. */
   keyAccount: boolean;
   fleetInferenceInstalled: boolean;
@@ -146,12 +153,27 @@ export interface InferenceReading {
  *
  * One function, because three surfaces say it (Cluster > Readiness, Fleet >
  * Model library, and the routing sources) and they must not differ.
+ *
+ * `clusterAccount` is whether the cluster's account pays for THIS reader
+ * (`clusterAccountOpen`), never merely whether it is set up: a reader it is
+ * closed to must not be told the cluster's federation serves them.
  */
-export function vendorDoorWords(federationConfigured: boolean, keyAccount: boolean): string {
-  if (federationConfigured && keyAccount) return "workload-identity federation and an API key of yours";
+export function vendorDoorWords(clusterAccount: boolean, keyAccount: boolean): string {
+  if (clusterAccount && keyAccount) return "workload-identity federation and an API key of yours";
   if (keyAccount) return "an API key of yours";
-  if (federationConfigured) return "workload-identity federation";
+  if (clusterAccount) return "workload-identity federation";
   return "a vendor account";
+}
+
+/**
+ * Whether the cluster's own vendor account pays for the reader, read off an
+ * `inferenceStatus` row. A row with no `clusterAccountOpen` came from an
+ * engine that predates the rule, where being set up meant paying for
+ * everybody.
+ */
+export function clusterAccountPaysFor(row: { clusterAccountOpen?: unknown; federationConfigured?: unknown }): boolean {
+  if (typeof row.clusterAccountOpen === "boolean") return row.clusterAccountOpen;
+  return row.federationConfigured === true;
 }
 
 export const UNREAD_INFERENCE: InferenceReading = {
@@ -167,6 +189,7 @@ export const UNREAD_INFERENCE: InferenceReading = {
   runnableApps: [],
   appSessionsInstalled: false,
   federationConfigured: false,
+  clusterAccountOpen: false,
   keyAccount: false,
   fleetInferenceInstalled: false,
   fleetCatalogInstalled: false,
@@ -216,6 +239,7 @@ export function inferenceFrom(row: Row | null | undefined, error: string): Infer
     runnableApps: strings(r, "runnableApps"),
     appSessionsInstalled: bool(r, "appSessionsInstalled"),
     federationConfigured: bool(r, "federationConfigured"),
+    clusterAccountOpen: clusterAccountPaysFor(r),
     keyAccount: bool(r, "keyAccount"),
     fleetInferenceInstalled: bool(r, "fleetInferenceInstalled"),
     fleetCatalogInstalled: bool(r, "fleetCatalogInstalled"),

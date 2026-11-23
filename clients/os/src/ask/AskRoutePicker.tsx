@@ -9,8 +9,8 @@ import { pickerValue, routeSupportsDestination, type AskRouteOption } from "./as
 export const MANAGE_ROUTES = "manage:routes";
 
 /**
- * The message field's route menu: Auto, Local, Apps, then the person's own
- * under "Yours", then Manage routes.
+ * The message field's route menu: Auto, Local, Apps, API, then the person's
+ * own under "Yours", then Manage routes.
  *
  * A route that is not ready is SHOWN and cannot be chosen, with its reason
  * under its name. Hiding it would leave somebody looking for the Apps they
@@ -41,7 +41,7 @@ export function AskRoutePicker({ value, routes, destination = "auto", onChange, 
     // Descriptions stay with the options in every state, never appear as a
     // warning after a selection, and never change the collapsed control.
     const description = route.kind === "apps" ? "Runs apps on your computer; unavailable with Workbench"
-      : route.description || (route.kind === "auto" ? "Chooses models automatically" : route.kind === "local" ? "Uses models on fleet machines" : "");
+      : route.description || (route.kind === "auto" ? "Chooses models automatically" : route.kind === "local" ? "Uses models on fleet machines" : route.kind === "api" ? "Vendor models, paid by an API key" : "");
     return <option key={route.id} value={route.id} disabled={!available(route)} data-hint={[description, route.reason].filter(Boolean).join(". ") || undefined}>{route.name}</option>;
   };
   return (
