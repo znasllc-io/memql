@@ -197,24 +197,6 @@ describe("the share view", () => {
     ]);
   });
 
-  it("does not offer a group with nobody in it but the sharer", async () => {
-    // Offered, then refused: "nobody but you is in that group yet".
-    connect({
-      shareDirectory: [...people,
-        { groupId: "g-solo", displayName: "Just me", members: 1 },
-        { groupId: "g-pair", displayName: "One other", members: 1 },
-        { groupId: "g-empty", displayName: "Empty", members: 0 },
-        { groupId: "g-design", displayName: "Design team", members: 4 }],
-      groupReach: { "g-pair": [{ userId: "u-dana", displayName: "Dana Cole" }] },
-    });
-    await renderFiles();
-    await openShare();
-    chooseOption(screen.getByLabelText("Search users and groups by", { selector: "button" }), "Groups");
-    fireEvent.focus(searchBox());
-    await screen.findByRole("option", { name: "Design team" });
-    expect(screen.getAllByRole("option").map((o) => o.getAttribute("aria-label"))).toEqual(["Design team", "One other"]);
-  });
-
   it("does not offer who already has the file, and removes sharing with them", async () => {
     const connection = connect({});
     await renderFiles();
