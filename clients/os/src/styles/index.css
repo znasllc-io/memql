@@ -4823,7 +4823,6 @@ a.os-button {
   color: var(--os-muted);
 }
 /* Who shared a file with you: a name, so the text face, not the data face. */
-.os-files-tile-from { font-family: inherit; }
 
 .os-files-rename { display: flex; gap: 8px; padding: 12px 4px; }
 .os-files-rename input { flex: 1; min-width: 0; }

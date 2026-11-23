@@ -28,7 +28,6 @@ const RENEW_DAYS = 7;
 interface SharedFile {
   id: string;
   createdAt: string;
-  ownerDisplayName: string;
   shares: OutgoingShare[];
 }
 
@@ -39,7 +38,6 @@ export function SharingPlace({
   titleOf,
   onStop,
   onRenew,
-  showSharer = false,
 }: {
   source: LiveView<OutgoingShare> | null;
   label: string;
@@ -50,8 +48,6 @@ export function SharingPlace({
   onStop: (share: OutgoingShare) => Promise<void>;
   /** Renews a share for `days`; absent where the caller may not renew (other people's shares). */
   onRenew?: (share: OutgoingShare, days: number) => Promise<void>;
-  /** Each tile says who shared it ("by Majo Zepeda"): the list is not only yours. */
-  showSharer?: boolean;
 }) {
   // One clock for the cards, so every card's time left agrees (kit/useNow).
   const now = useNow(60_000);
@@ -70,13 +66,13 @@ export function SharingPlace({
     }
   };
   // The shares, folded into their files in the order the Head's sort gave them.
-  const files = useLiveView<OutgoingShare, SharedFile>(source, `${showSharer}`, (shares) => {
+  const files = useLiveView<OutgoingShare, SharedFile>(source, "sharing", (shares) => {
     const byFile = new Map<string, SharedFile>();
     for (const share of shares) {
       const key = share.artifactId || share.id;
       const file = byFile.get(key);
       if (file) file.shares.push(share);
-      else byFile.set(key, { id: key, createdAt: share.createdAt, ownerDisplayName: share.ownerDisplayName, shares: [share] });
+      else byFile.set(key, { id: key, createdAt: share.createdAt, shares: [share] });
     }
     return [...byFile.values()];
   });
@@ -98,7 +94,6 @@ export function SharingPlace({
           renderRow={(file, tick) => (
             <FileTile
               row={artifactFromRow({ id: file.id, kind: "file", title: titleOfFile(file), createdAt: file.createdAt })}
-              caption={showSharer ? `by ${file.ownerDisplayName || "Unnamed person"}` : ""}
               fixed
               picked={picked === file.id}
               dim={false}

@@ -92,7 +92,6 @@ export function FileTile({
   onPick,
   onOpen,
   onMenu,
-  caption = "",
   fixed = false,
 }: {
   row: ArtifactRow;
@@ -111,8 +110,6 @@ export function FileTile({
    */
   onOpen: () => unknown;
   onMenu: (x: number, y: number) => void;
-  /** A quiet line under the name (who shared a file with you). */
-  caption?: string;
   /** Not draggable (to the Bin or the desk): a file shared with you is not yours. */
   fixed?: boolean;
 }) {
@@ -184,7 +181,6 @@ export function FileTile({
           <FileGlyph label={typeLabel(name, row.format)} />
         </span>
         <span className="os-files-tile-name">{name}</span>
-        {caption ? <span className="os-files-tile-meta os-files-tile-from">{caption}</span> : null}
         {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
       </button>
     </div>

@@ -1123,7 +1123,6 @@ export function BrowseSection({
                 source={byOthers ? overseenList : outgoingList}
                 label={headTitle}
                 emptyText={byOthers ? (sharedBy === "everyone" ? "Nobody is sharing a file you can stop." : "They are not sharing a file you can stop.") : emptyText}
-                showSharer={byOthers}
                 titleOf={(share) => shareTitles.get(share.artifactId) ?? content.find((row) => row.id === share.artifactId)?.title ?? "Untitled file"}
                 onStop={async (share) => {
                   setRowNote(null);

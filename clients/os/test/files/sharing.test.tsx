@@ -723,7 +723,7 @@ describe("Shared by, for someone who oversees others' shares (item 13, Nov 20 20
   ].map((row, i) => ({ ...row, ownerDisplayName: (row as Record<string, unknown>).ownerDisplayName ?? ["", "Enrique Mendivil", "Majo Zepeda"][i] }));
   const sharedBy = () => screen.getByLabelText("Shared by", { selector: "button" });
 
-  it("starts on Me, and Everyone lists each share with who shared it", async () => {
+  it("starts on Me, and Everyone lists every overseen share, with no \"by\" line on the files", async () => {
     const connection = connect({ shares: [mine], overseen });
     await renderFiles();
     await click(within(rail()).getByRole("button", { name: "Sharing" }));
@@ -735,11 +735,14 @@ describe("Shared by, for someone who oversees others' shares (item 13, Nov 20 20
 
     chooseOption(sharedBy(), "Everyone");
     const rows = within(await screen.findByRole("list", { name: "Sharing" })).getAllByRole("listitem");
+    // Who shared each file is the Shared by choice, not a line under it: file
+    // tiles read the same everywhere (Jesús, Nov 23).
     expect(rows.map((row) => row.textContent)).toEqual([
-      expect.stringContaining("by Majo Zepeda"),
-      expect.stringContaining("by Enrique Mendivil"),
-      expect.stringContaining("by Me Myself"),
+      expect.stringContaining("Site visit 03.jpg"),
+      expect.stringContaining("Lab results summary.pdf"),
+      expect.stringContaining("brief.pdf"),
     ]);
+    expect(rows.every((row) => !(row.textContent ?? "").includes("by "))).toBe(true);
     expect(connection.callsNamed("librarySharesOverseen").length).toBeGreaterThan(0);
 
     chooseOption(sharedBy(), "Enrique Mendivil");
