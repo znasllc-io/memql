@@ -105,6 +105,7 @@ query run pipelineRunsBrowse {
     branch string
     outcome string
   }
+  // Facets must stay identical to pipelineRunsBrowseAll's apart from this owner conjunct (TestRunBrowseFacetsMatch).
   filter    row => row.ownerUserId == actor.userId
                 && (args.changesOnly != true || row.event == "pull_request" || row.event == "merge_group")
                 && (args.pipelineId == nil || args.pipelineId == "" || row.pipelineId == args.pipelineId)
@@ -145,6 +146,7 @@ query run pipelineRunsBrowseAll {
     branch string
     outcome string
   }
+  // Facets must stay identical to pipelineRunsBrowse's apart from its owner conjunct (TestRunBrowseFacetsMatch).
   filter    row => (args.changesOnly != true || row.event == "pull_request" || row.event == "merge_group")
                 && (args.pipelineId == nil || args.pipelineId == "" || row.pipelineId == args.pipelineId)
                 && (args.branch == nil || args.branch == "" || row.headBranch == args.branch)
