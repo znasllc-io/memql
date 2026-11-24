@@ -7,15 +7,19 @@ import { computerUseStatus, formatClockOffset, hasRoundTrip, pipelineStepsStatus
 import { HardwareGroup } from "./HardwareGroup";
 import { setupNow, setupSummary } from "./setup";
 import { machineFeatureStates } from "./features";
+import { connectionDropsWords, type ConnectionDrops } from "./connectionDrops";
 
 export const MachineDetailsSection = DetailsSection;
 
 /** Read-only information stays open, ordered and separate from machine edits. */
-export function MachineDetailsInfo({ machine, now, machineClass, usableBytes }: {
+export function MachineDetailsInfo({ machine, now, machineClass, usableBytes, drops }: {
   machine: MachineRow; now: Date; machineClass: string; usableBytes: number;
+  /** The machine's recent connection drops; absent where the page reads none. */
+  drops?: ConnectionDrops;
 }) {
   const status = machine.revokedAt ? "Revoked" : isWorkerOnline(machine, now) ? "Online" : "Offline";
   const roundTrip = hasRoundTrip(machine) ? roundTripFigure(machine, now) : "Not measured";
+  const dropped = drops ? connectionDropsWords(drops, now) : null;
   const clock = machine.clockSkewKnown ? formatClockOffset(machine.clockSkewMs) : "Not reported";
   const computerUse = machine.ownerFeatures?.computerUse === false ? "Disabled" : computerUseStatus(machine).answer;
   const pipelines = pipelineStepsStatus(machine).answer;
@@ -38,12 +42,13 @@ export function MachineDetailsInfo({ machine, now, machineClass, usableBytes }: 
       <HardwareGroup machine={machine} machineClass={machineClass} usableBytes={usableBytes} now={now} heading={false} />
     </MachineDetailsSection>
     <MachineDetailsSection title="Connection">
-      <PageHelp title="Connection"><p>Online means Cockpit is connected. Active calls reflect the last heartbeat and may trail newly started work. Round trip measures the cluster’s ping to this machine. A missing ping or clock offset means Cockpit has not reported that measurement; it does not mean zero.</p></PageHelp>
+      <PageHelp title="Connection"><p>Online means Cockpit is connected. Active calls reflect the last heartbeat and may trail newly started work. Round trip measures the cluster’s ping to this machine. A missing ping or clock offset means Cockpit has not reported that measurement; it does not mean zero.</p><p>A connection drop is a connection that ended while the machine was running work, or that a new connection replaced before the cluster saw the old one end. Cockpit’s own reconnects are not drops. Pipeline steps wait for a machine with no recent drop when one can take them.</p></PageHelp>
       <Facts>
         <Fact label="Status" value={status} />
         {setup ? <Fact label="Setup" value={setup} /> : null}
         <Fact label="Last heartbeat" value={formatFreshness(machine.lastSeenAt, now)} title={machine.lastSeenAt || undefined} copyValue={machine.lastSeenAt} />
         <Fact label="Round trip" value={roundTrip} title={machine.rttAt || undefined} copyValue={hasRoundTrip(machine) ? roundTrip : undefined} />
+        {dropped ? <Fact label="Connection drops" value={dropped.value} title={dropped.title} /> : null}
         <Fact label="Clock offset" value={clock} copyValue={machine.clockSkewKnown ? clock : undefined} />
         <Fact label="Active calls" value={String(machine.activeCount)} />
       </Facts>

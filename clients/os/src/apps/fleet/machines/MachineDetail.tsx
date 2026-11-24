@@ -27,6 +27,7 @@ import { SharingGroup } from "./SharingGroup";
 import { OwnerFeaturesGroup } from "./OwnerFeaturesGroup";
 import { AutoRefresh } from "../../../kit/AutoRefresh";
 import { useMachineRecommendation } from "./useMachineRecommendation";
+import { useConnectionDrops } from "./connectionDrops";
 import type { MachineWrites, RemovalReceipt } from "./useMachineWrites";
 
 // One machine, in full: what it reported, what its owner set, what it can
@@ -57,17 +58,20 @@ export function MachineDetail({
   // one read for both, because a page that fetched the class separately could
   // show a class the recommendation disagreed with.
   const recommendation = useMachineRecommendation(machine.id, ["all", "details"].includes(view));
+  // The machine's recent connection drops, read with the Details page's own
+  // refresh: the rows reach no browser by subscription (connectionDrops.ts).
+  const connectionDrops = useConnectionDrops(machine.id, ["all", "details"].includes(view));
 
   return (
     <Panel label={`${label} detail`}>
-      <AutoRefresh enabled={["all", "details"].includes(view)} busy={recommendation.state === "reading"} onRefresh={recommendation.reread} />
+      <AutoRefresh enabled={["all", "details"].includes(view)} busy={recommendation.state === "reading"} onRefresh={() => { recommendation.reread(); connectionDrops.reread(); }} />
       {/* DETAILS is what the machine reported and how it is connected; SETTINGS
           is only what its owner can change. The advisories explain the
           connection facts, so they open the Details page. */}
       {view === "all" || view === "details" ? <div className="fleet-machine-details">
         <CredentialHealth machine={machine} now={now} />
         <SetupHealth machine={machine} now={now} />
-        <MachineDetailsInfo machine={machine} now={now} machineClass={recommendation.recommended.machineClass} usableBytes={recommendation.recommended.usableBytes} />
+        <MachineDetailsInfo machine={machine} now={now} machineClass={recommendation.recommended.machineClass} usableBytes={recommendation.recommended.usableBytes} drops={connectionDrops.drops} />
       </div> : null}
 
       {view === "all" || view === "settings" ? <div className="fleet-machine-details">
