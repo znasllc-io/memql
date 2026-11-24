@@ -2392,28 +2392,10 @@ func (e *MemQLEngine) embedWorkObservation(ctx context.Context, id string, paylo
 	if err := json.Unmarshal(payload, &p); err != nil {
 		return
 	}
-	content, _ := p["content"].(string)
-	if data, ok := p["data"].(map[string]any); ok {
-		// Accounting writes hold the admission/renewal locks. Embedding their
-		// labels would request another provider admission while those same locks
-		// are held, recursively blocking the durable write's return. These rows
-		// retain exact journal identity and no reusable semantic finding.
-		if data["providerAdmission"] != nil || data["progressCredit"] != nil {
-			return
-		}
-		// These administrative labels say nothing about the retained evidence.
-		// Their exact receipts remain available by run/source reference; indexing
-		// "Saved execution progress" or an opaque archive hash adds no recall value.
-		if data["execution"] != nil || data["continuation"] == true || data["delegatedEvidence"] == true {
-			return
-		}
-		if data["contextHash"] != nil {
-			// A semantic checkpoint has reusable meaning; an exact-only archive
-			// has no summary yet. Never replace its source or index the hash label.
-			content, _ = data["summary"].(string)
-		}
-	}
-	if strings.TrimSpace(content) == "" {
+	// The text rule lives in workObservationEmbedText, shared with the
+	// memory-search rebuild (memory_sources.go) so the two cannot drift.
+	content, ok := workObservationEmbedText(p)
+	if !ok {
 		return
 	}
 	args := map[string]any{
