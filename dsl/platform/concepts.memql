@@ -863,13 +863,25 @@ concept memoryIndexRun {
   /// Where the walk stands: the source it is in, mapped to the last item id done in it. Sources
   /// before it, in name order, are done for this walk. Empty is the walk's beginning.
   cursor            object
-  /// This walk's {total, done, skipped, unsourced, failed}. total = done + skipped + failed;
-  /// unsourced counts the active index's entries no source rebuilds, set when a walk ends.
+  /// This walk's {total, done, skipped, unsourced, failed, missing}. total = done + skipped +
+  /// failed; unsourced counts the active index's entries no source rebuilds, set when a walk ends;
+  /// missing counts the items the walk found absent from the target, or older there than their
+  /// row, and left so.
   counts            object
   /// Why the run waits, in plain words. Empty unless state is waiting.
   waitingReason     string
   /// When the last full walk ended: the backfill walks again ten minutes after it.
   lastPassAt        datetime
+  /// The items the last completed walk left missing, or that a counting walk found missing: the
+  /// backlog Memory search shows ("37 items waiting"). Kept across the walks of one model, so the
+  /// last count stands while the next is taken.
+  missing           int
+  /// When the walk that counted `missing` ended.
+  missingAt         datetime
+  /// A waiting backfill's counting walk in progress, {cursor, missing}: where it stands and what it
+  /// has found missing so far. It reads presence and staleness only and embeds nothing, so `cursor`
+  /// and `counts` stay where the wait left them. An empty cursor is none in progress.
+  counting          object
 }
 
 /// Virtual projection of ONE MODEL the caller's fleet can run right now (epic memql#4676). Never

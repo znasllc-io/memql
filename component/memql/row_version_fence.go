@@ -102,25 +102,37 @@ func (e *MemQLEngine) checkRowVersionFences(ctx context.Context, tx bun.Tx) erro
 
 // fenceWriteTarget records the version whose payload is about to be merged.
 // A concurrent write invalidates the entire decision rather than losing fields.
-// staged-data: MUST-NOT-GATE -- the witness must include unpublished target
-// versions or a later merge could overwrite a write hidden by publication state.
 func (e *MemQLEngine) fenceWriteTarget(ctx context.Context, concept, rowID string) (context.Context, error) {
 	if HasRowVersionFence(ctx, concept, rowID) {
 		return ctx, nil
 	}
+	at, err := e.latestRowVersion(ctx, concept, rowID)
+	if err != nil {
+		return nil, err
+	}
+	return ContextWithRowVersionFence(ctx, concept, rowID, at), nil
+}
+
+// latestRowVersion is when the newest version of one row was written, or zero
+// when the row has none: the witness a fenced write is checked against, and
+// the version a write stamps its own after (VersionTimeAfter), so a writer
+// whose clock lags the last writer's still writes the newest version.
+// staged-data: MUST-NOT-GATE -- the witness must include unpublished target
+// versions or a later merge could overwrite a write hidden by publication state.
+func (e *MemQLEngine) latestRowVersion(ctx context.Context, concept, rowID string) (time.Time, error) {
 	canonical := rowID
 	if !strings.HasPrefix(canonical, concept+":") {
 		canonical = concept + ":" + canonical
 	}
 	if e.database() == nil {
-		return nil, fmt.Errorf("row version fence requires a database")
+		return time.Time{}, fmt.Errorf("row version fence requires a database")
 	}
 	var at time.Time
 	err := versionsOfOneID(e.database().NewSelect().Model((*memorynodes.MemoryNode)(nil)).ModelTableExpr(memorynodes.ObservedRowsSQL+" AS mn").Column("createdAt").Where("concept = ?", concept), canonical, false).Limit(1).Scan(ctx, &at)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return nil, err
+		return time.Time{}, err
 	}
-	return ContextWithRowVersionFence(ctx, concept, rowID, at), nil
+	return at, nil
 }
 
 func fenceWriteClock(ctx context.Context, concept, rowID string, params *memorynodes.CreateParams) {

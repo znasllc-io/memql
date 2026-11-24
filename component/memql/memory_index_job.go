@@ -79,6 +79,20 @@ package memql
 // or an owner chooses the model again. The indexer's role is checked before a
 // tick's first step that embeds or moves the binding (work).
 //
+// # The backlog: what is missing, counted (ruling R10)
+//
+// Every walk that ends records what it LEFT missing -- items absent from the
+// target or older there than their row whose embedding failed
+// (Counts.Missing) -- on the run as Missing, with MissingAt: the backlog Memory
+// search shows. A waiting walk cannot say, since it stops at its first missing
+// item; so a waiting BACKFILL still takes a counting walk at the backfill's
+// cadence (count): every source from the first, presence and staleness reads
+// only, nothing embedded, on its own cursor (Counting) so the embed walk's
+// cursor and counts stay where the wait left them. It is saved with the wait,
+// at the tick's end, and resumes on the next tick, on any replica, when it does
+// not fit in one. A fresh walk of the same model keeps the last count until its
+// own end. A switch's waits count nothing: its backlog is not the screen's.
+//
 // # What counts as missing
 //
 // An item is missing from the target when its vector is absent OR older than
@@ -260,7 +274,12 @@ var (
 // Unsourced is not a visited item. It is set when a walk ends: the entries of
 // the ACTIVE table whose (concept, field) no registered source rebuilds, which
 // a switch would drop from search.
-type MemoryIndexCounts struct{ Total, Done, Skipped, Unsourced, Failed int }
+//
+// Missing is not a fourth kind of visited item either: it is the items the walk
+// found absent from the target, or older there than their row
+// (memoryIndexCurrent), and LEFT so -- the ones whose embedding failed. A walk
+// that ends records it on the run (MemoryIndexRun.Missing).
+type MemoryIndexCounts struct{ Total, Done, Skipped, Unsourced, Failed, Missing int }
 
 // MemoryIndexRun is the Go mirror of v1:platform:memoryIndexRun.
 type MemoryIndexRun struct {
@@ -271,6 +290,22 @@ type MemoryIndexRun struct {
 	// last id done in it ("" for its start). Empty is the walk's beginning.
 	Cursor map[string]string
 	Counts MemoryIndexCounts
+	// Missing is what the last COMPLETED walk left missing (its Counts.Missing),
+	// or what a counting walk found missing, and MissingAt when that walk
+	// ended: the backlog Memory search shows (ruling R10). It is kept across
+	// the walks of one model, so the last count stands while the next is taken.
+	Missing   int
+	MissingAt time.Time
+	// Counting is a waiting backfill's counting walk in progress (count).
+	Counting memoryIndexCounting
+}
+
+// memoryIndexCounting is a counting walk in progress: where it stands, in the
+// shape of MemoryIndexRun.Cursor, and how many items it has found missing so
+// far. An empty Cursor is no counting walk in progress.
+type memoryIndexCounting struct {
+	Cursor  map[string]string
+	Missing int
 }
 
 // memoryIndexWorld is everything a tick touches outside its own decisions:
@@ -303,25 +338,35 @@ type memoryIndexWorld interface {
 // cloneMemoryIndexRun copies a run, so a map held by one copy is never written
 // through another. A nil cursor becomes an empty one.
 func cloneMemoryIndexRun(run MemoryIndexRun) MemoryIndexRun {
-	cursor := make(map[string]string, len(run.Cursor))
-	for k, v := range run.Cursor {
-		cursor[k] = v
-	}
-	run.Cursor = cursor
+	run.Cursor = cloneMemoryIndexCursor(run.Cursor)
+	run.Counting.Cursor = cloneMemoryIndexCursor(run.Counting.Cursor)
 	return run
+}
+
+func cloneMemoryIndexCursor(cursor map[string]string) map[string]string {
+	out := make(map[string]string, len(cursor))
+	for k, v := range cursor {
+		out[k] = v
+	}
+	return out
 }
 
 // memoryIndexRunsEqual reports whether writing a would change the row b.
 func memoryIndexRunsEqual(a, b MemoryIndexRun) bool {
-	if a.Kind != b.Kind || a.State != b.State || a.TargetRef != b.TargetRef || a.TargetTable != b.TargetTable ||
-		a.PreviousRef != b.PreviousRef || a.IndexedBy != b.IndexedBy || a.StartedBy != b.StartedBy ||
-		a.WaitingReason != b.WaitingReason || a.TargetDimensions != b.TargetDimensions || a.Counts != b.Counts ||
-		!a.StartedAt.Equal(b.StartedAt) || !a.FinishedAt.Equal(b.FinishedAt) || !a.LastPassAt.Equal(b.LastPassAt) ||
-		len(a.Cursor) != len(b.Cursor) {
+	return a.Kind == b.Kind && a.State == b.State && a.TargetRef == b.TargetRef && a.TargetTable == b.TargetTable &&
+		a.PreviousRef == b.PreviousRef && a.IndexedBy == b.IndexedBy && a.StartedBy == b.StartedBy &&
+		a.WaitingReason == b.WaitingReason && a.TargetDimensions == b.TargetDimensions && a.Counts == b.Counts &&
+		a.StartedAt.Equal(b.StartedAt) && a.FinishedAt.Equal(b.FinishedAt) && a.LastPassAt.Equal(b.LastPassAt) &&
+		a.Missing == b.Missing && a.MissingAt.Equal(b.MissingAt) && a.Counting.Missing == b.Counting.Missing &&
+		memoryIndexCursorsEqual(a.Cursor, b.Cursor) && memoryIndexCursorsEqual(a.Counting.Cursor, b.Counting.Cursor)
+}
+
+func memoryIndexCursorsEqual(a, b map[string]string) bool {
+	if len(a) != len(b) {
 		return false
 	}
-	for k, v := range a.Cursor {
-		if w, ok := b.Cursor[k]; !ok || w != v {
+	for k, v := range a {
+		if w, ok := b[k]; !ok || w != v {
 			return false
 		}
 	}
@@ -483,6 +528,7 @@ func (t *memoryIndexTick) pick(ctx context.Context) (bool, error) {
 			StartedAt: now, Cursor: map[string]string{}}
 		if sameTarget {
 			next.LastPassAt, next.FinishedAt = bf.LastPassAt, bf.FinishedAt
+			next.Missing, next.MissingAt = bf.Missing, bf.MissingAt
 		}
 		t.run = next
 	}
@@ -504,6 +550,15 @@ func (t *memoryIndexTick) pick(ctx context.Context) (bool, error) {
 // (memoryIndexResumeState) and those steps would never run. The walk after the
 // flip is checked as usual, and waits for an owner.
 func (t *memoryIndexTick) work(ctx context.Context) error {
+	// The sources and the table first: a waiting backfill still counts its
+	// backlog over them (count).
+	t.sources = append([]MemorySource(nil), t.w.sources()...)
+	sort.SliceStable(t.sources, func(a, b int) bool { return t.sources[a].Name < t.sources[b].Name })
+	table, err := t.w.ensureTable(ctx, t.run.TargetRef, t.run.TargetDimensions)
+	if err != nil {
+		return err
+	}
+	t.table, t.run.TargetTable = table, table
 	if t.run.State == memoryIndexStateWaiting {
 		// Still refused: the run waits on, unchanged (save writes nothing).
 		if reason, wait := t.indexerWait(ctx); wait {
@@ -512,13 +567,6 @@ func (t *memoryIndexTick) work(ctx context.Context) error {
 		t.run.State = memoryIndexResumeState(t.run, t.active)
 		t.run.WaitingReason = ""
 	}
-	t.sources = append([]MemorySource(nil), t.w.sources()...)
-	sort.SliceStable(t.sources, func(a, b int) bool { return t.sources[a].Name < t.sources[b].Name })
-	table, err := t.w.ensureTable(ctx, t.run.TargetRef, t.run.TargetDimensions)
-	if err != nil {
-		return err
-	}
-	t.table, t.run.TargetTable = table, table
 	checked := false
 	check := func() (string, bool) {
 		if checked {
@@ -587,8 +635,106 @@ func (t *memoryIndexTick) indexerWait(ctx context.Context) (string, bool) {
 // not written again (save compares with the stored row).
 func (t *memoryIndexTick) wait(ctx context.Context, reason string) error {
 	t.run.State, t.run.WaitingReason = memoryIndexStateWaiting, reason
+	if t.run.Kind == memoryIndexKindBackfill {
+		if err := t.count(ctx); err != nil {
+			_, serr := t.save(ctx)
+			return errors.Join(err, serr)
+		}
+	}
 	_, err := t.save(ctx)
 	return err
+}
+
+// count takes the steps of a waiting backfill's COUNTING WALK (ruling R10).
+// While the model cannot be reached nothing is embedded, but Memory search must
+// still say how many items wait ("37 items waiting: ..."), and a wait stops the
+// embed walk at its first missing item, so its counts cannot say. TRIGGER: a
+// backfill waiting, and either a counting walk in progress or the last count
+// memoryIndexBackfillEvery old (or none taken). The walk covers every source
+// from the first, reading presence and staleness only (memoryIndexCurrent, as
+// the embed walk does), and keeps its own cursor and tally on the run
+// (Counting), so the embed walk's Cursor and Counts stay where the wait left
+// them and a walk too long for one tick resumes on the next, on any replica.
+// It runs one batch at least and then while the budget lasts. Its end records
+// Missing and MissingAt. It is saved with the wait, at the tick's end: losing a
+// batch of it costs a re-read of presence, never an embedding.
+func (t *memoryIndexTick) count(ctx context.Context) error {
+	r := &t.run
+	if len(r.Counting.Cursor) == 0 {
+		if !r.MissingAt.IsZero() && t.w.now().Sub(r.MissingAt) < memoryIndexBackfillEvery {
+			return nil
+		}
+		r.Counting.Missing = 0
+	}
+	for first := true; first || t.w.now().Before(t.soft); first = false {
+		ended, err := t.countBatch(ctx)
+		if err != nil || ended {
+			return err
+		}
+	}
+	return nil
+}
+
+// countBatch counts up to memoryIndexBatch items of the source the counting
+// walk is in. It answers true when counting stops for this tick: the walk
+// ended, or the tick's context did.
+func (t *memoryIndexTick) countBatch(ctx context.Context) (bool, error) {
+	r := &t.run
+	pos, after := memoryIndexPosition(t.sources, r.Counting.Cursor)
+	if pos >= len(t.sources) {
+		t.endCount()
+		return true, nil
+	}
+	s := t.sources[pos]
+	items, next, err := t.w.items(ctx, s, after, memoryIndexBatch)
+	if err != nil {
+		if ctx.Err() != nil {
+			return true, nil
+		}
+		t.log.Warn("memory index: a source could not be read while counting the backlog; its items are not in this count",
+			"source", s.Name, "error", err)
+		return t.countMoveOn(pos), nil
+	}
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		if item.Failure == "" {
+			ids = append(ids, item.Id)
+		}
+	}
+	written := map[string]time.Time{}
+	if len(ids) > 0 {
+		if written, err = t.w.vectorTimes(ctx, t.table, s.VectorField, ids); err != nil {
+			return true, err
+		}
+	}
+	for _, item := range items {
+		if item.Failure == "" && !memoryIndexCurrent(item, written) {
+			r.Counting.Missing++
+		}
+	}
+	if next != "" {
+		r.Counting.Cursor = map[string]string{s.Name: next}
+		return false, nil
+	}
+	return t.countMoveOn(pos), nil
+}
+
+// countMoveOn leaves source pos counted: the counting walk goes to the next
+// source's start, or, after the last, ends. It answers true when it ended.
+func (t *memoryIndexTick) countMoveOn(pos int) bool {
+	if pos+1 < len(t.sources) {
+		t.run.Counting.Cursor = map[string]string{t.sources[pos+1].Name: ""}
+		return false
+	}
+	t.endCount()
+	return true
+}
+
+// endCount records a finished counting walk as the backlog.
+func (t *memoryIndexTick) endCount() {
+	r := &t.run
+	r.Missing, r.MissingAt = r.Counting.Missing, t.w.now()
+	r.Counting = memoryIndexCounting{Cursor: map[string]string{}}
 }
 
 // save writes the run when it differs from the stored row. It answers false
@@ -677,6 +823,7 @@ func (t *memoryIndexTick) batch(ctx context.Context) (bool, error) {
 				t.log.Warn("memory index: an item could not be indexed; it counts as failed and the next walk tries it again",
 					"source", s.Name, "id", item.Id, "target", t.run.TargetRef, "error", err)
 				t.run.Counts.Failed++
+				t.run.Counts.Missing++
 			} else {
 				t.run.Counts.Done++
 			}
@@ -739,6 +886,10 @@ func (t *memoryIndexTick) embed(ctx context.Context, s MemorySource, item Memory
 func (t *memoryIndexTick) endWalk(ctx context.Context) (bool, error) {
 	now := t.w.now()
 	r := &t.run
+	// Every walk that ends records what it left missing: the backlog. A
+	// counting walk it interrupted is over, since this count is newer.
+	r.Missing, r.MissingAt = r.Counts.Missing, now
+	r.Counting = memoryIndexCounting{Cursor: map[string]string{}}
 	if r.Kind == memoryIndexKindSwitch && r.State == memoryIndexStateIndexing {
 		// The first walk filled the target; the catch-up walk picks up what
 		// arrived meanwhile, and decides about the flip.
@@ -1102,10 +1253,11 @@ func (e *MemQLEngine) flipMemoryIndex(ctx context.Context, run MemoryIndexRun) e
 	if db == nil {
 		return fmt.Errorf("memory index: no database")
 	}
-	fenced, err := e.fenceWriteTarget(ctx, EmbedderBindingConceptID, ActiveEmbedderBindingID)
+	bindingVersion, err := e.latestRowVersion(ctx, EmbedderBindingConceptID, ActiveEmbedderBindingID)
 	if err != nil {
 		return err
 	}
+	fenced := ContextWithRowVersionFence(ctx, EmbedderBindingConceptID, ActiveEmbedderBindingID, bindingVersion)
 	active, err := e.ReadEmbedderBinding(ctx)
 	if err != nil {
 		return fmt.Errorf("memory index: there is no active model to switch from: %w", err)
@@ -1126,8 +1278,15 @@ func (e *MemQLEngine) flipMemoryIndex(ctx context.Context, run MemoryIndexRun) e
 		// Retired FIRST: once the binding has moved, the old model's index
 		// must already be dated for keeping, or the daily cleanup could not
 		// tell it from an index nobody needs.
+		// Each write is stamped after the version it read (ruling R12): the
+		// retired row's own, and the binding's read under this lock.
+		retiredVersion, err := e.latestRowVersion(ctx, EmbedderBindingConceptID, retired)
+		if err != nil {
+			return err
+		}
 		retireArgs := map[string]any{"bindingId": retired, "providerRef": active.ProviderRef, "dimensions": active.Dimensions,
-			"retireAt": now.Add(memoryIndexRetention).Format(time.RFC3339Nano)}
+			"retireAt":    now.Add(memoryIndexRetention).Format(time.RFC3339Nano),
+			"versionTime": VersionTimeAfter(retiredVersion, now).Format(time.RFC3339Nano)}
 		if v := strings.TrimSpace(active.IndexedBy); v != "" {
 			retireArgs["indexedBy"] = v
 		}
@@ -1135,7 +1294,8 @@ func (e *MemQLEngine) flipMemoryIndex(ctx context.Context, run MemoryIndexRun) e
 			return err
 		}
 		flipArgs := map[string]any{"bindingId": ActiveEmbedderBindingID, "providerRef": current.TargetRef,
-			"dimensions": current.TargetDimensions, "activatedAt": now.Format(time.RFC3339Nano), "previousRef": active.ProviderRef}
+			"dimensions": current.TargetDimensions, "activatedAt": now.Format(time.RFC3339Nano), "previousRef": active.ProviderRef,
+			"versionTime": VersionTimeAfter(bindingVersion, now).Format(time.RFC3339Nano)}
 		if indexer, fleet := IndexerFor(EmbedderBinding{ProviderRef: current.TargetRef, IndexedBy: current.IndexedBy}); fleet && indexer != "" {
 			flipArgs["indexedBy"] = indexer
 		}
@@ -1222,9 +1382,16 @@ type memoryIndexRunPayload struct {
 		Skipped   int `json:"skipped"`
 		Unsourced int `json:"unsourced"`
 		Failed    int `json:"failed"`
+		Missing   int `json:"missing"`
 	} `json:"counts"`
 	WaitingReason string `json:"waitingReason"`
 	LastPassAt    string `json:"lastPassAt"`
+	Missing       int    `json:"missing"`
+	MissingAt     string `json:"missingAt"`
+	Counting      struct {
+		Cursor  map[string]string `json:"cursor"`
+		Missing int               `json:"missing"`
+	} `json:"counting"`
 }
 
 func memoryIndexTime(raw string) time.Time {
@@ -1274,7 +1441,9 @@ func (e *MemQLEngine) readMemoryIndexRun(ctx context.Context, kind string) (Memo
 		WaitingReason: p.WaitingReason, StartedAt: memoryIndexTime(p.StartedAt), FinishedAt: memoryIndexTime(p.FinishedAt),
 		LastPassAt: memoryIndexTime(p.LastPassAt), Cursor: p.Cursor,
 		Counts: MemoryIndexCounts{Total: p.Counts.Total, Done: p.Counts.Done, Skipped: p.Counts.Skipped,
-			Unsourced: p.Counts.Unsourced, Failed: p.Counts.Failed},
+			Unsourced: p.Counts.Unsourced, Failed: p.Counts.Failed, Missing: p.Counts.Missing},
+		Missing: p.Missing, MissingAt: memoryIndexTime(p.MissingAt),
+		Counting: memoryIndexCounting{Cursor: p.Counting.Cursor, Missing: p.Counting.Missing},
 	}
 	if run.Kind == "" {
 		run.Kind = kind
@@ -1295,12 +1464,20 @@ func (e *MemQLEngine) readMemoryIndexRun(ctx context.Context, kind string) (Memo
 // owner's builtins -- because the fence protects a row only when all its
 // writers carry one: an unfenced write would silently revert a cancel, or a
 // cancel would roll back a cursor.
+//
+// THE NEW VERSION IS STAMPED AFTER THE ONE READ (ruling R12, memql#5431's third
+// part): VersionTimeAfter(version, now) is the write's versionTime, so a
+// replica whose clock lags the last writer's still writes the newest version
+// rather than one that reads as older and is lost. (The fence's own clock,
+// fenceWriteClock, makes the same guarantee for a fenced write; the stamp here
+// states it on the write, the way every other writer of memory search's rows
+// does.)
 func (e *MemQLEngine) writeMemoryIndexRun(ctx context.Context, run MemoryIndexRun, version time.Time) (time.Time, error) {
 	if run.Kind != memoryIndexKindSwitch && run.Kind != memoryIndexKindBackfill {
 		return time.Time{}, fmt.Errorf("memory index: no run of kind %q", run.Kind)
 	}
 	fenced := ContextWithRowVersionFence(auth.ContextWithInternalOrigin(ctx), MemoryIndexRunConceptID, run.Kind, version)
-	res, err := e.memoryIndexMutationResult(fenced, "platform.recordMemoryIndexRun", memoryIndexRunArgs(run))
+	res, err := e.memoryIndexMutationResult(fenced, "platform.recordMemoryIndexRun", memoryIndexRunArgs(run, VersionTimeAfter(version, time.Now())))
 	if err != nil {
 		if errors.Is(err, ErrRowVersionChanged) || strings.Contains(err.Error(), ErrRowVersionChanged.Error()) {
 			return time.Time{}, errMemoryIndexRunChanged
@@ -1323,16 +1500,22 @@ func (e *MemQLEngine) writeMemoryIndexRun(ctx context.Context, run MemoryIndexRu
 	return at, nil
 }
 
-// memoryIndexRunArgs is run as recordMemoryIndexRun's arguments. A blank field
-// is left out, and the mutation stamps it blank: every write states the row.
-func memoryIndexRunArgs(run MemoryIndexRun) map[string]any {
+// memoryIndexRunArgs is run as recordMemoryIndexRun's arguments, written as
+// the row version versionTime. A blank field is left out, and the mutation
+// stamps it blank: every write states the row.
+func memoryIndexRunArgs(run MemoryIndexRun, versionTime time.Time) map[string]any {
 	counts := map[string]any{"total": run.Counts.Total, "done": run.Counts.Done, "skipped": run.Counts.Skipped,
-		"unsourced": run.Counts.Unsourced, "failed": run.Counts.Failed}
+		"unsourced": run.Counts.Unsourced, "failed": run.Counts.Failed, "missing": run.Counts.Missing}
 	cursor := map[string]any{}
 	for k, v := range run.Cursor {
 		cursor[k] = v
 	}
-	args := map[string]any{"kind": run.Kind, "state": run.State, "cursor": cursor, "counts": counts}
+	counting := map[string]any{}
+	for k, v := range run.Counting.Cursor {
+		counting[k] = v
+	}
+	args := map[string]any{"kind": run.Kind, "state": run.State, "cursor": cursor, "counts": counts, "missing": run.Missing,
+		"counting": map[string]any{"cursor": counting, "missing": run.Counting.Missing}}
 	for key, v := range map[string]string{"targetRef": run.TargetRef, "targetTable": run.TargetTable, "previousRef": run.PreviousRef,
 		"indexedBy": run.IndexedBy, "startedBy": run.StartedBy, "waitingReason": run.WaitingReason} {
 		if strings.TrimSpace(v) != "" {
@@ -1345,5 +1528,7 @@ func memoryIndexRunArgs(run MemoryIndexRun) map[string]any {
 	memoryIndexTimeArg(args, "startedAt", run.StartedAt)
 	memoryIndexTimeArg(args, "finishedAt", run.FinishedAt)
 	memoryIndexTimeArg(args, "lastPassAt", run.LastPassAt)
+	memoryIndexTimeArg(args, "missingAt", run.MissingAt)
+	memoryIndexTimeArg(args, "versionTime", versionTime)
 	return args
 }

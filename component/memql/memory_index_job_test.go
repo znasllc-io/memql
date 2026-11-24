@@ -475,3 +475,107 @@ func TestAVectorOlderThanItsRowIsMissing(t *testing.T) {
 		})
 	}
 }
+
+// A waiting backfill still counts what is missing (ruling R10). While the model
+// cannot be reached nothing is embedded, but at the backfill's cadence the job
+// walks every source again, reading presence and staleness only, and records
+// the count and when it was taken: the backlog Memory search shows ("37 items
+// waiting: ..."). The embed walk's cursor and counts stay where the wait left
+// them. Once the model is back, the walk resumes, and its end records what IT
+// left missing.
+func TestAWaitingBackfillStillCountsWhatIsMissing(t *testing.T) {
+	ctx := context.Background()
+	f := newMemoryIndexFake(10)
+	delete(f.runs, memoryIndexKindSwitch)
+	active := f.table(fakeOldRef, 4)
+	f.tables[active] = map[string]bool{}
+	for i := 1; i <= 6; i++ {
+		f.tables[active]["content|"+memoryIndexItemId(i)] = true
+	}
+	offline := errors.New("every_door_shut: no door to a model is open for this call; fleet:old-embedder (local): no machine offering old-embedder is online")
+	f.embedErr = func(MemoryIndexRun, MemoryItem) error { return fmt.Errorf("store: embed: %w", offline) }
+
+	require.NoError(t, runMemoryIndexTick(ctx, f, time.Hour))
+	bf := f.runs[memoryIndexKindBackfill]
+	require.Equal(t, memoryIndexStateWaiting, bf.State)
+	require.Equal(t, "none of the indexer's machines offering old-embedder is online", bf.WaitingReason)
+	require.Equal(t, 4, bf.Missing, "items 7 to 10 are waiting")
+	require.True(t, bf.MissingAt.Equal(f.clock))
+	require.Equal(t, map[string]string{"alpha": memoryIndexItemId(6)}, bf.Cursor, "the embed walk stays where the wait left it")
+	require.Equal(t, MemoryIndexCounts{Total: 6, Skipped: 6}, bf.Counts)
+	require.Empty(t, bf.Counting.Cursor, "the count is complete")
+	require.Equal(t, 1, f.attempts[memoryIndexItemId(7)], "nothing is embedded while it counts")
+	require.Empty(t, f.embedded)
+
+	// Inside the backfill's cadence nothing is counted again, and an unchanged
+	// wait writes nothing.
+	saves := len(f.saves)
+	f.clock = f.clock.Add(5 * time.Minute)
+	require.NoError(t, runMemoryIndexTick(ctx, f, time.Hour))
+	require.Len(t, f.saves, saves)
+
+	// Past it, the count is taken again, and includes what was written meanwhile.
+	f.rows["alpha"] = append(f.rows["alpha"], MemoryItem{Id: memoryIndexItemId(11), Text: "item 11"})
+	f.clock = f.clock.Add(6 * time.Minute)
+	require.NoError(t, runMemoryIndexTick(ctx, f, time.Hour))
+	bf = f.runs[memoryIndexKindBackfill]
+	require.Equal(t, 5, bf.Missing)
+	require.True(t, bf.MissingAt.Equal(f.clock))
+	require.Equal(t, map[string]string{"alpha": memoryIndexItemId(6)}, bf.Cursor)
+
+	// The model is back; item 9 keeps failing. The walk resumes at item 7, and
+	// its end records the one item it left missing.
+	f.embedErr = func(_ MemoryIndexRun, item MemoryItem) error {
+		if item.Id == memoryIndexItemId(9) {
+			return errors.New("embedding model returned a zero vector")
+		}
+		return nil
+	}
+	require.NoError(t, runMemoryIndexTick(ctx, f, time.Hour))
+	bf = f.runs[memoryIndexKindBackfill]
+	require.Equal(t, memoryIndexStateDone, bf.State)
+	require.Equal(t, 1, bf.Missing)
+	require.Equal(t, 1, bf.Counts.Missing)
+	require.True(t, bf.MissingAt.Equal(f.clock))
+	for _, i := range []int{7, 8, 10, 11} {
+		require.Equal(t, 1, f.embedded[memoryIndexItemId(i)], "item %d", i)
+	}
+
+	// A fresh walk of the same model keeps the last count until its own end.
+	for i := 12; i <= 50; i++ {
+		f.rows["alpha"] = append(f.rows["alpha"], MemoryItem{Id: memoryIndexItemId(i), Text: fmt.Sprintf("item %d", i)})
+	}
+	f.embedErr = nil
+	f.clock = f.clock.Add(11 * time.Minute)
+	require.NoError(t, runMemoryIndexTick(ctx, f, 0))
+	bf = f.runs[memoryIndexKindBackfill]
+	require.Equal(t, memoryIndexStateIndexing, bf.State, "a fresh walk, part way")
+	require.Equal(t, 1, bf.Missing, "the last count stands while the next walk is taken")
+	require.Zero(t, bf.Counts.Missing)
+}
+
+// A counting walk too long for one tick resumes from its own cursor on the
+// next, while the embed walk's cursor stays put.
+func TestACountingWalkResumesFromItsOwnCursor(t *testing.T) {
+	ctx := context.Background()
+	f := newMemoryIndexFake(70)
+	delete(f.runs, memoryIndexKindSwitch)
+	offline := errors.New("no machine offering old-embedder is online")
+	f.embedErr = func(MemoryIndexRun, MemoryItem) error { return fmt.Errorf("store: embed: %w", offline) }
+
+	require.NoError(t, runMemoryIndexTick(ctx, f, 0))
+	bf := f.runs[memoryIndexKindBackfill]
+	require.Equal(t, memoryIndexStateWaiting, bf.State)
+	require.Equal(t, map[string]string{"alpha": memoryIndexItemId(32)}, bf.Counting.Cursor)
+	require.Equal(t, 32, bf.Counting.Missing)
+	require.True(t, bf.MissingAt.IsZero(), "nothing is recorded before the count is complete")
+
+	require.NoError(t, runMemoryIndexTick(ctx, f, 0))
+	require.NoError(t, runMemoryIndexTick(ctx, f, 0))
+	bf = f.runs[memoryIndexKindBackfill]
+	require.Equal(t, 70, bf.Missing)
+	require.True(t, bf.MissingAt.Equal(f.clock))
+	require.Empty(t, bf.Counting.Cursor)
+	require.Equal(t, map[string]string{"alpha": ""}, bf.Cursor, "the embed walk is still at its first item")
+	require.Empty(t, f.embedded)
+}

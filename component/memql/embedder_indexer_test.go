@@ -269,8 +269,14 @@ func TestTheBindingWritesRecordWhoIndexesAndWhatWasRetired(t *testing.T) {
 		_, _ = db.DB.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE concept=$1`, EmbedderBindingConceptID)
 		_, _ = db.DB.ExecContext(context.Background(), `INSERT INTO "MemoryNodes" SELECT * FROM jsonb_populate_recordset(NULL::"MemoryNodes",$1::jsonb)`, saved)
 	})
+	// The binding's and the retired rows' writes are stamped with a version
+	// (ruling R12); this test writes them directly, so it stamps each itself.
+	stamped := map[string]bool{"platform.setEmbedderBindingChoice": true, "platform.flipEmbedderBinding": true, "platform.recordRetiredEmbedder": true}
 	write := func(name string, args map[string]any) {
 		t.Helper()
+		if stamped[name] {
+			args["versionTime"] = time.Now().UTC().Format(time.RFC3339Nano)
+		}
 		call, err := parser.RenderCall(name, args)
 		require.NoError(t, err)
 		_, err = e.Execute(internal, "mutation "+call)
@@ -332,13 +338,15 @@ func TestTheBindingWritesRecordWhoIndexesAndWhatWasRetired(t *testing.T) {
 
 	// A retired row's id is the only kind recordRetiredEmbedder writes: it
 	// cannot be pointed at the active binding.
-	call, err := parser.RenderCall("platform.recordRetiredEmbedder", map[string]any{"bindingId": "active", "providerRef": "fleet:indexer-test-c", "dimensions": 1024})
+	call, err := parser.RenderCall("platform.recordRetiredEmbedder", map[string]any{"bindingId": "active", "providerRef": "fleet:indexer-test-c", "dimensions": 1024,
+		"versionTime": at(0)})
 	require.NoError(t, err)
 	_, err = e.Execute(internal, "mutation "+call)
 	require.Error(t, err)
 
 	// Every one of them is the engine's: a client cannot flip the binding.
-	call, err = parser.RenderCall("platform.flipEmbedderBinding", map[string]any{"bindingId": "active", "providerRef": "fleet:indexer-test-c", "dimensions": 1024, "activatedAt": at(0)})
+	call, err = parser.RenderCall("platform.flipEmbedderBinding", map[string]any{"bindingId": "active", "providerRef": "fleet:indexer-test-c", "dimensions": 1024, "activatedAt": at(0),
+		"versionTime": at(time.Minute)})
 	require.NoError(t, err)
 	_, err = e.Execute(auth.ContextWithClientOrigin(ctx), "mutation "+call)
 	require.Error(t, err)

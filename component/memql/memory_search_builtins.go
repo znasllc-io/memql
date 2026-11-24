@@ -22,16 +22,34 @@ package memql
 //
 // # Who moves what
 //
-// A builtin moves the binding in one case only: a cluster with NO model binds
-// its first through bindEmbedder, because nothing is indexed under another
-// model. Every other change of model is the index job's (memory_index_job.go):
-// a builtin writes the `switch` run row and the job's tick rebuilds and flips.
-// No builtin calls flipMemoryIndex, Switch anyway included. TRIGGER for that
-// rule: the flip is ordered steps finished by the next tick from `switching`
-// (ruling R6); a builtin that died after moving the binding would leave the run
-// in a state the tick never resumes. So memorySearchSwitchAnyway writes
-// `switching` and the tick flips within a minute, and a switch over an index
-// that holds no vector is written `switching` directly for the same reason.
+// A builtin moves the binding's MODEL in one case only: a cluster with NO model
+// binds its first through bindEmbedder, because nothing is indexed under
+// another model. Every other change of model is the index job's
+// (memory_index_job.go): a builtin writes the `switch` run row and the job's
+// tick rebuilds and flips. No builtin calls flipMemoryIndex, Switch anyway
+// included. TRIGGER for that rule: the flip is ordered steps finished by the
+// next tick from `switching` (ruling R6); a builtin that died after moving the
+// binding would leave the run in a state the tick never resumes. So
+// memorySearchSwitchAnyway writes `switching` and the tick flips within a
+// minute, and a switch over an index that holds no vector is written
+// `switching` directly for the same reason.
+//
+// # The take-over, and the way out of a flipped switch
+//
+// Choosing the model in use again is how an owner TAKES OVER indexing it
+// (design record section 1, ruling R9; memorySearchTakesOver): when its indexer
+// is missing, is no longer an active owner, or has no machine -- own or lent,
+// embeddings only -- offering the model while one of the caller's does, the
+// caller becomes its indexer and chooser. Otherwise only an empty chooser is
+// filled. Choosing a running switch's own target is the same take-over of the
+// RUN's indexer. And a switch that has FLIPPED (memorySearchFlipped) is no
+// longer one switch at a time's to guard (ruling R11): its walk after the flip
+// embeds as the run's indexer, and with that indexer demoted or without the
+// model every other act would be refused while search refuses queries and the
+// previous model's kept index nears its drop. So choosing the model in use
+// takes over the binding and the run, and choosing another model closes the
+// flipped switch as done -- its remaining walk is the backfill's -- and starts
+// the new one. Cancel stays refused after the flip: the switch happened.
 //
 // # Every run-row write is fenced, and a refusal is answered
 //
@@ -40,7 +58,9 @@ package memql
 // would revert its cursor or be reverted by it. A refused fence reaches the
 // owner as "changed meanwhile, try again" (errMemorySearchChanged) and is never
 // retried here: the state it was decided on is gone, and deciding again is the
-// owner's call. The acts that read the binding and decide on it -- switch,
+// owner's call. Every write of the run, binding and retired rows is stamped
+// after the version it read (VersionTimeAfter, ruling R12), so a replica whose
+// clock lags the last writer's still writes the newest version. The acts that read the binding and decide on it -- switch,
 // cancel, confirm, and the cleanup -- hold the binding lock
 // (lockAskConversationKind "active", "embedder-binding") around those reads and
 // their writes, which is what the flip holds, so neither can interleave with a
@@ -123,9 +143,9 @@ type memorySearchWorld interface {
 	// lockBinding takes the binding lock without waiting; release it.
 	lockBinding(ctx context.Context) (func(), error)
 	readRun(ctx context.Context, kind string) (MemoryIndexRun, time.Time, bool, error)
-	// writeRun writes the whole run fenced to version, and answers
-	// errMemoryIndexRunChanged when somebody wrote it since.
-	writeRun(ctx context.Context, run MemoryIndexRun, version time.Time) error
+	// writeRun writes the whole run fenced to version, and answers the version
+	// it stored, or errMemoryIndexRunChanged when somebody wrote it since.
+	writeRun(ctx context.Context, run MemoryIndexRun, version time.Time) (time.Time, error)
 	// writeChoice records the active binding's indexer and/or chooser; the
 	// caller holds the binding lock.
 	writeChoice(ctx context.Context, choice embedderChoice) error
@@ -195,21 +215,89 @@ func memorySearchLock(ctx context.Context, w memorySearchWorld) (func(), error) 
 }
 
 // memorySearchWriteRun writes the run fenced to the version read, and answers a
-// refused fence as errMemorySearchChanged.
-func memorySearchWriteRun(ctx context.Context, w memorySearchWorld, run MemoryIndexRun, version time.Time) error {
-	if err := w.writeRun(ctx, run, version); err != nil {
-		if errors.Is(err, errMemoryIndexRunChanged) {
-			return errMemorySearchChanged
-		}
-		return err
+// refused fence as errMemorySearchChanged. It answers the version it stored:
+// the witness for a next write of the same row in the same act.
+func memorySearchWriteRun(ctx context.Context, w memorySearchWorld, run MemoryIndexRun, version time.Time) (time.Time, error) {
+	stored, err := w.writeRun(ctx, run, version)
+	if errors.Is(err, errMemoryIndexRunChanged) {
+		return time.Time{}, errMemorySearchChanged
 	}
-	return nil
+	return stored, err
 }
 
-// memorySearchSwitchRunning is the refusal of a second switch.
+// memorySearchSwitchRunning is the refusal of a second switch before the flip.
+// A switch held in needsDecision moves only by the owner's answer, so it names
+// the two answers instead of a finish it will never reach by itself.
 func memorySearchSwitchRunning(w memorySearchWorld, sw MemoryIndexRun) error {
+	if sw.State == memoryIndexStateNeedsDecision {
+		return fmt.Errorf("the switch to %s is waiting for your decision: Switch anyway, or Cancel it, before choosing another model",
+			memorySearchLabel(w, sw.TargetRef))
+	}
 	return fmt.Errorf("a switch to %s is still in progress (%s); cancel it or let it finish before choosing another model",
 		memorySearchLabel(w, sw.TargetRef), sw.State)
+}
+
+// memorySearchFlipped reports whether sw is a switch whose binding already names
+// its target and whose walk after the flip is under way or waiting: the switch
+// happened, and only that walk remains (ruling R11).
+func memorySearchFlipped(sw MemoryIndexRun, active EmbedderBinding) bool {
+	return (sw.State == memoryIndexStateFinishing || sw.State == memoryIndexStateWaiting) &&
+		active.ProviderRef == sw.TargetRef && active.Dimensions == sw.TargetDimensions
+}
+
+// memorySearchStartsASwitch reports whether choosing provider, with this switch
+// run and binding, starts a new switch -- the one act that probes the model.
+func memorySearchStartsASwitch(sw MemoryIndexRun, has bool, active EmbedderBinding, bound bool, provider string) bool {
+	running := has && !memorySearchSwitchOver(sw.State)
+	switch {
+	case running && bound && memorySearchFlipped(sw, active):
+		return provider != active.ProviderRef
+	case running:
+		return false
+	}
+	return bound && provider != active.ProviderRef
+}
+
+// memorySearchOffers reports whether a catalog holds model for embeddings, on
+// any of its machines, online or not: an offline machine still holds the model
+// (adoptEmbedderIndexer's reading).
+func memorySearchOffers(models []FleetModel, model string) bool {
+	for _, m := range models {
+		if m.ModelId == model && m.Embeddings {
+			return true
+		}
+	}
+	return false
+}
+
+// memorySearchTakesOver is the TAKE-OVER rule (design record section 1, ruling
+// R9): whether caller, choosing ref again, becomes its indexer in place of
+// indexer. A machine model's indexer is replaced when it is empty, is no longer
+// an active owner, or has no machine -- own or lent, embeddings only -- offering
+// the model while one of the caller's does; replacing an indexer whose machines
+// offer it, or with a caller whose machines do not either, would make nothing
+// index. A vendor model has no indexer, and the caller never takes over from
+// themself.
+func memorySearchTakesOver(ctx context.Context, w memorySearchWorld, caller, indexer, ref string) (bool, error) {
+	model, fleet := IsFleetReference(ref)
+	if !fleet || BareShortId(indexer) == BareShortId(caller) {
+		return false, nil
+	}
+	if strings.TrimSpace(indexer) == "" || !w.isActiveOwner(ctx, indexer) {
+		return true, nil
+	}
+	theirs, err := w.catalog(ctx, indexer)
+	if err != nil {
+		return false, fmt.Errorf("reading whose machines offer %s: %w", model, err)
+	}
+	if memorySearchOffers(theirs, model) {
+		return false, nil
+	}
+	mine, err := w.catalog(ctx, caller)
+	if err != nil {
+		return false, fmt.Errorf("reading whose machines offer %s: %w", model, err)
+	}
+	return memorySearchOffers(mine, model), nil
 }
 
 // memorySearchCaller is the person an owner's act is recorded as. The cluster
@@ -225,19 +313,27 @@ func memorySearchCaller(ctx context.Context) (string, error) {
 
 // memorySearchSwitch is an owner choosing provider as memory search's model.
 //
-// In order:
+// With no model bound, it is bound at once through bindEmbedder, which embeds
+// one sentence to learn the width: nothing is indexed under another model.
+// Otherwise everything is decided under the binding lock, from the run and the
+// binding read again there (an earlier look, without the lock, only says
+// whether a new switch starts, so its model can be probed -- a machine call of
+// seconds -- before the lock is taken; a state that moved meanwhile is "changed
+// meanwhile, try again"):
 //
-//  1. A switch in progress refuses another (memorySearchSwitchOver).
-//  2. No model bound: bound at once through bindEmbedder, which embeds one
-//     sentence to learn the width; nothing is indexed under another model.
-//  3. The model in use: nothing moves (memorySearchKeep).
-//  4. Otherwise the new model is probed, as its indexer, OUTSIDE the lock (a
-//     machine call takes seconds); then, under the binding lock, the run and
-//     the binding are read again, and a binding moved since is "changed
-//     meanwhile". The target's table is ensured -- a table kept from earlier is
-//     reused, so the walk embeds only what it is missing -- and the run is
-//     written `indexing`, or `switching` when the active index holds no vector
-//     (nothing to rebuild first; the tick flips it).
+//   - A FLIPPED switch (memorySearchFlipped). The model in use: the take-over
+//     of the binding (memorySearchKeep) and of the run's indexer, so the walk
+//     after the flip resumes on machines that can serve it (ruling R11 a).
+//     Another model, switching back included: that switch is closed as done --
+//     its remaining walk is the backfill's, over the model it made active --
+//     and the new switch starts.
+//   - A switch before the flip. Its own target: the take-over of the run's
+//     indexer (ruling R11 b). Another model: refused (one switch at a time).
+//   - No switch in progress. The model in use: memorySearchKeep. Another: a new
+//     switch -- the target's table ensured (a kept table is reused, so the walk
+//     embeds only what it is missing) and the run written `indexing`, or
+//     `switching` when the active index holds no vector (nothing to rebuild
+//     first; the tick flips it).
 //
 // A machine model is indexed on the chooser's machines and the ones lent to
 // them, so the chooser must be an active owner (the indexer rule, R5). A vendor
@@ -259,21 +355,18 @@ func memorySearchSwitch(ctx context.Context, w memorySearchWorld, caller, provid
 	if err != nil {
 		return err
 	}
-	if has && !memorySearchSwitchOver(sw.State) {
-		return memorySearchSwitchRunning(w, sw)
-	}
-	active, err := w.binding(ctx)
-	switch {
-	case errors.Is(err, ErrNoEmbedderBound):
-		return w.bind(ctx, provider, embedderChoice{IndexedBy: indexer, ChosenBy: caller})
-	case err != nil:
-		return err
-	case active.ProviderRef == provider:
-		return memorySearchKeep(ctx, w, caller, provider)
-	}
-	dims, err := w.probe(ctx, provider, indexer)
+	active, bound, err := memorySearchBinding(ctx, w)
 	if err != nil {
-		return fmt.Errorf("%s could not be checked: %w", memorySearchLabel(w, provider), err)
+		return err
+	}
+	if !bound && (!has || memorySearchSwitchOver(sw.State)) {
+		return w.bind(ctx, provider, embedderChoice{IndexedBy: indexer, ChosenBy: caller})
+	}
+	dims := 0
+	if memorySearchStartsASwitch(sw, has, active, bound, provider) {
+		if dims, err = w.probe(ctx, provider, indexer); err != nil {
+			return fmt.Errorf("%s could not be checked: %w", memorySearchLabel(w, provider), err)
+		}
 	}
 
 	unlock, err := memorySearchLock(ctx, w)
@@ -285,15 +378,33 @@ func memorySearchSwitch(ctx context.Context, w memorySearchWorld, caller, provid
 	if err != nil {
 		return err
 	}
-	if has && !memorySearchSwitchOver(sw.State) {
-		return memorySearchSwitchRunning(w, sw)
-	}
-	current, err := w.binding(ctx)
-	if err != nil && !errors.Is(err, ErrNoEmbedderBound) {
+	if active, bound, err = memorySearchBinding(ctx, w); err != nil {
 		return err
 	}
-	if err != nil || current.ProviderRef != active.ProviderRef || current.Dimensions != active.Dimensions {
+	running := has && !memorySearchSwitchOver(sw.State)
+	flipped := running && bound && memorySearchFlipped(sw, active)
+	switch {
+	case flipped && provider == active.ProviderRef:
+		return memorySearchTakeOverFlipped(ctx, w, caller, active, sw, version)
+	case running && !flipped && provider == sw.TargetRef:
+		return memorySearchTakeOverRun(ctx, w, caller, sw, version)
+	case running && !flipped:
+		return memorySearchSwitchRunning(w, sw)
+	case !bound:
 		return errMemorySearchChanged
+	case provider == active.ProviderRef:
+		_, err := memorySearchKeep(ctx, w, caller, active)
+		return err
+	case dims == 0:
+		// The look before the lock saw nothing to start.
+		return errMemorySearchChanged
+	}
+	if flipped {
+		closed := cloneMemoryIndexRun(sw)
+		closed.State, closed.WaitingReason, closed.FinishedAt = memoryIndexStateDone, "", w.now()
+		if version, err = memorySearchWriteRun(ctx, w, closed, version); err != nil {
+			return err
+		}
 	}
 	activeTable, err := EmbeddingVectorTable(active.ProviderRef, active.Dimensions)
 	if err != nil {
@@ -313,41 +424,81 @@ func memorySearchSwitch(ctx context.Context, w memorySearchWorld, caller, provid
 	if indexed == 0 {
 		run.State = memoryIndexStateSwitching
 	}
-	return memorySearchWriteRun(ctx, w, run, version)
+	_, err = memorySearchWriteRun(ctx, w, run, version)
+	return err
 }
 
-// memorySearchKeep is choosing the model already in use: nothing is rebuilt and
-// the binding's model does not move. Under the binding lock, it records the
-// chooser where nobody is recorded, and makes the chooser the indexer of a
-// machine model that has none or whose indexer is no longer an active owner --
-// the job's wait for a demoted indexer says "an owner can choose again", and
-// this is that choice. An indexer who is still an owner is kept.
-func memorySearchKeep(ctx context.Context, w memorySearchWorld, caller, provider string) error {
-	unlock, err := memorySearchLock(ctx, w)
+// memorySearchBinding reads the active binding, and whether there is one.
+func memorySearchBinding(ctx context.Context, w memorySearchWorld) (EmbedderBinding, bool, error) {
+	b, err := w.binding(ctx)
+	switch {
+	case errors.Is(err, ErrNoEmbedderBound):
+		return EmbedderBinding{}, false, nil
+	case err != nil:
+		return EmbedderBinding{}, false, err
+	}
+	return b, true, nil
+}
+
+// memorySearchKeep is choosing the model already in use, under the binding lock
+// the caller holds: nothing is rebuilt and the model does not move. It is the
+// take-over (memorySearchTakesOver): the caller becomes the indexer and the
+// chooser of a machine model whose indexer cannot index it. Otherwise only an
+// empty chooser is filled, which for a vendor model nobody chose is also its
+// confirmation. It answers the indexer the binding names afterwards.
+func memorySearchKeep(ctx context.Context, w memorySearchWorld, caller string, b EmbedderBinding) (string, error) {
+	indexer, _ := IndexerFor(b)
+	takeOver, err := memorySearchTakesOver(ctx, w, caller, indexer, b.ProviderRef)
+	if err != nil {
+		return "", err
+	}
+	var choice embedderChoice
+	switch {
+	case takeOver:
+		choice, indexer = embedderChoice{IndexedBy: caller, ChosenBy: caller}, caller
+	case strings.TrimSpace(b.ChosenBy) == "":
+		choice.ChosenBy = caller
+	}
+	if choice != (embedderChoice{}) {
+		if err := w.writeChoice(ctx, choice); err != nil {
+			return "", err
+		}
+	}
+	return indexer, nil
+}
+
+// memorySearchTakeOverFlipped is the model in use chosen again while a flipped
+// switch's walk remains: the binding is kept (memorySearchKeep), and the run is
+// then given the indexer the binding names, so the walk after the flip embeds on
+// machines that can serve it. A run already on that indexer is left alone; one
+// on another -- the take-over just made, or one an earlier attempt made before
+// its run write was refused -- is written, fenced.
+func memorySearchTakeOverFlipped(ctx context.Context, w memorySearchWorld, caller string, active EmbedderBinding, sw MemoryIndexRun, version time.Time) error {
+	indexer, err := memorySearchKeep(ctx, w, caller, active)
 	if err != nil {
 		return err
 	}
-	defer unlock()
-	b, err := w.binding(ctx)
-	if err != nil && !errors.Is(err, ErrNoEmbedderBound) {
-		return err
-	}
-	if err != nil || b.ProviderRef != provider {
-		return errMemorySearchChanged
-	}
-	var choice embedderChoice
-	indexer, fleet := IndexerFor(b)
-	takeOver := fleet && (indexer == "" || !w.isActiveOwner(ctx, indexer))
-	if takeOver {
-		choice.IndexedBy = caller
-	}
-	if takeOver || strings.TrimSpace(b.ChosenBy) == "" {
-		choice.ChosenBy = caller
-	}
-	if choice == (embedderChoice{}) {
+	if _, fleet := IsFleetReference(sw.TargetRef); !fleet || indexer == "" || indexer == sw.IndexedBy {
 		return nil
 	}
-	return w.writeChoice(ctx, choice)
+	next := cloneMemoryIndexRun(sw)
+	next.IndexedBy = indexer
+	_, err = memorySearchWriteRun(ctx, w, next, version)
+	return err
+}
+
+// memorySearchTakeOverRun is a switch's own target chosen again before the flip:
+// the take-over of the run's indexer, under the same rule. The switch goes on,
+// and flips with the new indexer.
+func memorySearchTakeOverRun(ctx context.Context, w memorySearchWorld, caller string, sw MemoryIndexRun, version time.Time) error {
+	takeOver, err := memorySearchTakesOver(ctx, w, caller, sw.IndexedBy, sw.TargetRef)
+	if err != nil || !takeOver {
+		return err
+	}
+	next := cloneMemoryIndexRun(sw)
+	next.IndexedBy = caller
+	_, err = memorySearchWriteRun(ctx, w, next, version)
+	return err
 }
 
 // memorySearchCancel stops the switch in progress. Under the binding lock: a
@@ -387,7 +538,8 @@ func memorySearchCancel(ctx context.Context, w memorySearchWorld) error {
 	}
 	next := cloneMemoryIndexRun(sw)
 	next.State, next.WaitingReason = memoryIndexStateCancelled, ""
-	return memorySearchWriteRun(ctx, w, next, version)
+	_, err = memorySearchWriteRun(ctx, w, next, version)
+	return err
 }
 
 // memorySearchSwitchAnyway is the owner's answer to a switch held in
@@ -404,7 +556,8 @@ func memorySearchSwitchAnyway(ctx context.Context, w memorySearchWorld) error {
 	}
 	next := cloneMemoryIndexRun(sw)
 	next.State, next.WaitingReason = memoryIndexStateSwitching, ""
-	return memorySearchWriteRun(ctx, w, next, version)
+	_, err = memorySearchWriteRun(ctx, w, next, version)
+	return err
 }
 
 // memorySearchConfirm is an owner confirming a VENDOR model nobody chose (bound
@@ -440,11 +593,13 @@ func memorySearchConfirm(ctx context.Context, w memorySearchWorld, caller string
 //     account pays for) and who chose it (chosenBy); needsConfirmation for a
 //     vendor model nobody chose.
 //   - indexed: the entries in its vector table.
-//   - backlog and waitingReason, from the backfill run while it is about this
-//     model: backlog is the items its latest walk found missing and could not
-//     index (counts.failed). A LOWER BOUND while it waits: a waiting walk stops
-//     at the first item it cannot embed and counts nothing past it, which
-//     waitingReason says.
+//   - backlog, backlogCountedAt and waitingReason, from the backfill run while
+//     it is about this model: backlog is the items its last count found absent
+//     from the index or older there than their row (MemoryIndexRun.Missing:
+//     what its last completed walk left missing, or what the counting walk a
+//     waiting backfill takes found -- ruling R10), and backlogCountedAt when
+//     that count was taken; empty when none has been. waitingReason says why
+//     the backfill waits, if it does.
 //   - switch: the switch run's state, target, counts, start and starter, and
 //     its own waitingReason; null when there has never been one. counts.total
 //     is the items the CURRENT walk has visited and starts again with each
@@ -457,7 +612,8 @@ func memorySearchConfirm(ctx context.Context, w memorySearchWorld, caller string
 //     one: that table is in use.
 func memorySearchStatus(ctx context.Context, w memorySearchWorld) (map[string]any, error) {
 	row := map[string]any{"providerRef": "", "kind": "", "label": "", "indexedBy": "", "indexedByName": "", "chosenBy": "",
-		"needsConfirmation": false, "indexed": 0, "backlog": 0, "waitingReason": "", "switch": nil, "retained": []any{}}
+		"needsConfirmation": false, "indexed": 0, "backlog": 0, "backlogCountedAt": "", "waitingReason": "", "switch": nil,
+		"retained": []any{}}
 	active, err := w.binding(ctx)
 	if err != nil && !errors.Is(err, ErrNoEmbedderBound) {
 		return nil, err
@@ -488,8 +644,10 @@ func memorySearchStatus(ctx context.Context, w memorySearchWorld) (map[string]an
 		return nil, err
 	}
 	if bound && hasBackfill && bf.TargetRef == active.ProviderRef && bf.TargetDimensions == active.Dimensions {
-		backlog = bf.Counts.Failed
-		row["backlog"] = backlog
+		if !bf.MissingAt.IsZero() {
+			backlog = bf.Missing
+			row["backlog"], row["backlogCountedAt"] = backlog, bf.MissingAt.UTC().Format(time.RFC3339Nano)
+		}
 		if bf.State == memoryIndexStateWaiting {
 			row["waitingReason"] = bf.WaitingReason
 		}
@@ -759,9 +917,8 @@ func (w engineMemorySearchWorld) readRun(ctx context.Context, kind string) (Memo
 	return w.e.readMemoryIndexRun(ctx, kind)
 }
 
-func (w engineMemorySearchWorld) writeRun(ctx context.Context, run MemoryIndexRun, version time.Time) error {
-	_, err := w.e.writeMemoryIndexRun(ctx, run, version)
-	return err
+func (w engineMemorySearchWorld) writeRun(ctx context.Context, run MemoryIndexRun, version time.Time) (time.Time, error) {
+	return w.e.writeMemoryIndexRun(ctx, run, version)
 }
 
 func (w engineMemorySearchWorld) writeChoice(ctx context.Context, choice embedderChoice) error {
@@ -851,11 +1008,18 @@ func (w engineMemorySearchWorld) retired(ctx context.Context) ([]retiredMemoryIn
 }
 
 // recordRetired writes a retired model's row WHOLE (recordRetiredEmbedder), at
-// the id derived from its model and width, never one taken from input.
+// the id derived from its model and width, never one taken from input. Its
+// version is stamped after the row's newest (ruling R12), read here under the
+// binding lock every caller holds, so a replica whose clock lags the last
+// writer's still writes the current version.
 func (w engineMemorySearchWorld) recordRetired(ctx context.Context, r retiredMemoryIndex) error {
 	id := RetiredEmbedderBindingID(r.ProviderRef, r.Dimensions)
 	if id == "" {
 		return fmt.Errorf("memory search: %q has no index to record", r.ProviderRef)
+	}
+	version, err := w.e.latestRowVersion(ctx, EmbedderBindingConceptID, id)
+	if err != nil {
+		return err
 	}
 	args := map[string]any{"bindingId": id, "providerRef": r.ProviderRef, "dimensions": r.Dimensions}
 	if v := strings.TrimSpace(r.IndexedBy); v != "" {
@@ -863,6 +1027,7 @@ func (w engineMemorySearchWorld) recordRetired(ctx context.Context, r retiredMem
 	}
 	memoryIndexTimeArg(args, "retireAt", r.RetireAt)
 	memoryIndexTimeArg(args, "droppedAt", r.DroppedAt)
+	memoryIndexTimeArg(args, "versionTime", VersionTimeAfter(version, time.Now()))
 	return w.e.memoryIndexMutation(auth.ContextWithInternalOrigin(ctx), "platform.recordRetiredEmbedder", args)
 }
 
@@ -882,11 +1047,16 @@ func (w engineMemorySearchWorld) isActiveOwner(ctx context.Context, userId strin
 	return w.e.IndexerIsActiveOwner(ctx, userId)
 }
 
+// catalog reads one person's machine models -- their own machines and the ones
+// lent to them, what the router reads for a fleet door -- as the cluster, the
+// way ownerEmbeddingCandidates reads an owner's: the take-over reads the
+// indexer's catalog as well as the caller's, and the answer must not depend on
+// whose session asked.
 func (w engineMemorySearchWorld) catalog(ctx context.Context, userId string) ([]FleetModel, error) {
 	if w.e.providers == nil {
 		return nil, nil
 	}
-	return w.e.providers.FleetCatalog(ctx, userId)
+	return w.e.providers.FleetCatalog(readinessEvaluateContext(ctx), userId)
 }
 
 func (w engineMemorySearchWorld) vendorEmbedders() []vendorEmbedderRecord {

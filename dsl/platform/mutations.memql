@@ -3310,6 +3310,13 @@ mutation moduleReadiness recordModuleReadiness {
 //
 // The act an operator performs is the BUILTIN that runs the steps. These are
 // what it writes with.
+//
+// flipEmbedderBinding, setEmbedderBindingChoice, recordRetiredEmbedder and
+// recordMemoryIndexRun take a REQUIRED `versionTime`, written as the row's
+// version: every caller stamps it after the newest version it read
+// (memql.VersionTimeAfter, ruling R12; memql#5431's third part), so a replica
+// whose clock lags the last writer's still writes the newest version instead
+// of an older one every reader passes over.
 
 /// Record a binding that is being activated. Written before the re-embed starts, with
 /// `activatedAt` deliberately absent -- until the counts match this row is a PLAN, and a reader
@@ -3388,6 +3395,7 @@ mutation embedderBinding flipEmbedderBinding {
     previousRef  string
     indexedBy    string
     chosenBy     string
+    versionTime  datetime!
   }
   update {
     accept { providerRef, dimensions, activatedAt }
@@ -3397,6 +3405,7 @@ mutation embedderBinding flipEmbedderBinding {
       indexedBy:     args.indexedBy ?? ""
       chosenBy:      args.chosenBy ?? ""
       reembedRunId:  ""
+      createdAt:     args.versionTime
     }
   }
 }
@@ -3419,14 +3428,16 @@ mutation embedderBinding flipEmbedderBinding {
 @serverOnly
 mutation embedderBinding setEmbedderBindingChoice {
   args {
-    bindingId  string!
-    indexedBy  string
-    chosenBy   string
+    bindingId    string!
+    indexedBy    string
+    chosenBy     string
+    versionTime  datetime!
   }
   update {
     accept { indexedBy, chosenBy }
     stamp {
-      id: args.bindingId
+      id:         args.bindingId
+      createdAt:  args.versionTime
     }
   }
 }
@@ -3452,6 +3463,7 @@ mutation embedderBinding recordRetiredEmbedder {
     indexedBy    string
     retireAt     datetime
     droppedAt    datetime
+    versionTime  datetime!
   }
   insert {
     accept { providerRef, dimensions }
@@ -3460,6 +3472,7 @@ mutation embedderBinding recordRetiredEmbedder {
       indexedBy:  args.indexedBy ?? ""
       retireAt:   args.retireAt ?? ""
       droppedAt:  args.droppedAt ?? ""
+      createdAt:  args.versionTime
     }
   }
 }
@@ -3475,7 +3488,8 @@ mutation embedderBinding recordRetiredEmbedder {
 /// writeMemoryIndexRun): the job writes after every batch, and an owner's Cancel or Switch anyway
 /// lands between two of them on another replica. Unfenced, the job's next batch would write the
 /// cancelled run back to `indexing`. After writing, a caller's next write is fenced to the version
-/// ITS OWN write stored, never to one read afterwards, which may be the other replica's.
+/// ITS OWN write stored, never to one read afterwards, which may be the other replica's. And the
+/// write's `versionTime` is stamped after the version it was fenced to.
 ///
 /// @serverOnly, AND actor.userId SCOPING IS NOT THE FIX: no actor owns the cluster's one index, and a
 /// caller-reachable write could start a switch on nobody's decision, name an indexer whose machines
@@ -3497,6 +3511,10 @@ mutation memoryIndexRun recordMemoryIndexRun {
     counts            object
     waitingReason     string
     lastPassAt        datetime
+    missing           int      @minimum(0)
+    missingAt         datetime
+    counting          object
+    versionTime       datetime!
   }
   insert {
     accept { kind, state }
@@ -3514,6 +3532,10 @@ mutation memoryIndexRun recordMemoryIndexRun {
       counts:            args.counts ?? {}
       waitingReason:     args.waitingReason ?? ""
       lastPassAt:        args.lastPassAt ?? ""
+      missing:           args.missing ?? 0
+      missingAt:         args.missingAt ?? ""
+      counting:          args.counting ?? {}
+      createdAt:         args.versionTime
     }
   }
 }

@@ -9,10 +9,12 @@ package memql
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -66,13 +68,38 @@ func (f *memoryIndexDBFixture) ownerRow(name string) {
 	})
 }
 
+// plantVersion writes a newer version of a row the way a replica whose clock
+// runs ahead of this process's would: its newest payload (an empty one when the
+// row has none), changed by edit, stamped at.
+func (f *memoryIndexDBFixture) plantVersion(concept, id string, at time.Time, edit func(map[string]any)) {
+	f.t.Helper()
+	payload := map[string]any{}
+	var raw []byte
+	err := f.db.DB.QueryRowContext(f.ctx, `SELECT payload FROM "MemoryNodes" WHERE id = $1 ORDER BY "createdAt" DESC LIMIT 1`, id).Scan(&raw)
+	if err == nil {
+		require.NoError(f.t, json.Unmarshal(raw, &payload))
+	} else {
+		require.ErrorIs(f.t, err, sql.ErrNoRows)
+	}
+	if edit != nil {
+		edit(payload)
+	}
+	body, err := json.Marshal(payload)
+	require.NoError(f.t, err)
+	rows := []*memorynodes.MemoryNode{{ID: id, Concept: concept, CreatedBy: "memory-search-test:" + f.token, CreatedAt: at.UTC(), Payload: body,
+		Provenance: json.RawMessage(`{"kind":"direct","name":"memory-search-test"}`)}}
+	_, err = f.db.NewInsert().Model(&rows).Exec(f.ctx)
+	require.NoError(f.t, err)
+}
+
 // retire writes a retired model's row the way a flip or a cancel does, dated at.
 func (f *memoryIndexDBFixture) retire(ref string, at time.Time) {
 	f.t.Helper()
 	_, err := EnsureEmbeddingVectorTable(f.ctx, f.db.DB, ref, f.widths[ref])
 	require.NoError(f.t, err)
 	call, err := parser.RenderCall("platform.recordRetiredEmbedder", map[string]any{"bindingId": RetiredEmbedderBindingID(ref, f.widths[ref]),
-		"providerRef": ref, "dimensions": f.widths[ref], "retireAt": at.UTC().Format(time.RFC3339Nano)})
+		"providerRef": ref, "dimensions": f.widths[ref], "retireAt": at.UTC().Format(time.RFC3339Nano),
+		"versionTime": time.Now().UTC().Format(time.RFC3339Nano)})
 	require.NoError(f.t, err)
 	_, err = f.a.Execute(auth.ContextWithInternalOrigin(f.ctx), "mutation "+call)
 	require.NoError(f.t, err)
@@ -218,4 +245,64 @@ func TestTheActiveAndTargetTablesAreNeverDropped(t *testing.T) {
 	f.sweep(f.b)
 	require.False(t, f.tableExists(target), "the switch is over: its target is an ordinary retired index")
 	require.True(t, f.tableExists(active))
+}
+
+// Every write of the binding, the retired rows and the run rows is stamped
+// after the version it read (ruling R12; memql#5431's third part), so a writer
+// whose clock lags the last writer's still writes the CURRENT version rather
+// than an older one that reads as lost. Here each last version was stamped an
+// hour ahead of this process's clock, as a replica whose clock runs ahead
+// leaves it.
+func TestEveryWriteIsStampedAfterTheVersionItRead(t *testing.T) {
+	f := newMemoryIndexDBFixture(t)
+	f.probeModels()
+	first, second := f.ref("first", 3), f.ref("second", 4)
+	f.bind(first, f.owner)
+	f.write(f.a, f.addItems("one", "two")...)
+	ahead := time.Now().Add(time.Hour)
+	retiredRow := func(ref string, dims int) string {
+		return EmbedderBindingConceptID + ":" + RetiredEmbedderBindingID(ref, dims)
+	}
+	monthAhead := func(row map[string]any) time.Time {
+		at, _ := time.Parse(time.RFC3339Nano, stringFromAny(row["retireAt"]))
+		return at
+	}
+
+	// The binding: choosing the model in use records its chooser.
+	f.plantVersion(EmbedderBindingConceptID, EmbedderBindingConceptID+":"+ActiveEmbedderBindingID, ahead,
+		func(p map[string]any) { p["chosenBy"] = "" })
+	_, err := f.a.memorySearchSwitchBuiltin(f.ownerCall(), map[string]any{"provider": first}, 0)
+	require.NoError(t, err)
+	assert.Equal(t, f.owner, f.binding().ChosenBy, "the binding: the chooser written after a version stamped ahead is current")
+
+	// The run row and a retired row: Cancel dates the target's index for 30
+	// days over an older retirement, and records the run cancelled.
+	_, err = f.a.memorySearchSwitchBuiltin(f.ownerCall(), map[string]any{"provider": second}, 0)
+	require.NoError(t, err)
+	f.plantVersion(MemoryIndexRunConceptID, MemoryIndexRunConceptID+":"+memoryIndexKindSwitch, ahead, nil)
+	f.plantVersion(EmbedderBindingConceptID, retiredRow(second, 4), ahead, func(p map[string]any) {
+		p["providerRef"], p["dimensions"], p["retireAt"] = second, 4, time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano)
+	})
+	_, err = f.b.memorySearchCancelBuiltin(f.ownerCall(), nil, 0)
+	require.NoError(t, err)
+	assert.Equal(t, memoryIndexStateCancelled, f.run(memoryIndexKindSwitch).State, "the run row: the cancel is current")
+	kept, _ := f.retiredRow(second)
+	assert.WithinDuration(t, time.Now().Add(30*24*time.Hour), monthAhead(kept), time.Minute,
+		"a retired row: the cancel's 30 days are current, not the older date")
+
+	// A retired row written by the flip: the model it replaces, over an older
+	// row that said its index was dropped.
+	f.plantVersion(EmbedderBindingConceptID, retiredRow(first, 3), ahead, func(p map[string]any) {
+		p["providerRef"], p["dimensions"] = first, 3
+		p["retireAt"] = time.Now().Add(-48 * time.Hour).UTC().Format(time.RFC3339Nano)
+		p["droppedAt"] = time.Now().Add(-24 * time.Hour).UTC().Format(time.RFC3339Nano)
+	})
+	_, err = f.a.memorySearchSwitchBuiltin(f.ownerCall(), map[string]any{"provider": second}, 0)
+	require.NoError(t, err)
+	f.tick(f.b, time.Minute)
+	require.Equal(t, memoryIndexStateDone, f.run(memoryIndexKindSwitch).State)
+	require.Equal(t, second, f.binding().ProviderRef)
+	replaced, _ := f.retiredRow(first)
+	assert.Empty(t, replaced["droppedAt"], "the flip's retired row: its retirement is current, not the older drop")
+	assert.WithinDuration(t, time.Now().Add(30*24*time.Hour), monthAhead(replaced), time.Minute)
 }

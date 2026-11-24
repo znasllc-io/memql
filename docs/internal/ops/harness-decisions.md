@@ -2543,7 +2543,8 @@ A batch of items already present is saved with the tick's end instead: losing
 it costs presence checks, never an embedding, and the backfill walks every item
 every ten minutes. Rows keep only their newest version past a day
 (`@retention`). Counts are per walk: total = done + skipped + failed; unsourced,
-set at a walk's end, counts the active table's entries no source rebuilds. An
+set at a walk's end, counts the active table's entries no source rebuilds;
+missing counts the items found absent or stale and left so (below). An
 item its source cannot rebuild (a payload that does not decode, a lesson event
 that does not read as a lesson, a lesson head with no receipt) arrives as a
 `MemoryItem` with `Failure` and is counted failed and logged; a source that
@@ -2579,6 +2580,25 @@ waits too: counting every item failed during an outage would offer the owner
 tick's first step that embeds or moves the binding (`IndexerIsActiveOwner`);
 a fleet model with no indexer waits, since it would resolve as the job and
 reach nobody's machines.
+
+**The backlog is counted, waiting or not (ruling R10).** Trigger: design
+section 8's "37 items waiting: none of your machines offering ... is online",
+which no count the job kept could say. A waiting walk stops at its first
+missing item, and `counts.failed` is often 0 while it waits. Every walk that
+ends now records what it left missing on the run: `missing`, the items found
+absent or stale whose embedding failed (`counts.missing`), with `missingAt`. A
+waiting BACKFILL also takes a counting walk at the backfill's cadence
+(`count`): every source from the first, presence and staleness reads only,
+nothing embedded, on its own cursor and tally (`counting`), so the embed
+walk's cursor and counts stay put. It is saved with the wait at the tick's end
+(losing it costs a re-read of presence), resumes on the next tick on any
+replica, and its end records `missing` and `missingAt`. A fresh walk of the
+same model keeps the last count until its own end. A switch's waits count
+nothing: the screen's backlog is the active index's. Rejected: counting with
+SQL, because a source's recipe and its lesson items are Go, and a count on
+every status poll, which would walk the corpus each time. Tests:
+`TestAWaitingBackfillStillCountsWhatIsMissing`,
+`TestACountingWalkResumesFromItsOwnCursor`.
 
 **The flip.** Automatic only when the catch-up walk left nothing failed and
 nothing unsourced; otherwise `needsDecision`, the owner's move. A catch-up
@@ -2667,21 +2687,48 @@ only) writes `switching`, and a switch over an active index that holds no
 vector is written `switching` directly; either way the tick flips within a
 minute.
 
-**`memorySearchSwitch`, in order.** A switch in any state but done, cancelled or
-failed refuses another, before anything is probed. No model bound: bound at
-once. The model in use: nothing moves; under the binding lock the chooser is
-recorded where nobody is, and becomes the indexer of a machine model with none
-or with an indexer who is no longer an active owner. That last part goes beyond
-"when empty": the job's wait for a demoted indexer says "an owner can choose
-again", and without it choosing the same model again could never replace the
-indexer (rejected: switching away and back, which rebuilds the index twice).
-Otherwise the new model is probed as its indexer OUTSIDE the lock (a machine
-call takes seconds), then under the binding lock the run and the binding are
-read again (a binding moved since is "changed meanwhile"), the target's table is
-ensured, and the run is written `indexing`. A table kept from earlier is reused:
-the walk embeds only what it is missing (`TestSwitchingBackReusesTheKeptIndex`).
+**`memorySearchSwitch`.** No model bound: bound at once. Otherwise a look before
+the lock says only whether a new switch starts, so the new model can be probed
+as its indexer OUTSIDE the lock (a machine call takes seconds); everything is
+then decided again under the binding lock, from the run and the binding read
+there (a state that moved meanwhile is "changed meanwhile, try again"):
+
+- A switch before the flip refuses another model, before anything is probed.
+  One held in `needsDecision` names Switch anyway and Cancel; any other says to
+  cancel it or let it finish. Its own target chosen again is the take-over of
+  the RUN's indexer (below; ruling R11 b), or nothing.
+- A FLIPPED switch (the binding names its target; `finishing` or `waiting`) is
+  the way out (ruling R11 a). Trigger: its walk after the flip embeds as the
+  run's indexer, and with that indexer demoted or without the model every act
+  was refused, while search refused queries and the previous model's kept index
+  neared its drop. The model in use chosen again takes over the binding and
+  sets the run's indexer to the binding's, so the walk resumes. Another model,
+  switching back included, closes it `done` (its remaining walk is the
+  backfill's, over the model it made active) and starts the new switch,
+  fenced to the version the close stored. Cancel stays refused after the flip.
+- No switch in progress: the model in use is the take-over or nothing; another
+  model ensures the target's table and writes the run `indexing`. A table kept
+  from earlier is reused: the walk embeds only what it is missing
+  (`TestSwitchingBackReusesTheKeptIndex`).
+
 `bindEmbedder` still refuses to change an active binding, and now names
 Cluster > Settings > Memory search.
+
+**The take-over (design section 1, ruling R9; `memorySearchTakesOver`).**
+Choosing a machine model again makes the caller its indexer and chooser when
+the indexer is empty, is no longer an active owner, or has no machine, own or
+lent, offering the model for embeddings (online or not, as adoption reads it)
+while one of the caller's does. Both catalogs are read as the cluster
+(`readinessEvaluateContext`), so the answer does not depend on whose session
+asks. A healthy indexer keeps it, and only an empty chooser is filled; a vendor
+model has no indexer and only an empty chooser is filled (which also confirms
+it). Rejected: replacing a healthy indexer, which would move every person's
+text to another owner's machines for nothing, and taking over when neither
+catalog offers the model, which would leave nobody able to index. Tests:
+`TestChoosingTheModelInUseTakesOverAnIndexerWhoCannotIndex`,
+`TestAFlippedSwitchWhoseIndexerCannotIndexIsTakenOverByChoosingItAgain`,
+`TestChoosingTheRunningSwitchsTargetAgainTakesItOver`,
+`TestSwitchingBackDuringTheWalkAfterTheFlipStartsANewSwitch`.
 
 **Fenced, answered, never retried.** Every run-row write goes through
 `writeMemoryIndexRun`, fenced to the version the builtin read. A refused fence
@@ -2690,6 +2737,21 @@ act was decided on is gone, and deciding again is the owner's call. Switch,
 cancel, confirm and the cleanup hold the binding lock around the reads they
 decide on and their writes, which is what the flip holds; it is a try-lock, so a
 held lock answers "try again" rather than waiting.
+
+**A version stamped after the one read (ruling R12; memql#5431's third part).**
+Trigger: a fence checks that a row did not change; it does not make the new
+version later, and a replica whose clock lags the last writer's would stamp an
+OLDER version, which every reader passes over as superseded. Every write of
+these rows now carries a REQUIRED `versionTime`, stamped as its version:
+`VersionTimeAfter(<newest version read>, now)` (`latestRowVersion`, read under
+the binding lock where one is held). The writers: `writeMemoryIndexRun` (every
+run row, after the version it is fenced to), the flip (the binding after the
+version it fenced, the retired row after its own), `writeEmbedderChoice`
+(adoption, `bindEmbedder`, the take-over and Confirm), and the retired rows
+Cancel and the cleanup write. The run rows were already safe through the
+fence's own clock (`fenceWriteClock`); the binding choice and the retired rows
+were not. Test: `TestEveryWriteIsStampedAfterTheVersionItRead` (the last
+versions stamped an hour ahead).
 
 **Cancel** holds the binding lock and is refused once the binding names the
 switch's target (the switch happened; going back is a new switch). Otherwise the
@@ -2700,9 +2762,10 @@ caller as the chooser of a VENDOR binding with none, once, under the lock; a
 machine model is never put to an owner this way.
 
 **The status is one row** (`current`). `indexed` counts the active table.
-`backlog` is the backfill's latest `counts.failed` for the active model: items it
-found missing and could not index, a lower bound while it waits, because a
-waiting walk stops at the first item it cannot embed (`waitingReason` says why).
+`backlog` is the backfill's last count for the active model of the items
+missing from it (the run's `missing`: what its last completed walk left
+missing, or what a waiting backfill's counting walk found), with
+`backlogCountedAt`; `waitingReason` says why the backfill waits, if it does.
 The switch's `counts.total` is what the current walk has visited and restarts
 with each walk, so the summary's `estimatedTotal` gives the screen a
 denominator: an ESTIMATE, `indexed + backlog`, with no walk of the corpus per
@@ -2734,8 +2797,9 @@ nothing between calls, so a retry or another replica decides from what is
 stored.
 
 **Limits.** Not run against a live cluster. `indexed` is a `count(*)` of the
-active table on every status read. The backlog is a lower bound while the
-backfill waits. The probe and the store path in the db tests are stubs. Tests:
+active table on every status read. The backlog is as fresh as its last count:
+the backfill's cadence, ten minutes, and while a switch runs the backfill
+counts nothing. The probe and the store path in the db tests are stubs. Tests:
 `component/memql/memory_search_builtins_test.go` (the decisions, over the job's
 map world, the job's tick included) and
 `component/memql/memory_search_builtins_db_test.go` (two engines over one

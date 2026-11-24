@@ -215,6 +215,11 @@ func (f *memoryIndexDBFixture) bind(ref string, indexer string) {
 		{"platform.setEmbedderBindingChoice", map[string]any{"bindingId": "active", "indexedBy": indexer, "chosenBy": indexer}},
 	}
 	for _, w := range writes {
+		if w.name == "platform.setEmbedderBindingChoice" {
+			// Stamped when written, after the activation (ruling R12): a version
+			// taken before it would read as the older one.
+			w.args["versionTime"] = time.Now().UTC().Format(time.RFC3339Nano)
+		}
 		call, err := parser.RenderCall(w.name, w.args)
 		require.NoError(f.t, err)
 		_, err = f.a.Execute(auth.ContextWithInternalOrigin(f.ctx), "mutation "+call)
@@ -796,7 +801,7 @@ func TestAResumedFlipFinishesFromTheBinding(t *testing.T) {
 		f.setRun(f.a, func(r *MemoryIndexRun) { r.State = memoryIndexStateSwitching })
 		require.NoError(t, f.a.memoryIndexMutation(auth.ContextWithInternalOrigin(f.ctx), "platform.flipEmbedderBinding", map[string]any{
 			"bindingId": "active", "providerRef": newRef, "dimensions": 8, "activatedAt": time.Now().UTC().Format(time.RFC3339Nano),
-			"previousRef": oldRef, "indexedBy": f.owner, "chosenBy": f.owner}))
+			"previousRef": oldRef, "indexedBy": f.owner, "chosenBy": f.owner, "versionTime": time.Now().UTC().Format(time.RFC3339Nano)}))
 		return f, oldRef, newRef
 	}
 	bindingVersions := func(t *testing.T, f *memoryIndexDBFixture) int {
@@ -909,7 +914,7 @@ func TestARunWriteAnswersTheVersionItStored(t *testing.T) {
 
 	run.LastPassAt = run.LastPassAt.Add(-time.Minute)
 	fenced := ContextWithRowVersionFence(auth.ContextWithInternalOrigin(f.ctx), MemoryIndexRunConceptID, run.Kind, version)
-	res, err := f.a.memoryIndexMutationResult(fenced, "platform.recordMemoryIndexRun", memoryIndexRunArgs(run))
+	res, err := f.a.memoryIndexMutationResult(fenced, "platform.recordMemoryIndexRun", memoryIndexRunArgs(run, VersionTimeAfter(version, time.Now())))
 	require.NoError(t, err)
 	written := memoryIndexWrittenVersion(res, MemoryIndexRunConceptID+":"+run.Kind)
 	require.False(t, written.IsZero(), "the write's result names the version it stored")

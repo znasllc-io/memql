@@ -415,6 +415,12 @@ func (e *MemQLEngine) adoptEmbedderIndexer(ctx context.Context) error {
 // "embedder-binding") around its own read and this write: a flip on another
 // replica between the two would otherwise be silently reverted (memql#5431).
 // Only non-empty fields are sent, so an empty chooser never clears one.
+//
+// The new version is stamped after the binding's newest one (ruling R12,
+// memql#5431's third part), read here under the caller's lock: written at this
+// replica's clock alone, a choice made on a replica whose clock lags the last
+// binding writer's would be an OLDER version, and every reader would go on
+// seeing the binding without it.
 func (e *MemQLEngine) writeEmbedderChoice(ctx context.Context, choice embedderChoice) error {
 	args := map[string]any{"bindingId": "active"}
 	if v := strings.TrimSpace(choice.IndexedBy); v != "" {
@@ -426,6 +432,11 @@ func (e *MemQLEngine) writeEmbedderChoice(ctx context.Context, choice embedderCh
 	if len(args) == 1 {
 		return nil
 	}
+	version, err := e.latestRowVersion(ctx, EmbedderBindingConceptID, ActiveEmbedderBindingID)
+	if err != nil {
+		return err
+	}
+	args["versionTime"] = VersionTimeAfter(version, time.Now()).Format(time.RFC3339Nano)
 	call, err := parser.RenderCall("platform.setEmbedderBindingChoice", args)
 	if err != nil {
 		return err

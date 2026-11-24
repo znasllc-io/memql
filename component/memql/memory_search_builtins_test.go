@@ -90,14 +90,14 @@ func (f *memorySearchFake) readRun(_ context.Context, kind string) (MemoryIndexR
 	return cloneMemoryIndexRun(run), f.job.clock, ok, nil
 }
 
-func (f *memorySearchFake) writeRun(_ context.Context, run MemoryIndexRun, _ time.Time) error {
+func (f *memorySearchFake) writeRun(_ context.Context, run MemoryIndexRun, _ time.Time) (time.Time, error) {
 	f.runAttempts++
 	if f.writeErr != nil {
-		return f.writeErr
+		return time.Time{}, f.writeErr
 	}
 	f.job.runs[run.Kind] = cloneMemoryIndexRun(run)
 	f.events = append(f.events, fmt.Sprintf("writeRun %s locked=%t", run.State, f.locked))
-	return nil
+	return f.job.clock, nil
 }
 
 func (f *memorySearchFake) writeChoice(_ context.Context, c embedderChoice) error {
@@ -282,9 +282,12 @@ func TestAFirstBindingOnAnEmptyCorpusActivatesAtOnce(t *testing.T) {
 	require.Len(t, f.job.tables[f.job.table(fakeNewRef, 6)], 3, "the walk after the flip indexes every item")
 }
 
-// One switch at a time: while one is in progress -- needsDecision, waiting and
-// finishing included -- another is refused before anything is probed or
-// written. A switch that is over leaves the way open.
+// One switch at a time. Before the flip, another model is refused before
+// anything is probed or written: a switch held for the owner's decision names
+// Switch anyway and Cancel, any other says to cancel it or let it finish.
+// Choosing the running switch's own target again is not a second switch, and
+// with its indexer able to index changes nothing. A switch that is over leaves
+// the way open.
 func TestASecondSwitchIsRefusedWhileOneRuns(t *testing.T) {
 	ctx := context.Background()
 	const third = "fleet:third-embedder"
@@ -298,10 +301,20 @@ func TestASecondSwitchIsRefusedWhileOneRuns(t *testing.T) {
 			err := memorySearchSwitch(ctx, f, fakeOwner, third)
 			require.Error(t, err)
 			require.ErrorContains(t, err, "new-embedder", "the refusal names the switch in progress")
-			require.ErrorContains(t, err, "cancel it or let it finish")
+			if state == memoryIndexStateNeedsDecision {
+				require.ErrorContains(t, err, "Switch anyway")
+				require.ErrorContains(t, err, "Cancel")
+				require.NotContains(t, err.Error(), "let it finish", "a held switch does not finish by itself")
+			} else {
+				require.ErrorContains(t, err, "cancel it or let it finish")
+			}
 			require.Zero(t, f.runAttempts)
 			require.Empty(t, f.probes)
 			require.Equal(t, state, f.job.runs[memoryIndexKindSwitch].State)
+
+			require.NoError(t, memorySearchSwitch(ctx, f, fakeOwner, fakeNewRef), "the running switch's own target")
+			require.Zero(t, f.runAttempts)
+			require.Empty(t, f.probes)
 		})
 	}
 	for _, state := range []string{memoryIndexStateDone, memoryIndexStateCancelled} {
@@ -339,47 +352,200 @@ func TestASecondSwitchIsRefusedWhileOneRuns(t *testing.T) {
 	require.Equal(t, 1, f.runAttempts)
 }
 
-// Choosing the model already in use moves nothing, rebuilds nothing and probes
-// nothing; under the binding lock it records who chose it where nobody is
-// recorded, and makes the chooser the indexer of a machine model nobody indexes
-// or whose indexer is no longer an owner (the job's wait says "an owner can
-// choose again"). An indexer who is still an owner is kept.
-func TestChoosingTheModelInUseRecordsWhoChoseIt(t *testing.T) {
+// offeredFor is a catalog with one model, embedding or not, on one machine.
+func offeredFor(model string, embeds bool) []FleetModel {
+	return []FleetModel{{ModelId: model, Embeddings: embeds, Machines: []FleetMachine{{RegistrationId: "m-" + model,
+		Capabilities: FleetModelCapabilities{Embeddings: embeds}}}}}
+}
+
+// tickUntil runs the index job one step a tick until its switch is in state.
+func tickUntil(t *testing.T, job *memoryIndexFake, state string) {
+	t.Helper()
+	for i := 0; i < 50; i++ {
+		if job.runs[memoryIndexKindSwitch].State == state {
+			return
+		}
+		require.NoError(t, runMemoryIndexTick(context.Background(), job, 0))
+	}
+	t.Fatalf("the switch never reached %s: %+v", state, job.runs[memoryIndexKindSwitch])
+}
+
+// Choosing the model in use again moves nothing, rebuilds nothing and probes
+// nothing. Under the binding lock it is the TAKE-OVER (design section 1, ruling
+// R9): the caller becomes the indexer and the chooser of a machine model whose
+// indexer is missing, is no longer an active owner, or has no machine, own or
+// lent, offering the model for embeddings while one of the caller's does.
+// Otherwise only an empty chooser is filled. A vendor model has no indexer: only
+// an empty chooser is filled.
+func TestChoosingTheModelInUseTakesOverAnIndexerWhoCannotIndex(t *testing.T) {
 	ctx := context.Background()
+	const other, model = memorySearchOtherOwner, "old-embedder"
+	for _, tc := range []struct {
+		name                string
+		arrange             func(f *memorySearchFake)
+		indexedBy, chosenBy string
+	}{
+		{"nobody indexes it", func(f *memorySearchFake) { f.job.active.IndexedBy = "" }, other, other},
+		{"the indexer is no longer an owner", func(f *memorySearchFake) { delete(f.job.owners, fakeOwner) }, other, other},
+		{"no machine of the indexer's offers it, and one of the caller's does", func(f *memorySearchFake) {
+			f.catalogs[other] = offeredFor(model, true)
+		}, other, other},
+		{"the indexer's machine offers it for something other than embeddings", func(f *memorySearchFake) {
+			f.catalogs[fakeOwner] = offeredFor(model, false)
+			f.catalogs[other] = offeredFor(model, true)
+		}, other, other},
+		{"no machine of either offers it, so taking over would not help", nil, fakeOwner, fakeOwner},
+		{"the indexer's machines offer it", func(f *memorySearchFake) {
+			f.catalogs[fakeOwner] = offeredFor(model, true)
+			f.catalogs[other] = offeredFor(model, true)
+		}, fakeOwner, fakeOwner},
+		{"the indexer's machines offer it and nobody chose it", func(f *memorySearchFake) {
+			f.job.active.ChosenBy = ""
+			f.catalogs[fakeOwner] = offeredFor(model, true)
+		}, fakeOwner, other},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newMemorySearchFake(3).noSwitch()
+			f.job.active.ChosenBy = fakeOwner
+			f.job.owners[other] = true
+			if tc.arrange != nil {
+				tc.arrange(f)
+			}
+			require.NoError(t, memorySearchSwitch(ctx, f, other, fakeOldRef))
+			require.Equal(t, tc.indexedBy, f.job.active.IndexedBy)
+			require.Equal(t, tc.chosenBy, f.job.active.ChosenBy)
+			require.Equal(t, fakeOldRef, f.job.active.ProviderRef)
+			require.Empty(t, f.probes)
+			require.Zero(t, f.runAttempts)
+			for _, e := range f.events {
+				if strings.HasPrefix(e, "writeChoice") {
+					require.Equal(t, "writeChoice locked=true", e)
+				}
+			}
+			if tc.indexedBy == fakeOwner && tc.chosenBy == fakeOwner {
+				require.Empty(t, f.choices, "nothing to record")
+			}
+		})
+	}
 
-	f := newMemorySearchFake(3).noSwitch()
-	f.job.active.IndexedBy, f.job.active.ChosenBy = "", ""
-	f.job.owners[memorySearchOtherOwner] = true
-	require.NoError(t, memorySearchSwitch(ctx, f, memorySearchOtherOwner, fakeOldRef))
-	require.Equal(t, memorySearchOtherOwner, f.job.active.IndexedBy)
-	require.Equal(t, memorySearchOtherOwner, f.job.active.ChosenBy)
-	require.Equal(t, []string{"lock", "writeChoice locked=true", "unlock"}, f.events)
-	require.Empty(t, f.probes)
-	require.Zero(t, f.runAttempts)
+	const vendor = "embedding3Small"
+	f := newMemorySearchFake(2).noSwitch()
+	f.job.active = EmbedderBinding{ProviderRef: vendor, Dimensions: 1536, ActivatedAt: "2026-10-01T00:00:00Z"}
+	f.job.owners[other] = true
+	require.NoError(t, memorySearchSwitch(ctx, f, other, vendor))
+	require.Equal(t, other, f.job.active.ChosenBy)
+	require.Empty(t, f.job.active.IndexedBy, "a vendor model runs on nobody's machines")
+	require.NoError(t, memorySearchSwitch(ctx, f, fakeOwner, vendor))
+	require.Equal(t, other, f.job.active.ChosenBy, "a recorded chooser of a vendor model is kept")
+	require.Len(t, f.choices, 1)
+}
 
-	// An indexer who is still an owner stays; only the empty chooser is filled.
-	f = newMemorySearchFake(3).noSwitch()
-	f.job.active.ChosenBy = ""
-	f.job.owners[memorySearchOtherOwner] = true
-	require.NoError(t, memorySearchSwitch(ctx, f, memorySearchOtherOwner, fakeOldRef))
-	require.Equal(t, fakeOwner, f.job.active.IndexedBy)
-	require.Equal(t, memorySearchOtherOwner, f.job.active.ChosenBy)
+// A switch whose binding already names its target (ruling R11) has a way out.
+// Its walk after the flip embeds as the run's indexer, and when that indexer
+// cannot index, an owner choosing the model in use again takes over both the
+// binding and the run, and the next tick finishes. Cancel stays refused: the
+// switch happened.
+func TestAFlippedSwitchWhoseIndexerCannotIndexIsTakenOverByChoosingItAgain(t *testing.T) {
+	ctx := context.Background()
+	const other = memorySearchOtherOwner
+	written := MemoryItem{Id: memoryIndexItemId(9), Text: "written after the flip"}
 
-	// An indexer who is no longer an owner is replaced by the owner choosing again.
-	f = newMemorySearchFake(3).noSwitch()
-	f.job.active.ChosenBy = fakeOwner
+	t.Run("the indexer is no longer an owner", func(t *testing.T) {
+		f := newMemorySearchFake(4)
+		f.job.fill(fakeOldRef, 4)
+		f.job.owners[other] = true
+		tickUntil(t, f.job, memoryIndexStateFinishing)
+		require.Equal(t, fakeNewRef, f.job.active.ProviderRef, "flipped")
+		f.job.rows["alpha"] = append(f.job.rows["alpha"], written)
+		delete(f.job.owners, fakeOwner)
+		require.NoError(t, runMemoryIndexTick(ctx, f.job, time.Hour))
+		require.Equal(t, memoryIndexStateWaiting, f.job.runs[memoryIndexKindSwitch].State)
+		require.Equal(t, memoryIndexOwnerReason, f.job.runs[memoryIndexKindSwitch].WaitingReason)
+		require.ErrorContains(t, memorySearchCancel(ctx, f), "already happened")
+
+		require.NoError(t, memorySearchSwitch(ctx, f, other, fakeNewRef))
+		require.Equal(t, other, f.job.active.IndexedBy)
+		require.Equal(t, other, f.job.active.ChosenBy)
+		require.Equal(t, other, f.job.runs[memoryIndexKindSwitch].IndexedBy, "the walk after the flip resumes on the new indexer's machines")
+		require.Empty(t, f.probes)
+
+		require.NoError(t, runMemoryIndexTick(ctx, f.job, time.Hour))
+		require.Equal(t, memoryIndexStateDone, f.job.runs[memoryIndexKindSwitch].State)
+		require.True(t, f.job.tables[f.job.table(fakeNewRef, 4)]["content|"+written.Id], "the walk after the flip finished")
+	})
+
+	t.Run("no machine of the indexer's offers the model", func(t *testing.T) {
+		f := newMemorySearchFake(4)
+		f.job.fill(fakeOldRef, 4)
+		f.job.owners[other] = true
+		tickUntil(t, f.job, memoryIndexStateFinishing)
+		f.job.rows["alpha"] = append(f.job.rows["alpha"], written)
+		f.job.embedErr = func(run MemoryIndexRun, _ MemoryItem) error {
+			if run.IndexedBy == fakeOwner {
+				return errors.New("store: embed: resolve provider \"fleet:new-embedder\": no machine offering new-embedder is online")
+			}
+			return nil
+		}
+		require.NoError(t, runMemoryIndexTick(ctx, f.job, time.Hour))
+		require.Equal(t, memoryIndexStateWaiting, f.job.runs[memoryIndexKindSwitch].State)
+		require.Equal(t, "none of the indexer's machines offering new-embedder is online", f.job.runs[memoryIndexKindSwitch].WaitingReason)
+
+		f.catalogs[other] = offeredFor("new-embedder", true)
+		require.NoError(t, memorySearchSwitch(ctx, f, other, fakeNewRef))
+		require.Equal(t, other, f.job.active.IndexedBy)
+		require.Equal(t, other, f.job.runs[memoryIndexKindSwitch].IndexedBy)
+
+		require.NoError(t, runMemoryIndexTick(ctx, f.job, time.Hour))
+		require.Equal(t, memoryIndexStateDone, f.job.runs[memoryIndexKindSwitch].State)
+		require.True(t, f.job.tables[f.job.table(fakeNewRef, 4)]["content|"+written.Id])
+	})
+}
+
+// Before the flip, choosing the running switch's target again takes over the
+// RUN's indexer under the same triggers (ruling R11 b): the switch goes on, and
+// flips with the new indexer.
+func TestChoosingTheRunningSwitchsTargetAgainTakesItOver(t *testing.T) {
+	ctx := context.Background()
+	const other = memorySearchOtherOwner
+	f := newMemorySearchFake(4)
+	f.job.fill(fakeOldRef, 4)
+	f.job.owners[other] = true
 	delete(f.job.owners, fakeOwner)
-	f.job.owners[memorySearchOtherOwner] = true
-	require.NoError(t, memorySearchSwitch(ctx, f, memorySearchOtherOwner, fakeOldRef))
-	require.Equal(t, memorySearchOtherOwner, f.job.active.IndexedBy)
-	require.Equal(t, memorySearchOtherOwner, f.job.active.ChosenBy)
+	require.NoError(t, runMemoryIndexTick(ctx, f.job, time.Hour))
+	require.Equal(t, memoryIndexStateWaiting, f.job.runs[memoryIndexKindSwitch].State)
 
-	// Everything already recorded: nothing to write.
-	f = newMemorySearchFake(3).noSwitch()
-	f.job.active.ChosenBy = fakeOwner
+	require.NoError(t, memorySearchSwitch(ctx, f, other, fakeNewRef))
+	require.Equal(t, other, f.job.runs[memoryIndexKindSwitch].IndexedBy)
+	require.Equal(t, fakeOldRef, f.job.active.ProviderRef, "nothing flips")
+	require.Empty(t, f.probes)
+
+	require.NoError(t, runMemoryIndexTick(ctx, f.job, time.Hour))
+	require.Equal(t, memoryIndexStateDone, f.job.runs[memoryIndexKindSwitch].State)
+	require.Equal(t, fakeNewRef, f.job.active.ProviderRef)
+	require.Equal(t, other, f.job.active.IndexedBy, "the binding is indexed as the run is")
+}
+
+// Choosing another model while the walk after a flip runs -- switching back
+// included -- closes the flipped switch as done, leaving its remaining walk to
+// the backfill, and starts the new switch (ruling R11 a).
+func TestSwitchingBackDuringTheWalkAfterTheFlipStartsANewSwitch(t *testing.T) {
+	ctx := context.Background()
+	f := newMemorySearchFake(4)
+	f.job.fill(fakeOldRef, 4)
+	tickUntil(t, f.job, memoryIndexStateFinishing)
+	require.Equal(t, fakeNewRef, f.job.active.ProviderRef)
+
 	require.NoError(t, memorySearchSwitch(ctx, f, fakeOwner, fakeOldRef))
-	require.Equal(t, fakeOwner, f.job.active.IndexedBy)
-	require.Empty(t, f.choices)
+	require.Equal(t, []string{"lock", "writeRun done locked=true", "writeRun indexing locked=true", "unlock"}, f.events)
+	run := f.job.runs[memoryIndexKindSwitch]
+	require.Equal(t, memoryIndexStateIndexing, run.State)
+	require.Equal(t, fakeOldRef, run.TargetRef)
+	require.Equal(t, fakeOwner, run.StartedBy)
+	require.Equal(t, fakeNewRef, f.job.active.ProviderRef, "the builtin moves nothing")
+
+	require.NoError(t, runMemoryIndexTick(ctx, f.job, time.Hour))
+	require.Equal(t, memoryIndexStateDone, f.job.runs[memoryIndexKindSwitch].State)
+	require.Equal(t, fakeOldRef, f.job.active.ProviderRef, "switched back")
 }
 
 // Cancel stops the switch and keeps the partial index under the 30-day
@@ -488,8 +654,9 @@ func TestSwitchAnywayFlipsWithTheHeldItems(t *testing.T) {
 }
 
 // The status says what is in use and who indexes it, how many items the index
-// holds, the backlog the backfill could not index and why it waits, the switch
-// in progress with an ESTIMATED total, and the indexes kept for switching back.
+// holds, the backlog -- the items the backfill's last count found missing, with
+// when it was counted (ruling R10) -- and why it waits, the switch in progress
+// with an ESTIMATED total, and the indexes kept for switching back.
 func TestStatusReportsTheBacklogAndWhyItWaits(t *testing.T) {
 	ctx := context.Background()
 	f := newMemorySearchFake(10).noSwitch()
@@ -497,9 +664,11 @@ func TestStatusReportsTheBacklogAndWhyItWaits(t *testing.T) {
 	f.job.active.ChosenBy = fakeOwner
 	f.names[fakeOwner] = "Ana Owner"
 	const reason = "none of the indexer's machines offering old-embedder is online"
+	counted := f.job.clock.Add(-3 * time.Minute)
 	f.job.runs[memoryIndexKindBackfill] = MemoryIndexRun{Kind: memoryIndexKindBackfill, State: memoryIndexStateWaiting,
 		TargetRef: fakeOldRef, TargetDimensions: 4, IndexedBy: fakeOwner, WaitingReason: reason,
-		Counts: MemoryIndexCounts{Total: 6, Done: 1, Skipped: 3, Failed: 2}, Cursor: map[string]string{"alpha": memoryIndexItemId(6)}}
+		Counts: MemoryIndexCounts{Total: 6, Done: 1, Skipped: 3, Failed: 2}, Cursor: map[string]string{"alpha": memoryIndexItemId(6)},
+		Missing: 37, MissingAt: counted}
 
 	row, err := memorySearchStatus(ctx, f)
 	require.NoError(t, err)
@@ -511,7 +680,8 @@ func TestStatusReportsTheBacklogAndWhyItWaits(t *testing.T) {
 	require.Equal(t, fakeOwner, row["chosenBy"])
 	require.Equal(t, false, row["needsConfirmation"])
 	require.Equal(t, 10, row["indexed"])
-	require.Equal(t, 2, row["backlog"], "the items the backfill found missing and could not index")
+	require.Equal(t, 37, row["backlog"], "the items the backfill's last count found missing")
+	require.Equal(t, counted.Format(time.RFC3339Nano), row["backlogCountedAt"])
 	require.Equal(t, reason, row["waitingReason"])
 	require.Nil(t, row["switch"])
 	require.Equal(t, []any{}, row["retained"])
@@ -539,7 +709,7 @@ func TestStatusReportsTheBacklogAndWhyItWaits(t *testing.T) {
 		"startedAt":      started.Format(time.RFC3339Nano),
 		"startedBy":      fakeOwner,
 		"waitingReason":  "",
-		"estimatedTotal": 12,
+		"estimatedTotal": 47,
 	}, row["switch"])
 	require.Equal(t, []any{map[string]any{"providerRef": third, "retireAt": keptUntil.Format(time.RFC3339Nano)}}, row["retained"])
 
@@ -551,6 +721,7 @@ func TestStatusReportsTheBacklogAndWhyItWaits(t *testing.T) {
 	row, err = memorySearchStatus(ctx, f)
 	require.NoError(t, err)
 	require.Equal(t, 0, row["backlog"])
+	require.Equal(t, "", row["backlogCountedAt"])
 	require.Equal(t, "", row["waitingReason"])
 
 	// Nothing bound: one row, empty.
