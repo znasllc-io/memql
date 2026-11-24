@@ -78,11 +78,19 @@ func visionResolveRequest() airoute.ResolveRequest {
 // ledger. The pinned embedding model id on a binding stays exactly as it is
 // this epic; epic memql#5137 owns re-pointing it, so nothing changes on the
 // wire here.
-func embeddingResolveRequest(name string) airoute.ResolveRequest {
+//
+// indexer, when set, FIXES whom the call is resolved for: memory search
+// embeds as its indexer, whoever asks (memql.EmbeddingIndexerForCall). It
+// rides UserId, which the engine's attribution fills only when it is empty
+// (component/memql ai_attribution.go) and the router reads to choose machines,
+// so a fleet model is resolved against the indexer's machines and the decision
+// names the indexer. Empty leaves the call its caller's, as every other site.
+func embeddingResolveRequest(name, indexer string) airoute.ResolveRequest {
 	return airoute.ResolveRequest{
 		Level:            airoute.LevelEmbeddings,
 		Modality:         airoute.ModalityEmbedding,
 		ExplicitProvider: name,
+		UserId:           indexer,
 	}
 }
 
@@ -231,6 +239,39 @@ func (v callerVision) CallVision(ctx context.Context, prompt string, images []co
 // visionForCaller is the vision provider the app hands to every extractor.
 func (a *App) visionForCaller() common.VisionAIProvider {
 	return callerVision{resolve: a.resolveVisionProvider}
+}
+
+// resolveEmbeddingProvider is PluginContext.ResolveEmbeddingProvider: every
+// embedding a plug-in makes -- an item indexed, a search query, a knowledge
+// chunk, a seed -- is resolved here.
+//
+// MEMORY SEARCH EMBEDS AS ITS INDEXER, WHOEVER ASKS (design record
+// 2026-11-23, section 1; component/memql embedder_indexer.go). The index is
+// one for the whole cluster and the owner provides it, so the bound fleet
+// model is resolved for the binding's indexer -- or for the indexer the
+// context names, which is how the index job fills a model that is not active
+// yet -- and the call then runs on their machines and the ones lent to them.
+// Before, it was resolved for the caller, so an item written by somebody with
+// no machine offering the model was never indexed and they could not search.
+//
+// Two halves, because the router can do only one of them. The REQUEST names
+// the indexer (embeddingResolveRequest), which is what chooses their machines
+// and puts them on the decision. The PROVIDER carries the indexer's assertion
+// on each call (memql.EmbedAsIndexer), which is what the replica holding a
+// machine's stream checks the machine against; the bff embeds memory and holds
+// no stream, so without it every such call would be refused at the hop.
+//
+// A vendor model and a fleet model that is not memory search's are resolved
+// for their caller exactly as before, and nothing is wrapped.
+//
+// Regression tests: embedding_indexer_test.go.
+func (a *App) resolveEmbeddingProvider(ctx context.Context, name string) (memql.EmbeddingAIProvider, error) {
+	indexer := memql.EmbeddingIndexerForCall(ctx, name)
+	provider, _, err := memql.ResolveAITyped[memql.EmbeddingAIProvider](ctx, a.engine, embeddingResolveRequest(name, indexer))
+	if err != nil {
+		return nil, err
+	}
+	return memql.EmbedAsIndexer(provider, indexer), nil
 }
 
 // resolveVisionProvider returns a vision-capable provider for the caller on

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -99,9 +98,12 @@ type releaseIndexResult struct {
 }
 
 // Both callers select the same checked-in manifest. Only publication borrows
-// lifecycle authority. Inference retains the original actor, accepted forward
-// assertion, run budget/observability context and cancellation all the way to
-// the serving worker. An embedder binding does not grant machine access.
+// lifecycle authority. Inference retains the original actor, run
+// budget/observability context and cancellation all the way to the serving
+// worker. An embedder binding reaches one person's machines and no one else's:
+// its indexer's, and the ones lent to them, for the embedding step alone
+// (memql.EmbedAsIndexer), as every memory-search embedding runs. A fleet
+// binding with no indexer reaches none.
 func (i *Integration) reconcileRelease(ctx context.Context, publish, index bool, admit func(context.Context) error) (releaseIndexResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
@@ -156,10 +158,24 @@ func (i *Integration) reconcileRelease(ctx context.Context, publish, index bool,
 				if err != nil {
 					return err
 				}
-				// Ownerless scheduled work cannot create a person or a forwarding
-				// assertion. Defer fleet inference until an authorized owned turn.
-				if strings.HasPrefix(binding.ProviderRef, memql.FleetReferencePrefix) {
-					if _, ok := auth.ForwardedAuthorityFromContext(ctx); !ok {
+				// A SEED IS EMBEDDED AS THE INDEXER (design record 2026-11-23,
+				// section 1). This used to defer every fleet model in ownerless
+				// scheduled work: the lifecycle actor is the cluster, and the
+				// cluster has no machines of its own, so a fleet embedding had
+				// nobody's to run on. A binding that names its indexer answers
+				// that -- memory search embeds on the indexer's machines whoever
+				// asks -- so the seed is embedded now. The context names the
+				// indexer because this call already holds the binding, and the
+				// resolver then does not read it a second time.
+				//
+				// A fleet binding with NO indexer (one bound before indexers
+				// existed) still has nobody to act as, and still waits for an
+				// owned turn rather than manufacturing a person.
+				embedCtx := ctx
+				if indexer, fleet := memql.IndexerFor(binding); fleet {
+					if indexer != "" {
+						embedCtx = memql.ContextWithEmbeddingIndexer(ctx, indexer)
+					} else if _, ok := auth.ForwardedAuthorityFromContext(ctx); !ok {
 						result.Deferred = "fleet-authority-unavailable"
 						return nil
 					}
@@ -172,7 +188,7 @@ func (i *Integration) reconcileRelease(ctx context.Context, publish, index bool,
 				if i.embeddingProvider == nil {
 					return fmt.Errorf("release knowledge embedder resolver is not wired")
 				}
-				provider, err := i.embeddingProvider(ctx, binding.ProviderRef)
+				provider, err := i.embeddingProvider(embedCtx, binding.ProviderRef)
 				if err != nil {
 					// Defer only unavailable selection, never admission ceilings,
 					// caller cancellation, storage failures or a failed model call.

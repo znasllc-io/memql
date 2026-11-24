@@ -365,7 +365,8 @@ shape moduleReadiness moduleReadinessFull {
   row.createdAt
 }
 
-/// The cluster's active embedder, whole (epic memql#5137, D6).
+/// The cluster's active embedder, whole (epic memql#5137, D6), including whose machines index for
+/// memory search and who chose it (design record 2026-11-23, section 1).
 @row
 shape embedderBinding embedderBindingFull {
   row.id
@@ -374,6 +375,10 @@ shape embedderBinding embedderBindingFull {
   activatedAt
   reembedRunId
   previousRef
+  indexedBy
+  chosenBy
+  retireAt
+  droppedAt
   row.createdAt
 }
 

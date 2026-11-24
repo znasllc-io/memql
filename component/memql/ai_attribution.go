@@ -150,6 +150,13 @@ func applyCallAttribution(ctx context.Context, req airoute.ResolveRequest) airou
 		}
 	}
 
+	// A USERID THE REQUEST ALREADY FIXED IS KEPT, and one call site depends on
+	// it rather than merely knowing better: memory search resolves its bound
+	// model AS ITS INDEXER, whoever is asking (embedder_indexer.go,
+	// app/ai_call_sites.go embeddingResolveRequest). The caller is on the
+	// context of every such call, so filling over the request's id would put
+	// the embedding back on the asker's machines -- none, for somebody who has
+	// no machine -- and name them on the decision instead of the indexer.
 	if strings.TrimSpace(req.UserId) == "" {
 		if access, ok := auth.AccessFromContext(ctx); ok && access != nil {
 			req.UserId = strings.TrimSpace(access.UserId)

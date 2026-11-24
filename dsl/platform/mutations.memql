@@ -3301,14 +3301,15 @@ mutation moduleReadiness recordModuleReadiness {
 // (epic memql#5137, D6). A cluster owner may certainly CHOOSE the embedder --
 // that is the point of the feature. What they may not do is write this row
 // directly, because activating a binding is not a write: it is create the
-// vector table for the new width, run reembedLibrary to fill it, compare the
-// counts, and only then flip `active`. A mutation reachable from a client would
-// let somebody perform step four on its own, and the cluster would then read
-// every vector in the old table through the new model's geometry -- half a
-// search space, ranked confidently, with no error anywhere.
+// vector table for the new model, fill it (the memory index job, design record
+// 2026-11-23 section 4), and only then flip `active`. A mutation reachable from
+// a client would let somebody perform the last step on its own, and the
+// cluster would then read every vector in the old table through the new
+// model's geometry -- half a search space, ranked confidently, with no error
+// anywhere.
 //
-// The act an operator performs is the BUILTIN that runs all four steps. These
-// are what it writes with.
+// The act an operator performs is the BUILTIN that runs the steps. These are
+// what it writes with.
 
 /// Record a binding that is being activated. Written before the re-embed starts, with
 /// `activatedAt` deliberately absent -- until the counts match this row is a PLAN, and a reader
@@ -3361,6 +3362,96 @@ mutation embedderBinding activateEmbedderBinding {
   update {
     id:           args.bindingId
     activatedAt:  args.activatedAt
+  }
+}
+
+/// Switch the binding to another model in ONE write: the index job calls this, under the binding's
+/// lock, once every item is in the new model's table (design record 2026-11-23, section 6).
+///
+/// NOT @createOnly, unlike recordEmbedderBindingPlan: a switch is exactly the write that changes
+/// the model and its width on a row that exists. And it states the WHOLE new model: an omitted
+/// previousRef, indexedBy or chosenBy is written empty rather than inherited, because a flip that
+/// kept the previous model's indexer would embed the new model on machines nobody chose for it.
+///
+/// @serverOnly, AND actor.userId SCOPING IS NOT THE FIX: no actor owns the deployment's one vector
+/// space, and a caller-reachable flip would let somebody perform the switch's last step alone --
+/// every search would then read a half-built index through the new model's geometry.
+@serverOnly
+mutation embedderBinding flipEmbedderBinding {
+  args {
+    bindingId    string!
+    providerRef  string!
+    dimensions   int!      @minimum(1)
+    activatedAt  datetime!
+    previousRef  string
+    indexedBy    string
+    chosenBy     string
+  }
+  update {
+    accept { providerRef, dimensions, activatedAt }
+    stamp {
+      id:           args.bindingId
+      previousRef:  args.previousRef ?? ""
+      indexedBy:    args.indexedBy ?? ""
+      chosenBy:     args.chosenBy ?? ""
+    }
+  }
+}
+
+/// Record whose machines index the active model and who chose it, without touching the model.
+/// Each writer names only its own field and the read-merge keeps the other: adopting an owner as
+/// the indexer of a binding made before indexers existed leaves its chooser empty, and an owner
+/// confirming a vendor model leaves its indexer alone.
+///
+/// @serverOnly, AND actor.userId SCOPING IS NOT THE FIX: the indexer decides whose machines embed
+/// EVERY person's items and searches, so a caller-reachable write would let somebody route the
+/// whole cluster's memory text to machines of their choosing. Only the owner's choice, made through
+/// the engine, writes it.
+@serverOnly
+mutation embedderBinding setEmbedderBindingChoice {
+  args {
+    bindingId  string!
+    indexedBy  string
+    chosenBy   string
+  }
+  update {
+    accept { indexedBy, chosenBy }
+    stamp {
+      id: args.bindingId
+    }
+  }
+}
+
+/// Record a model whose index is no longer the active one, at `retired-<16 hex>` -- the hex of its
+/// vector table's name (RetiredEmbedderBindingID in component/memql). Written when a switch flips
+/// away from a model, when a switch is cancelled, and again when the retained index is dropped.
+///
+/// AN INSERT ON A DERIVED ID, so a model retired twice is one row with one timeline. It states the
+/// whole row each time: an omitted retireAt or droppedAt is written empty rather than inherited, so
+/// a model retired again after its old index was dropped does not read as dropped while its new
+/// table exists. The id must have the retired shape, so this can never write the active binding.
+///
+/// @serverOnly, AND actor.userId SCOPING IS NOT THE FIX: the retained list decides which vector
+/// tables the daily cleanup may drop, and no actor owns the deployment's indexes. A caller-reachable
+/// write could date somebody's whole search index for deletion.
+@serverOnly
+mutation embedderBinding recordRetiredEmbedder {
+  args {
+    bindingId    string!   @pattern("^retired-[0-9a-f]{16}$")
+    providerRef  string!
+    dimensions   int!      @minimum(1)
+    indexedBy    string
+    retireAt     datetime
+    droppedAt    datetime
+  }
+  insert {
+    accept { providerRef, dimensions }
+    stamp {
+      id:         args.bindingId
+      indexedBy:  args.indexedBy ?? ""
+      retireAt:   args.retireAt ?? ""
+      droppedAt:  args.droppedAt ?? ""
+    }
   }
 }
 

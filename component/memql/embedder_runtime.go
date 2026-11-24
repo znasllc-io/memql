@@ -27,14 +27,29 @@ func (e *MemQLEngine) readEmbedderPlan(ctx context.Context) (EmbedderBinding, er
 	if len(rows) != 1 {
 		return EmbedderBinding{}, ErrNoEmbedderBound
 	}
-	row := rows[0]
-	var b EmbedderBinding
-	raw, _ := json.Marshal(row)
-	if err = json.Unmarshal(raw, &b); err != nil {
+	b, err := embedderBindingFromRow(rows[0])
+	if err != nil {
 		return b, err
 	}
 	if !b.Valid() {
 		return EmbedderBinding{}, ErrNoEmbedderBound
+	}
+	return b, nil
+}
+
+// embedderBindingFromRow decodes one embedderBindingFull row. The row's keys
+// are the concept's field names, which match EmbedderBinding's fields
+// case-insensitively, so a field the shape projects reaches the struct without
+// a mapping to keep in step -- the indexer and the chooser included, which is
+// how every replica learns whose machines memory search embeds on.
+func embedderBindingFromRow(row map[string]any) (EmbedderBinding, error) {
+	var b EmbedderBinding
+	raw, err := json.Marshal(row)
+	if err != nil {
+		return EmbedderBinding{}, err
+	}
+	if err = json.Unmarshal(raw, &b); err != nil {
+		return EmbedderBinding{}, err
 	}
 	return b, nil
 }

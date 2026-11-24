@@ -2398,6 +2398,80 @@ call record a person wrote naming somebody's key changes no figure. The owner
 notice is at-least-once: a mail that went, and whose record then failed to
 write, goes again.
 
+## Memory search embeds as its indexer (2026-11-24)
+
+From the [memory-search design record](../../superpowers/specs/2026-11-23-memory-search-model-switch-design.md),
+section 1 (the owner's decision 7): memory search is one index for the whole
+cluster, and the owner provides it.
+
+**Every memory-search embedding resolves as the binding's indexer**
+(`EmbeddingIndexerForCall`, `component/memql/embedder_indexer.go`;
+`resolveEmbeddingProvider`, `app/ai_call_sites.go`). Trigger: a `fleet:` model
+was resolved for whoever asked, so an item was embedded on its writer's
+machines, and an item written, or a search run, by somebody with no machine
+offering the bound model was never embedded. The binding now records
+`indexedBy` and `chosenBy`. For a fleet reference the request's `UserId`
+becomes, in order: the indexer the context names (`ContextWithEmbeddingIndexer`:
+the index job, or a caller already holding the binding); the active binding's
+`indexedBy` when the name is its reference; else nobody, and the call is its
+caller's as before. A vendor reference is unchanged: it runs on no one's
+machines and the cluster's account already pays for embeddings. The engine's
+attribution fills `UserId` only when a request left it empty
+(`ai_attribution.go`), so the decision names the indexer. The binding is read
+at most once per call, not at all when the context names the indexer, and a
+failed read borrows nobody.
+
+**The hop carries the indexer's assertion, and nothing else** (`EmbedAsIndexer`).
+Trigger, reproduced in process: the bff embeds memory and holds no stream, so
+every fleet embedding it makes is forwarded, and the receiving replica checks
+the machine against the forwarded assertion's subject (`owner_mismatch`,
+`integrations/agent/worker/model_forward.go`). A call resolved for the indexer
+and carrying the writer's own assertion is refused before start. Chosen path:
+for each call, the indexer's writer-scoped assertion
+(`auth.ForwardedAuthorityForUser`, the model pull runner's and the deployer
+fleet's form) is bound as the call's forwarded authority only; the actor stays
+the caller, and the caller's context is unchanged after the call.
+Alternatives: binding the indexer's whole context, as `deployer_fleet.go`
+does, would run the call as the indexer, and a work run's provider admission
+requires the actor to be the run's owner (`integrations/work/provider_admission.go`),
+so every embedding inside another person's run would be refused; binding
+nothing keeps the refusal. Invariant: the subject comes off the binding row or
+the index job's run, never a caller's argument; it reaches only the embedding
+call of a provider the router resolved for that subject; a test persona never
+borrows, and its call fails closed.
+
+**Release knowledge seeds stop waiting for an owned turn when the binding names
+its indexer** (`integrations/knowledge/release_seeds.go`). The deferral existed
+because the lifecycle actor is the cluster, which has no machines. A fleet
+binding with no indexer, bound before indexers existed, still defers
+(`fleet-authority-unavailable`) rather than manufacturing a person; an offline
+indexer defers as `embedder-unavailable`, as before.
+
+**The binding's writes** (`dsl/platform/mutations.memql`, all `@serverOnly`).
+`flipEmbedderBinding` states the whole new model: an omitted previous
+reference, indexer or chooser is written empty, so a flip never inherits the
+previous model's indexer. `setEmbedderBindingChoice` writes only the fields it
+is given. `recordRetiredEmbedder` writes a retired model's row at
+`retired-<16 hex>` (`RetiredEmbedderBindingID`, the hex of its vector table's
+name), states the whole row each time so a stale `droppedAt` does not survive
+a new retirement, and refuses any other id. All of it is binding rows in
+Postgres; a replica holds none of it and reads the binding fresh on each call,
+so a retry, a restart or another replica sees the same indexer.
+
+**Limits.** The rule follows the row and does not re-check on each call that
+the indexer is still an active owner; the design pauses indexing then, and the
+check belongs where indexing is driven and the model is chosen. Embedding
+resolutions write no `v1:router:call` row (`resolveDirect` has no observer),
+so the indexer is named on the request and the resolution, not in a ledger
+row. A test persona's memory-search embedding fails rather than running on its
+own machines. Not verified on a live cluster. Tests:
+`component/memql/embedder_indexer_test.go`; `app/embedding_indexer_test.go`,
+through the real router; `integrations/agent/worker/memory_search_hop_test.go`,
+across the hop in process (`-tags agent`);
+`TestOwnedReleaseIndexing/ScheduledEmbedsAsTheIndexer` and
+`.../ScheduledDefersWithoutInventingFleetAuthority` in
+`integrations/knowledge/release_work_db_test.go`.
+
 ## A vendor model is chosen for a job, and API is a route of them (2026-11-22)
 
 The third part of the [vendor accounts design](../../superpowers/specs/2026-11-21-vendor-accounts-and-api-keys-design.md)

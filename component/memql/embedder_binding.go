@@ -38,8 +38,10 @@ const ActiveEmbedderBindingID = "active"
 type EmbedderBinding struct {
 	// ProviderRef is a provider record name (embedding3Small) or a fleet
 	// reference (fleet:qwen3-embedding:0.6b). It is resolved through the same
-	// registry path every other provider name takes, so a fleet embedder is
-	// resolved against the ACTING USER's machines like any other fleet call.
+	// registry path every other provider name takes, but a fleet embedder is
+	// resolved against its INDEXER's machines rather than the acting person's
+	// (IndexedBy, embedder_indexer.go): memory search is one index for the
+	// whole cluster, and the owner provides it.
 	ProviderRef string
 	// Dimensions is the vector width this provider produces, and therefore
 	// which model-specific vector table its vectors live in. Never zero on a
@@ -59,6 +61,20 @@ type EmbedderBinding struct {
 	// only record of what a search space used to mean is gone the moment it is
 	// replaced.
 	PreviousRef string
+	// IndexedBy is the cluster owner whose machines (and the ones lent to them)
+	// embed everything for memory search under a fleet binding, whoever wrote
+	// the item or runs the search (IndexerFor). Empty for a vendor binding,
+	// which runs on no one's machines, and on a fleet binding made before
+	// indexers existed, whose embeddings then resolve for their caller.
+	IndexedBy string
+	// ChosenBy is the owner who chose this model. Empty when it was bound
+	// automatically, which is what lets an owner be asked once to confirm a
+	// vendor model nobody chose.
+	ChosenBy string
+	// RetireAt is set on a RETIRED model's row (RetiredEmbedderBindingID): its
+	// index is kept until then, so switching back is quick, and dropped after.
+	// RFC3339, like ActivatedAt. Empty on the active binding.
+	RetireAt string
 }
 
 // Valid reports whether the binding can actually be used. A binding with no

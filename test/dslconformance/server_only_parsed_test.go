@@ -1265,6 +1265,16 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// half a search space, ranked confidently, with no error anywhere.
 		{Path: "platform/mutations.memql", Name: "recordEmbedderBindingPlan"}: true,
 		{Path: "platform/mutations.memql", Name: "activateEmbedderBinding"}:   true,
+		// The memory-search switch's writes (design record 2026-11-23), for the
+		// same reason and three of their own. flipEmbedderBinding is a switch's
+		// last step and would, reachable alone, put every search on a half-built
+		// index. setEmbedderBindingChoice names the INDEXER, whose machines embed
+		// every person's items and searches: a caller-reachable write would route
+		// the whole cluster's memory text to machines of the caller's choosing.
+		// recordRetiredEmbedder dates an index for the daily cleanup to drop.
+		{Path: "platform/mutations.memql", Name: "flipEmbedderBinding"}:      true,
+		{Path: "platform/mutations.memql", Name: "setEmbedderBindingChoice"}: true,
+		{Path: "platform/mutations.memql", Name: "recordRetiredEmbedder"}:    true,
 		// memql#4270 / memql#4606 / memql#4601. The four writes of the
 		// user-invitation lifecycle, and none is caller-scopable for the same
 		// underlying reason: the row is not the caller's.

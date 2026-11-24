@@ -5341,10 +5341,14 @@
       "file": "platform/concepts.memql",
       "fields": [
         "activatedAt",
+        "chosenBy",
         "dimensions",
+        "droppedAt",
+        "indexedBy",
         "previousRef",
         "providerRef",
-        "reembedRunId"
+        "reembedRunId",
+        "retireAt"
       ],
       "required": [
         "dimensions",
