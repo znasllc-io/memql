@@ -52,6 +52,18 @@ func TestADeveloperReadsAPipelineLogThroughTheRunPointer(t *testing.T) {
 		}
 	}
 
+	// A second run whose workRunId is never set, and the owner's pipeline file with no producer.
+	emptyRun := marker + "-empty"
+	call, err := dslCall("createPipelineRun", map[string]any{"runId": emptyRun, "pipelineId": marker, "repository": "acme/" + marker,
+		"sha": "def456", "mode": "full", "event": "push", "runKey": marker + "-e", "attempt": 1, "trigger": "webhook",
+		"status": "completed", "queuedAt": time.Now().UTC().Format(time.RFC3339Nano)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eng.Execute(auth.ContextWithInternalOrigin(ownerCtx), "mutation "+call); err != nil {
+		t.Fatalf("createPipelineRun: %v", err)
+	}
+
 	// The owner's files: this run's log, another run's log, an upload this run produced.
 	file := func(name, source, producedBy string) string {
 		t.Helper()
@@ -75,6 +87,7 @@ func TestADeveloperReadsAPipelineLogThroughTheRunPointer(t *testing.T) {
 	runLog := file("tests.unit.log", "pipeline", workRun)
 	otherRunLog := file("other.log", "pipeline", marker+"-other-work")
 	upload := file("notes.txt", "uploaded", workRun)
+	unproduced := file("unproduced.log", "pipeline", "")
 
 	get := func(ctx context.Context, artifactId, run string) *httptest.ResponseRecorder {
 		target := "/artifacts/" + artifactId + "/content"
@@ -92,6 +105,8 @@ func TestADeveloperReadsAPipelineLogThroughTheRunPointer(t *testing.T) {
 		"without the pointer":      get(devCtx, runLog, ""),
 		"another run's log":        get(devCtx, otherRunLog, runID),
 		"a non-pipeline artifact":  get(devCtx, upload, runID),
+		"a run with no work run":   get(devCtx, unproduced, emptyRun),
+		"an unknown run":           get(devCtx, runLog, marker+"-nope"),
 		"a caller below developer": get(wireCallerCtx(marker+"-writer"), runLog, runID),
 	} {
 		if got.Code != http.StatusNotFound {

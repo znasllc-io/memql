@@ -2225,8 +2225,11 @@ func (s *EngineLibraryStore) SharedFile(ctx context.Context, artifactId string) 
 // its backing file the owner's and live. The blob-key check stays with the
 // caller of this function.
 func (s *EngineLibraryStore) PipelineRunFile(ctx context.Context, runId, artifactId string) (*LibraryArtifactRow, *LibraryFileRow, error) {
+	ctx = memql.ContextWithFreshRead(ctx)
 	res, err := s.exec(ctx, "pipelineRunView", map[string]any{"runId": strings.TrimSpace(runId)})
 	if err != nil {
+		// Same 404 to the client; this line is the only place the reason goes.
+		slog.Info("pipeline run pointer: run not readable", "error", err, "runId", runId, "artifactId", artifactId)
 		return nil, nil, nil
 	}
 	runs := memql.MaterializeRows(res)
