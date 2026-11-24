@@ -299,6 +299,12 @@ func (f *Fleet) runStep(ctx context.Context, req pl.StepRequest, run StepRun, se
 	if result.WorkerId != "" {
 		capture.Note(fmt.Sprintf("memql: the step ran on machine %s, held by replica %s", result.WorkerId, result.NodeId))
 	}
+	// A step that ran on a machine whose connection had dropped inside the
+	// window says so where the owner reads the step (network-aware fleet
+	// selection): no steady machine could take it then.
+	if unsteady(result) {
+		capture.Notice(ranOnUnsteadyNotice(result))
+	}
 
 	// The step's files reach the Library as a Job's do on the cluster
 	// (settle.go): the log, then the artifacts, every note masked and bounded
@@ -371,7 +377,7 @@ func (f *Fleet) cloneToken(ctx context.Context, run StepRun) (string, pl.StepRes
 // on that machine" after the fact. The last exclusion is the last machine tried
 // (the driver appends them in the order it tried them). A pin moves nothing and
 // says nothing.
-func (f *Fleet) dispatchStep(ctx context.Context, req pl.StepRequest, run StepRun, token string, onChunk func(*nodev1.WorkerForwardStream)) (worker.Result, error) {
+func (f *Fleet) dispatchStep(ctx context.Context, req pl.StepRequest, run StepRun, token string, pref worker.ConnectionPreference, onChunk func(*nodev1.WorkerForwardStream)) (worker.Result, error) {
 	labels := worker.EnvironmentNeedsLabels(req.Step.Needs, "")
 	if labels == nil {
 		labels = map[string]string{}
@@ -395,7 +401,12 @@ func (f *Fleet) dispatchStep(ctx context.Context, req pl.StepRequest, run StepRu
 		RequireLabels:        labels,
 		PinRegistration:      run.PinWorker,
 		ExcludeRegistrations: slices.Clone(run.ExcludeWorkers),
-		OnStreamChunk:        onChunk,
+		// Network-aware placement (fleet_connection.go): the run's window and,
+		// for every step but a pool step, the wait for a steady machine. The
+		// capacity loop passes it per poll, because a bounded wait drops the
+		// wait half when it runs out (D11).
+		Connection:    pref,
+		OnStreamChunk: onChunk,
 	}
 	if n := len(run.ExcludeWorkers); n > 0 {
 		request.ReroutedFrom = "worker:" + run.ExcludeWorkers[n-1]
@@ -587,9 +598,15 @@ func (f *Fleet) classify(ctx context.Context, req pl.StepRequest, run StepRun, r
 		return withWhere(cancelledResult("The step was cancelled on "+machine+"."), where)
 	case code == "worker_disconnected":
 		// Not refused before start: the call may have started, and the
-		// connection ended before the machine reported it.
-		return failed(pl.CodeNodeLost, fmt.Sprintf(
-			"The connection to %s ended before it reported the step: %s", machine, msg))
+		// connection ended before the machine reported it. On a machine whose
+		// connection had already dropped inside the run's window the failure
+		// says that too (network-aware fleet selection), so the owner reads the
+		// cause on the step instead of in the machine's own log.
+		message := fmt.Sprintf("The connection to %s ended before it reported the step: %s", machine, msg)
+		if unsteady(r) {
+			message += nodeLossConnectionSentence(*r.Connection)
+		}
+		return failed(pl.CodeNodeLost, message)
 	case code == pl.CodeCloneFailed:
 		return failed(pl.CodeCloneFailed, msg)
 	default:
