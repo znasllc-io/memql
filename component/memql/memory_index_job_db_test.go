@@ -230,14 +230,30 @@ func (f *memoryIndexDBFixture) addItems(names ...string) []string {
 	var ids []string
 	for _, name := range names {
 		id := f.concept + ":" + name
-		payload, _ := json.Marshal(map[string]any{"text": "a note about " + name})
-		row := []*memorynodes.MemoryNode{{ID: id, Concept: f.concept, CreatedBy: "memory-index-test", CreatedAt: time.Now().UTC(),
-			Payload: payload, Provenance: json.RawMessage(`{"kind":"direct","name":"memory-index-test"}`)}}
-		_, err := f.db.NewInsert().Model(&row).Exec(f.ctx)
-		require.NoError(f.t, err)
+		f.writeRow(id, "a note about "+name)
 		ids = append(ids, id)
 	}
 	return ids
+}
+
+// rewrite writes a newer version of a row, with other text.
+func (f *memoryIndexDBFixture) rewrite(id, text string) {
+	f.t.Helper()
+	f.writeRow(id, text)
+}
+
+// writeRow writes one version of a row, stamped by the DATABASE's clock, as is
+// every vector's updated_at: a writer's version and its vector are then
+// ordered the way they were written, whatever this host's clock says.
+func (f *memoryIndexDBFixture) writeRow(id, text string) {
+	f.t.Helper()
+	var at time.Time
+	require.NoError(f.t, f.db.DB.QueryRowContext(f.ctx, `SELECT clock_timestamp()`).Scan(&at))
+	payload, _ := json.Marshal(map[string]any{"text": text})
+	row := []*memorynodes.MemoryNode{{ID: id, Concept: f.concept, CreatedBy: "memory-index-test", CreatedAt: at.UTC(),
+		Payload: payload, Provenance: json.RawMessage(`{"kind":"direct","name":"memory-index-test"}`)}}
+	_, err := f.db.NewInsert().Model(&row).Exec(f.ctx)
+	require.NoError(f.t, err)
 }
 
 func memoryIndexNames(prefix string, n int) []string {
@@ -269,10 +285,46 @@ func (f *memoryIndexDBFixture) startSwitch(ref, indexer string) MemoryIndexRun {
 		IndexedBy: indexer, StartedBy: indexer, StartedAt: time.Now().UTC().Truncate(time.Microsecond), Cursor: map[string]string{}}
 	_, version, _, err := f.a.readMemoryIndexRun(f.ctx, memoryIndexKindSwitch)
 	require.NoError(f.t, err)
-	require.NoError(f.t, f.a.writeMemoryIndexRun(f.ctx, run, version))
+	_, err = f.a.writeMemoryIndexRun(f.ctx, run, version)
+	require.NoError(f.t, err)
 	_, err = EnsureEmbeddingVectorTable(f.ctx, f.db.DB, ref, f.widths[ref])
 	require.NoError(f.t, err)
 	return run
+}
+
+// setRun writes a run as somebody else would: fenced to the version read.
+func (f *memoryIndexDBFixture) setRun(e *MemQLEngine, change func(*MemoryIndexRun)) {
+	f.t.Helper()
+	run, version, ok, err := e.readMemoryIndexRun(f.ctx, memoryIndexKindSwitch)
+	require.NoError(f.t, err)
+	require.True(f.t, ok)
+	change(&run)
+	_, err = e.writeMemoryIndexRun(f.ctx, run, version)
+	require.NoError(f.t, err)
+}
+
+// semanticCacheRow puts one answer in the semantic answer cache and answers a
+// count of the rows under its namespace.
+func (f *memoryIndexDBFixture) semanticCacheRow() func() int {
+	f.t.Helper()
+	ns := "memidx-test-" + f.token
+	vec := make([]string, 1536)
+	for i := range vec {
+		vec[i] = "0"
+	}
+	vec[0] = "1"
+	_, err := f.db.DB.ExecContext(f.ctx, `INSERT INTO semantic_ai_cache (namespace, embedding, value, expires_at)
+		VALUES ($1, $2::vector, '{}'::jsonb, NOW() + interval '1 hour')`, ns, "["+strings.Join(vec, ",")+"]")
+	require.NoError(f.t, err)
+	f.t.Cleanup(func() {
+		_, _ = f.db.DB.ExecContext(context.Background(), `DELETE FROM semantic_ai_cache WHERE namespace = $1`, ns)
+	})
+	return func() int {
+		f.t.Helper()
+		var n int
+		require.NoError(f.t, f.db.DB.QueryRowContext(f.ctx, `SELECT count(*) FROM semantic_ai_cache WHERE namespace = $1`, ns).Scan(&n))
+		return n
+	}
 }
 
 func (f *memoryIndexDBFixture) tick(e *MemQLEngine, budget time.Duration) {
@@ -456,7 +508,9 @@ func TestTheRowSourceWalkReadsTheLatestVersionOnPostgres(t *testing.T) {
 	items, next, err := eng.memorySourceItems(ctx, source, "", 2)
 	require.NoError(t, err)
 	require.Len(t, items, 2)
-	require.Equal(t, MemoryItem{Id: concept + ":a", Text: "new a"}, items[0], "the newest version of a row, once")
+	require.Equal(t, concept+":a", items[0].Id)
+	require.Equal(t, "new a", items[0].Text, "the newest version of a row, once")
+	require.WithinDuration(t, base.Add(time.Second), items[0].Version, time.Millisecond, "the version the text came from")
 	require.Equal(t, concept+":d", items[1].Id)
 	require.Contains(t, items[1].Failure, "its stored payload does not decode")
 	require.Empty(t, items[1].Text)
@@ -464,7 +518,17 @@ func TestTheRowSourceWalkReadsTheLatestVersionOnPostgres(t *testing.T) {
 
 	items, next, err = eng.memorySourceItems(ctx, source, next, 2)
 	require.NoError(t, err)
-	require.Equal(t, []MemoryItem{{Id: concept + ":e", Text: "e"}, {Id: concept + ":f", Text: "f"}}, items)
+	require.Len(t, items, 2)
+	require.Equal(t, []string{concept + ":e", "e", concept + ":f", "f"}, []string{items[0].Id, items[0].Text, items[1].Id, items[1].Text})
+
+	// A content-addressed source's items carry no version: their text never
+	// changes under an id, so a newer row version is no reason to embed again.
+	source.ContentAddressed = true
+	items, _, err = eng.memorySourceItems(ctx, source, concept+":d", 2)
+	require.NoError(t, err)
+	require.Len(t, items, 2)
+	require.True(t, items[0].Version.IsZero() && items[1].Version.IsZero())
+	source.ContentAddressed = false
 	items, next, err = eng.memorySourceItems(ctx, source, next, 2)
 	require.NoError(t, err)
 	require.Empty(t, items)
@@ -715,39 +779,66 @@ func TestAWidthChangeMovesTablesOnlyAtTheFlip(t *testing.T) {
 
 // A flip that died after moving the binding, before the run said so, is
 // finished by the next tick on another replica: the binding is not moved
-// again, and the run still names the model the binding replaced.
+// again, the semantic answer cache is emptied, and the run names the model the
+// binding replaced. That holds even when the indexer stopped being an owner in
+// between: the rest of the flip embeds nothing, so it is not parked, and only
+// the walk after it waits (ruling R6: every prefix of the flip finishes).
 func TestAResumedFlipFinishesFromTheBinding(t *testing.T) {
-	f := newMemoryIndexDBFixture(t)
-	oldRef, newRef := f.ref("old", 8), f.ref("new", 8)
-	f.bind(oldRef, f.owner)
-	ids := f.addItems(memoryIndexNames("item", 3)...)
-	f.write(f.a, ids...)
-	run := f.startSwitch(newRef, f.owner)
-
-	// The earlier attempt: `switching` saved, the binding moved -- and the
-	// replica died before it wrote `finishing`.
-	_, version, _, err := f.a.readMemoryIndexRun(f.ctx, memoryIndexKindSwitch)
-	require.NoError(t, err)
-	run.State = memoryIndexStateSwitching
-	require.NoError(t, f.a.writeMemoryIndexRun(f.ctx, run, version))
-	require.NoError(t, f.a.memoryIndexMutation(auth.ContextWithInternalOrigin(f.ctx), "platform.flipEmbedderBinding", map[string]any{
-		"bindingId": "active", "providerRef": newRef, "dimensions": 8, "activatedAt": time.Now().UTC().Format(time.RFC3339Nano),
-		"previousRef": oldRef, "indexedBy": f.owner, "chosenBy": f.owner}))
-	bindingVersions := func() int {
+	// crashedFlip leaves a switch the way a replica dying mid-flip does:
+	// `switching` saved, the binding moved, `finishing` never written.
+	crashedFlip := func(t *testing.T) (f *memoryIndexDBFixture, oldRef, newRef string) {
+		f = newMemoryIndexDBFixture(t)
+		oldRef, newRef = f.ref("old", 8), f.ref("new", 8)
+		f.bind(oldRef, f.owner)
+		ids := f.addItems(memoryIndexNames("item", 3)...)
+		f.write(f.a, ids...)
+		f.startSwitch(newRef, f.owner)
+		f.setRun(f.a, func(r *MemoryIndexRun) { r.State = memoryIndexStateSwitching })
+		require.NoError(t, f.a.memoryIndexMutation(auth.ContextWithInternalOrigin(f.ctx), "platform.flipEmbedderBinding", map[string]any{
+			"bindingId": "active", "providerRef": newRef, "dimensions": 8, "activatedAt": time.Now().UTC().Format(time.RFC3339Nano),
+			"previousRef": oldRef, "indexedBy": f.owner, "chosenBy": f.owner}))
+		return f, oldRef, newRef
+	}
+	bindingVersions := func(t *testing.T, f *memoryIndexDBFixture) int {
 		t.Helper()
 		var n int
 		require.NoError(t, f.db.DB.QueryRowContext(f.ctx, `SELECT count(*) FROM "MemoryNodes" WHERE id = $1`, EmbedderBindingConceptID+":active").Scan(&n))
 		return n
 	}
-	before := bindingVersions()
 
-	f.tick(f.b, 45*time.Second)
-	got := f.run(memoryIndexKindSwitch)
-	require.Equal(t, memoryIndexStateDone, got.State)
-	require.Equal(t, oldRef, got.PreviousRef, "the run names the model the binding replaced")
-	require.Equal(t, before, bindingVersions(), "the binding is not moved again")
-	require.Equal(t, newRef, f.binding().ProviderRef)
-	require.Len(t, f.present(newRef), 3, "the walk after the flip filled the new index")
+	t.Run("on another replica", func(t *testing.T) {
+		f, oldRef, newRef := crashedFlip(t)
+		cached := f.semanticCacheRow()
+		before := bindingVersions(t, f)
+		f.tick(f.b, 45*time.Second)
+		got := f.run(memoryIndexKindSwitch)
+		require.Equal(t, memoryIndexStateDone, got.State)
+		require.Equal(t, oldRef, got.PreviousRef, "the run names the model the binding replaced")
+		require.Equal(t, before, bindingVersions(t, f), "the binding is not moved again")
+		require.Zero(t, cached(), "the semantic answer cache is emptied")
+		require.Equal(t, newRef, f.binding().ProviderRef)
+		require.Len(t, f.present(newRef), 3, "the walk after the flip filled the new index")
+	})
+
+	t.Run("with the indexer no longer an owner", func(t *testing.T) {
+		f, oldRef, newRef := crashedFlip(t)
+		cached := f.semanticCacheRow()
+		f.setOwners()
+		f.tick(f.b, 45*time.Second)
+		got := f.run(memoryIndexKindSwitch)
+		require.Equal(t, oldRef, got.PreviousRef, "the flip finished before anything waited")
+		require.Zero(t, cached(), "the semantic answer cache is emptied")
+		require.Equal(t, memoryIndexStateWaiting, got.State, "the walk after the flip waits for an owner")
+		require.Equal(t, memoryIndexOwnerReason, got.WaitingReason)
+		require.Empty(t, f.present(newRef), "nothing is embedded on a former owner's machines")
+
+		f.setOwners(f.owner)
+		f.tick(f.b, 45*time.Second)
+		got = f.run(memoryIndexKindSwitch)
+		require.Equal(t, memoryIndexStateDone, got.State)
+		require.Equal(t, oldRef, got.PreviousRef)
+		require.Len(t, f.present(newRef), 3)
+	})
 }
 
 // An indexer who is no longer an active owner makes the run wait with a plain
@@ -773,4 +864,116 @@ func TestAnIndexerWhoIsNoLongerAnOwnerMakesTheRunWait(t *testing.T) {
 	f.tick(f.b, 45*time.Second)
 	require.Equal(t, memoryIndexStateDone, f.run(memoryIndexKindSwitch).State)
 	require.Equal(t, newRef, f.binding().ProviderRef)
+}
+
+// Another replica's write of the run between two of the job's batches -- an
+// owner's Cancel on the bff, or a second tick after a lost lock -- survives:
+// the job's next write is fenced to the version the job ITSELF wrote, so it is
+// refused and the job stops, rather than writing `indexing` over the cancel.
+func TestAnotherReplicasWriteBetweenTwoBatchesSurvives(t *testing.T) {
+	f := newMemoryIndexDBFixture(t)
+	oldRef, newRef := f.ref("old", 8), f.ref("new", 8)
+	f.bind(oldRef, f.owner)
+	ids := f.addItems(memoryIndexNames("item", 40)...)
+	f.write(f.a, ids...)
+	f.startSwitch(newRef, f.owner)
+	cancelled := false
+	f.a.memoryIndexAfterRunWrite = func(run MemoryIndexRun) {
+		if cancelled || run.Kind != memoryIndexKindSwitch || run.State != memoryIndexStateIndexing {
+			return
+		}
+		cancelled = true // right after a's first batch is saved
+		f.setRun(f.b, func(r *MemoryIndexRun) { r.State = memoryIndexStateCancelled })
+	}
+
+	f.tick(f.a, 45*time.Second)
+	require.True(t, cancelled, "b wrote between a's first and second batch")
+	got := f.run(memoryIndexKindSwitch)
+	require.Equal(t, memoryIndexStateCancelled, got.State, "b's write survives")
+	require.Equal(t, oldRef, f.binding().ProviderRef, "nothing flipped")
+	require.LessOrEqual(t, len(f.jobStores(newRef)), 40, "a stopped at its next write; no catch-up walk ran")
+}
+
+// The witness is the write's own answer: on Postgres the mutation's result
+// names the version it stored, so writeMemoryIndexRun takes it without a read
+// that another replica's write could land before. The read after the write is
+// only its fallback, and the test above passes through either path.
+func TestARunWriteAnswersTheVersionItStored(t *testing.T) {
+	f := newMemoryIndexDBFixture(t)
+	f.bind(f.ref("active", 8), f.owner)
+	f.write(f.a, f.addItems("one")...)
+	f.tick(f.a, 45*time.Second) // the pass writes the backfill run
+	run, version, ok, err := f.a.readMemoryIndexRun(f.ctx, memoryIndexKindBackfill)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	run.LastPassAt = run.LastPassAt.Add(-time.Minute)
+	fenced := ContextWithRowVersionFence(auth.ContextWithInternalOrigin(f.ctx), MemoryIndexRunConceptID, run.Kind, version)
+	res, err := f.a.memoryIndexMutationResult(fenced, "platform.recordMemoryIndexRun", memoryIndexRunArgs(run))
+	require.NoError(t, err)
+	written := memoryIndexWrittenVersion(res, MemoryIndexRunConceptID+":"+run.Kind)
+	require.False(t, written.IsZero(), "the write's result names the version it stored")
+	_, stored, _, err := f.a.readMemoryIndexRun(f.ctx, run.Kind)
+	require.NoError(t, err)
+	require.True(t, written.Equal(stored), "answered %s, stored %s", written, stored)
+	require.True(t, written.After(version))
+}
+
+// A vector older than its row's newest version is MISSING (ruling R7): the row
+// was rewritten after it was embedded, so its vector no longer says what the
+// row says. A row its writer embedded after writing it is not touched.
+func TestARowRewrittenAfterItsVectorIsEmbeddedAgain(t *testing.T) {
+	f := newMemoryIndexDBFixture(t)
+	slack := memoryIndexClockSlack
+	memoryIndexClockSlack = 0 // the fixture stamps rows and vectors with one clock
+	t.Cleanup(func() { memoryIndexClockSlack = slack })
+	ref := f.ref("active", 8)
+	f.bind(ref, f.owner)
+	ids := f.addItems("edited", "fresh")
+	f.write(f.a, ids...)                           // both embedded live, after their rows were written
+	f.rewrite(ids[0], "a later note about edited") // and its live re-embed never happened
+
+	f.tick(f.a, 45*time.Second)
+	run := f.run(memoryIndexKindBackfill)
+	require.Equal(t, memoryIndexStateDone, run.State)
+	require.Equal(t, map[string]int{ids[0]: 1}, f.jobStores(ref), "the rewritten row is embedded again; the fresh one is not")
+	require.Equal(t, MemoryIndexCounts{Total: 2, Done: 1, Skipped: 1}, run.Counts)
+
+	// Its new vector is newer than the row: the next walk embeds nothing.
+	backfill, version, _, err := f.a.readMemoryIndexRun(f.ctx, memoryIndexKindBackfill)
+	require.NoError(t, err)
+	backfill.LastPassAt = backfill.LastPassAt.Add(-11 * time.Minute)
+	_, err = f.a.writeMemoryIndexRun(f.ctx, backfill, version)
+	require.NoError(t, err)
+	f.tick(f.b, 45*time.Second)
+	require.Equal(t, map[string]int{ids[0]: 1}, f.jobStores(ref))
+	require.Equal(t, MemoryIndexCounts{Total: 2, Skipped: 2}, f.run(memoryIndexKindBackfill).Counts)
+}
+
+// During a switch the writers write the ACTIVE table only, so a row rewritten
+// after the first walk embedded it into the target is caught by the catch-up
+// walk, before the flip, and not left answering with text the row no longer has.
+func TestARowRewrittenDuringTheSwitchIsEmbeddedAgain(t *testing.T) {
+	f := newMemoryIndexDBFixture(t)
+	slack := memoryIndexClockSlack
+	memoryIndexClockSlack = 0
+	t.Cleanup(func() { memoryIndexClockSlack = slack })
+	oldRef, newRef := f.ref("old", 8), f.ref("new", 8)
+	f.bind(oldRef, f.owner)
+	ids := f.addItems(memoryIndexNames("item", 40)...)
+	f.write(f.a, ids...)
+	f.startSwitch(newRef, f.owner)
+
+	f.tick(f.a, time.Nanosecond) // the first batch: items 1-32 into the target
+	require.Equal(t, 1, f.jobStores(newRef)[ids[0]])
+	f.rewrite(ids[0], "a later note about item one")
+	f.write(f.b, ids[0]) // its writer re-embeds it -- into the active model's table
+
+	f.settle(f.a)
+	require.Equal(t, newRef, f.binding().ProviderRef)
+	stores := f.jobStores(newRef)
+	require.Equal(t, 2, stores[ids[0]], "the rewritten row is embedded again before the flip")
+	for _, id := range ids[1:] {
+		require.Equal(t, 1, stores[id], "%s", id)
+	}
 }

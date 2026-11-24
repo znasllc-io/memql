@@ -75,20 +75,42 @@ package memql
 // broken and offer the owner "Switch anyway" over an empty index. So the run
 // goes to `waiting` with a plain reason, keeps its cursor, counts nothing, and
 // the next tick tries again. STOP CONDITION: the indexer's machine comes back
-// or an owner chooses the model again. The indexer's role is checked at the
-// start of every tick, before anything is embedded.
+// or an owner chooses the model again. The indexer's role is checked before a
+// tick's first step that embeds or moves the binding (work).
 //
-// # The flip
+// # What counts as missing
 //
-// flipMemoryIndex, under the binding lock. It is one critical section and not
-// one SQL transaction: the engine writes rows only through its mutations, each
-// its own statement, and the lock lives on another connection. So the writes
-// are ordered so that every prefix of them is safe, and the run's `switching`
-// state, saved before any of them, makes the next tick finish what a crash
-// left: retire the active model's row first (its index then cannot be dropped
-// early), flip the binding (one row version: readers see one model or the
-// other, never half), drop the semantic answer cache, then record `finishing`.
-// A resumed flip finds the binding already moved and does only the rest.
+// An item is missing from the target when its vector is absent OR older than
+// its row's newest version (memoryIndexCurrent, ruling R7): a rewritten row's
+// old vector no longer says what the row says, and presence alone cannot see
+// that. Content-addressed sources are exempt; their text never changes under
+// an id.
+//
+// # The flip: ordered steps, every prefix finished (ruling R6)
+//
+// flipMemoryIndex, under the binding lock. It is ORDERED STEPS, not one
+// transaction: the engine writes rows only through its mutations, each its own
+// statement, and the lock lives on another connection. `switching` is saved
+// first, and the next tick finishes whatever prefix a crash left; the steps
+// after the binding moves embed nothing, so they are finished even when the
+// indexer is no longer an owner (work). What each prefix leaves:
+//
+//  1. `switching` saved, nothing else: search reads the active model; the next
+//     tick runs the whole flip.
+//  2. The active model recorded retired (retireAt now + 30 days), the binding
+//     not moved: search still reads it, and its index is dated though in use,
+//     which the daily cleanup never drops while it is active; the next tick
+//     records it again, with a later date, and goes on.
+//  3. The binding moved (one row version: readers see one model or the other,
+//     never half): search reads the new model, the semantic answer cache may
+//     hold the old model's answers, which no lookup matches (every cached row
+//     is scoped to the model that embedded it, ai_semantic_cache.go), and the
+//     run still says `switching` with no previous model; the next tick sees
+//     the binding already moved, writes no binding, empties the cache and
+//     records `finishing`, taking the previous model from the binding.
+//  4. The cache emptied, `finishing` not yet recorded: as 3, and the DELETE
+//     runs again.
+//  5. `finishing` recorded: the flip is over, and the walk after it follows.
 //
 // # Nothing is broadcast (ruling R3)
 //
@@ -162,6 +184,44 @@ const (
 	memoryIndexMaxBudget     = 50 * time.Second
 )
 
+// memoryIndexClockSlack is how much older than its row's newest version a
+// vector may be and still count as that version's (memoryIndexCurrent). A
+// variable only so a test can shorten it.
+var memoryIndexClockSlack = 2 * time.Second
+
+// memoryIndexCurrent reports whether the target already holds item's vector AS
+// ITS ROW NOW IS: present, and not older than the row's newest version.
+//
+// WHY A PRESENT VECTOR CAN BE MISSING (ruling R7). A vector is keyed by (id,
+// vector_field) and carries no text, so presence alone cannot see a row
+// rewritten after it was embedded. During a switch the writers write only the
+// active table, so a row the first walk embedded into the target and someone
+// then rewrote would be skipped by every later walk, and after the flip search
+// would answer from text the row no longer has; the backfill would never repair
+// an edit whose live re-embed failed either (embedCatalogConstruct swallows its
+// failure and counts on a backfill). So a vector older than its row's newest
+// version (MemoryItem.Version) is missing, in every walk.
+//
+// THE GUARD: a row its writer embedded when it was written is not touched.
+// Every registered writer writes the row version first and its vector after
+// (embedWorkObservation runs after the mutation, indexConversationEvidence,
+// the acknowledgement and the catalog promotion write the row and then call
+// the store, the Library writes its chunk and then embeds it), so its vector is
+// the newer of the two. The version is stamped by the writing replica's clock
+// and the vector's updated_at by the database's, so within memoryIndexClockSlack
+// a vector still counts as its row's: replicas drift by milliseconds, not
+// seconds. The cost of the slack is one rare miss: a row rewritten within it
+// after the job embedded the row keeps the older vector until its next write.
+// An item with no Version -- a content-addressed source, or one that pages its
+// own items -- is current whenever it is present.
+func memoryIndexCurrent(item MemoryItem, written map[string]time.Time) bool {
+	at, ok := written[item.Id]
+	if !ok {
+		return false
+	}
+	return item.Version.IsZero() || !item.Version.After(at.Add(memoryIndexClockSlack))
+}
+
 // memoryIndexLockSQL takes the job's one-runner lock, without waiting, for the
 // transaction it runs in (see the header).
 const memoryIndexLockSQL = `SELECT pg_try_advisory_xact_lock(hashtextextended('memql:memory-index', 0))`
@@ -227,7 +287,9 @@ type memoryIndexWorld interface {
 	sources() []MemorySource
 	items(ctx context.Context, s MemorySource, after string, limit int) ([]MemoryItem, string, error)
 	ensureTable(ctx context.Context, ref string, dims int) (string, error)
-	present(ctx context.Context, table, vectorField string, ids []string) (map[string]bool, error)
+	// vectorTimes answers, for each of ids the table holds a vector of, when
+	// that vector was last written.
+	vectorTimes(ctx context.Context, table, vectorField string, ids []string) (map[string]time.Time, error)
 	embed(ctx context.Context, run MemoryIndexRun, s MemorySource, item MemoryItem) error
 	unsourced(ctx context.Context, table string, sources []MemorySource) (int, error)
 	// flip makes the run's target the active model and answers the run as it
@@ -430,13 +492,22 @@ func (t *memoryIndexTick) pick(ctx context.Context) (bool, error) {
 }
 
 // work takes the run's steps.
+//
+// The indexer is re-checked before the first step of the tick that embeds or
+// moves the binding (indexerWait). ONE STEP IS EXEMPT: the rest of a flip whose
+// binding already names its target (ruling R6). A flip that moved the binding
+// and stopped before recording `finishing` has left only steps that embed
+// nothing and choose no machine -- emptying the semantic answer cache,
+// recording `finishing` and the model replaced -- so they run whatever the
+// indexer's standing. Parked instead, the run would resume as `finishing`
+// (memoryIndexResumeState) and those steps would never run. The walk after the
+// flip is checked as usual, and waits for an owner.
 func (t *memoryIndexTick) work(ctx context.Context) error {
-	if t.run.State != memoryIndexStateNeedsDecision {
+	if t.run.State == memoryIndexStateWaiting {
+		// Still refused: the run waits on, unchanged (save writes nothing).
 		if reason, wait := t.indexerWait(ctx); wait {
 			return t.wait(ctx, reason)
 		}
-	}
-	if t.run.State == memoryIndexStateWaiting {
 		t.run.State = memoryIndexResumeState(t.run, t.active)
 		t.run.WaitingReason = ""
 	}
@@ -447,6 +518,14 @@ func (t *memoryIndexTick) work(ctx context.Context) error {
 		return err
 	}
 	t.table, t.run.TargetTable = table, table
+	checked := false
+	check := func() (string, bool) {
+		if checked {
+			return "", false
+		}
+		checked = true
+		return t.indexerWait(ctx)
+	}
 	for steps := 0; ; steps++ {
 		if steps > 0 && !t.w.now().Before(t.soft) {
 			_, err := t.save(ctx)
@@ -455,8 +534,16 @@ func (t *memoryIndexTick) work(ctx context.Context) error {
 		var stop bool
 		switch t.run.State {
 		case memoryIndexStateSwitching:
+			if !t.bindingNamesTarget() {
+				if reason, wait := check(); wait {
+					return t.wait(ctx, reason)
+				}
+			}
 			stop, err = t.flipStep(ctx)
 		case memoryIndexStateIndexing, memoryIndexStateCatchingUp, memoryIndexStateFinishing:
+			if reason, wait := check(); wait {
+				return t.wait(ctx, reason)
+			}
 			stop, err = t.batch(ctx)
 		default:
 			_, err = t.save(ctx)
@@ -468,8 +555,15 @@ func (t *memoryIndexTick) work(ctx context.Context) error {
 	}
 }
 
-// indexerWait is the indexer re-check at the start of every tick (R5 at the
-// job's level). A fleet model is embedded on its indexer's machines, and the
+// bindingNamesTarget reports whether the active binding already is the run's
+// target: a switch whose flip has moved the binding.
+func (t *memoryIndexTick) bindingNamesTarget() bool {
+	return t.active.ProviderRef == t.run.TargetRef && t.active.Dimensions == t.run.TargetDimensions
+}
+
+// indexerWait is the indexer re-check of every tick (R5 at the job's level),
+// made before the tick's first step that embeds or moves the binding. A fleet
+// model is embedded on its indexer's machines, and the
 // indexer's machines see every person's memory text, so an indexer who is no
 // longer an active owner indexes nothing; a fleet model with no indexer named
 // would resolve as the job itself and reach no one's machines. A vendor model
@@ -547,9 +641,9 @@ func (t *memoryIndexTick) batch(ctx context.Context) (bool, error) {
 			ids = append(ids, item.Id)
 		}
 	}
-	present := map[string]bool{}
+	written := map[string]time.Time{}
 	if len(ids) > 0 {
-		if present, err = t.w.present(ctx, t.table, s.VectorField, ids); err != nil {
+		if written, err = t.w.vectorTimes(ctx, t.table, s.VectorField, ids); err != nil {
 			_, serr := t.save(ctx)
 			return true, errors.Join(err, serr)
 		}
@@ -563,7 +657,7 @@ func (t *memoryIndexTick) batch(ctx context.Context) (bool, error) {
 			t.run.Counts.Total++
 			t.run.Counts.Failed++
 			changed = true
-		case present[item.Id]:
+		case memoryIndexCurrent(item, written):
 			t.run.Counts.Total++
 			t.run.Counts.Skipped++
 		default:
@@ -811,16 +905,25 @@ func (w *engineMemoryIndexWorld) readRun(ctx context.Context, kind string) (Memo
 	return run, ok, nil
 }
 
+// saveRun writes the run fenced to the version this tick last read or wrote,
+// and keeps THE VERSION OF ITS OWN WRITE, as writeMemoryIndexRun answers it, as
+// the next write's witness.
+//
+// Never whatever a read after the write returns: a write by anybody else
+// landing between this write and that read -- an owner's Cancel on the bff, a
+// second tick after a lost lock -- would become the witness, the job's next
+// batch would pass the fence, and the job would write `indexing` over it, which
+// is the revert the fence exists to prevent. With its own version as the
+// witness, the job's next write is refused instead (errMemoryIndexRunChanged)
+// and the tick stops.
 func (w *engineMemoryIndexWorld) saveRun(ctx context.Context, run MemoryIndexRun) error {
-	if err := w.e.writeMemoryIndexRun(ctx, run, w.versions[run.Kind]); err != nil {
-		return err
-	}
-	_, version, ok, err := w.e.readMemoryIndexRun(ctx, run.Kind)
+	version, err := w.e.writeMemoryIndexRun(ctx, run, w.versions[run.Kind])
 	if err != nil {
 		return err
 	}
-	if ok {
-		w.versions[run.Kind] = version
+	w.versions[run.Kind] = version
+	if w.e.memoryIndexAfterRunWrite != nil {
+		w.e.memoryIndexAfterRunWrite(run)
 	}
 	return nil
 }
@@ -848,26 +951,28 @@ func (w *engineMemoryIndexWorld) ensureTable(ctx context.Context, ref string, di
 	return EnsureEmbeddingVectorTable(ctx, db.DB, ref, dims)
 }
 
-// present reads which of ids the table holds for one field. The table name
-// comes from EmbeddingVectorTable, never from a row, and is checked again
-// before it enters the statement.
-func (w *engineMemoryIndexWorld) present(ctx context.Context, table, vectorField string, ids []string) (map[string]bool, error) {
+// vectorTimes reads, for each of ids the table holds a vector of for one
+// field, when that vector was last written (updated_at, which every upsert
+// sets). The table name comes from EmbeddingVectorTable, never from a row, and
+// is checked again before it enters the statement.
+func (w *engineMemoryIndexWorld) vectorTimes(ctx context.Context, table, vectorField string, ids []string) (map[string]time.Time, error) {
 	db := w.e.database()
 	if db == nil || !embeddingTableName.MatchString(table) {
 		return nil, fmt.Errorf("memory index: cannot read vector table %q", table)
 	}
-	rows, err := db.DB.QueryContext(ctx, `SELECT id FROM `+table+` WHERE vector_field = $1 AND id = ANY($2::text[])`, vectorField, pq.Array(ids))
+	rows, err := db.DB.QueryContext(ctx, `SELECT id, updated_at FROM `+table+` WHERE vector_field = $1 AND id = ANY($2::text[])`, vectorField, pq.Array(ids))
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := map[string]bool{}
+	out := map[string]time.Time{}
 	for rows.Next() {
 		var id string
-		if err := rows.Scan(&id); err != nil {
+		var at time.Time
+		if err := rows.Scan(&id, &at); err != nil {
 			return nil, err
 		}
-		out[id] = true
+		out[id] = at.UTC()
 	}
 	return out, rows.Err()
 }
@@ -926,6 +1031,11 @@ func (w *engineMemoryIndexWorld) unsourced(ctx context.Context, table string, so
 	return num.ClampInt64(n), err
 }
 
+// flip runs flipMemoryIndex and then reads the run back. The read takes the
+// row's payload AND its version together, so the tick goes on with whatever
+// the row now is -- the `finishing` it wrote, or a later write by somebody else,
+// which the tick then obeys -- never its own idea of the row under another
+// writer's version (saveRun).
 func (w *engineMemoryIndexWorld) flip(ctx context.Context, run MemoryIndexRun) (MemoryIndexRun, error) {
 	if err := w.e.flipMemoryIndex(ctx, run); err != nil {
 		return MemoryIndexRun{}, err
@@ -1037,14 +1147,17 @@ func (e *MemQLEngine) flipMemoryIndex(ctx context.Context, run MemoryIndexRun) e
 		previous = active.ProviderRef
 	}
 	// The semantic answer cache holds the old model's vectors: dropped, and it
-	// refills on its own (design record, non-goals).
+	// refills in the bound model on its own (design record, non-goals). No
+	// lookup could match them anyway -- every cached row is scoped to the model
+	// that embedded it, so neither these nor a row a lagging replica writes after
+	// this DELETE answer a lookup made with the new model (ai_semantic_cache.go).
 	if _, err := db.DB.ExecContext(ctx, `DELETE FROM semantic_ai_cache`); err != nil {
 		return fmt.Errorf("memory index: emptying the semantic answer cache: %w", err)
 	}
 	next := cloneMemoryIndexRun(current)
 	next.State, next.PreviousRef, next.WaitingReason = memoryIndexStateFinishing, previous, ""
 	next.Cursor, next.Counts = map[string]string{}, MemoryIndexCounts{}
-	if err := e.writeMemoryIndexRun(ctx, next, version); err != nil {
+	if _, err := e.writeMemoryIndexRun(ctx, next, version); err != nil {
 		return err
 	}
 	e.logOrDefault().Info("memory index: memory search switched to its new model",
@@ -1054,12 +1167,32 @@ func (e *MemQLEngine) flipMemoryIndex(ctx context.Context, run MemoryIndexRun) e
 
 // memoryIndexMutation runs one of the job's @serverOnly mutations.
 func (e *MemQLEngine) memoryIndexMutation(ctx context.Context, name string, args map[string]any) error {
+	_, err := e.memoryIndexMutationResult(ctx, name, args)
+	return err
+}
+
+// memoryIndexMutationResult runs one of the job's @serverOnly mutations and
+// answers what it wrote.
+func (e *MemQLEngine) memoryIndexMutationResult(ctx context.Context, name string, args map[string]any) (*ExecuteResult, error) {
 	call, err := parser.RenderCall(name, args)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	_, err = e.Execute(ctx, "mutation "+call)
-	return err
+	return e.Execute(ctx, "mutation "+call)
+}
+
+// memoryIndexWrittenVersion is the version a write of row id stored, as the
+// write's own result reports it, or zero when the result does not name it.
+func memoryIndexWrittenVersion(res *ExecuteResult, id string) time.Time {
+	if res == nil || res.Bundle == nil {
+		return time.Time{}
+	}
+	for _, n := range res.Bundle.Nodes {
+		if n != nil && n.GetId() == id && n.GetCreatedAt() != nil {
+			return n.GetCreatedAt().AsTime().UTC()
+		}
+	}
+	return time.Time{}
 }
 
 func (e *MemQLEngine) logOrDefault() *slog.Logger {
@@ -1152,16 +1285,46 @@ func (e *MemQLEngine) readMemoryIndexRun(ctx context.Context, kind string) (Memo
 // fenced to version: the time of the newest version the caller read, or zero
 // when it read none (the row must then still be absent). A write after anybody
 // else's answers errMemoryIndexRunChanged and writes nothing; the caller reads
-// again and decides again (memql#5431).
+// again and decides again (memql#5431). It answers the version it stored, which
+// is the witness for the caller's NEXT write of the row: a caller that wrote
+// keeps that, and never a version read afterwards, which may be somebody
+// else's (saveRun).
 //
 // EVERY WRITER OF THE RUN ROWS GOES THROUGH HERE -- the job, its flip, and the
 // owner's builtins -- because the fence protects a row only when all its
 // writers carry one: an unfenced write would silently revert a cancel, or a
 // cancel would roll back a cursor.
-func (e *MemQLEngine) writeMemoryIndexRun(ctx context.Context, run MemoryIndexRun, version time.Time) error {
+func (e *MemQLEngine) writeMemoryIndexRun(ctx context.Context, run MemoryIndexRun, version time.Time) (time.Time, error) {
 	if run.Kind != memoryIndexKindSwitch && run.Kind != memoryIndexKindBackfill {
-		return fmt.Errorf("memory index: no run of kind %q", run.Kind)
+		return time.Time{}, fmt.Errorf("memory index: no run of kind %q", run.Kind)
 	}
+	fenced := ContextWithRowVersionFence(auth.ContextWithInternalOrigin(ctx), MemoryIndexRunConceptID, run.Kind, version)
+	res, err := e.memoryIndexMutationResult(fenced, "platform.recordMemoryIndexRun", memoryIndexRunArgs(run))
+	if err != nil {
+		if errors.Is(err, ErrRowVersionChanged) || strings.Contains(err.Error(), ErrRowVersionChanged.Error()) {
+			return time.Time{}, errMemoryIndexRunChanged
+		}
+		return time.Time{}, err
+	}
+	if written := memoryIndexWrittenVersion(res, MemoryIndexRunConceptID+":"+run.Kind); !written.IsZero() {
+		return written, nil
+	}
+	// The result did not name the version it stored: read it back, and take it
+	// only as THIS write. Anything else is another writer landing after it,
+	// and its version must not become this writer's witness (saveRun).
+	stored, at, ok, err := e.readMemoryIndexRun(ctx, run.Kind)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if !ok || !memoryIndexRunsEqual(stored, cloneMemoryIndexRun(run)) {
+		return time.Time{}, errMemoryIndexRunChanged
+	}
+	return at, nil
+}
+
+// memoryIndexRunArgs is run as recordMemoryIndexRun's arguments. A blank field
+// is left out, and the mutation stamps it blank: every write states the row.
+func memoryIndexRunArgs(run MemoryIndexRun) map[string]any {
 	counts := map[string]any{"total": run.Counts.Total, "done": run.Counts.Done, "skipped": run.Counts.Skipped,
 		"unsourced": run.Counts.Unsourced, "failed": run.Counts.Failed}
 	cursor := map[string]any{}
@@ -1181,12 +1344,5 @@ func (e *MemQLEngine) writeMemoryIndexRun(ctx context.Context, run MemoryIndexRu
 	memoryIndexTimeArg(args, "startedAt", run.StartedAt)
 	memoryIndexTimeArg(args, "finishedAt", run.FinishedAt)
 	memoryIndexTimeArg(args, "lastPassAt", run.LastPassAt)
-	fenced := ContextWithRowVersionFence(auth.ContextWithInternalOrigin(ctx), MemoryIndexRunConceptID, run.Kind, version)
-	if err := e.memoryIndexMutation(fenced, "platform.recordMemoryIndexRun", args); err != nil {
-		if errors.Is(err, ErrRowVersionChanged) || strings.Contains(err.Error(), ErrRowVersionChanged.Error()) {
-			return errMemoryIndexRunChanged
-		}
-		return err
-	}
-	return nil
+	return args
 }

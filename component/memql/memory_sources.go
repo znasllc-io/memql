@@ -46,8 +46,15 @@ import (
 // logs it, and never embeds it: an item a rebuild cannot produce must show in
 // the switch's counts, never silently drop out of search (design record
 // 2026-11-23, anti-goals).
+//
+// Version is when the row version the text was rebuilt from was written. The
+// index job takes a vector older than it as missing: the row changed after it
+// was embedded (ruling R7). Zero for an item whose source keys its ids by
+// content (MemorySource.ContentAddressed) or pages its own items, where the text
+// under an id never changes.
 type MemoryItem struct {
 	Id, Text, Failure string
+	Version           time.Time
 }
 
 // MemorySource says how to rebuild the text of one kind of indexed item.
@@ -61,10 +68,17 @@ type MemoryItem struct {
 // own items in id order, after the given id, and returns the id to resume
 // after ("" once exhausted). The Training lessons need it, because only the
 // current head of each lesson is indexed, which no single row can say.
+//
+// ContentAddressed says the text under a row's id never changes: a knowledge
+// chunk's id hashes its text, and a seed chunk's names its recipe version. Such
+// rows are written again without their text changing -- a review stamp, every
+// boot's re-seed -- so a newer row version is NOT a reason to embed the item
+// again, and the walk gives it no Version.
 type MemorySource struct {
 	Name, Concept, VectorField string
 	Rows                       func(payload map[string]any) (text string, ok bool)
 	Items                      func(ctx context.Context, after string, limit int) (items []MemoryItem, next string, err error)
+	ContentAddressed           bool
 }
 
 var memorySources = struct {
@@ -250,7 +264,11 @@ func (e *MemQLEngine) memorySourceItems(ctx context.Context, s MemorySource, aft
 				continue
 			}
 			if text, ok := s.Rows(payload); ok {
-				items = append(items, MemoryItem{Id: n.ID, Text: text})
+				item := MemoryItem{Id: n.ID, Text: text}
+				if !s.ContentAddressed {
+					item.Version = n.CreatedAt.UTC()
+				}
+				items = append(items, item)
 			}
 		}
 		if len(nodes) < limit {

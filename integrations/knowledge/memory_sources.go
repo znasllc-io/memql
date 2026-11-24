@@ -58,5 +58,11 @@ func init() {
 			text = KnowledgeChunkEmbedText(text)
 			return text, strings.TrimSpace(text) != ""
 		},
+		// A chunk's id is a hash of its text (chunkIdFor) or names a seed's
+		// recipe version (seedChunkId, the canonical seeds), so the text under
+		// an id never changes. Its row IS written again without its text
+		// changing -- a validation stamp, every boot's re-seed -- and a newer
+		// version must not send every chunk to be embedded again.
+		ContentAddressed: true,
 	})
 }

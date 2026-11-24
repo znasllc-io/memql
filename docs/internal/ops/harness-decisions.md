@@ -2522,7 +2522,14 @@ row (`recordMemoryIndexRun`) and is fenced to the version its writer read
 (`writeMemoryIndexRun`, `ContextWithRowVersionFence`): an owner's Cancel on the
 bff lands between two of the job's batches, and unfenced the job's next write
 would put the run back to `indexing`. A refused write stops the tick; the next
-one reads again. The job and the owner's builtins (Task 5) are the only writers
+one reads again. After a write, the witness for the writer's NEXT write is the
+version its own write stored, as the mutation's result names it
+(`TestARunWriteAnswersTheVersionItStored`). A plain re-read can return another
+writer's version, which would then let the job's next batch pass the fence and
+write over it (`TestAnotherReplicasWriteBetweenTwoBatchesSurvives`); a re-read is
+only the fallback for a result that names no version, and is accepted only when
+the row it reads is the row just written.
+The job and the owner's builtins (Task 5) are the only writers
 and both go through `writeMemoryIndexRun`. A doubled tick (a lost lock) costs
 duplicate embeddings, never a wrong row. No broadcast rule (ruling R3): nothing
 subscribes, and one would put a mesh event per 32 items on every node.
@@ -2541,6 +2548,25 @@ that does not read as a lesson, a lesson head with no receipt) arrives as a
 `MemoryItem` with `Failure` and is counted failed and logged; a source that
 cannot be read counts once. Nothing drops out silently.
 
+**What counts as missing (ruling R7).** An item is missing from the target when
+its vector is absent OR older than its row's newest version
+(`memoryIndexCurrent`): a vector is keyed by `(id, vector_field)` and carries no
+text, so presence alone cannot see a row rewritten after it was embedded.
+During a switch the writers write only the active table, so without this a row
+the first walk embedded and someone then rewrote would answer from its old text
+after the flip, and the backfill could never repair an edit whose live re-embed
+failed. The rule runs in every walk: switch, catch-up, after the flip, backfill.
+GUARD: every registered writer writes the row version first and the vector
+after (the observation, conversation evidence, acknowledgement, catalog and
+Library chunk writers), so a row embedded when it was written is never
+embedded again; the version is the writer's clock and `updated_at` the
+database's, so a vector within `memoryIndexClockSlack` (2 s) still counts as its
+row's. A content-addressed source (`MemorySource.ContentAddressed`: knowledge
+chunks, whose ids hash their text or name a seed's recipe version) is exempt:
+its rows are rewritten by review stamps and every boot's re-seed without the
+text changing (`TestARowRewrittenAfterItsVectorIsEmbeddedAgain`,
+`TestARowRewrittenDuringTheSwitchIsEmbeddedAgain`).
+
 **Waiting is not failing.** An item is tried three times, then counted failed,
 and the walk goes on; the next walk tries it again. When the model cannot be
 reached at all (`memoryIndexWaitReason`: every door shut, no machine offering
@@ -2548,9 +2574,10 @@ it online, `ErrFleetUnavailable`, the indexer not an owner, no embedding
 writer on the replica), the run goes to `waiting` with a plain reason, keeps
 its cursor and counts nothing; the next tick tries again. A vendor refusal
 waits too: counting every item failed during an outage would offer the owner
-"Switch anyway" over an empty index. The indexer is re-checked at the start of
-every tick (`IndexerIsActiveOwner`); a fleet model with no indexer waits, since
-it would resolve as the job and reach nobody's machines.
+"Switch anyway" over an empty index. The indexer is re-checked before a
+tick's first step that embeds or moves the binding (`IndexerIsActiveOwner`);
+a fleet model with no indexer waits, since it would resolve as the job and
+reach nobody's machines.
 
 **The flip.** Automatic only when the catch-up walk left nothing failed and
 nothing unsourced; otherwise `needsDecision`, the owner's move. A catch-up
@@ -2558,22 +2585,55 @@ walk that embedded what arrived meanwhile still flips (rejected: walking again
 until a walk finds nothing, which never ends on a busy cluster); what is
 written after it goes to the active table and the walk after the flip catches
 it. `flipMemoryIndex` holds the binding lock around its fresh reads and writes
-and fences the binding write to the version read under it (memql#5431). It is
-ordered steps, not one SQL transaction: the engine writes only through its
-mutations and the lock is on another connection. Order: `switching` is saved
-first; the active model is recorded retired (`retireAt` = now + 30 days, its id
-derived by `RetiredEmbedderBindingID`); the binding flips, stating
-`reembedRunId` empty; `semantic_ai_cache` is emptied; the run goes to
-`finishing`. Every prefix is safe, and a tick that finds `switching` with the
-binding already moved does only the rest, taking the replaced model's name
-from the binding when the run never recorded it
-(`TestAResumedFlipFinishesFromTheBinding`).
+and fences the binding write to the version read under it (memql#5431).
+
+**The flip is ordered steps, and every prefix is finished (ruling R6).** It is
+not one transaction: the engine writes only through its mutations, each its own
+statement, and the lock is on another connection. `switching` is saved first,
+and the next tick finishes whatever prefix a crash left. What each prefix
+leaves:
+
+1. `switching` saved, nothing else: search reads the active model; the next tick
+   runs the whole flip.
+2. The active model recorded retired (`retireAt` = now + 30 days, its id derived
+   by `RetiredEmbedderBindingID`), the binding not moved: its index is dated
+   though still in use, which the daily cleanup never drops while it is active;
+   the next tick records it again with a later date and goes on.
+3. The binding moved (one row version, stating `reembedRunId` empty): search
+   reads the new model; the semantic answer cache may hold the old model's
+   answers, which no lookup matches (below); the run still says `switching`
+   with no previous model. The next tick writes no binding, empties
+   `semantic_ai_cache`, and records `finishing` with the previous model taken
+   from the binding. It does so even when the indexer is no longer an owner:
+   nothing in those steps embeds or chooses a machine, so the run is not
+   parked (parked, it would resume as `finishing` and skip them); only the walk
+   after the flip waits.
+4. The cache emptied, `finishing` not yet recorded: as 3, and the DELETE runs
+   again.
+5. `finishing` recorded: the flip is over, and the walk after it follows.
+
+Tests: `TestAResumedFlipFinishesFromTheBinding` (another replica; the indexer
+no longer an owner).
+
+**The semantic answer cache follows the binding (ruling R8).** It was wired once
+at boot with the model bound then (`WireSemanticCache`), so after a flip every
+running replica went on embedding its keys and lookups with the replaced model,
+refilling `semantic_ai_cache` in that model's space, and a replica restarted
+later compared new-model lookups with those rows. Now each lookup and write reads
+the binding (fresh, like every memory-search embedding), embeds with its model as
+its indexer (`boundSemanticEmbedder`), and keys the row by the model as well as
+the namespace (`semanticModelNamespace`), so a lookup never compares two models'
+vectors, including a row a lagging replica writes after the flip's DELETE. The
+cache is wired before any model is bound, and works once one is. Tests:
+`TestTheSemanticCacheFollowsTheBinding`,
+`TestTheSemanticCacheIsWiredBeforeAModelIsBound`.
 
 **Limits.** Not run against a live cluster. The store path in the db tests is a
 stub of `integrations/embedding`'s contract (this package cannot import it);
 that integration's own tests hold the real one. A walk's `total` counts what it
 has visited, so a progress figure for a running switch needs the active
-index's count as its denominator. Tests: `component/memql/memory_index_job_test.go`
+index's count as its denominator. A row rewritten within the clock slack after
+the job embedded it keeps the older vector until its next write. Tests: `component/memql/memory_index_job_test.go`
 (the decisions); `component/memql/memory_index_job_db_test.go` (two engines over
 one database: the lock, the resume on another replica, the flip, the width
 change, the backfill, the waits); `TestTheLessonSourceReadsItsEventsFromPostgres`

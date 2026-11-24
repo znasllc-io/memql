@@ -70,6 +70,38 @@ type SemanticEmbedder interface {
 	Embed(ctx context.Context, text string) ([]float32, error)
 }
 
+// semanticModelEmbedder is a SemanticEmbedder that also says WHICH MODEL
+// answered. The cache then keys every row it stores, and every lookup, by that
+// model as well as the namespace (semanticModelNamespace), so it never compares
+// vectors of two models: after memory search switches models, a row the old
+// model embedded -- including one a lagging replica writes after the switch
+// emptied the cache -- is never an answer to a lookup the new model embedded.
+// Production's embedder follows the binding (boundSemanticEmbedder).
+type semanticModelEmbedder interface {
+	SemanticEmbedder
+	EmbedWithModel(ctx context.Context, text string) (vec []float32, model string, err error)
+}
+
+// semanticModelNamespace is the store key of one namespace's rows for one model.
+func semanticModelNamespace(namespace, model string) string {
+	return namespace + "|model=" + model
+}
+
+// embedFor embeds text for a namespace and names the key its rows are stored
+// and looked up under: the namespace alone, or, for an embedder that names its
+// model, the namespace scoped to that model.
+func (c *semanticAICache) embedFor(ctx context.Context, namespace, text string) ([]float32, string, error) {
+	if me, ok := c.embedder.(semanticModelEmbedder); ok {
+		vec, model, err := me.EmbedWithModel(ctx, text)
+		if err != nil {
+			return nil, "", err
+		}
+		return vec, semanticModelNamespace(namespace, model), nil
+	}
+	vec, err := c.embedder.Embed(ctx, text)
+	return vec, namespace, err
+}
+
 // SemanticVectorStore is the nearest-neighbour substrate the semantic cache
 // reads/writes, scoped by namespace. Production wraps node_vectors; tests use
 // an in-memory map. Cached VALUES live alongside the vector so a hit returns
@@ -220,14 +252,14 @@ func (c *semanticAICache) Lookup(ctx context.Context, namespace, promptText stri
 	}
 	c.lookups.Add(1)
 
-	vec, err := c.embedder.Embed(ctx, promptText)
+	vec, key, err := c.embedFor(ctx, namespace, promptText)
 	if err != nil {
 		c.errors.Add(1)
 		c.logSoft("semanticCache: embed failed on lookup; falling through to fresh", namespace, err)
 		return nil, false
 	}
 
-	cached, sim, found, err := c.store.Nearest(ctx, namespace, vec)
+	cached, sim, found, err := c.store.Nearest(ctx, key, vec)
 	if err != nil {
 		c.errors.Add(1)
 		c.logSoft("semanticCache: nearest lookup failed; falling through to fresh", namespace, err)
@@ -263,13 +295,13 @@ func (c *semanticAICache) Store(ctx context.Context, namespace, promptText strin
 	if !enabled {
 		return
 	}
-	vec, err := c.embedder.Embed(ctx, promptText)
+	vec, key, err := c.embedFor(ctx, namespace, promptText)
 	if err != nil {
 		c.errors.Add(1)
 		c.logSoft("semanticCache: embed failed on store; result not cached", namespace, err)
 		return
 	}
-	if err := c.store.Store(ctx, namespace, vec, cloneInterface(value), cfg.TTL); err != nil {
+	if err := c.store.Store(ctx, key, vec, cloneInterface(value), cfg.TTL); err != nil {
 		c.errors.Add(1)
 		c.logSoft("semanticCache: store failed; result not cached", namespace, err)
 		return

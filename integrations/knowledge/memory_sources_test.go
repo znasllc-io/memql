@@ -56,3 +56,11 @@ func TestOrdinaryAndRejectedChunks(t *testing.T) {
 	// A header the body of an ordinary chunk merely resembles is not stripped.
 	require.Equal(t, "<!--seed:oops", KnowledgeChunkEmbedText("<!--seed:oops"))
 }
+
+// A chunk's id hashes its text or names a seed's recipe version, so its rows
+// are rewritten (review stamps, every boot's re-seed) without the text
+// changing: the source is content-addressed, and a newer row version does not
+// send the chunk to be embedded again (ruling R7).
+func TestKnowledgeChunksAreContentAddressed(t *testing.T) {
+	require.True(t, knowledgeSource(t).ContentAddressed)
+}

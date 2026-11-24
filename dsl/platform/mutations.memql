@@ -3474,7 +3474,8 @@ mutation embedderBinding recordRetiredEmbedder {
 /// EVERY CALLER FENCES THE WRITE to the version it read (memql.ContextWithRowVersionFence, through
 /// writeMemoryIndexRun): the job writes after every batch, and an owner's Cancel or Switch anyway
 /// lands between two of them on another replica. Unfenced, the job's next batch would write the
-/// cancelled run back to `indexing`.
+/// cancelled run back to `indexing`. After writing, a caller's next write is fenced to the version
+/// ITS OWN write stored, never to one read afterwards, which may be the other replica's.
 ///
 /// @serverOnly, AND actor.userId SCOPING IS NOT THE FIX: no actor owns the cluster's one index, and a
 /// caller-reachable write could start a switch on nobody's decision, name an indexer whose machines

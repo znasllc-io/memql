@@ -152,11 +152,11 @@ func (f *memoryIndexFake) ensureTable(_ context.Context, ref string, dims int) (
 	return t, nil
 }
 
-func (f *memoryIndexFake) present(_ context.Context, table, field string, ids []string) (map[string]bool, error) {
-	out := map[string]bool{}
+func (f *memoryIndexFake) vectorTimes(_ context.Context, table, field string, ids []string) (map[string]time.Time, error) {
+	out := map[string]time.Time{}
 	for _, id := range ids {
 		if f.tables[table][field+"|"+id] {
-			out[id] = true
+			out[id] = f.clock
 		}
 	}
 	return out, nil
@@ -450,4 +450,28 @@ func TestTheIndexRunKeepsOnlyItsNewestVersionPastADay(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, c.Retention)
 	require.Equal(t, memorynodes.RetentionPolicy{TTL: 24 * time.Hour, KeepLatest: true, Archive: "none"}, *c.Retention)
+}
+
+// A vector counts as its row's while it is not older than the row's newest
+// version, give or take the clock slack between the writing replica and the
+// database; an item with no version (content-addressed) is current whenever
+// its vector is present (ruling R7).
+func TestAVectorOlderThanItsRowIsMissing(t *testing.T) {
+	at := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
+	written := map[string]time.Time{"v": at}
+	for _, tc := range []struct {
+		name    string
+		item    MemoryItem
+		current bool
+	}{
+		{"absent", MemoryItem{Id: "absent"}, false},
+		{"no version", MemoryItem{Id: "v"}, true},
+		{"row written before its vector", MemoryItem{Id: "v", Version: at.Add(-time.Minute)}, true},
+		{"row stamped by a clock a little ahead", MemoryItem{Id: "v", Version: at.Add(memoryIndexClockSlack)}, true},
+		{"row rewritten after its vector", MemoryItem{Id: "v", Version: at.Add(memoryIndexClockSlack + time.Millisecond)}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.current, memoryIndexCurrent(tc.item, written))
+		})
+	}
 }
