@@ -1001,7 +1001,13 @@ func (e *MemQLEngine) flipMemoryIndex(ctx context.Context, run MemoryIndexRun) e
 	}
 	now := time.Now().UTC()
 	previous := current.PreviousRef
-	if active.ProviderRef != current.TargetRef || active.Dimensions != current.TargetDimensions {
+	if active.ProviderRef == current.TargetRef && active.Dimensions == current.TargetDimensions {
+		// A resumed flip: an earlier attempt moved the binding and stopped
+		// before the run said so. The binding names what it replaced.
+		if previous == "" {
+			previous = active.PreviousRef
+		}
+	} else {
 		retired := RetiredEmbedderBindingID(active.ProviderRef, active.Dimensions)
 		if retired == "" {
 			return fmt.Errorf("memory index: the active model %q has no index to keep", active.ProviderRef)

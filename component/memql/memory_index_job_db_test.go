@@ -713,6 +713,43 @@ func TestAWidthChangeMovesTablesOnlyAtTheFlip(t *testing.T) {
 	require.Len(t, hits, 36)
 }
 
+// A flip that died after moving the binding, before the run said so, is
+// finished by the next tick on another replica: the binding is not moved
+// again, and the run still names the model the binding replaced.
+func TestAResumedFlipFinishesFromTheBinding(t *testing.T) {
+	f := newMemoryIndexDBFixture(t)
+	oldRef, newRef := f.ref("old", 8), f.ref("new", 8)
+	f.bind(oldRef, f.owner)
+	ids := f.addItems(memoryIndexNames("item", 3)...)
+	f.write(f.a, ids...)
+	run := f.startSwitch(newRef, f.owner)
+
+	// The earlier attempt: `switching` saved, the binding moved -- and the
+	// replica died before it wrote `finishing`.
+	_, version, _, err := f.a.readMemoryIndexRun(f.ctx, memoryIndexKindSwitch)
+	require.NoError(t, err)
+	run.State = memoryIndexStateSwitching
+	require.NoError(t, f.a.writeMemoryIndexRun(f.ctx, run, version))
+	require.NoError(t, f.a.memoryIndexMutation(auth.ContextWithInternalOrigin(f.ctx), "platform.flipEmbedderBinding", map[string]any{
+		"bindingId": "active", "providerRef": newRef, "dimensions": 8, "activatedAt": time.Now().UTC().Format(time.RFC3339Nano),
+		"previousRef": oldRef, "indexedBy": f.owner, "chosenBy": f.owner}))
+	bindingVersions := func() int {
+		t.Helper()
+		var n int
+		require.NoError(t, f.db.DB.QueryRowContext(f.ctx, `SELECT count(*) FROM "MemoryNodes" WHERE id = $1`, EmbedderBindingConceptID+":active").Scan(&n))
+		return n
+	}
+	before := bindingVersions()
+
+	f.tick(f.b, 45*time.Second)
+	got := f.run(memoryIndexKindSwitch)
+	require.Equal(t, memoryIndexStateDone, got.State)
+	require.Equal(t, oldRef, got.PreviousRef, "the run names the model the binding replaced")
+	require.Equal(t, before, bindingVersions(), "the binding is not moved again")
+	require.Equal(t, newRef, f.binding().ProviderRef)
+	require.Len(t, f.present(newRef), 3, "the walk after the flip filled the new index")
+}
+
 // An indexer who is no longer an active owner makes the run wait with a plain
 // reason, and nothing is embedded on their machines; an owner again, it goes on.
 func TestAnIndexerWhoIsNoLongerAnOwnerMakesTheRunWait(t *testing.T) {

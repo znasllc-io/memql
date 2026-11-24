@@ -2565,7 +2565,9 @@ first; the active model is recorded retired (`retireAt` = now + 30 days, its id
 derived by `RetiredEmbedderBindingID`); the binding flips, stating
 `reembedRunId` empty; `semantic_ai_cache` is emptied; the run goes to
 `finishing`. Every prefix is safe, and a tick that finds `switching` with the
-binding already moved does only the rest.
+binding already moved does only the rest, taking the replaced model's name
+from the binding when the run never recorded it
+(`TestAResumedFlipFinishesFromTheBinding`).
 
 **Limits.** Not run against a live cluster. The store path in the db tests is a
 stub of `integrations/embedding`'s contract (this package cannot import it);
