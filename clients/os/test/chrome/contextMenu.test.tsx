@@ -2,6 +2,7 @@ import { fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ContextMenu, placeContextMenu, type MenuEntry } from "../../src/chrome/ContextMenu";
+import { setOsScale } from "../../src/system/scale";
 
 // The shell's one context menu. Two things are under test and they are the
 // same thing twice: WHERE the node lives in the DOM, and where it therefore
@@ -99,6 +100,22 @@ describe("the shell's context menu", () => {
 
     expect(menu.style.left).toBe("300px");
     expect(menu.style.top).toBe("210px");
+  });
+
+  // A scaled desktop zooms the page: the click and the menu's box are screen
+  // pixels, its left/top CSS pixels the zoom multiplies (system/scale.ts).
+  it("lands on the click on a scaled desktop, flipping against the real screen edge", () => {
+    viewport(2560, 1440);
+    menuMeasures(300, 180);
+    setOsScale(1.5);
+    restore.push(() => setOsScale(1));
+    const { menu, view } = openIn({ x: 300, y: 210 });
+    expect(menu.style.left).toBe("200px");
+    expect(menu.style.top).toBe("140px");
+    view.unmount();
+    const near = openIn({ x: 2450, y: 1400 }).menu;
+    expect(near.style.left).toBe(`${(2450 - 300) / 1.5}px`);
+    expect(near.style.top).toBe(`${(1400 - 180) / 1.5}px`);
   });
 
   it("opens leftwards when the click is too near the right edge", () => {

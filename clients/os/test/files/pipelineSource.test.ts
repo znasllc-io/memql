@@ -61,6 +61,8 @@ describe("a pipeline's file", () => {
 
   it("is a source the list can be refined by, in the concept's own order", () => {
     expect(SOURCE_VALUES).toContain("pipeline");
+    expect(SOURCE_VALUES).toContain("app_session");
+    expect(SOURCE_VALUES).toContain("vision_input");
     // Read from the concept itself: the filter offers the concept's values
     // and no others, in the order the concept declares them.
     const here = dirname(fileURLToPath(import.meta.url));
@@ -71,6 +73,8 @@ describe("a pipeline's file", () => {
     expect(order).toContain("pipeline");
     const positions = SOURCE_VALUES.map((value) => order.indexOf(value));
     expect(positions.every((at) => at >= 0)).toBe(true);
+    // ...and no value of the concept is left out of the list.
+    expect([...SOURCE_VALUES].sort()).toEqual([...order].sort());
     expect([...positions].sort((a, b) => a - b)).toEqual(positions);
   });
 });

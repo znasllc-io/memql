@@ -12,7 +12,7 @@ vi.mock("../../src/live/connection", () => ({
   useOsConnection: () => h.connection,
 }));
 
-import { artifactRow, click, fakeConnection, renderFiles } from "./harness";
+import { artifactRow, fakeConnection, renderFiles, openDetails } from "./harness";
 
 beforeEach(() => {
   h.connection = null;
@@ -26,7 +26,7 @@ const ACCOUNTS = [
 async function openInspector(conn: ReturnType<typeof fakeConnection>) {
   h.connection = conn;
   await renderFiles();
-  await click(screen.getByRole("button", { name: /brief\.pdf/ }));
+  await openDetails(/brief\.pdf/);
   return screen.getByRole("region", { name: "File details" });
 }
 

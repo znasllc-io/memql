@@ -4406,6 +4406,69 @@
       }
     },
     {
+      "concept": "v1:library:share",
+      "file": "library/concepts.memql",
+      "fields": [
+        "accountId",
+        "artifactId",
+        "days",
+        "expiresAt",
+        "memberUserIds",
+        "ownerUserId",
+        "recipientDisplayName",
+        "recipientGroupId",
+        "recipientUserId",
+        "revokedAt",
+        "title"
+      ],
+      "required": [
+        "artifactId",
+        "days",
+        "expiresAt",
+        "ownerUserId",
+        "recipientDisplayName"
+      ]
+    },
+    {
+      "concept": "v1:library:shareNotice",
+      "file": "library/concepts.memql",
+      "fields": [
+        "accountId",
+        "artifactId",
+        "endedAt",
+        "expiresAt",
+        "format",
+        "mimeType",
+        "ownerUserId",
+        "shareId",
+        "sharerDisplayName",
+        "sharerUserId",
+        "size",
+        "title"
+      ],
+      "required": [
+        "artifactId",
+        "expiresAt",
+        "ownerUserId",
+        "shareId",
+        "sharerDisplayName",
+        "sharerUserId",
+        "title"
+      ],
+      "enums": {
+        "format": [
+          "conversation",
+          "document",
+          "image",
+          "markdown",
+          "other",
+          "pdf",
+          "spreadsheet",
+          "text"
+        ]
+      }
+    },
+    {
       "concept": "v1:library:uploadSession",
       "file": "library/concepts.memql",
       "fields": [

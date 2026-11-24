@@ -28,7 +28,7 @@ import { RESOURCE_PAGE_VIEWS } from "./resourcePageScenes";
 import { MATERIALIZER_VIEWS } from "./materializerScenes";
 import { FilesApp } from "../src/apps/files/FilesApp";
 import { LocalFilesSettingsStore } from "../src/apps/files/settings";
-import { fakeConnection as filesConnection, artifactRow as filesArtifact, folderRow as filesFolder, fileRow as filesFile, versionRow as filesVersion, watchedFolderRow, withSession as filesSession } from "../test/files/harness";
+import { fakeConnection as filesConnection, artifactRow as filesArtifact, folderRow as filesFolder, fileRow as filesFile, versionRow as filesVersion, watchedFolderRow, withSession as filesSession, shareRow as filesShare, noticeRow as filesNotice } from "../test/files/harness";
 import { EmailApp } from "../src/apps/email/EmailApp";
 import { AzureEmailConnections } from "../src/modules/connections/AzureEmailConnections";
 import { LocalEmailSettingsStore } from "../src/apps/email/settings";
@@ -2457,17 +2457,35 @@ document.documentElement.style.colorScheme = mode;
 
 createRoot(document.getElementById("root")!).render(<App />);
 
+// Sharing, staged through the fake like every other feed: three people to
+// share with, "Quarterly report.pdf" already shared with Sam Lee for 7 days,
+// and two files Dana Cole shared with you (Shared with me).
+const DAY_MS = 86_400_000;
+const inDays = (days: number) => new Date(Date.now() + days * DAY_MS).toISOString();
+const STAGED_SHARING = {
+ shareDirectory: [{userId:"u-sam",displayName:"Sam Lee"},{userId:"u-dana",displayName:"Dana Cole"},{userId:"u-lee",displayName:"Lee Park"}],
+ shares: [filesShare({id:"share-quarterly",artifactId:"quarterly",recipientUserId:"u-sam",recipientDisplayName:"Sam Lee",days:7,expiresAt:inDays(7)})],
+ sharedWithMe: [
+  filesNotice({id:"notice-budget",artifactId:"dana-budget",sharerUserId:"u-dana",sharerDisplayName:"Dana Cole",title:"Budget 2027.xlsx",format:"xlsx",mimeType:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",expiresAt:inDays(10)}),
+  filesNotice({id:"notice-brief",artifactId:"dana-brief",sharerUserId:"u-dana",sharerDisplayName:"Dana Cole",title:"Client brief.pdf",expiresAt:inDays(3)}),
+ ],
+};
+
 function filesPreview(section: string, empty = false) {
  return {
   connect: () => filesConnection(empty ? {} : {
-   folders: [filesFolder({id:"research",name:"Research"}), filesFolder({id:"reports",name:"Reports"})],
-   artifacts: [filesArtifact({id:"nano",title:"Nanotechnology for Water Purification.md",folderId:"research",sourceConceptRef:"v1:library:file:nano-file",mimeType:"text/markdown",format:"md",summary:"Evidence, trade-offs, and translation in water treatment.",labels:["research","water"]}),filesArtifact({id:"quarterly",title:"Quarterly report.pdf",folderId:"reports",mimeType:"application/pdf"}),filesArtifact({id:"notes",title:"Workshop notes.md",mimeType:"text/markdown"})],
+   // Enough folders (two of them nested) and file types to judge the Places
+   // grid and the rail's tree, not just to render them.
+   folders: [filesFolder({id:"research",name:"Research"}), filesFolder({id:"reports",name:"Reports"}), filesFolder({id:"contracts",name:"Contracts"}), filesFolder({id:"field",name:"Field notes",parentFolderId:"research"}), filesFolder({id:"lab",name:"Lab data",parentFolderId:"research"})],
+   artifacts: [filesArtifact({id:"nano",title:"Nanotechnology for Water Purification.md",folderId:"research",sourceConceptRef:"v1:library:file:nano-file",mimeType:"text/markdown",format:"md",summary:"Evidence, trade-offs, and translation in water treatment.",labels:["research","water"]}),filesArtifact({id:"labsum",title:"Lab results summary.pdf",folderId:"research",mimeType:"application/pdf"}),filesArtifact({id:"quarterly",title:"Quarterly report.pdf",folderId:"reports",mimeType:"application/pdf"}),filesArtifact({id:"notes",title:"Workshop notes.md",mimeType:"text/markdown"}),filesArtifact({id:"site",title:"Site visit 03.jpg",mimeType:"image/jpeg"}),filesArtifact({id:"pricing",title:"Pricing model.xlsx",mimeType:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}),filesArtifact({id:"transcript",title:"Interview transcript.txt",mimeType:"text/plain"}),filesArtifact({id:"grant",title:"Grant proposal.docx",mimeType:"application/vnd.openxmlformats-officedocument.wordprocessingml.document"}),filesArtifact({id:"backup",title:"site-backup-nov-17.tar.gz",mimeType:"application/gzip"})],
    files: [filesFile({id:"nano-file",name:"Nanotechnology for Water Purification.md",versionNumber:3,size:24920})],
    versions: [filesVersion({id:"nano-v2",fileId:"nano-file",versionNumber:2,size:22100,name:"Nanotechnology for Water Purification.md"}),filesVersion({id:"nano-v1",fileId:"nano-file",versionNumber:1,size:12400,name:"Nanotechnology for Water Purification.md"})],
    machines:[fleetMachineRow({id:"studio",name:"Studio mini",capabilities:["HEADLESS"]})],
+   ...STAGED_SHARING,
    backups:[watchedFolderRow({id:"research-backup",workerId:"studio",localPath:"/Users/ana/Research",folderId:"research",intervalMinutes:1440,originState:"ok",filesSeen:18,bytesSeen:3400000,lastSweepAt:new Date().toISOString()}),watchedFolderRow({id:"reports-backup",workerId:"studio",localPath:"/Users/ana/Reports",folderId:"reports",status:"paused",intervalMinutes:10080})],
   }),
-  wrap: (el: JSX.Element) => filesSession(<OsProvider registry={OS_REGISTRY} actorRole="owner" grid={{cols:8,rows:5}}><MachinesProvider>{el}</MachinesProvider></OsProvider>),
+  // The owner's seeded set, so the Share panel's part (app:files/share) is held.
+  wrap: (el: JSX.Element) => { installSeededAccess("owner"); return filesSession(<OsProvider registry={OS_REGISTRY} actorRole="owner" grid={{cols:8,rows:5}}><MachinesProvider>{el}</MachinesProvider></OsProvider>); },
   render: () => <FilesQa section={section} />,
  };
 }

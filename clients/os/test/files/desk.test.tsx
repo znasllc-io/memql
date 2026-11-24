@@ -107,7 +107,7 @@ describe("a desk folder is a desktop icon (epic memql#4842, #4847)", () => {
     await act(async () => {});
     const window = screen.getByRole("dialog", { name: "Files" });
     // The Head names the scope once: the folder, inside the Desktop place.
-    expect(within(window).getByRole("heading", { name: "Client videos" })).toBeTruthy();
+    expect(within(window).queryByRole("heading", { name: "Client videos" })).toBeNull(); // no repeated big title: the trail row names the place (Jesús, Nov 23)
     expect(within(window).getByText(/inside\.mp4/)).toBeTruthy();
     expect(within(window).queryByText(/outside\.txt/)).toBeNull();
   });
@@ -156,11 +156,15 @@ describe("send to desktop", () => {
     });
     h.connection = connection;
     await renderFiles();
-    await click(screen.getByRole("button", { name: /brief\.pdf/ }));
-    const inspector = screen.getByRole("region", { name: "File details" });
-    await click(within(inspector).getByRole("button", { name: "Send to desktop" }));
-    expect(within(inspector).getByText("On the desk.")).toBeTruthy();
-    await click(within(inspector).getByRole("button", { name: "Send to desktop" }));
-    expect(within(inspector).getByText(/Already on the desk/)).toBeTruthy();
+    // From the file's right-click menu: the Details page has no action bar
+    // since the Nov 20 call.
+    const send = async () => {
+      fireEvent.contextMenu(screen.getByRole("button", { name: /brief\.pdf/ }));
+      await click(within(screen.getByRole("menu", { name: "File" })).getByRole("menuitem", { name: "Send to desktop" }));
+    };
+    await send();
+    expect(screen.getByText("On the desk.")).toBeTruthy();
+    await send();
+    expect(screen.getByText(/Already on the desk/)).toBeTruthy();
   });
 });

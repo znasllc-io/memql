@@ -14,8 +14,8 @@ import { artifactName, isContentKind, type ArtifactRow } from "./rows";
 // ===========================================================================
 // PLACES, NOT A CHECKBOX (epic memql#4842, #4846)
 // ===========================================================================
-// The rail offers four places and the fold answers for the one being looked
-// at. Library is what you have; Desktop is the subset sitting on your desks;
+// The rail offers five places and the fold answers for the one being looked
+// at (Shared with me answers with nothing: see FILES_PLACES). Library is what you have; Desktop is the subset sitting on your desks;
 // the Bin is what you archived; the Materializer is what was composed from
 // the memory graph (epic memql#4981, #4983). The old `showArchived` toggle is
 // gone -- archived rows have a place now, not a filter.
@@ -27,23 +27,28 @@ import { artifactName, isContentKind, type ArtifactRow } from "./rows";
 // composition rows' `outputFileId` against each artifact's backing file.
 //
 // THE PLACE IS `bin`, NOT `archive` (epic memql#4981). One destination had
-// two names: the row menu's verb has always been "Move to Bin", the dock
+// two names: the row menu's verb was "Move to Bin", the dock
 // fixture it lands in is the Bin app, and the rail alone called it Archive.
 // A person who archives a file from the menu and then goes looking for
 // "Bin" in the rail found "Archive" instead and had to work out that they
-// are the same place. ARCHIVE STAYS AS THE VERB -- archiving is what you do,
-// the Bin is where it goes -- so `confirmBeforeArchive`, `planArchive` and
-// the confirm's own wording are deliberately untouched.
+// are the same place. In CODE, archive stays the verb -- `confirmBeforeArchive`,
+// `planArchive` -- because it is the engine's mutation. What a person reads
+// is "Delete" (José, Nov 18 2026), and the Bin is where a deleted file waits.
 
-/** No client constraint. */
+/** No account constraint. */
 export const ACCOUNT_ANY = "all";
-/** Only rows tied to no client at all. */
+/** Only rows tied to no account at all. */
 export const ACCOUNT_NONE = "none";
 
 export type KindFilter = "all" | (typeof CONTENT_KINDS)[number];
 export type SourceFilter = "all" | (typeof SOURCE_VALUES)[number];
 
-export const FILES_PLACES = ["library", "desktop", "materializer", "bin"] as const;
+// `shared` is what other people shared WITH the caller (Nov 2026). Its tiles are
+// share notices, read on their own feed (useSharing.ts): none of the caller's
+// own artifacts belongs to it, so the fold below keeps nothing there.
+// `sharing` is the other half of the rail's "Shared" folder (Nov 19 2026): the
+// caller's own active shares, also on a feed of its own, so likewise nothing.
+export const FILES_PLACES = ["library", "desktop", "materializer", "shared", "sharing", "bin"] as const;
 export type FilesPlace = (typeof FILES_PLACES)[number];
 
 export function isFilesPlace(value: unknown): value is FilesPlace {
@@ -63,8 +68,15 @@ export const EMPTY_DESK: DeskMembership = {
   folderIds: new Set(),
 };
 
+/**
+ * `source`, `accountId` AND `label` WERE REFINE'S FACETS, and they are back
+ * (Jesús, Nov 20 2026, Option C of draft p17): Label, Source and Account are
+ * groups in the search panel's kind menu, under the kinds of file (see
+ * `filterMenuPick`). `kind` (the artifact's index kind) has no control and stays
+ * at its default.
+ */
 export interface FilesFilter {
-  /** Which of the rail's three places is being looked at. */
+  /** Which of the rail's places is being looked at. */
   place: FilesPlace;
   /**
    * The folder scope: "" = the place's own root, an id = that folder, null =
@@ -91,7 +103,7 @@ export interface FilesFilter {
    * exact label a row must carry.
    *
    * =========================================================================
-   * A LABEL IS A FACET BEHIND `Refine`, NOT A SECOND RAIL (DESIGN.md rule 2)
+   * A LABEL IS A FACET IN THE SEARCH PANEL, NOT A SECOND RAIL (DESIGN.md rule 2)
    * =========================================================================
    * The portal filtered by `?label=`, and the obvious port of that is a
    * standing label list beside the folder tree. Two rules refuse it. Rule 2:
@@ -103,8 +115,7 @@ export interface FilesFilter {
    * is not a place -- one file carries several at once -- so a second
    * navigational axis beside the one that answers "where is this" would make
    * a rail click ambiguous about what it means. The label rides in the
-   * Refine, and an active one shows as a removable chip beside it exactly as
-   * kind, source and client do.
+   * search panel's kind menu, as its Label group (see `filterMenuPick`).
    *
    * "" IS THE SENTINEL rather than a word like ACCOUNT_ANY's "all", because
    * labels are FREE TEXT: "all" is a label somebody may genuinely have used,
@@ -113,8 +124,12 @@ export interface FilesFilter {
    */
   label: string;
   search: string;
-  /** false = newest first, the default. */
-  sortAscending: boolean;
+  /** The search panel's kind of file (see FILE_TYPES). */
+  type: FileType;
+  /** The search panel's Added menu. */
+  added: AddedWithin;
+  /** "newest" is the default; Settings may start a window on "oldest". */
+  sort: FilesSort;
 }
 
 /** No label constraint. */
@@ -128,8 +143,140 @@ export const DEFAULT_FILTER: FilesFilter = {
   accountId: ACCOUNT_ANY,
   label: LABEL_ANY,
   search: "",
-  sortAscending: false,
+  type: "all",
+  added: "any",
+  sort: "newest",
 };
+
+// ===========================================================================
+// THE SEARCH PANEL'S QUESTIONS (José, Nov 19 2026; Jesús's picks, Nov 20)
+// ===========================================================================
+// A kind of file, when it was added, and an order. The kind is read off the
+// file's NAME first (its extension), then its MIME type, then the format the
+// index recorded -- the order the tile's glyph reads a name in (Tiles.tsx
+// `typeLabel`), so a tile that says PDF is never filed under Misc. This table
+// is the ONE place the mapping lives.
+
+export const FILE_TYPES = [
+  ["all", "All"],
+  ["folders", "Folders"],
+  ["documents", "Documents"],
+  ["images", "Images"],
+  ["media", "Media"],
+  ["sheets", "Sheets"],
+  ["archives", "Archives"],
+  ["misc", "Misc"],
+] as const;
+export type FileType = (typeof FILE_TYPES)[number][0];
+/** What one file is: every FileType except the two that are not a file's own. */
+export type FileKind = Exclude<FileType, "all" | "folders">;
+
+const EXTENSIONS: Record<Exclude<FileKind, "misc">, readonly string[]> = {
+  // Slides count as documents: a deck is something you read, and Misc is for
+  // files nothing else claims.
+  documents: ["pdf", "doc", "docx", "txt", "md", "markdown", "rtf", "odt", "pages", "epub", "ppt", "pptx", "key", "odp"],
+  images: ["jpg", "jpeg", "png", "gif", "webp", "svg", "heic", "heif", "bmp", "tif", "tiff", "avif", "ico"],
+  media: ["mp3", "wav", "m4a", "aac", "flac", "ogg", "oga", "opus", "aiff", "mp4", "m4v", "mov", "webm", "mkv", "avi", "wmv", "mpg", "mpeg"],
+  sheets: ["xlsx", "xls", "csv", "tsv", "ods", "numbers"],
+  // A .tar.gz reads as "gz", its last extension, as the tile's glyph does.
+  archives: ["zip", "tar", "gz", "tgz", "7z", "rar", "bz2", "xz"],
+};
+const KIND_OF_EXTENSION = new Map<string, FileKind>(
+  Object.entries(EXTENSIONS).flatMap(([kind, exts]) => exts.map((ext) => [ext, kind as FileKind] as const)),
+);
+
+function kindOfMime(mime: string): FileKind | null {
+  const m = mime.toLowerCase().split(";")[0]?.trim() ?? "";
+  if (m === "") return null;
+  // Sheets and archives first: text/csv is a sheet, not text, and
+  // application/x-zip-compressed is an archive whatever else it says.
+  if (/spreadsheet|excel|csv|tab-separated|numbers/.test(m)) return "sheets";
+  if (/zip|x-tar|gzip|x-7z|x-rar|rar-compressed|bzip|x-xz/.test(m)) return "archives";
+  if (m.startsWith("image/")) return "images";
+  if (m.startsWith("audio/") || m.startsWith("video/")) return "media";
+  if (m === "text/plain" || m === "text/markdown" || /pdf|msword|wordprocessing|opendocument\.text|rtf|presentation|powerpoint|epub/.test(m)) {
+    return "documents";
+  }
+  return null;
+}
+
+const KIND_OF_FORMAT: Record<string, FileKind> = {
+  markdown: "documents",
+  document: "documents",
+  pdf: "documents",
+  text: "documents",
+  spreadsheet: "sheets",
+  image: "images",
+};
+
+/** Which kind of file a row is; "misc" when neither its name, its MIME type nor its format says. */
+export function fileKindOf(row: Pick<ArtifactRow, "title" | "mimeType" | "format">): FileKind {
+  const name = row.title.trim().toLowerCase();
+  const dot = name.lastIndexOf(".");
+  const ext = dot > 0 ? name.slice(dot + 1) : "";
+  return KIND_OF_EXTENSION.get(ext) ?? kindOfMime(row.mimeType) ?? KIND_OF_FORMAT[row.format] ?? "misc";
+}
+
+export const ADDED_WITHIN = [
+  ["any", "Any time"],
+  ["today", "Today"],
+  ["7d", "Last 7 days"],
+  ["30d", "Last 30 days"],
+] as const;
+export type AddedWithin = (typeof ADDED_WITHIN)[number][0];
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Whether a creation time falls in the Added window; Today starts at local midnight, and an unreadable time never does. */
+export function addedWithin(createdAt: string | undefined, added: AddedWithin, now: number): boolean {
+  if (added === "any") return true;
+  const day = new Date(now);
+  const since = added === "today"
+    ? new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime()
+    : now - (added === "7d" ? 7 : 30) * DAY_MS;
+  return Date.parse(createdAt ?? "") >= since;
+}
+
+export const FILES_SORTS = [
+  ["name", "Name"],
+  ["newest", "Newest first"],
+  ["oldest", "Oldest first"],
+  ["size", "Size"],
+  ["kind", "Kind"],
+] as const;
+export type FilesSort = (typeof FILES_SORTS)[number][0];
+
+const KIND_ORDER: readonly FileType[] = FILE_TYPES.map(([type]) => type);
+const byName = (a: ArtifactRow, b: ArtifactRow) =>
+  artifactName(a).localeCompare(artifactName(b), undefined, { numeric: true, sensitivity: "base" }) || a.id.localeCompare(b.id);
+
+/**
+ * The order a sort names. Newest and Oldest keep the server's own page order
+ * (created-at, then id). Size is largest first, and a file whose size is not
+ * known (a document or generated output with no stored bytes) goes last.
+ */
+export function compareRows(sort: FilesSort, sizeOf: (row: ArtifactRow) => number | undefined = () => undefined) {
+  return (a: ArtifactRow, b: ArtifactRow): number => {
+    if (sort === "newest" || sort === "oldest") {
+      return (sort === "oldest" ? 1 : -1) * (a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+    }
+    if (sort === "size") return (sizeOf(b) ?? -1) - (sizeOf(a) ?? -1) || byName(a, b);
+    if (sort === "kind") return KIND_ORDER.indexOf(fileKindOf(a)) - KIND_ORDER.indexOf(fileKindOf(b)) || byName(a, b);
+    return byName(a, b);
+  };
+}
+
+/**
+ * Whether the view needs the place's WHOLE population rather than the pages
+ * scrolled so far. The server pages newest (or oldest) first and narrows only
+ * by what `libraryBrowseArgs` sends, so a name, size or kind order, a kind of
+ * file and an Added window are answered here, over every page.
+ */
+export function needsWholePlace(filter: Pick<FilesFilter, "sort" | "type" | "added">): boolean {
+  return (filter.sort !== "newest" && filter.sort !== "oldest") ||
+    (filter.type !== "all" && filter.type !== "folders") ||
+    filter.added !== "any";
+}
 
 function matchesSearch(row: ArtifactRow, needle: string): boolean {
   const q = needle.trim().toLowerCase();
@@ -166,8 +313,12 @@ export function applyFilters(
   filter: FilesFilter,
   desk: DeskMembership = EMPTY_DESK,
   materialized: MaterializedSet = NOTHING_MATERIALIZED,
+  sizeOf?: (row: ArtifactRow) => number | undefined,
+  now: number = Date.now(),
 ): ArtifactRow[] {
   const searching = filter.search.trim() !== "";
+  // Folders is a question about folders: no file answers it.
+  if (filter.type === "folders") return [];
   const kept = rows.filter((row) => {
     // The records lens never renders here, under ANY combination (design D2).
     if (!isContentKind(row.kind)) return false;
@@ -189,6 +340,8 @@ export function applyFilters(
       } else if (row.folderId !== filter.folderId) {
         return false;
       }
+    } else if (filter.place === "shared" || filter.place === "sharing") {
+      return false;
     } else if (filter.place === "materializer") {
       // ARCHIVED OUTPUTS ARE THE BIN'S, not this place's. One file offering
       // Restore from two places is the ambiguity the Bin rename removed, and
@@ -215,6 +368,8 @@ export function applyFilters(
     // inside labels -- so the two questions stay separable.
     if (filter.label !== LABEL_ANY && !row.labels.includes(filter.label)) return false;
     if (!matchesSearch(row, filter.search)) return false;
+    if (filter.type !== "all" && fileKindOf(row) !== filter.type) return false;
+    if (!addedWithin(row.createdAt, filter.added, now)) return false;
     // THE CLIENT SCOPE READS ABSENCE AND THE EMPTY LIST AS ONE ANSWER, and it
     // has to: every row promoted before `accountIds` existed carries no key at
     // all, so a filter that distinguished them would hide the entire
@@ -230,10 +385,7 @@ export function applyFilters(
     }
     return true;
   });
-  const direction = filter.sortAscending ? 1 : -1;
-  return kept.sort(
-    (a, b) => direction * (a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)),
-  );
+  return kept.sort(compareRows(filter.sort, sizeOf));
 }
 
 /**
@@ -244,7 +396,7 @@ export function applyFilters(
  * picked so one paged read holds the complete truth, and the engine's own
  * `libraryArtifactsByLabel` carries the default `archived != true` conjunct,
  * so a server-side label read would disagree with the archived, kind, source,
- * client and search filters standing beside it in the same Refine panel.
+ * client and search filters standing beside it in the same search panel.
  *
  * The caller passes the rows that pass every OTHER facet, so a label offered
  * always has at least one row behind it in the view being looked at -- and
@@ -260,4 +412,67 @@ export function labelsOf(rows: readonly ArtifactRow[]): string[] {
     }
   }
   return [...seen].sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * The sources at least one of these rows has, in the concept's own order: the
+ * Source group offers only these, the way the Label group is absent when
+ * nothing is labelled. ponytail: folds the rows LOADED so far (labels come from
+ * a server facet read; sources have none), so a source only on a not-yet-loaded
+ * page appears once its page loads; add a facet to libraryBrowseFacets if needed.
+ */
+export function sourcesOf(rows: readonly Pick<ArtifactRow, "source">[], picked: SourceFilter = "all"): (typeof SOURCE_VALUES)[number][] {
+  const seen = new Set<string>(rows.map((row) => row.source));
+  // The one picked stays listed, so the person can see it and undo it.
+  return SOURCE_VALUES.filter((source) => seen.has(source) || source === picked);
+}
+
+// ===========================================================================
+// THE KIND MENU HOLDS FOUR SINGLE CHOICES (Jesús, Nov 20 2026, draft p17 C)
+// ===========================================================================
+// Label, source and client came back INSIDE the search panel's kind menu, as
+// groups under the kinds of file: Kind, Label, Source, Account. Each group is
+// its own single choice -- one kind AND one label AND one source AND one
+// client can be on together -- so one option value carries its group in front
+// of a colon ("label:invoices") and `filterMenuPick` turns it back into the
+// one field it sets. Only the first colon splits: a label is free text.
+
+/** Words for the source values the old Refine offered (it showed the raw values). */
+export const SOURCE_LABELS: Record<SourceFilter, string> = {
+  all: "Any source",
+  uploaded: "Uploaded",
+  exported: "Exported",
+  workbench_generated: "Made on the workbench",
+  computer_use: "Computer use",
+  agent_generated: "Made by an agent",
+  derived: "Derived",
+  user_created: "Written here",
+  live: "Live",
+  app_session: "Recorded from an app session",
+  vision_input: "Image sent to an app",
+  pipeline: "Pipeline",
+};
+
+export type FilterMenuGroup = "type" | "label" | "source" | "client";
+
+export function filterMenuValue(group: FilterMenuGroup, value: string): string {
+  return `${group}:${value}`;
+}
+
+/** The one filter field an option of the kind menu sets. */
+export function filterMenuPick(option: string): Partial<FilesFilter> {
+  const at = option.indexOf(":");
+  const value = option.slice(at + 1);
+  switch (option.slice(0, at)) {
+    case "type": return { type: value as FileType };
+    case "label": return { label: value };
+    case "source": return { source: value as SourceFilter };
+    case "client": return { accountId: value };
+    default: return {};
+  }
+}
+
+/** How many of label, source and client are on: the kind menu's button adds "+N" to the kind. */
+export function otherFiltersOn(filter: Pick<FilesFilter, "label" | "source" | "accountId">): number {
+  return [filter.label !== LABEL_ANY, filter.source !== "all", filter.accountId !== ACCOUNT_ANY].filter(Boolean).length;
 }

@@ -24,11 +24,13 @@ export function useEntryTransition(pending: boolean) {
   return { show: pending || (held && !reduced), leaving: !pending };
 }
 
-/** One quiet handoff while identity and the initial cluster destination resolve. */
+/** One quiet handoff while identity and the initial cluster destination resolve.
+ * No theme switch (see EntryLayout); the mark is 86px, twice the 43px it was
+ * (Jesús, Nov 20 2026), and the label doubles with it; CSS caps both on small windows. */
 export function EntryPending({ label = "Opening MemQL OS", leaving = false }: { label?: string; leaving?: boolean }) {
-  return <EntryLayout><main className="os-entry-pending" data-leaving={leaving || undefined} role="status" aria-busy="true">
+  return <EntryLayout preferences={false}><main className="os-entry-pending" data-leaving={leaving || undefined} role="status" aria-busy="true">
     <div className="os-entry-pending-content">
-      <span className="os-entry-pending-mark" aria-hidden="true"><Mark size={36} /></span>
+      <span className="os-entry-pending-mark" aria-hidden="true"><Mark size={86} /></span>
       <p className="os-entry-pending-label">{label}</p>
     </div>
   </main></EntryLayout>;

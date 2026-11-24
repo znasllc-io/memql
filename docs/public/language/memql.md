@@ -1029,7 +1029,7 @@ filter  row => row.folderId == args.folderId
 | `<=` | `a <= b` | Is true when a orders before b or equals it. | Any ordering against an absent field is false. |
 | `>` | `a > b` | Is true when a orders after b. | Any ordering against an absent field is false. |
 | `>=` | `a >= b` | Is true when a orders after b or equals it. | Any ordering against an absent field is false. |
-| `in` | `v in list` | Is true when v equals an element of the list: `row.status in ["open", "held"]`, `args.tag in row.tags`. | Membership is `==` against each element, so an unset v is in a list only when the list holds `""` or `nil`. Nothing is in an absent list. |
+| `in` | `v in list` | Is true when v equals an element of the list: `row.status in ["open", "held"]`, `args.tag in row.tags`. | Membership is `==` against each element, so an unset v is in a list only when the list holds `""` or `nil`. Nothing is in an absent list or an empty one: `v in []` is false whether the list is written or arrives as an argument, so an optional list a caller sends empty selects no rows rather than failing the read. |
 | `startsWith` | `s startsWith p` | Is true when the string s begins with the prefix p, or with any prefix in a list of them. | Is false when either side is absent; a blank prefix and an empty list match nothing. |
 | `&&` | `a && b` | Is true when both sides are true, and skips the right side when the left is false. Both sides must be boolean: nothing else counts as true. |  |
 | `\|\|` | `a \|\| b` | Is true when either side is true, and skips the right side when the left is true. Both sides must be boolean: nothing else counts as true. |  |

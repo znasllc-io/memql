@@ -12,7 +12,7 @@ vi.mock("../../src/live/connection", () => ({
 }));
 
 import { ARTIFACT_CONCEPT, FILE_CONCEPT } from "../../src/apps/files/concepts";
-import { artifactRow, click, emit, fakeConnection, fileRow, renderFiles, versionRow } from "./harness";
+import { artifactRow, emit, fakeConnection, fileRow, renderFiles, versionRow, openDetails } from "./harness";
 // Version history remains available; Files no longer replaces a file by upload.
 
 beforeEach(() => {
@@ -20,7 +20,7 @@ beforeEach(() => {
 });
 
 async function openInspector(title: string) {
-  await click(await screen.findByRole("button", { name: new RegExp(title) }));
+  await openDetails(title);
   return screen.getByRole("region", { name: "File details" });
 }
 
@@ -82,7 +82,7 @@ describe("the version history panel", () => {
     expect(within(history).getAllByText("--").length).toBeGreaterThan(0);
   });
 
-  it("invites the action on a file with one version instead of listing one row", async () => {
+  it("lists a file's only version with no note about future ones (Nov 20 call)", async () => {
     h.connection = fakeConnection({
       artifacts: [artifactRow({ id: "a-1", title: "only.txt", sourceConceptRef: "v1:library:file:f-1" })],
       files: [fileRow({ id: "f-1", name: "only.txt", versionNumber: 1 })],
@@ -91,7 +91,8 @@ describe("the version history panel", () => {
     await renderFiles();
     const inspector = await openInspector("only\\.txt");
     const history = within(inspector).getByRole("region", { name: "Version history" });
-    expect(within(history).getByText(/Previous versions stay available/)).toBeTruthy();
+    expect(within(history).queryByText(/Previous versions stay available/)).toBeNull();
+    expect(within(history).getByText("v1")).toBeTruthy();
   });
 
   it("updates history when another session changes the file head, without a second subscription", async () => {
@@ -170,8 +171,8 @@ describe("the version history panel", () => {
   });
 });
 
-describe("file footer actions", () => {
-  it("keeps actions together without a replacement upload while retaining history", async () => {
+describe("the details page without an action bar (Nov 20 call)", () => {
+  it("keeps the version history and offers no replacement upload", async () => {
     h.connection = fakeConnection({
       artifacts: [artifactRow({ id: "a-1", title: "q3.pdf", sourceConceptRef: "v1:library:file:f-1" })],
       files: [fileRow({ id: "f-1", versionNumber: 2, size: 1024 })],
@@ -179,20 +180,13 @@ describe("file footer actions", () => {
     });
     await renderFiles();
     const inspector = await openInspector("q3\\.pdf");
-    const footer = within(inspector).getByRole("group", { name: "What you can do with this" });
-    expect(within(footer).getAllByRole("button").map(button => button.getAttribute("aria-label") || button.textContent)).toEqual([
-      "Delete", "Send to desktop", "Download", "Open",
-    ]);
-    expect(within(footer).getByText("In Library")).toBeTruthy();
-    expect(within(footer).getByText(/Version 2/)).toBeTruthy();
+    expect(within(inspector).queryByRole("group", { name: "What you can do with this" })).toBeNull();
     expect(screen.queryByRole("button", { name: /Upload new version/ })).toBeNull();
     expect(screen.queryByLabelText("Choose a file to upload as the new version")).toBeNull();
     expect(within(inspector).getByRole("region", { name: "Version history" })).toBeTruthy();
-    await click(within(footer).getByRole("button", { name: "Send to desktop" }));
-    expect(within(footer).getByText("On the desk.")).toBeTruthy();
   });
 
-  it("offers Restore in the Bin and keeps previous versions available", async () => {
+  it("keeps previous versions available in the Bin, with Restore on the menu instead", async () => {
     h.connection = fakeConnection({
       artifacts: [
         artifactRow({
@@ -208,11 +202,8 @@ describe("file footer actions", () => {
     await renderFiles();
     fireEvent.click(screen.getByRole("button", { name: /^Bin/ }));
     const inspector = await openInspector("gone\\.pdf");
-    expect(within(inspector).queryByRole("button", { name: /Upload new version/ })).toBeNull();
-    const footer = within(inspector).getByRole("group", { name: "What you can do with this" });
-    expect(within(footer).getByText("In Bin")).toBeTruthy();
-    expect(within(footer).getByRole("button", { name: "Restore" })).toBeTruthy();
-    expect(within(footer).queryByRole("button", { name: "Delete" })).toBeNull();
+    expect(within(inspector).queryByRole("button", { name: "Restore" })).toBeNull();
+    expect(within(inspector).queryByRole("button", { name: "Delete" })).toBeNull();
     // The HISTORY is still there: an archived file keeps its bytes and its
     // provenance, and the panel is where a person goes to get an earlier copy.
     expect(within(inspector).getByRole("region", { name: "Version history" })).toBeTruthy();

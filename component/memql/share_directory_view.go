@@ -68,7 +68,10 @@ func (e *MemQLEngine) ShareDirectoryFor(ctx context.Context) (ShareDirectoryView
 	if e == nil {
 		return ShareDirectoryView{}, nil
 	}
-	dir, err := e.shareDirectoryFor(ctx)
+	// Fleet's rule, unchanged (any active group the caller shares, custom
+	// ones included), so not narrowed to the caller's organization the way a
+	// Library file share is (library_share_directory.go).
+	dir, err := e.shareDirectoryFor(ctx, false)
 	if err != nil {
 		return ShareDirectoryView{}, err
 	}

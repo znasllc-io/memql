@@ -5933,6 +5933,92 @@ QueryClient.prototype.libraryItemsForAccount = function (this: QueryClient, args
   return this.executeNamed("libraryItemsForAccount", buildLibraryItemsForAccount(args), opts);
 };
 
+/** One of the caller's own shares by id, stopped or not -- what libraryShareStop checks ownership with and what an access reads, under the sharer, to decide. The caller compares revokedAt and expiresAt itself, against its own clock. */
+// Bound concept: v1:library:share (machine-readable: BoundConcepts["libraryShareById"] in generated_concepts.ts).
+export interface LibraryShareByIdArgs {
+  shareId: string;
+}
+
+export function buildLibraryShareById(args: LibraryShareByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("shareId: " + renderMemQLValue(args.shareId));
+  return "query libraryShareById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryShareById(args: LibraryShareByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryShareById = function (this: QueryClient, args: LibraryShareByIdArgs = {} as LibraryShareByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryShareById", buildLibraryShareById(args), opts);
+};
+
+/** Files shared WITH the caller that have not ended or expired: the "Shared with me" list, live through the notice rows' graph events. artifactId narrows it to one file, which is how the download route and librarySaveSharedCopy find the share behind a file. A notice grants nothing: every access re-reads the share it names. */
+// Bound concept: v1:library:shareNotice (machine-readable: BoundConcepts["librarySharedWithMe"] in generated_concepts.ts).
+export interface LibrarySharedWithMeArgs {
+  artifactId?: string;
+}
+
+export function buildLibrarySharedWithMe(args: LibrarySharedWithMeArgs): string {
+  const parts: string[] = [];
+  if (args.artifactId !== undefined) parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  return "query librarySharedWithMe(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    librarySharedWithMe(args: LibrarySharedWithMeArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.librarySharedWithMe = function (this: QueryClient, args: LibrarySharedWithMeArgs = {} as LibrarySharedWithMeArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("librarySharedWithMe", buildLibrarySharedWithMe(args), opts);
+};
+
+/** The caller's ACTIVE shares of one of their files -- who has it now, and until when. Backs the share view: `id` is the shareId libraryShareStop takes, `days` is what Renew sends back to libraryShareFile. Stopped and expired shares are not listed. */
+// Bound concept: v1:library:share (machine-readable: BoundConcepts["librarySharesForArtifact"] in generated_concepts.ts).
+export interface LibrarySharesForArtifactArgs {
+  artifactId: string;
+}
+
+export function buildLibrarySharesForArtifact(args: LibrarySharesForArtifactArgs): string {
+  const parts: string[] = [];
+  parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  return "query librarySharesForArtifact(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    librarySharesForArtifact(args: LibrarySharesForArtifactArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.librarySharesForArtifact = function (this: QueryClient, args: LibrarySharesForArtifactArgs = {} as LibrarySharesForArtifactArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("librarySharesForArtifact", buildLibrarySharesForArtifact(args), opts);
+};
+
+/** Every file the caller is sharing right now: one row per ACTIVE share, across all their files -- the Files app's "Sharing" page (Jesús, Nov 19 2026: "Shared" opens into "Shared with me" and "Sharing"). `title` names the file, `recipientDisplayName` who has it, `expiresAt` how long is left, and `id` is the shareId libraryShareStop takes. Stopped and expired shares are not listed: they stay as the record (revokedAt / expiresAt), read by nothing here yet. Live through the share rows' own graph events, which reach the sharer's stream because the sharer owns them. */
+// Bound concept: v1:library:share (machine-readable: BoundConcepts["librarySharing"] in generated_concepts.ts).
+export interface LibrarySharingArgs {
+}
+
+export function buildLibrarySharing(args: LibrarySharingArgs): string {
+  void args;
+  return "query librarySharing()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    librarySharing(args?: LibrarySharingArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.librarySharing = function (this: QueryClient, args: LibrarySharingArgs = {} as LibrarySharingArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("librarySharing", buildLibrarySharing(args), opts);
+};
+
 /** The caller's watched folders, live (epic memql#4783, the cockpit half memql#4841).
 ONE READ SERVES BOTH CONSUMERS, and that is deliberate. The Files app wants every watch the person has; a cockpit wants the watches for the one machine it is. Those are the same question with a guard on it, and a second query would be a second place for the owner filter and the soft-delete spelling to drift -- the `row.archived != true` / `== true` asymmetry two constructs up is exactly the kind of drift a duplicate read acquires.
 `workerId` is GUARDED, so an absent argument is the whole list rather than a match on the empty string. There is no half-supplied-key hazard here the way there is on libraryFileByUploadedFrom, because there is only one part to supply.

@@ -311,7 +311,9 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // 211 -> 212: vendorKeysOwnerNotices, the ten-minute pass that mails the owner
 // of each API key that stopped working, once per fall (vendor accounts,
 // 2026-11-22). One added, none removed; measured by the strict loader.
-const shippedAutomationCount = 212
+// 212 -> 213: endSharesOnArtifactArchive, which ends every share of a Library
+// file its owner archived (file sharing, 2026-11-18). One added, none removed.
+const shippedAutomationCount = 213
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

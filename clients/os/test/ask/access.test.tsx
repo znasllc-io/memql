@@ -40,7 +40,9 @@ it.each(["not granted", "denied", "not loaded"])("refuses commands, app callback
     const windowAsk = useWindowAsk("app:deployables");
     const work = useOpenAskWork(), discuss = useDiscussApproval();
     expect(work).toBeNull(); expect(discuss).toBeNull();
-    return <><button onClick={() => ask.openAsk()}>Command</button><button onClick={() => windowAsk.askAbout("Reviews")}>App command</button></>;
+    // No "Ask about this" control is offered: there is nothing for it to open.
+    expect(windowAsk.askAbout).toBeUndefined();
+    return <><button onClick={() => ask.openAsk()}>Command</button><button onClick={() => windowAsk.askAbout?.("Reviews")}>App command</button></>;
   }
   render(withOs(<SessionProvider value={{ access: person, config: UNKNOWN_RUNTIME_CONFIG }}><AskProvider transport={transport} availability={READY_ASK}><Commands /><AskSheet /></AskProvider></SessionProvider>, "owner"));
   fireEvent.click(screen.getByRole("button", { name: "Command" }));
@@ -120,7 +122,7 @@ it.each(["desktop", "phone"] as const)("hides Ask from %s chrome and keeps Profi
     if (!screen.queryByRole("dialog", { name: "Launcher" })) fireEvent.click(screen.getByRole("button", { name: "Launcher" }));
     fireEvent.click(within(screen.getByRole("dialog", { name: "Launcher" })).getByRole("button", { name: appTileName("Files") }));
     expect(screen.queryByRole("button", { name: "Ask about Files" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Search Files" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Minimize Files" })).toBeTruthy();
   }
   expect(screen.queryByRole("dialog", { name: "Ask" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Open Profile" }));

@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
@@ -91,6 +92,17 @@ type Integration struct {
 	journal      *workjournal.Journal
 	training     *trainingReader
 	lessonSource func(context.Context, string, string) (map[string]any, error)
+
+	// copyStore and copyBucket are where librarySaveSharedCopy writes a
+	// recipient's copy (share.go, SetShareCopyStorage). Unset, a copy is
+	// refused rather than half made.
+	copyStore  ShareCopyStore
+	copyBucket string
+
+	// saveClaims is the cross-replica claim librarySaveSharedCopy takes so a
+	// burst of the same save makes one copy (share.go, oneSaveAtATime). Unset,
+	// a copy is refused rather than made unguarded.
+	saveClaims *automations.StrictClusterClaimer
 }
 
 // NewIntegration wires the engine handle. The factory is in plugin.go;
@@ -138,6 +150,10 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		{Name: "removeDocumentAnnotation", Description: "Remove your document feedback or personal note.", Handler: i.handleRemoveDocumentAnnotation},
 		{Name: "removeArtifact", Description: "Remove a generated output entirely, for the engine's own use.", Handler: i.handleRemoveArtifact},
 		{Name: "documentNotes", Description: "Read the caller’s personal notes.", Handler: i.handleDocumentNotes},
+		{Name: "shareFile", Description: "Share one of your files with one person, or renew their active share.", Handler: i.handleShareFile},
+		{Name: "stopShare", Description: "Stop one of your shares at once.", Handler: i.handleStopShare},
+		{Name: "saveSharedCopy", Description: "Save a copy of a file shared with you into your own Library.", Handler: i.handleSaveSharedCopy},
+		{Name: "endSharesForArtifact", Description: "End every share of an archived file, for the engine's own automation.", Handler: i.handleEndSharesForArtifact},
 		{Name: "addDocumentNote", Description: "Save a personal note, excluded from AI feedback.", Handler: i.handleAddDocumentNote},
 		{Name: "documentHistory", Description: "Read retained versions and branch provenance.", Handler: i.handleDocumentHistory},
 		{Name: "documentVersion", Description: "Open an owned immutable snapshot.", Handler: i.handleDocumentVersion},

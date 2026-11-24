@@ -180,6 +180,9 @@ describe("opening a person", () => {
     expect(screen.queryByRole("button", { name: "Deactivate" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Add to a group" })).toBeNull();
     expect(screen.getByText("Signs in with")).toBeTruthy();
+    // No "Joined": the client only sees the newest version's time, which is the
+    // last change to the person, not when they joined.
+    expect(screen.queryByText("Joined")).toBeNull();
   });
 
   it.each(["admin", "owner"])("%s can read sessions and manage lower-ranked people", async role => {
@@ -336,6 +339,28 @@ describe("the groups panel", () => {
     expect(connection.query.groupsForUser.mock.calls[0]?.[0]).toMatchObject({
       userId: "v1:identity:user:ada",
     });
+  });
+
+  it("marks only the group being removed as Removing...", async () => {
+    // The busy state was keyed on the person, so removing Ada from one group
+    // (or any other write about her) drew "Removing..." on every group row.
+    const connection = seed({
+      groupsAll: [
+        groupRow({ id: "g-acme", name: "Acme", kind: "account", accountId: "acct-acme" }),
+        groupRow({ id: "g-beta", name: "Beta" }),
+      ],
+      groupsForUser: {
+        "v1:identity:user:ada": [
+          membershipRow({ id: "m1", groupId: "g-acme", userId: "v1:identity:user:ada" }),
+          membershipRow({ id: "m2", groupId: "g-beta", userId: "v1:identity:user:ada" }),
+        ],
+      },
+    });
+    connection.query.groupMemberRemove.mockImplementation(() => new Promise(() => {}));
+    await openAda(connection);
+    await click(await screen.findByRole("button", { name: "Remove from Acme" }));
+    expect(screen.getByRole("button", { name: "Remove from Acme" }).textContent).toBe("Removing...");
+    expect(screen.getByRole("button", { name: "Remove from Beta" }).textContent).toBe("Remove");
   });
 
   it("says the standing rule instead of rows for staff", async () => {

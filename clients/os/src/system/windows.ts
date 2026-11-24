@@ -36,6 +36,14 @@ export interface OsWindow {
   /** Session-only return location for an app on its dedicated MemQL desktop. */
   expandedReturn?: { deskId: DeskId; index: number };
   minimizedFrom?: Exclude<WindowMode, "minimized">;
+  /**
+   * A "normal" window dropped on a side rests on that half (0 left, 1 right)
+   * while it is alone on its desk, the other half left empty (Jesús, Nov 20
+   * 2026). In a pair the desk's order places it, and the half follows its
+   * seat (desks.ts `seat`), so it stays put when the partner leaves. Going
+   * borderless or full screen clears it; minimizing keeps it.
+   */
+  half?: 0 | 1;
   /** A standing instruction the app has not yet consumed. */
   intent?: WindowIntent;
 }

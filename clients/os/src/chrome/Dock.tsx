@@ -4,6 +4,7 @@ import { horizontalListSortingStrategy, SortableContext, useSortable } from "@dn
 import { LayoutGrid, LogOut, RefreshCw } from "lucide-react";
 
 import { useAsk } from "../ask/AskProvider";
+import { windowAskContext } from "./windowAsk";
 import { BIN_DROPPABLE_ID, type BinDropPayload } from "../apps/bin/concepts";
 import { decideBinDrop } from "../apps/bin/drop";
 import { LocalFilesSettingsStore } from "../apps/files/settings";
@@ -22,6 +23,7 @@ import { ContextMenu, type MenuEntry } from "./ContextMenu";
 import { Mark } from "./Mark";
 import { AccountAvatar } from "./AccountAvatar";
 import { useOs, type OsNotice } from "./state";
+import { dragTranslate } from "../system/scale";
 
 // The one bar (spec A): Launcher at the left end; pinned then running apps
 // center (running dot beneath, right-click to pin/unpin/close, drag to
@@ -65,7 +67,7 @@ function DockApp({
       data-running={running || undefined}
       data-dragging={isDragging || undefined}
       style={{
-        transform: transform ? `translate(${transform.x}px, ${transform.y}px)` : undefined,
+        transform: dragTranslate(transform),
         transition: transition ?? undefined,
       }}
       aria-label={`${manifest.name}${running ? " (running)" : ""}`}
@@ -274,7 +276,7 @@ export function Dock({
     async (drop: BinDropPayload) => {
       const query = osConnection?.query ?? null;
       if (query === null) {
-        setBinNote({ tone: "error", sentence: "Not connected to the cluster, so nothing was archived." });
+        setBinNote({ tone: "error", sentence: "Not connected to the cluster, so nothing was deleted." });
         return;
       }
       setArchiving(true);
@@ -287,12 +289,12 @@ export function Dock({
         setBinNote({
           tone: "info",
           sentence: `"${drop.name}" is in the Bin.`,
-          next: "Nothing was deleted -- open the Bin to look at it or put it back.",
+          next: "Open the Bin to look at it or put it back.",
         });
       } catch (err: unknown) {
         setBinNote({
           tone: "error",
-          sentence: "The archive was refused.",
+          sentence: "The file was not deleted.",
           next: `"${drop.name}" is where it was.`,
           detail: err instanceof Error ? err.message : String(err),
         });
@@ -324,7 +326,7 @@ export function Dock({
           setBinNote({
             tone: "info",
             sentence: `"${outcome.name}" is a folder, and the Bin cannot take a whole folder from here.`,
-            next: "Archive it from Files, where the confirm can tell you how many things are inside it first.",
+            next: "Delete it from Files, where the confirm can tell you how many things are inside it first.",
           });
           return;
         case "confirm":
@@ -360,28 +362,28 @@ export function Dock({
   }, [binNote]);
 
   // THE WHOLE NOTICE IS THE ASK, question and all: a second file dropped while
-  // this one is open changes the question under the same Archive and Cancel,
+  // this one is open changes the question under the same Delete and Cancel,
   // and a hold on the buttons alone would not notice (see InPlaceAsk).
   const binBubble: ReactNode =
     pending !== null ? (
       <InPlaceAsk>
         <Notice
           tone="warn"
-          sentence={`Archive "${pending.name}"?`}
-          next="It goes to the Bin and keeps its bytes, its history and its provenance. Nothing is deleted."
+          sentence={`Delete "${pending.name}"?`}
+          next="It goes to the Bin and keeps its bytes, its history and its provenance. The Bin can put it back."
         >
           <div className="os-dock-bubble-actions">
             <Button
               tone="danger"
               busy={archiving}
-              busyLabel="Archiving"
+              busyLabel="Deleting"
               onClick={() => {
                 const drop = pending;
                 setPending(null);
                 void archive(drop);
               }}
             >
-              Archive
+              Delete
             </Button>
             <Button onClick={() => setPending(null)}>Cancel</Button>
           </div>
@@ -462,7 +464,7 @@ export function Dock({
             setBinNote({
               tone: "info",
               sentence: "The Bin does not take files from your computer.",
-              next: "Drop it on the desktop to add it to your Library, or drag something already in MemQL here to archive it.",
+              next: "Drop it on the desktop to add it to your Library, or drag something already in MemQL here to delete it.",
             })
           }
           bubble={binBubble}
@@ -470,9 +472,15 @@ export function Dock({
       ))}
       <div className="os-dock-status">
         <RoamNotice notice={notice} />
-        {canAsk && <button type="button" className="os-ask-orb" aria-label="Ask" onClick={() => openAsk(null)}>
+        {canAsk && <button type="button" className="os-ask-orb" aria-label="Ask" onClick={() => {
+          // The focused window is the front one on the active desk (switchDesk
+          // refocuses its top window); none focused, Ask opens plain.
+          const at = windowAskContext(state.shell.focusedWindowId);
+          openAsk(at?.context ?? null, at?.label);
+        }}>
           <Mark className="os-ask-mark" />
         </button>}
+        <span className="os-dock-desks" data-os-dock-desks />
         <span
           className="os-dot os-connection-dot"
           data-os-dot={connectionTone}

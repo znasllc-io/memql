@@ -1,4 +1,5 @@
 import { EntryPending, useEntryTransition } from "../kit/EntryPending";
+import { BootCurtain, bootFinished, bootReached } from "../kit/BootCurtain";
 import { useEffect, useState } from "react";
 
 import { AuthProvider, useAuth } from "../auth/AuthProvider";
@@ -9,16 +10,26 @@ import { IdentityScreen } from "../auth/IdentityScreen";
 
 export function App() {
   return (
-    <AuthProvider>
-      <OsBoot />
-    </AuthProvider>
+    <>
+      <AuthProvider>
+        <OsBoot />
+      </AuthProvider>
+      <BootCurtain />
+    </>
   );
+}
+
+/** Rendered beside a destination that is not the desktop: the first load ends here. */
+function BootDone() {
+  useEffect(() => bootFinished(), []);
+  return null;
 }
 
 function OsBoot() {
   const { status, signIn, signOut, config, authSource, entry } = useAuth();
   const [layout, setLayout] = useState<ChromeLayout>(() => layoutFromWindow(window));
   const entryTransition = useEntryTransition(status === "loading");
+  useEffect(() => { if (status !== "loading") bootReached(1); }, [status]);
 
   useEffect(() => {
     const update = () => setLayout(layoutFromWindow(window));
@@ -42,10 +53,10 @@ function OsBoot() {
   if (entryTransition.show) {
     return <EntryPending leaving={entryTransition.leaving} />;
   }
-  if (status !== "unavailable" && entry && !(status === "signed-in" && entry.startsWith("/me"))) return <IdentityScreen initialPath={entry} />;
-  if (status === "unclaimed") return <IdentityScreen initialPath="/setup" />;
+  if (status !== "unavailable" && entry && !(status === "signed-in" && entry.startsWith("/me"))) return <><BootDone /><IdentityScreen initialPath={entry} /></>;
+  if (status === "unclaimed") return <><BootDone /><IdentityScreen initialPath="/setup" /></>;
   if (status === "signed-out" || status === "unavailable") {
-    return <SignIn status={status} onSignIn={signIn} />;
+    return <><BootDone /><SignIn status={status} onSignIn={signIn} /></>;
   }
   return <Shell layout={layout} onSignOut={signOut} config={config} authSource={authSource} />;
 }

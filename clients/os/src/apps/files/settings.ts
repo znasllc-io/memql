@@ -12,6 +12,10 @@ import type { OsAppSection } from "../../system/registry";
  *  manifest and the gear must offer the same set. */
 export const FILES_SECTIONS: OsAppSection[] = [
   { id: "browse", name: "Browse" },
+  // Every transfer, one row each, "like Steam" (owner's pick 1A): this
+  // browser's uploads and the backup transfers that used to sit under the
+  // Backups list. Between Browse and Backups, the order José asked for.
+  { id: "downloads", name: "Downloads" },
   // Backups lives in Files rather than in Fleet, and the split is about what
   // the thing IS. Fleet is machines and how work is routed to them; a backup
   // is a folder, its destination is a Library folder two panes away, and the

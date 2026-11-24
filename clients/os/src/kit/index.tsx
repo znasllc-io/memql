@@ -3,7 +3,6 @@
 // substrate task (PR B) and is exported from here the moment it exists.
 
 import { deriveProvenance, type MachinePresence, type ProvenanceFacts, type ProvenanceTone } from "../items/provenance";
-import type { FileEntry } from "../system/desktop";
 import {
   holds,
   roleAdmits,
@@ -147,17 +146,6 @@ export function ProvenanceDot({
       aria-hidden={label ? undefined : true}
     />
   );
-}
-
-export function FileProvenanceDot({
-  file,
-  machine = null,
-}: {
-  file: Pick<FileEntry, "source" | "producedByWorkerId" | "uploadState">;
-  machine?: MachinePresence | null;
-}) {
-  const facts = deriveProvenance(file, machine);
-  return <ProvenanceDot tone={facts.tone} label={facts.origin || undefined} />;
 }
 
 export { RecordList, RecordRow, listCount } from "./RecordRow";

@@ -3,7 +3,13 @@ import { Button, Caption, Field, Input, Notice } from "../../../kit";
 import { useOsConnection } from "../../../live/connection";
 import { formatStorageBytes, type StorageUsage } from "./transfers";
 
-export function StorageAllowance({ userId = "", editable = false }: { userId?: string; editable?: boolean }) {
+/** Below this share of the allowance left (or 1 GB), Files' Backups shows a warning. */
+const LOW_SHARE = 0.1;
+const LOW_BYTES = 1_000_000_000;
+
+/** `alertsOnly` (Files > Backups): nothing at all unless space is running low. The full
+ *  figures stay on a person's page in Users, where an owner sets the allowance. */
+export function StorageAllowance({ userId = "", editable = false, alertsOnly = false }: { userId?: string; editable?: boolean; alertsOnly?: boolean }) {
   const ids=useId();
   const connection = useOsConnection();
   const [usage, setUsage] = useState<StorageUsage | null>(null);
@@ -34,6 +40,10 @@ export function StorageAllowance({ userId = "", editable = false }: { userId?: s
     try { const r = await connection.query.libraryBackupSetUserLimit({ userId, bytes }); setUsage(r.rows()[0] as unknown as StorageUsage); setEditing(false); }
     catch (e) { setSaveError(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };
+  if (alertsOnly) {
+    const low = usage ? lowStorage(usage) : null;
+    return low ? <Notice tone="warn" sentence={low} /> : null;
+  }
   return <div aria-label="Storage allowance">
     {usage ? <Caption>{formatStorageBytes(usage.used)} stored · {formatStorageBytes(usage.reserved)} reserved · {formatStorageBytes(usage.available)} available{usage.exempt ? " in shared cluster storage" : ` of ${formatStorageBytes(usage.limit)}`}</Caption> : <Caption>Checking storage…</Caption>}
     {usage && <Caption>Cluster: {formatStorageBytes(Math.max(0, usage.clusterLimit - usage.clusterUsed - usage.clusterReserved))} available of 5 TB. Files, versions, the Bin and unfinished transfers count.</Caption>}
@@ -41,9 +51,17 @@ export function StorageAllowance({ userId = "", editable = false }: { userId?: s
     {editing && <>
       <Field label="Storage allowance in GB"><Input id={`${ids}-limit`} label="Storage allowance in GB" value={gigabytes} onChange={setGigabytes} onEnter={() => void save()} /></Field>
       <Caption>From 0 to 5,000 GB. Lowering this keeps existing files and stops new reservations that exceed the allowance.</Caption>
-      <Button onClick={() => setEditing(false)}>Cancel</Button>{valid && <Button tone="primary" busy={busy} onClick={() => void save()}>Save allowance</Button>}
+      <Button onClick={() => setEditing(false)}>Cancel</Button>{valid && <Button tone="primary" busy={busy} onClick={() => save()}>Save allowance</Button>}
     </>}
     {error && <Notice tone="error" sentence="Storage could not be checked." detail={error} next={usage ? "The displayed allowance is from the last successful check." : undefined} />}
     {saveError && <Notice tone="error" sentence="The allowance was not changed." detail={saveError} />}
   </div>;
+}
+
+/** The warning sentence when space is low, else null. An exempt person draws on the cluster's space. */
+export function lowStorage(u: StorageUsage): string | null {
+  const clusterLeft = Math.max(0, u.clusterLimit - u.clusterUsed - u.clusterReserved);
+  const [left, total] = u.exempt ? [clusterLeft, u.clusterLimit] : [Math.min(u.available, clusterLeft), u.limit];
+  if (left >= LOW_BYTES && left >= total * LOW_SHARE) return null;
+  return left <= 0 ? "Storage is full. New backups can't copy anything." : `Storage is almost full: ${formatStorageBytes(left)} left.`;
 }

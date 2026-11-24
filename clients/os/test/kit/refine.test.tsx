@@ -128,23 +128,45 @@ describe("Select (rule 5: no UA chrome)", () => {
   });
 });
 
-const { WindowSearchContext, useWindowSearchHost } = await import('../../src/kit/windowSearch');
-function SearchWindow({ name }: { name: string }) {
-  const {host,openVisible}=useWindowSearchHost();
-  return <div><button onClick={openVisible}>Search {name}</button><WindowSearchContext.Provider value={host}>
-    <div hidden><Refine search="" onSearch={()=>{}} label={`Hidden ${name}`} placeholder={`Hidden ${name}`}/></div>
-    <Refine search="" onSearch={()=>{}} label={`Refine ${name}`} placeholder={`Find ${name}`}><span>{name} filters</span></Refine>
-  </WindowSearchContext.Provider></div>;
-}
-it('uses one window search, focuses its own content and ignores parked panes',()=>{
- render(<><SearchWindow name="Fleet"/><SearchWindow name="Deployables"/></>);
- expect(screen.queryByRole('button',{name:'Refine Fleet'})).toBeNull();
- expect(screen.queryByRole('button',{name:'Refine Deployables'})).toBeNull();
- const trigger=screen.getByRole('button',{name:'Search Deployables'});trigger.focus();fireEvent.click(trigger);
- expect(document.activeElement).toBe(screen.getByPlaceholderText('Find Deployables'));
- expect(screen.queryByPlaceholderText('Find Fleet')).toBeNull();
- expect(screen.queryByPlaceholderText('Hidden Deployables')).toBeNull();
- fireEvent.keyDown(document,{key:'Escape'});expect(document.activeElement).toBe(trigger);
- fireEvent.click(screen.getByRole('button',{name:'Search Fleet'}));
+// The window title bar has no search button (José, Nov 19 2026): every
+// Refine draws its own, in the page, and Escape hands focus back to it.
+it('draws its own search button, focuses the field and returns focus on Escape',()=>{
+ render(<Refine search="" onSearch={()=>{}} label="Refine Fleet" placeholder="Find Fleet"><span>Fleet filters</span></Refine>);
+ const trigger=screen.getByRole('button',{name:'Refine Fleet'});fireEvent.click(trigger);
  expect(document.activeElement).toBe(screen.getByPlaceholderText('Find Fleet'));
+ fireEvent.keyDown(document,{key:'Escape'});
+ expect(screen.queryByPlaceholderText('Find Fleet')).toBeNull();
+ expect(document.activeElement).toBe(trigger);
+});
+
+describe("Refine's panel near the window's left edge (Jesús, Nov 23 2026: Downloads cut it off)", () => {
+  // jsdom lays nothing out, so the two boxes the check compares are given.
+  const box = (left: number) => ({ left, right: left + 264, top: 0, bottom: 40, width: 264, height: 40, x: left, y: 0, toJSON: () => ({}) }) as DOMRect;
+  function inWindow() {
+    return render(
+      <div className="os-window">
+        <Harness />
+      </div>,
+    );
+  }
+
+  it("opens rightward when leftward would leave the window", () => {
+    const spy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("os-window") ? box(100) : box(this.classList.contains("os-refine-panel") ? 40 : 200);
+    });
+    inWindow();
+    fireEvent.click(screen.getByRole("button", { name: "Refine files" }));
+    expect(document.querySelector(".os-refine-panel")?.getAttribute("data-align")).toBe("start");
+    spy.mockRestore();
+  });
+
+  it("keeps opening leftward where there is room", () => {
+    const spy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("os-window") ? box(0) : box(600);
+    });
+    inWindow();
+    fireEvent.click(screen.getByRole("button", { name: "Refine files" }));
+    expect(document.querySelector(".os-refine-panel")?.hasAttribute("data-align")).toBe(false);
+    spy.mockRestore();
+  });
 });

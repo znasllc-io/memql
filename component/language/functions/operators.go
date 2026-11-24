@@ -140,7 +140,7 @@ func Operators() []Operator {
 		{
 			Symbol: "in", Name: "in", Kind: "in", Form: "v in list", Level: 6,
 			Doc:     "Is true when v equals an element of the list: `row.status in [\"open\", \"held\"]`, `args.tag in row.tags`.",
-			Absence: "Membership is `==` against each element, so an unset v is in a list only when the list holds `\"\"` or `nil`. Nothing is in an absent list.",
+			Absence: "Membership is `==` against each element, so an unset v is in a list only when the list holds `\"\"` or `nil`. Nothing is in an absent list or an empty one: `v in []` is false whether the list is written or arrives as an argument, so an optional list a caller sends empty selects no rows rather than failing the read.",
 		},
 		{
 			Symbol: "startsWith", Name: "startsWith", Kind: "startsWith", Form: "s startsWith p", Level: 6,

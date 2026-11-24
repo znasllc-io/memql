@@ -25,6 +25,9 @@ export interface FileEntry {
   /** Library provenance source (uploaded / computer_use / ...). */
   source: string;
   producedByWorkerId?: string;
+  /** The Library's recorded format, which names the glyph's kind when the
+   *  title has no extension. Absent on shortcuts made before it was kept. */
+  format?: string;
   /** Transient: present while an upload is in flight or has failed. */
   uploadState?: "uploading" | "failed";
 }
@@ -98,8 +101,10 @@ export function nearestFreeCell(
   preferred: GridPos,
   grid: GridSize,
   except?: ItemId,
+  blocked: readonly GridPos[] = [],
 ): GridPos | null {
   const occupied = occupiedCells(surface, except);
+  for (const cell of blocked) occupied.add(keyOf(cell));
   const clamp = (pos: GridPos): GridPos => ({
     col: Math.max(0, Math.min(grid.cols - spanOf(item).w, pos.col)),
     row: Math.max(0, Math.min(grid.rows - spanOf(item).h, pos.row)),
@@ -147,6 +152,34 @@ export function moveItem(
   return { ...surface, positions: { ...surface.positions, [id]: pos } };
 }
 
+/**
+ * A Library file dropped on this desk at `cell` (dragged out of Files). A desk
+ * icon is a shortcut, so a file that already has one here is never given a
+ * second: that icon moves to the drop instead (Jesús, Nov 20 2026). Otherwise
+ * a new icon takes the nearest free cell. `hidden` are cells a window or the
+ * dock covers right now: an icon is never dropped where nobody can see it
+ * land. Null = no free cell in view. The drag's landing spot reads the same
+ * answer, so the spot is where the icon lands.
+ */
+export function placeFileAt(
+  surface: DeskSurface,
+  entry: FileEntry,
+  cell: GridPos,
+  grid: GridSize,
+  hidden: readonly GridPos[] = [],
+): { surface: DeskSurface; itemId: ItemId } | null {
+  const existing = Object.values(surface.items).find(
+    (i) => i.kind === "file" && entry.artifactId !== "" && i.artifactId === entry.artifactId,
+  );
+  const item: DesktopItem = existing ?? { kind: "file", ...entry };
+  const pos = nearestFreeCell(surface, item, cell, grid, item.id, hidden);
+  if (!pos) return null;
+  return {
+    surface: { items: { ...surface.items, [item.id]: item }, positions: { ...surface.positions, [item.id]: pos } },
+    itemId: item.id,
+  };
+}
+
 export function removeItem(surface: DeskSurface, id: ItemId): DeskSurface {
   if (!surface.items[id]) return surface;
   const items = { ...surface.items };
@@ -180,6 +213,32 @@ export function updateFolder(
   if (!item || item.kind !== "folder") return surface;
   if (patch.name === undefined || patch.name === item.name) return surface;
   return { ...surface, items: { ...surface.items, [id]: { ...item, name: patch.name } } };
+}
+
+/**
+ * The surface as THIS grid can hold it: every item whose saved spot fits stays
+ * put, and every one that does not (saved on a wider grid -- a wider window, or
+ * before the desktop scaled up, item 16) moves to the nearest free spot that
+ * does. Returns the same object when everything fits. The shell draws and edits
+ * through this, so an item is never painted past the screen edge; an edit then
+ * saves the spots it was edited at.
+ */
+export function fitSurface(surface: DeskSurface, grid: GridSize): DeskSurface {
+  const outside = Object.entries(surface.items).filter(([id, item]) => {
+    const pos = surface.positions[id];
+    return pos && !fits(item, pos, grid, new Set());
+  });
+  if (outside.length === 0) return surface;
+  let fitted: DeskSurface = { items: surface.items, positions: { ...surface.positions } };
+  // Placed against the items that stay, so a moved item never covers one.
+  for (const [id] of outside) delete fitted.positions[id];
+  for (const [id, item] of outside) {
+    // No room at all (a widget taller than a short window, or a full grid):
+    // keep the saved spot, so the item is clipped at the edge rather than gone.
+    const to = nearestFreeCell(fitted, item, surface.positions[id]!, grid) ?? surface.positions[id]!;
+    fitted = { ...fitted, positions: { ...fitted.positions, [id]: to } };
+  }
+  return fitted;
 }
 
 /** Repack every item top-left, files and folders sorted by title/name. */

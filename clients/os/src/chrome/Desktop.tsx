@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useDraggable, useDroppable, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { DragOverlay, useDndMonitor, useDraggable, useDroppable, type DragEndEvent, type DragMoveEvent, type DragStartEvent } from "@dnd-kit/core";
 
 import { newShortId, rowNumber, rowString } from "@znasllc-io/memql-sdk-core/client";
 
@@ -12,10 +13,14 @@ import { downloadArtifact } from "../apps/files/actions/download";
 import { useAuthSource } from "../auth/context";
 import { FileIcon } from "../items/FileIcon";
 import { FolderIcon } from "../items/FolderIcon";
+import { holdOf, useArrivalGlow, useDeskFileStates, type DeskLine, type Hold } from "../items/deskFileState";
+import { trackDeskUpload } from "../apps/files/useUploadTasks";
 import type { UploadProvider } from "../items/upload";
 import { accessAdmits, widgetById, widgetsFor } from "../system/registry";
-import { placeWindows, type PlacementTokens } from "../system/placement";
-import type { DeskSurface, DesktopItem, GridPos } from "../system/desktop";
+import { borderlessArea, halvesOf, placeWindows, type PlacementTokens, type Rect } from "../system/placement";
+import { dragTranslate, osScale } from "../system/scale";
+import { emptySurface, placeFileAt, type DeskSurface, type DesktopItem, type FileEntry, type GridPos } from "../system/desktop";
+import { FileGlyph } from "../apps/files/Tiles";
 import type { Desk } from "../system/desks";
 import { DeskNumeral, FoldWallpaper } from "../wallpaper/FoldWallpaper";
 import { WidgetHost } from "../widgets/WidgetFrame";
@@ -44,6 +49,14 @@ import { WindowFrame } from "./WindowFrame";
 // Stable by construction -- it is a dependency of the desk's registration
 // effect, and an array rebuilt each render would re-register on every one.
 const DESK_DRAG_PREFIXES = ["window:", "item:"] as const;
+
+// How close to an edge of the desktop the pointer must be for a window drop
+// to snap (Jesús, Nov 2026): a side takes that half, the top the whole area.
+const SNAP_EDGE = 24;
+type SnapZone = "left" | "right" | "top";
+// The picker's fade when it is dismissed: --os-duration-fast, which reduced
+// motion sets to 0ms; there it goes at once.
+const PICKER_FADE_MS = 140;
 
 export const CELL_W = 96;
 export const CELL_H = 104;
@@ -85,12 +98,25 @@ export function Desktop({
   const [renamingItemId, setRenamingItemId] = useState<string | null>(null);
   const selectedId = state.selectedItemId;
   const [draggingWindow, setDraggingWindow] = useState(false);
+  // The desk dots live INSIDE the dock, between Ask and the clock (Jesús, Nov
+  // 2026: horizontal room is precious, the dock has room to spare). They stay
+  // this desk's own component, drawn into the dock's slot, so a window dragged
+  // onto a dot still lands there. No dock (none mounted yet) draws them above
+  // the dock as before.
+  const [dockDesks, setDockDesks] = useState<HTMLElement | null>(null);
+  useEffect(() => { setDockDesks(document.querySelector<HTMLElement>("[data-os-dock-desks]")); }, []);
+  const [snapZone, setSnapZone] = useState<SnapZone | null>(null);
+  // A lone window dropped on a side rests on that half; while other apps are
+  // open the empty half offers them. `leaving` is the dismissal's fade.
+  const [picker, setPicker] = useState<{ windowId: string; side: 0 | 1; leaving?: boolean } | null>(null);
+  const pickerRef = useRef<HTMLDivElement>(null);
   const [noAnswerFor, setNoAnswerFor] = useState<string | null>(null);
   // The desk's own error line (create/rename/move refusals): in-surface, at
   // the bottom of the desk, self-clearing -- the menu that caused it is gone
   // by the time the server answers, and a toast is not the house's way.
   const [deskError, setDeskError] = useState<string | null>(null);
   const pendingFiles = useRef(new Map<string, File>());
+  const stopUpload = useRef(new Map<string, () => void>());
   const cancelHandoff = useRef<(() => void) | null>(null);
 
 
@@ -125,9 +151,32 @@ export function Desktop({
     [config.domain, connection, handoffPorts, authSource],
   );
 
+  // ---- what each file icon says (no dot: items/deskFileState.ts) ----
+  // Machine presence is asked for only while a file made on a machine is on a
+  // desk: it is what "Computer offline" reads.
+  const fileItems = useMemo(
+    () => Object.values(state.surfaces).flatMap((surface) =>
+      Object.values(surface?.items ?? {}).flatMap((i) => (i.kind === "file" ? [i] : []))),
+    [state.surfaces],
+  );
+  const { presence } = useMachinePresence(fileItems.some((i) => !!i.producedByWorkerId));
+  const holds = useMemo(
+    () => new Map(fileItems.map((i) => [i.id, holdOf(i, i.producedByWorkerId ? presence(i.producedByWorkerId) : null)] as const)),
+    [fileItems, presence],
+  );
+  const fileStates = useDeskFileStates(holds, (id, wait) => {
+    const item = fileItems.find((i) => i.id === id);
+    if (!item) return;
+    if (wait === "open") openFile(item);
+    else void fileIntoFolder(item, wait.folderId);
+  });
+  const arrival = useArrivalGlow(holds, state.deskResolved, state.deskHydrations);
+  const fileLook = (id: string) => ({ hold: holds.get(id) ?? null, line: fileStates.line(id), glow: arrival.glowing(id) });
+
   // The desktop is a strip of plates that only the pager moves. Anything that
   // scrolls it (a focus call, a reveal) is undone at once.
   const desktopRef = useRef<HTMLDivElement>(null);
+  const { slide, travel } = useDeskSlide(activeIndex, state.shell.activeDeskId, state.shell.desks, desktopRef);
   useEffect(() => {
     const el = desktopRef.current;
     if (!el) return;
@@ -221,6 +270,9 @@ export function Desktop({
   );
 
   // ---- host-file drop -> upload provider (spec B) ----
+  // A retry pressed in Files > Downloads comes back through the desk, which
+  // owns the icon; retryUpload is declared below startUpload, hence the ref.
+  const retryRef = useRef<(itemId: string) => void>(() => {});
   const startUpload = useCallback(
     (file: File, preferred: GridPos, opts?: { existingItemId?: string; folderId?: string }) => {
       const itemId = opts?.existingItemId ?? `up-${Date.now()}-${file.name}`;
@@ -246,10 +298,13 @@ export function Desktop({
         }
         pendingFiles.current.set(itemId, file);
       }
-      uploads
-        .upload(file, opts?.folderId ? { folderId: opts.folderId } : undefined)
-        .done.then((result) => {
+      const handle = uploads.upload(file, opts?.folderId ? { folderId: opts.folderId } : undefined);
+      trackDeskUpload(intoFolder ? `${itemId}:${opts?.folderId}` : itemId, file, handle, intoFolder ? null : () => retryRef.current(itemId));
+      if (!intoFolder) stopUpload.current.set(itemId, handle.abort);
+      handle.done
+        .then((result) => {
           if (intoFolder) return;
+          stopUpload.current.delete(itemId);
           pendingFiles.current.delete(itemId);
           actions.updateFileItem(itemId, {
             artifactId: result.artifactId,
@@ -264,6 +319,9 @@ export function Desktop({
             setDeskError(describe(err));
             return;
           }
+          stopUpload.current.delete(itemId);
+          // Thrown in the Bin while it uploaded (discardUpload): already gone.
+          if (!pendingFiles.current.has(itemId)) return;
           actions.updateFileItem(itemId, { uploadState: "failed" });
           // The server's own sentence, beside the icon's retry chip -- the
           // desk used to swallow the reason, which is what made a broken
@@ -272,6 +330,33 @@ export function Desktop({
         });
     },
     [actions, uploads],
+  );
+
+  // Opening a failed upload tries it again (José, Nov 22 2026: "the action
+  // of trying to open it will retry the upload"). The bytes live only in this
+  // tab's memory, so after a reload there is nothing to send again: the icon
+  // stays, and the desk's one error line says to drop the file again.
+  const retryUpload = useCallback(
+    (itemId: string) => {
+      const file = pendingFiles.current.get(itemId);
+      if (file) startUpload(file, { col: 0, row: 0 }, { existingItemId: itemId });
+      else setDeskError("This upload can't be tried again after the page reloaded. Drop the file on the desk again.");
+    },
+    [startUpload],
+  );
+  retryRef.current = retryUpload;
+
+  // An upload thrown in the Bin before it landed: nothing of it is in the
+  // Library, so there is nothing for the Bin to keep. The upload stops and
+  // the icon goes; the file is still wherever it was dropped from.
+  const discardUpload = useCallback(
+    (itemId: string) => {
+      pendingFiles.current.delete(itemId);
+      stopUpload.current.get(itemId)?.();
+      stopUpload.current.delete(itemId);
+      actions.removeSurfaceItem(itemId);
+    },
+    [actions],
   );
 
   // A dropped DIRECTORY becomes a Library folder tree with a desk shortcut
@@ -363,12 +448,22 @@ export function Desktop({
   // see the other's drops.
   useShellDragClaim(DESK_DRAG_PREFIXES, { onDragStart, onDragEnd });
 
+  // The edge a window drag is over, lit while it is there.
+  const snapMonitor = useMemo(() => ({
+    onDragMove: (event: DragMoveEvent) => {
+      if (String(event.active.id).startsWith("window:")) setSnapZone(snapZoneOf(event, desktopRef.current, viewport.w));
+    },
+    onDragCancel: () => setSnapZone(null),
+  }), [viewport.w]);
+  useDndMonitor(snapMonitor);
+
   function onDragStart(event: DragStartEvent) {
     setDraggingWindow(String(event.active.id).startsWith("window:"));
   }
 
   function onDragEnd(event: DragEndEvent) {
     setDraggingWindow(false);
+    setSnapZone(null);
     const id = String(event.active.id);
     const overId = event.over ? String(event.over.id) : null;
 
@@ -379,8 +474,21 @@ export function Desktop({
         actions.throwToDesk(windowId, target === "new" ? "new" : target);
         return;
       }
-      // Two windows on the desk: dropping past the center line swaps.
       const desk = desks.find((d) => d.windows.includes(windowId));
+      const zone = snapZoneOf(event, desktopRef.current, viewport.w);
+      if (zone === "top") {
+        actions.makeBorderless(windowId);
+        return;
+      }
+      if (desk && desk.windows.length === 1 && zone) {
+        // Alone: rest on that half, the other half empty; with apps open on
+        // other desks, that half offers them too.
+        const side = zone === "left" ? 0 : 1;
+        actions.restOnHalf(windowId, side);
+        if (Object.keys(state.shell.windows).length > 1) setPicker({ windowId, side });
+        return;
+      }
+      // Two windows on the desk: dropping past the center line swaps.
       if (desk && desk.windows.length === 2) {
         const pointerX = pointerXOf(event);
         if (pointerX !== null) {
@@ -397,31 +505,74 @@ export function Desktop({
       // The Bin owns this drop (epic memql#4784). It is the dock's droppable,
       // reachable now that one DndContext spans the shell, and the desk
       // deliberately does not act: archiving is a write with a confirm and a
-      // refusal to render, and both live where the gesture ended.
-      if (overId === BIN_DROPPABLE_ID) return;
+      // refusal to render, and both live where the gesture ended. A file
+      // whose upload has not landed has no artifact to archive; the desk
+      // throws that one away itself.
+      const dragged = surface?.items[itemId];
+      if (overId === BIN_DROPPABLE_ID) {
+        if (dragged?.kind === "file" && !dragged.artifactId) discardUpload(itemId);
+        return;
+      }
       if (overId?.startsWith("folder:")) {
         const folderItemId = overId.slice("folder:".length);
         const folderItem = surface?.items[folderItemId];
-        const fileItem = surface?.items[itemId];
+        // Still uploading, it goes into the folder once it lands.
         if (
           folderItemId !== itemId &&
           folderItem?.kind === "folder" &&
-          fileItem?.kind === "file" &&
-          !fileItem.uploadState
+          dragged?.kind === "file" &&
+          dragged.uploadState !== "failed"
         ) {
-          void fileIntoFolder(fileItem, folderItem.folderId);
+          fileStates.ask(itemId, { folderId: folderItem.folderId });
           return;
         }
       }
       const pos = surface?.positions[itemId];
       if (!pos) return;
+      // dnd-kit's delta is in screen pixels; the grid is in CSS pixels.
       const target: GridPos = {
-        col: pos.col + Math.round(event.delta.x / CELL_W),
-        row: pos.row + Math.round(event.delta.y / CELL_H),
+        col: pos.col + Math.round(event.delta.x / osScale() / CELL_W),
+        row: pos.row + Math.round(event.delta.y / osScale() / CELL_H),
       };
       actions.moveSurfaceItem(itemId, target);
     }
   }
+
+  // ---- the half picker ----
+  // Live only while its window is still alone on the desk in view.
+  const pickerDesk = picker ? desks.find((d) => d.windows.includes(picker.windowId)) : undefined;
+  const pickerLive = !!picker && pickerDesk?.id === state.shell.activeDeskId && pickerDesk.windows.length === 1;
+  useEffect(() => {
+    if (picker && !pickerLive) setPicker(null);
+  }, [picker, pickerLive]);
+  useEffect(() => {
+    if (!picker || !pickerLive || picker.leaving) return;
+    // Dismissed (Jesús, Nov 20 2026): the options fade away and the window
+    // stays on its half, the other half empty with the desk showing. Any
+    // press but one on an option dismisses, the darkened half included.
+    const dismiss = () => {
+      if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) setPicker(null);
+      else setPicker({ ...picker, leaving: true });
+    };
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") dismiss(); };
+    const onDown = (event: PointerEvent) => {
+      const option = (event.target as Element | null)?.closest?.(".os-snap-pick") ?? null;
+      if (!pickerRef.current?.contains(option)) dismiss();
+    };
+    pickerRef.current?.querySelector("button")?.focus();
+    window.addEventListener("keydown", onKey);
+    document.addEventListener("pointerdown", onDown, true);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onDown, true);
+    };
+  }, [picker, pickerLive]);
+  useEffect(() => {
+    if (!picker?.leaving) return;
+    const timer = setTimeout(() => setPicker(null), PICKER_FADE_MS);
+    return () => clearTimeout(timer);
+  }, [picker]);
+  const halves = halvesOf(viewport, placement);
 
   // ---- context menus ----
   function deskMenuEntries(cell: GridPos): MenuEntry[] {
@@ -458,13 +609,24 @@ export function Desktop({
 
   function itemMenuEntries(item: DesktopItem): MenuEntry[] {
     if (item.kind === "file") {
+      const hold = holds.get(item.id) ?? null;
       return [
-        {
-          id: "open",
-          label: "Open in VS Code",
-          disabled: !item.artifactId || !!item.uploadState,
-          onSelect: () => openFile(item),
-        },
+        hold === "failed"
+          ? { id: "open", label: "Try upload again", onSelect: () => retryUpload(item.id) }
+          : {
+              id: "open",
+              label: "Open in VS Code",
+              // Uploading or offline: an open is refused, never queued
+              // (deskFileState.ts), so it is not offered.
+              disabled: hold !== null,
+              onSelect: () => fileStates.ask(item.id, "open"),
+            },
+        // A file still on its way, or stopped on it, has its transfer in Files >
+        // Downloads (José, Nov 20 2026: right-click it "and it should be able to
+        // take you to the downloads").
+        ...(hold === "uploading" || hold === "failed"
+          ? [{ id: "downloads", label: "Show in Downloads", onSelect: () => actions.openApp("files", "downloads") }]
+          : []),
         {
           id: "remove",
           label: "Remove from desk",
@@ -496,7 +658,8 @@ export function Desktop({
 
   return (
     <>
-      <div ref={desktopRef} className="os-desktop" data-os-desktop data-dragging-window={draggingWindow || undefined}>
+      <div ref={desktopRef} className="os-desktop" data-os-desktop data-dragging-window={draggingWindow || undefined}
+        style={{ "--os-slide-travel": travel } as React.CSSProperties}>
         <FoldWallpaper />
         <div
           className="os-plates"
@@ -513,14 +676,14 @@ export function Desktop({
               selectedId={selectedId}
               renamingItemId={renamingItemId}
               noAnswerFor={noAnswerFor}
+              fileLook={fileLook}
               onSelect={actions.selectSurfaceItem}
-              onOpenFile={openFile}
-              onOpenFolder={openFolderInFiles}
-              onRetryUpload={(itemId) => {
-                const file = pendingFiles.current.get(itemId);
-                if (file) startUpload(file, { col: 0, row: 0 }, { existingItemId: itemId });
-                else actions.removeSurfaceItem(itemId);
+              onOpenFile={(item) => {
+                arrival.clear(item.id);
+                fileStates.ask(item.id, "open");
               }}
+              onOpenFolder={openFolderInFiles}
+              onRetryUpload={retryUpload}
               onRenameFolder={renameDeskFolder}
               onRenameCancel={() => setRenamingItemId(null)}
               onFolderHostDrop={onFolderHostDrop}
@@ -541,10 +704,35 @@ export function Desktop({
           const peers = desk.windows.flatMap(id => state.shell.windows[id] ? [state.shell.windows[id]!] : []);
           const rect = placeWindows(peers, viewport, placement)[win.id]
             ?? placeWindows([{ ...win, mode: "normal" }], viewport, placement)[win.id]!;
-          return <WindowFrame key={win.id} win={win} manifest={manifest} rect={rect}
-            hidden={desk.id !== state.shell.activeDeskId || win.mode === "minimized"}
+          const leaving = !!slide && desk.id === slide.fromDeskId && desk.id !== state.shell.activeDeskId;
+          const arriving = !!slide && desk.id === state.shell.activeDeskId;
+          const split = (win.mode === "normal" && win.half !== undefined) || peers.filter((w) => w.mode !== "minimized").length === 2;
+          return <WindowFrame key={win.id} win={win} manifest={manifest} rect={rect} split={split}
+            hidden={(desk.id !== state.shell.activeDeskId && !leaving) || win.mode === "minimized"}
+            slide={leaving ? "out" : arriving ? "in" : undefined} slideDx={slide?.dx}
             deskId={desk.id} focused={state.shell.focusedWindowId === win.id} actorRole={actorRole} />;
         })}
+        {snapZone ? (
+          <div className="os-snap-zone" data-os-snap-zone={snapZone} aria-hidden="true"
+            style={rectStyle(snapZone === "top" ? borderlessArea(viewport, placement) : halves[snapZone === "left" ? 0 : 1])} />
+        ) : null}
+        {pickerLive ? (
+          <div ref={pickerRef} className="os-snap-picker" role="group" aria-label="Choose an app for the other half"
+            data-leaving={picker.leaving || undefined} aria-hidden={picker.leaving || undefined}
+            style={rectStyle(halves[picker.side === 0 ? 1 : 0])}>
+            {desks.flatMap((d) => (d.id === pickerDesk.id ? [] : d.windows)).map((otherId) => {
+              const other = registry.apps.find((a) => a.id === state.shell.windows[otherId]?.appId);
+              if (!other) return null;
+              const Icon = other.icon;
+              return (
+                <button key={otherId} type="button" className="os-snap-pick" aria-label={other.name} title={other.name}
+                  onClick={() => { setPicker(null); actions.pairWindows(picker.windowId, picker.side, otherId); }}>
+                  <Icon size={22} aria-hidden />
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
         <p className="os-sr-only" aria-live="polite">
           Desk {activeIndex + 1} of {desks.length}
         </p>
@@ -553,7 +741,8 @@ export function Desktop({
             {deskError}
           </p>
         ) : null}
-        {!hidePager ? <DeskPager draggingWindow={draggingWindow} /> : null}
+        {hidePager ? null : dockDesks ? createPortal(<DeskPager draggingWindow={draggingWindow} />, dockDesks)
+          : <DeskPager draggingWindow={draggingWindow} />}
         {menu ? (
           <ContextMenu
             x={menu.x}
@@ -564,23 +753,51 @@ export function Desktop({
           />
         ) : null}
       </div>
+      <DeskFileDrop />
     </>
   );
 }
 
+/** Which snapping edge the pointer is at, relative to the desktop's own box.
+ *  The pointer and the box are screen pixels; `width` and SNAP_EDGE are CSS
+ *  pixels, so the offset is divided by the desktop's scale. */
+export function snapZoneOf(event: DragMoveEvent | DragEndEvent, desktop: HTMLElement | null, width: number): SnapZone | null {
+  const activator = event.activatorEvent as PointerEvent | undefined;
+  if (!activator || typeof activator.clientX !== "number") return null;
+  const box = desktop?.getBoundingClientRect();
+  const x = (activator.clientX + event.delta.x - (box?.left ?? 0)) / osScale();
+  const y = (activator.clientY + event.delta.y - (box?.top ?? 0)) / osScale();
+  if (x <= SNAP_EDGE) return "left";
+  if (x >= width - SNAP_EDGE) return "right";
+  if (y <= SNAP_EDGE) return "top";
+  return null;
+}
+
+function rectStyle(rect: Rect): React.CSSProperties {
+  return { left: rect.x, top: rect.y, width: rect.w, height: rect.h };
+}
+
+/** The pointer's x in the desktop's CSS pixels (the desktop starts at the left edge). */
 function pointerXOf(event: DragEndEvent): number | null {
   const activator = event.activatorEvent as PointerEvent | undefined;
   if (activator && typeof activator.clientX === "number") {
-    return activator.clientX + event.delta.x;
+    return (activator.clientX + event.delta.x) / osScale();
   }
   return null;
 }
 
-function pxToCell(event: React.DragEvent, grid: { cols: number; rows: number }): GridPos {
+/** The plate cell under a pointer event (screen pixels in, grid cell out). */
+function pxToCell(event: React.MouseEvent, grid: { cols: number; rows: number }): GridPos {
   const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+  return cellAt(event.clientX - rect.left, event.clientY - rect.top, grid);
+}
+
+/** The grid cell at a screen-pixel offset from a plate's corner. */
+export function cellAt(dx: number, dy: number, grid: { cols: number; rows: number }): GridPos {
+  const s = osScale();
   return {
-    col: Math.max(0, Math.min(grid.cols - 1, Math.floor((event.clientX - rect.left - SURFACE_PAD) / CELL_W))),
-    row: Math.max(0, Math.min(grid.rows - 1, Math.floor((event.clientY - rect.top - SURFACE_PAD) / CELL_H))),
+    col: Math.max(0, Math.min(grid.cols - 1, Math.floor((dx / s - SURFACE_PAD) / CELL_W))),
+    row: Math.max(0, Math.min(grid.rows - 1, Math.floor((dy / s - SURFACE_PAD) / CELL_H))),
   };
 }
 
@@ -592,6 +809,7 @@ function DeskPlate({
   selectedId,
   renamingItemId,
   noAnswerFor,
+  fileLook,
   onSelect,
   onOpenFile,
   onOpenFolder,
@@ -610,6 +828,7 @@ function DeskPlate({
   selectedId: string | null;
   renamingItemId: string | null;
   noAnswerFor: string | null;
+  fileLook: (id: string) => FileLook;
   onSelect: (id: string | null) => void;
   onOpenFile: (item: Extract<DesktopItem, { kind: "file" }>) => void;
   onOpenFolder: (folderId: string) => void;
@@ -621,7 +840,7 @@ function DeskPlate({
   onHostDrop: (event: React.DragEvent) => void;
   onBackgroundClick: () => void;
 }) {
-  const { state, registry } = useOs();
+  const { state, registry, grid } = useOs();
   const { setNodeRef } = useDroppable({ id: active ? "surface" : `plate:${desk.id}` });
 
   const windows = desk.windows.flatMap((id) => {
@@ -656,15 +875,7 @@ function DeskPlate({
       onContextMenu={(event) => {
         if (event.target !== event.currentTarget) return;
         event.preventDefault();
-        onMenu({
-          x: event.clientX,
-          y: event.clientY,
-          kind: "desk",
-          cell: {
-            col: Math.max(0, Math.floor((event.clientX - SURFACE_PAD) / CELL_W)),
-            row: Math.max(0, Math.floor((event.clientY - SURFACE_PAD) / CELL_H)),
-          },
-        });
+        onMenu({ x: event.clientX, y: event.clientY, kind: "desk", cell: pxToCell(event, grid) });
       }}
       onDragOver={(event) => {
         if (event.dataTransfer.types.includes("Files")) event.preventDefault();
@@ -680,6 +891,7 @@ function DeskPlate({
           selected={selectedId === id}
           renaming={renamingItemId === id}
           noAnswerFor={noAnswerFor}
+          look={fileLook(id)}
           onSelect={() => onSelect(id)}
           onOpenFile={onOpenFile}
           onOpenFolder={onOpenFolder}
@@ -697,12 +909,19 @@ function DeskPlate({
   );
 }
 
+interface FileLook {
+  hold: Hold;
+  line: DeskLine;
+  glow: boolean;
+}
+
 function SurfaceItem({
   item,
   pos,
   selected,
   renaming,
   noAnswerFor,
+  look,
   onSelect,
   onOpenFile,
   onOpenFolder,
@@ -717,6 +936,7 @@ function SurfaceItem({
   selected: boolean;
   renaming: boolean;
   noAnswerFor: string | null;
+  look: FileLook;
   onSelect: () => void;
   onOpenFile: (item: Extract<DesktopItem, { kind: "file" }>) => void;
   onOpenFolder: (folderId: string) => void;
@@ -727,7 +947,6 @@ function SurfaceItem({
   onMenu: (x: number, y: number) => void;
 }) {
   const { actions, registry } = useOs();
-  const { presence } = useMachinePresence();
   // The drag carries what the Bin needs to name and archive this, because the
   // dock holds neither the Library feed nor the desktop document (memql#4784).
   const draggable = useDraggable({
@@ -751,9 +970,7 @@ function SurfaceItem({
     top,
     width: item.kind === "widget" ? item.w * CELL_W - 12 : undefined,
     height: item.kind === "widget" ? item.h * CELL_H - 12 : undefined,
-    transform: draggable.transform
-      ? `translate(${draggable.transform.x}px, ${draggable.transform.y}px)`
-      : undefined,
+    transform: dragTranslate(draggable.transform),
   };
 
   const ref = (node: HTMLElement | null) => {
@@ -797,7 +1014,9 @@ function SurfaceItem({
       {item.kind === "file" ? (
         <FileIcon
           entry={item}
-          machine={item.producedByWorkerId ? presence(item.producedByWorkerId) : null}
+          hold={look.hold}
+          line={look.line}
+          glow={look.glow}
           selected={selected}
           noAnswerMessage={noAnswerFor === item.id ? VSCODE_NO_ANSWER_MESSAGE : null}
           onOpen={() => onOpenFile(item)}
@@ -832,5 +1051,208 @@ function SurfaceItem({
         })()
       )}
     </div>
+  );
+}
+
+/**
+ * The moment a desk switch slides, so windows can ride it with the plates
+ * (the owner, Nov 2026: the background slid while apps popped in and out).
+ *
+ * Windows are stable siblings of the plates, not their children, so moving a
+ * window between desks never remounts its app. They therefore cannot inherit
+ * the plates' transform; each gets the same motion as a short keyframe of its
+ * own instead (`.os-window[data-slide]`), never a transform at rest, which
+ * would make the window a containing block for fixed content inside apps.
+ *
+ * `dx` is how far the plates travel: the index change times the desk's width.
+ * The desk being left stays drawn, inert, for one --os-duration-med; reduced
+ * motion sets that token to 0ms, and then nothing slides. A desk removed by
+ * the switch's own cleanup has no windows to draw, so it needs no case.
+ */
+function useDeskSlide(
+  activeIndex: number,
+  activeDeskId: string,
+  desks: readonly { id: string }[],
+  desktopRef: React.RefObject<HTMLDivElement | null>,
+): { slide: { fromDeskId: string; dx: number; travel: number } | null; travel: number } {
+  const [slide, setSlide] = useState<{ fromDeskId: string; dx: number; travel: number } | null>(null);
+  const last = useRef({ index: activeIndex, deskId: activeDeskId, desks });
+  // An empty desk deletes itself as you leave it (desks.ts gcAutoDesks), and
+  // every desk after it moves up one place in the same update. Measure the
+  // switch on the strip as it stood, or leaving it rightward crosses 0 desks
+  // and jumps. The plates move by the new index, so there they stay put
+  // while the arriving windows slide in.
+  const targetOf = (from: typeof last.current) => {
+    const was = from.desks.findIndex(d => d.id === activeDeskId);
+    return was < 0 ? activeIndex : was;
+  };
+  // CONSTANT SPEED (Jesús, Nov 2026): a switch takes one --os-duration-med per
+  // desk it crosses, so desk 1 to 4 moves at the same speed as 1 to 2. Read in
+  // render, before the plates' transform changes, because a running CSS
+  // transition keeps the duration it started with; the windows' slide carries
+  // the same number in its state.
+  const travel = slide?.travel ?? Math.max(1, Math.abs(targetOf(last.current) - last.current.index));
+  useLayoutEffect(() => {
+    const from = last.current;
+    last.current = { index: activeIndex, deskId: activeDeskId, desks };
+    if (from.deskId === activeDeskId) return;
+    const to = targetOf(from);
+    const ms = cssTimeMs(getComputedStyle(document.documentElement).getPropertyValue("--os-duration-med"));
+    const width = desktopRef.current?.clientWidth ?? 0;
+    if (ms <= 0 || from.index === to) {
+      setSlide(null);
+      return;
+    }
+    const crossed = Math.abs(to - from.index);
+    setSlide({ fromDeskId: from.deskId, dx: (to - from.index) * width, travel: crossed });
+    const timer = setTimeout(() => setSlide(null), ms * crossed);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeIndex, activeDeskId, desktopRef]);
+  // Desks added or moved without a switch (a window sent to a new desk) count
+  // at the next one: keep the strip current after every commit.
+  useLayoutEffect(() => { last.current.desks = desks; });
+  return { slide, travel };
+}
+
+/** A CSS time token in milliseconds. Themes write it either way (Graphite's
+ * ".26s", the base tokens' "260ms"); a bare parseFloat read ".26s" as 0.26ms,
+ * so the windows' slide ended at once while the plates slid (Jesús, Nov 2026). */
+function cssTimeMs(value: string): number {
+  const n = parseFloat(value);
+  if (!Number.isFinite(n)) return 0;
+  return value.trim().endsWith("ms") ? n : n * 1000;
+}
+
+// ---- a file dragged out of Files onto the desk ----
+//
+// José asked for it on the Nov 19 call; Jesús picked the look (Draft A, Nov 20
+// 2026). A Files tile is already a shell draggable (`artifact:`, for the Bin).
+// Let go over the VISIBLE desk -- not over a window, not over the dock -- and
+// the file becomes a desk shortcut at that cell: the same act as "Send to
+// desktop", never a copy, the file stays in the Library once. A file that
+// already has an icon on this desk moves that icon there instead of getting a
+// second one. While it travels, a see-through copy of the tile follows the
+// pointer and a dashed spot marks the cell it will land on; letting go over a
+// window, or Escape, does nothing.
+
+const FILE_DRAG_PREFIXES = ["artifact:"] as const;
+
+/** What a Files tile carries: the Bin's fields, plus the desk shortcut. */
+export interface DeskFileDrag extends BinDropPayload {
+  desk?: { entry: Omit<FileEntry, "id">; glyph: string };
+}
+
+function pointerOf(event: DragMoveEvent | DragEndEvent): { x: number; y: number } | null {
+  const activator = event.activatorEvent as PointerEvent | undefined;
+  if (!activator || typeof activator.clientX !== "number") return null;
+  return { x: activator.clientX + event.delta.x, y: activator.clientY + event.delta.y };
+}
+
+function DeskFileDrop() {
+  const { state, actions, grid } = useOs();
+  const [ghost, setGhost] = useState<{ name: string; glyph: string } | null>(null);
+  const [landing, setLanding] = useState<{ pos: GridPos; plate: HTMLElement } | null>(null);
+
+  // The active desk's cell under the pointer, or null when anything but the
+  // bare desk (or an icon or widget on it) is there. `hidden` are the cells a
+  // window or the dock covers: an icon placed there would land out of sight.
+  const deskCellAt = (x: number, y: number) => {
+    const plate = document.querySelector<HTMLElement>(`[data-os-desk="${CSS.escape(state.shell.activeDeskId)}"]`);
+    const hit = document.elementsFromPoint(x, y).find((el) => !el.closest(".os-desk-ghost"));
+    if (!plate || !hit || !plate.contains(hit) || hit.closest(".os-window")) return null;
+    // Screen pixels throughout (pointer, plate, covers); the grid's CSS
+    // pixels are multiplied by the desktop's scale to meet them.
+    const s = osScale();
+    const rect = plate.getBoundingClientRect();
+    const covers = [...document.querySelectorAll(".os-window, [data-os-dock]")].map((el) => el.getBoundingClientRect());
+    const hidden: GridPos[] = [];
+    for (let col = 0; col < grid.cols; col += 1) {
+      for (let row = 0; row < grid.rows; row += 1) {
+        // Hidden when a window or the dock covers the cell's MIDDLE: a cell
+        // only clipped at its edge still shows most of the icon. Counting any
+        // overlap left no cell at all beside a default-size window on a
+        // 1440-wide desk (80px margins, 96px cells; found live, Nov 20 2026).
+        const cx = rect.left + (SURFACE_PAD + col * CELL_W + CELL_W / 2) * s;
+        const cy = rect.top + (SURFACE_PAD + row * CELL_H + CELL_H / 2) * s;
+        if (covers.some((c) => c.width > 0 && cx > c.left && cx < c.right && cy > c.top && cy < c.bottom)) {
+          hidden.push({ col, row });
+        }
+      }
+    }
+    return { plate, hidden, cell: cellAt(x - rect.left, y - rect.top, grid) };
+  };
+
+  // Where the icon would land: the very function the drop runs, so the spot
+  // and the result cannot disagree (an occupied or covered cell yields to the
+  // nearest free one in view; a file already here shows its own icon's new
+  // place).
+  const landingAt = (drag: DeskFileDrag | undefined, x: number, y: number) => {
+    const at = drag?.desk ? deskCellAt(x, y) : null;
+    if (!at || !drag?.desk) return null;
+    const surface = state.surfaces[state.shell.activeDeskId] ?? emptySurface();
+    const landed = placeFileAt(surface, { id: "landing", ...drag.desk.entry }, at.cell, grid, at.hidden);
+    const pos = landed?.surface.positions[landed.itemId];
+    return pos ? { pos, plate: at.plate, cell: at.cell, hidden: at.hidden } : null;
+  };
+  const latest = useRef(landingAt);
+  latest.current = landingAt;
+
+  const clear = () => {
+    setGhost(null);
+    setLanding(null);
+  };
+
+  useShellDragClaim(FILE_DRAG_PREFIXES, {
+    onDragStart: (event: DragStartEvent) => {
+      const drag = event.active.data.current as DeskFileDrag | undefined;
+      setGhost(drag?.desk ? { name: drag.name, glyph: drag.desk.glyph } : null);
+    },
+    onDragEnd: (event: DragEndEvent) => {
+      clear();
+      // The Bin owns a drop on itself.
+      if (event.over && String(event.over.id) === BIN_DROPPABLE_ID) return;
+      const drag = event.active.data.current as DeskFileDrag | undefined;
+      const at = pointerOf(event);
+      const land = at ? landingAt(drag, at.x, at.y) : null;
+      if (land && drag?.desk) actions.dropFileOnDesk(drag.desk.entry, land.cell, land.hidden);
+    },
+  });
+
+  useDndMonitor(
+    useMemo(
+      () => ({
+        onDragMove: (event: DragMoveEvent) => {
+          if (!String(event.active.id).startsWith("artifact:")) return;
+          const at = pointerOf(event);
+          const next = at ? latest.current(event.active.data.current as DeskFileDrag | undefined, at.x, at.y) : null;
+          setLanding((prev) =>
+            prev?.plate === next?.plate && prev?.pos.col === next?.pos.col && prev?.pos.row === next?.pos.row
+              ? prev
+              : next && { pos: next.pos, plate: next.plate },
+          );
+        },
+        onDragCancel: () => clear(),
+      }),
+      [],
+    ),
+  );
+
+  return (
+    <>
+      {/* dnd-kit places the overlay in screen pixels (the tile's measured box),
+          so it is un-zoomed and the tile inside zoomed back to the desk's size. */}
+      <DragOverlay dropAnimation={null} className="os-desk-ghost" style={{ zoom: 1 / osScale() }}>
+        {ghost ? (
+          <div className="os-files-tile" style={{ zoom: osScale() }}>
+            <span className="os-files-tile-icon">
+              <FileGlyph label={ghost.glyph} />
+            </span>
+            <span className="os-files-tile-name">{ghost.name}</span>
+          </div>
+        ) : null}
+      </DragOverlay>
+      {landing ? createPortal(<div className="os-desk-landing" style={cellToPx(landing.pos)} aria-hidden />, landing.plate) : null}
+    </>
   );
 }

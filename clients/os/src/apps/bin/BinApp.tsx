@@ -206,25 +206,21 @@ export function BinApp({
         />
       </Head>
 
-      {/* THE INVARIANT, ON THE PAGE. Not a tooltip and not a settings note:
-          it is the one thing about this surface that differs from every
-          trash can the reader has used, and a person who never opens
-          settings still has to know it. */}
-      <p className="os-bin-lede">
-        Nothing here has been deleted. Archived items keep their bytes, their whole version history
-        and everywhere they came from, and stay until you restore them.
-      </p>
+      {/* No lede and no note under the list (Nov 20 2026 call: Jesús, "I
+          don't like these descriptions on stuff ... the worst offender of it
+          is the bin"; José, "we can slim down a lot on this"). The empty
+          state still says what the Bin keeps. */}
 
       <div className="os-bin-body">
         <div className="os-bin-list">
           <LiveList<BinItem>
             source={list}
-            label="Archived items"
+            label="Deleted items"
             rowId={(item) => item.id}
             fingerprint={binFingerprint}
             emptyText={
               search.trim() === ""
-                ? "The Bin is empty. Archiving a file from Files sends it here -- it keeps its bytes and its history, and waits for you."
+                ? "The Bin is empty. A file you delete in Files comes here -- it keeps its bytes and its history, and waits for you."
                 : "Nothing in the Bin matches that."
             }
             renderRow={(item) => (
@@ -244,10 +240,6 @@ export function BinApp({
             )}
           />
           <LoadMore feed={pagination} />
-          <Caption>
-            Newest first -- an archive re-writes the row, so for most items this is the order they
-            were archived in.
-          </Caption>
         </div>
 
         {selected === null ? null : (
@@ -258,7 +250,7 @@ export function BinApp({
             presence={presence}
             restoring={restoring === selected.id}
             restoreError={restoreError}
-            onRestore={() => void restore(selected)}
+            onRestore={() => restore(selected)}
             onClose={() => setSelectedId("")}
           />
         )}
@@ -338,12 +330,12 @@ function BinSettingsSection({
       <Head title="Bin settings" />
       <Panel label="Bin settings">
         <fieldset className="os-field-group">
-          <legend>Archiving</legend>
+          <legend>Deleting</legend>
           <Check
             checked={settings.confirmBeforeArchive}
             onChange={(confirmBeforeArchive) => update({ confirmBeforeArchive })}
           >
-            Ask before archiving
+            Ask before deleting
           </Check>
           <p className="os-caption">
             The same setting the Files app carries, not a second copy of it -- changing it here
@@ -360,20 +352,20 @@ function BinSettingsSection({
           <legend>How long things stay</legend>
           <p className="os-caption">
             Indefinitely. There is no automatic cleanup, no expiry and no size limit on the Bin:
-            archived items accumulate and are kept until you do something about them. Restoring an
+            deleted items accumulate and are kept until you do something about them. Restoring an
             item puts it back; nothing in this product removes one for you.
           </p>
         </fieldset>
 
         <p className="os-caption">
-          Archiving is never a delete. An archived item is a new version of the same row carrying
+          Deleting a file never erases it. A deleted item is a new version of the same row carrying
           "archived", so its bytes, its earlier versions and its provenance all survive it --
           which is also why restoring is simply the opposite flag rather than a rebuild.
         </p>
       </Panel>
       <Caption>
         Defaults: {DEFAULT_FILES_SETTINGS.confirmBeforeArchive ? "ask" : "do not ask"} before
-        archiving.
+        deleting.
       </Caption>
     </div>
   );

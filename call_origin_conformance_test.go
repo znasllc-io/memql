@@ -728,6 +728,14 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		"component/server/libraryfile":      "library file create store -- REQUEST-DERIVED; preconditions (stamp is required by @serverOnly, dies inside one call, no write names an owner or status, and blobUrl must be under the actor's own library/{owner}/ prefix before the stamp is applied) asserted by component/server/libraryfile/store_internal_origin_test.go",
 		"integrations/library/reviewstore":  "document feedback store -- REQUEST-DERIVED; library first admits the current artifact AND backing document under the original caller. Comment storage and version receipts borrow that verified document owner; one fixed artifact-scoped server-only approval read uses the system actor so collaborators cannot erase applied history. Revision and author are checked under the shared document lock. Cross-replica and access-denial tests in integrations/library/review_remove_test.go and review_replica_test.go",
 		"integrations/library/versionstore": "document version store -- REQUEST-DERIVED; original caller ownership reads stay outside the package, the two writes are serverOnly and accept no owner; preconditions in integrations/library/versionstore/store_test.go",
+		// File sharing (2026-11-18): v1:library:share and shareNotice are
+		// @serverWritten, so their four writes need the stamp. Every decision
+		// is made first in integrations/library/share.go under the original
+		// caller: the sharer is a person who owns the file, the recipient is
+		// one libraryShareDirectory offers them, the lifetime is one of four,
+		// and a share being ended was read back as the caller's (internal
+		// origin skips the write guard's owner check on an update).
+		"integrations/library/sharestore": "file sharing store -- REQUEST-DERIVED; share.go decides each act under the original caller first (owns the file, recipient offered by the directory, one of four lifetimes, a share being ended read back as the caller's); only the four serverOnly sharing writes are admitted, none names an owner, the stamp dies in one Execute; preconditions in integrations/library/sharestore/store_test.go, acts across ranks in integrations/library/share_db_test.go",
 		// THE AUDIT WRITERS (memql#5624). v1:identity:auditEvent is a
 		// cluster-owner-tier concept, and its create now admits a cluster
 		// owner or server code and nobody else. Each of these packages records

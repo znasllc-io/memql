@@ -40,15 +40,16 @@ describe("what the link says", () => {
     // ever looked at.
     h.connection = fakeConnection({
       backups: [watchedFolderRow({ id: "w-1", localPath: "/Users/ana/Clients" })],
-      machines: [{ id: "wkr-1", name: "laptop", capabilities: ["HEADLESS"] } as never],
+      machines: [{ id: "wkr-1", name: "laptop", capabilities: ["HEADLESS"], connectedNodeId: "bff-1" } as never],
     });
     await renderFiles({ section: "backups" });
 
     expect(toneOf()).toBe("waiting");
-    expect(screen.getByText("Waiting for this machine")).toBeTruthy();
+    expect(screen.getByText("Waiting")).toBeTruthy();
     expect(screen.getByText(/no report yet/)).toBeTruthy();
     // The count is not invented either: nothing has counted the origin.
-    expect(screen.getByText(/not counted yet/)).toBeTruthy();
+    expect(screen.queryByText(/\d+ files?\b/)).toBeNull();
+    expect(screen.queryByText("Up to date")).toBeNull();
   });
 
   it("carries the state in its accessible name, so colour is never the only carrier", async () => {
@@ -62,13 +63,12 @@ describe("what the link says", () => {
           bytesSeen: 0,
         }),
       ],
-      machines: [{ id: "wkr-1", name: "laptop", capabilities: ["HEADLESS"] } as never],
+      machines: [{ id: "wkr-1", name: "laptop", capabilities: ["HEADLESS"], connectedNodeId: "bff-1" } as never],
     });
     await renderFiles({ section: "backups" });
 
     expect(toneOf()).toBe("refused");
-    const link = screen.getByRole("img", { name: /This machine said no/ });
-    expect(link).toBeTruthy();
+    expect(screen.getByText("This machine said no")).toBeTruthy();
     // And the repair is named, in the place the person is already looking.
     expect(screen.getByText(/policy\.yaml/)).toBeTruthy();
   });
@@ -128,14 +128,13 @@ describe("what the link says", () => {
           linkState: "origin_gone",
         }),
       ],
-      machines: [{ id: "wkr-1", name: "laptop", capabilities: ["HEADLESS"] } as never],
+      machines: [{ id: "wkr-1", name: "laptop", capabilities: ["HEADLESS"], connectedNodeId: "bff-1" } as never],
     });
     await renderFiles({ section: "backups" });
 
     expect(toneOf()).toBe("settled");
-    expect(screen.getByText("Backed up")).toBeTruthy();
-    // One file here, not two -- the arrived count is the backup's own.
-    expect(screen.getByText("1 file here")).toBeTruthy();
+    expect(screen.getByText("Up to date")).toBeTruthy();
+    expect(screen.getByText(/laptop · every 5 min · checked .* · 1 file$/)).toBeTruthy();
   });
 });
 
@@ -236,11 +235,23 @@ describe("pausing", () => {
 });
 
 describe("the empty state", () => {
-  it("invites the person to act rather than reporting an absence", async () => {
+  it("is just the title and the button: no absence sentence, no storage figures", async () => {
     h.connection = fakeConnection({ backups: [] });
     await renderFiles({ section: "backups" });
-    expect(screen.getByText(/No folder syncs yet/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Add backup" })).toBeTruthy();
+    expect(screen.queryByText(/No folders are backed up yet/)).toBeNull();
+    expect(screen.queryByText(/stored|reserved|available/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Back up a folder" })).toBeTruthy();
+  });
+});
+
+describe("adding a backup", () => {
+  it("keeps the explanations behind the help button, not on the steps", async () => {
+    h.connection = fakeConnection({ backups: [] });
+    await renderFiles({ section: "backups" });
+    fireEvent.click(screen.getByRole("button", { name: "Back up a folder" }));
+    expect(await screen.findByRole("combobox", { name: "Backup type" })).toBeTruthy();
+    expect(screen.queryByText(/Enter the full path on a paired machine/)).toBeNull();
+    expect(screen.queryByText(/The folder stays in sync/)).toBeNull();
   });
 });
 
@@ -322,7 +333,7 @@ describe("folder backup schedule",()=>{
  it("creates a scheduled directory backup and refuses an invalid interval",async()=>{
   const connection=fakeConnection({machines:[{id:"wkr-1",name:"laptop",capabilities:["HEADLESS"]} as never]}); h.connection=connection;
   await renderFiles({section:"backups"});
-  await click(screen.getByRole("button",{name:"Add backup"}));
+  await click(screen.getByRole("button",{name:"Back up a folder"}));
   fireEvent.change(screen.getByLabelText("Folder on that machine"),{target:{value:"/Users/ana/Reports"}});
   await readTheBar();
   await click(screen.getByRole("button",{name:"Continue"}));
@@ -337,6 +348,29 @@ describe("folder backup schedule",()=>{
   expect(connection.callsNamed("createLibraryWatchedFolder")[0]).toContain('mode: "sync"');
   expect(connection.callsNamed("createLibraryWatchedFolder")[0]).toContain('includeHidden: true');
   expect(connection.callsNamed("createLibraryWatchedFolder")[0]).toContain('localPath: "/Users/ana/Reports"');
-  expect(screen.getByRole("button",{name:"Add backup"})).toBeTruthy();
+  expect(screen.getByRole("button",{name:"Back up a folder"})).toBeTruthy();
  });
+});
+
+describe("the Downloads tab owns the transfers", () => {
+  const transfer = { id: "backup-001", workerId: "wkr-1", path: "/backup.zip", name: "backup.zip", kind: "archive", size: 12, committedBytes: 4, sha256: "a".repeat(64), state: "uploading", desiredState: "running", etag: "etag", failure: "", metadata: {} };
+  const machines = [{ id: "wkr-1", name: "laptop", capabilities: ["HEADLESS"], connectedNodeId: "bff-1" } as never];
+
+  it("lists only the backed-up folders under Backups", async () => {
+    h.connection = fakeConnection({ backups: [watchedFolderRow({ id: "w-1", localPath: "/Users/ana/Clients" })], machines, transfers: [transfer as never] });
+    await renderFiles({ section: "backups" });
+    expect(screen.getByText("/Users/ana/Clients")).toBeTruthy();
+    expect(screen.queryByText("backup.zip")).toBeNull();
+    expect(screen.queryByText("Transfers and downloads")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Search transfers" })).toBeNull();
+  });
+
+  it("lists every transfer under Downloads", async () => {
+    h.connection = fakeConnection({ machines, transfers: [transfer as never] });
+    await renderFiles({ section: "downloads" });
+    expect(screen.queryByRole("heading", { name: "Downloads" })).toBeNull(); // no repeated big title: the trail row names the place (Jesús, Nov 23)
+    expect(await screen.findByText("backup.zip")).toBeTruthy();
+    expect(await screen.findByText(/Backup from laptop · Uploading/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Search transfers" })).toBeTruthy();
+  });
 });

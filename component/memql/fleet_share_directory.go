@@ -75,9 +75,12 @@ type shareEntry struct {
 // group by bare id so a stored subject can still be NAMED after it stops
 // being offered.
 type shareDirectory struct {
-	everyone      bool
-	people        []shareEntry
-	groups        []shareEntry
+	everyone bool
+	people   []shareEntry
+	groups   []shareEntry
+	// members holds, per OFFERED group, its active people other than the
+	// caller: who a Library share with that group reaches.
+	members       map[string][]shareEntry
 	offeredPeople map[string]struct{}
 	offeredGroups map[string]struct{}
 	knownPeople   map[string]shareEntry
@@ -121,13 +124,24 @@ func (e *MemQLEngine) actorSeesEveryone(ctx context.Context) bool {
 }
 
 // shareDirectoryFor builds the caller's directory.
-func (e *MemQLEngine) shareDirectoryFor(ctx context.Context) (shareDirectory, error) {
+//
+// accountGroupsOnly narrows the co-member half to groups of kind `account` --
+// the caller's ORGANIZATION -- and adds the cluster's staff (the block at the
+// end), which is the Library's rule for sharing a file
+// (library_share_directory.go). Fleet lends a machine to anybody the owner
+// shares any active group with, custom groups included, and passes false. The
+// `everyone` half is the same for both: `read principal` already sees everyone,
+// and every active group, custom ones included -- a custom group can cross
+// organizations, which is why a member is not offered one, but it holds nobody
+// a caller who sees everyone could not already pick by name.
+func (e *MemQLEngine) shareDirectoryFor(ctx context.Context, accountGroupsOnly bool) (shareDirectory, error) {
 	dir := shareDirectory{
 		everyone:      e.actorSeesEveryone(ctx),
 		offeredPeople: map[string]struct{}{},
 		offeredGroups: map[string]struct{}{},
 		knownPeople:   map[string]shareEntry{},
 		knownGroups:   map[string]shareEntry{},
+		members:       map[string][]shareEntry{},
 	}
 	caller := BareShortId(strings.TrimSpace(actingUserFromContext(ctx)))
 	if caller == "" {
@@ -144,6 +158,10 @@ func (e *MemQLEngine) shareDirectoryFor(ctx context.Context) (shareDirectory, er
 	type person struct {
 		entry  shareEntry
 		active bool
+		// staff: a cluster-wide (not account-scoped) role at admin rank or
+		// above -- the people the account tier already counts as standing
+		// members of every account (rowauthz_account.go, design D6).
+		staff bool
 	}
 	people := map[string]person{}
 	activeGroups := map[string]shareEntry{}
@@ -164,7 +182,8 @@ func (e *MemQLEngine) shareDirectoryFor(ctx context.Context) (shareDirectory, er
 				entry.Detail = email
 			}
 			active := payload["active"] == true && strings.TrimSpace(stringFromAny(payload["suspendedAt"])) == ""
-			people[id] = person{entry: entry, active: active}
+			staff := auth.IsClusterOperator(auth.Role(strings.TrimSpace(stringFromAny(payload["role"]))))
+			people[id] = person{entry: entry, active: active, staff: staff}
 			dir.knownPeople[id] = entry
 		case conceptIdentityGroup:
 			entry := shareEntry{Id: id, Name: strings.TrimSpace(stringFromAny(payload["name"]))}
@@ -172,7 +191,8 @@ func (e *MemQLEngine) shareDirectoryFor(ctx context.Context) (shareDirectory, er
 				entry.Name = "Unnamed group"
 			}
 			dir.knownGroups[id] = entry
-			if strings.TrimSpace(stringFromAny(payload["status"])) == "active" {
+			if strings.TrimSpace(stringFromAny(payload["status"])) == "active" &&
+				(!accountGroupsOnly || dir.everyone || strings.TrimSpace(stringFromAny(payload["kind"])) == "account") {
 				activeGroups[id] = entry
 			}
 		case conceptIdentityGroupMembership:
@@ -222,6 +242,17 @@ func (e *MemQLEngine) shareDirectoryFor(ctx context.Context) (shareDirectory, er
 		entry.Members = countActive(group)
 		dir.offeredGroups[group] = struct{}{}
 		dir.groups = append(dir.groups, entry)
+		seen := map[string]struct{}{}
+		for _, user := range members[group] {
+			if _, dup := seen[user]; dup {
+				continue
+			}
+			seen[user] = struct{}{}
+			if p := people[user]; p.active && user != caller {
+				dir.members[group] = append(dir.members[group], p.entry)
+			}
+		}
+		sortShareEntries(dir.members[group])
 	}
 
 	if dir.everyone {
@@ -252,6 +283,27 @@ func (e *MemQLEngine) shareDirectoryFor(ctx context.Context) (shareDirectory, er
 		}
 	}
 
+	// THE PRIMARY ACCOUNT'S STAFF, for a Library share (Jesús, Nov 22 2026).
+	// A client's person is in their own organization's group and nobody else's,
+	// so without this they could receive files from ZNAS but never send one
+	// back. The engine already treats the cluster's staff as standing members
+	// of every account, as a RULE rather than membership rows (design D6,
+	// rowauthz_account.go): rows drift, and nobody can place an owner in a
+	// group by hand (a target must rank strictly below whoever adds them).
+	// José's picture on the Nov 20 call is the same one: the primary account
+	// is the outer bubble every client account sits inside. So a Library
+	// share also offers every active staff person, by name only. Only people:
+	// a group share still reaches the group's real members (dir.members), and
+	// Fleet's machine lending and API-key lending (accountGroupsOnly false)
+	// are unchanged.
+	if accountGroupsOnly && !dir.everyone {
+		for user, p := range people {
+			if p.staff {
+				offerPerson(user)
+			}
+		}
+	}
+
 	sortShareEntries(dir.people)
 	sortShareEntries(dir.groups)
 	return dir, nil
@@ -261,7 +313,7 @@ func (e *MemQLEngine) shareDirectoryFor(ctx context.Context) (shareDirectory, er
 // then first and last, then a placeholder -- never their email, which a plain
 // user is not entitled to read.
 func sharePersonName(payload map[string]any) string {
-	if name := strings.TrimSpace(stringFromAny(payload["displayName"])); name != "" {
+	if name := NameWithoutEmail(stringFromAny(payload["displayName"])); name != "" {
 		return name
 	}
 	first := strings.TrimSpace(stringFromAny(payload["firstName"]))
@@ -270,6 +322,21 @@ func sharePersonName(payload map[string]any) string {
 		return full
 	}
 	return "Unnamed person"
+}
+
+// NameWithoutEmail keeps an email address out of a name shown to another
+// person. Someone who joined by invitation starts with their email as their
+// display name, so the share directory offered "ana@example.com" to people
+// who may not read emails; a name that IS an address (no spaces, one "@" past
+// the first character) becomes the part before the "@" (Jesús, Nov 18 2026).
+// Any other name, and the empty name, pass through trimmed.
+func NameWithoutEmail(name string) string {
+	name = strings.TrimSpace(name)
+	at := strings.IndexByte(name, '@')
+	if at <= 0 || strings.ContainsAny(name, " \t") || strings.Count(name, "@") != 1 {
+		return name
+	}
+	return name[:at]
 }
 
 func sortShareEntries(entries []shareEntry) {
@@ -331,7 +398,7 @@ func (e *MemQLEngine) evaluateFleetShareDirectoryExpression(ctx context.Context,
 		return nil, err
 	}
 	machine = machine.forSharingResource(resource)
-	dir, err := e.shareDirectoryFor(ctx)
+	dir, err := e.shareDirectoryFor(ctx, false)
 	if err != nil {
 		return nil, err
 	}

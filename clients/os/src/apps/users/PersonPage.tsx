@@ -17,7 +17,6 @@ import {
   PeerRowReadOnly,
   Subhead,
   formatFreshness,
-  formatMoment,
   roleRungOf,
   useNow,
 } from "../../kit";
@@ -27,7 +26,7 @@ import type { AccountRow } from "../accounts/rows";
 import { accountName } from "../accounts/rows";
 import type { AssignContext } from "./assign";
 import { ladderSentence, rungRefusal } from "./assign";
-import type { UsersActions } from "./actions";
+import { membershipKey, type UsersActions } from "./actions";
 import { GroupPicker, RoleLadderPicker } from "./pickers";
 import {
   membershipFromRow,
@@ -288,7 +287,7 @@ export function PersonPage({
                     accounts={accounts}
                     people={people}
                     onRemove={() => void actions.groupMemberRemove(membership.groupId, person.id)}
-                    busy={actions.busyKey === person.id}
+                    busy={actions.busyKey === membershipKey(membership.groupId, person.id)}
                     removable={governable && canManageGroups}
                   />
                 )}
@@ -334,7 +333,6 @@ export function PersonPage({
           <Facts>
             <Fact label="Signs in with" value={person.signInPolicy === "passkey_only" ? "A passkey only" : "A link or a passkey"} />
             <Fact label="Last seen" value={formatFreshness(person.lastSeenAt, now)} title={person.lastSeenAt || undefined} />
-            <Fact label="Joined" value={formatMoment(person.createdAt)} />
             {person.sharedMailbox ? <Fact label="Mailbox" value={<Chip>shared</Chip>} /> : null}
           </Facts>
 

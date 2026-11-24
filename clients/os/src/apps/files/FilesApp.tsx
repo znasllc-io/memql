@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Concepts, newShortId, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { Concepts, newShortId, rowNumber, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useEdgeUploadProvider } from "../../items/useEdgeUploadProvider";
 import type { UploadProvider } from "../../items/upload";
@@ -7,9 +7,13 @@ import { Button, Check, ContentSkeleton, Head, Notice, Panel, SetupGroup } from 
 import { useOsConnection } from "../../live/connection";
 import { useLiveView } from "../../live/liveView";
 import { useOs } from "../../chrome/state";
+import { useMachines } from "../../live/machines";
+import { machineFromRow, isRevoked, type MachineRow } from "../fleet/rows";
 import { AppLogsSection } from "../../logs/AppLogsSection";
 import type { OsAppProps } from "../../system/registry";
+import { ArchiveTransfers, DownloadSetup } from "./backups/ArchiveTransfers";
 import { BackupsSection } from "./backups/BackupsSection";
+import type { BackupTransfer } from "./backups/transfers";
 import { backupFromRow, type BackupRow } from "./backups/rows";
 import { useBackupsFeed } from "./backups/useBackups";
 import { BrowseSection, type DeskFolderShortcut } from "./BrowseSection";
@@ -35,7 +39,7 @@ import {
   type FilesSettings,
   type FilesSettingsStore, FILES_REQUIRES, FILES_WANTS } from "./settings";
 import { useLibraryFeeds } from "./useLibrary";
-import { useUploadTasks } from "./useUploadTasks";
+import { useUploadTasks, type UploadTask } from "./useUploadTasks";
 import { useFileDestination } from "./useFileDestination";
 import { useSession } from "../../chrome/access";
 import { readEditorPreference, saveEditorPreference, type EditorPreference } from "../../items/editorPreference";
@@ -108,10 +112,17 @@ export function FilesApp({
     [connection],
   );
   const { tasks, uploadFiles, uploadTree } = useUploadTasks(provider, createFolder);
+  // Browse shows a placeholder only until the landed row arrives; Downloads keeps them all.
+  const placeholderTasks = useMemo(() => tasks.filter((task) => !task.settled), [tasks]);
+  // Bumped when Backups starts an archive or Downloads starts a download, so
+  // the Downloads list re-reads on its next mount instead of showing its
+  // cached page (ArchiveTransfers reseeds when this differs from 0 on mount).
+  const [transferRefresh, setTransferRefresh] = useState(0);
+  const [downloading, setDownloading] = useState<BackupTransfer | null>(null);
 
   const [filter, setFilter] = useState<FilesFilter>(() => ({
     ...DEFAULT_FILTER,
-    sortAscending: settings.defaultSort === "oldest",
+    sort: settings.defaultSort,
   }));
   const [selectedId, setSelectedId] = useState("");
   // ===========================================================================
@@ -154,7 +165,7 @@ export function FilesApp({
   }, [osState.shell.desks, osState.surfaces]);
 
   const { artifacts, folders, files, compositions, counts, labels, facetsError, effectiveFilter } = useLibraryFeeds(
-    filter, desk.membership, sectionId !== "settings" && sectionId !== "logs" && sectionId !== "backups", sectionId === "backups",
+    filter, desk.membership, sectionId !== "settings" && sectionId !== "logs" && sectionId !== "backups" && sectionId !== "downloads", sectionId === "backups",
   );
 
   // Loaded directory pages only. Exact counts/facets and archive membership
@@ -182,7 +193,7 @@ export function FilesApp({
       const place = artifact.archived ? "bin" : "library";
       setFilter((f) => ({
         ...DEFAULT_FILTER,
-        sortAscending: f.sortAscending,
+        sort: f.sort,
         place,
         folderId: artifact.folderId,
       }));
@@ -243,7 +254,11 @@ export function FilesApp({
     // files that have been in the Library for weeks.
     filter.label,
     filter.search,
-    filter.sortAscending ? "asc" : "desc",
+    filter.type,
+    filter.added,
+    filter.sort,
+    // Size reads each file's bytes off the files feed, which lands after the list.
+    filter.sort === "size" ? `s:${files.snapshot.version}` : "",
     filter.place === "desktop" ? deskKey : "",
     // A COMPOSITION LANDING REVEALS ROWS THE BROWSER ALREADY HELD, exactly as
     // a desk shortcut does, so the reading changes without the filter
@@ -251,12 +266,17 @@ export function FilesApp({
     // cue for files that have been sitting in the Library for weeks.
     filter.place === "materializer" ? `m:${materialized.size}` : "",
   ].join("|");
+  const sizes = useMemo(
+    () => new Map(files.snapshot.rows.map((row) => [rowString(row, "id"), rowNumber(row, "size")])),
+    [files.snapshot],
+  );
   const list = useLiveView<Row, ArtifactRow>(artifacts.source, `files:list:${filterKey}`, (rows) =>
     applyFilters(
       rows.map(artifactFromRow).filter((r) => r.id !== ""),
       effectiveFilter,
       desk.membership,
       materialized,
+      (row) => (row.kind === "file" ? sizes.get(row.sourceConceptRef.split(":").pop() ?? "") : undefined),
     ),
   );
 
@@ -319,7 +339,7 @@ export function FilesApp({
     // moment "starts" is re-read.
     setFilter((f) => ({
       ...f,
-      sortAscending: next.defaultSort === "oldest",
+      sort: next.defaultSort,
     }));
   }
 
@@ -342,6 +362,18 @@ export function FilesApp({
         folders={folders.snapshot.rows}
         files={files.snapshot.rows}
         source={backups}
+        onTransferStarted={() => setTransferRefresh((n) => n + 1)}
+      />
+    );
+  }
+  if (sectionId === "downloads") {
+    return (
+      <DownloadsSection
+        tasks={tasks}
+        refresh={transferRefresh}
+        downloading={downloading}
+        setDownloading={setDownloading}
+        onStarted={() => { setDownloading(null); setTransferRefresh((n) => n + 1); }}
       />
     );
   }
@@ -388,10 +420,33 @@ export function FilesApp({
       onSelect={id => { clearDestination(); setSelectedId(id); }}
       confirmBeforeArchive={settings.confirmBeforeArchive}
       askAbout={askAbout}
-      tasks={tasks}
+      tasks={placeholderTasks}
       uploadFiles={uploadFiles}
       uploadTree={uploadTree}
     />
+  );
+}
+
+/** Downloads: every transfer, one row each (owner's pick 1A). The machines
+ *  feed names where a backup came from and where a download is saved. */
+function DownloadsSection({ tasks, refresh, downloading, setDownloading, onStarted }: {
+  tasks: readonly UploadTask[];
+  refresh: number;
+  downloading: BackupTransfer | null;
+  setDownloading: (job: BackupTransfer | null) => void;
+  onStarted: () => void;
+}) {
+  const { collection } = useMachines();
+  const machines = useLiveView<Row, MachineRow>(collection, "downloads:machines", (rows) =>
+    rows.map(machineFromRow).filter((machine) => machine.id !== "" && !isRevoked(machine)),
+  );
+  const machineList = machines?.snapshot.rows ?? [];
+  if (downloading) return <DownloadSetup source={downloading} machines={machineList} onCancel={() => setDownloading(null)} onStarted={onStarted} />;
+  return (
+    <section className="os-app-section" aria-label="Downloads">
+      <Head title="Downloads" hideTitle />
+      <ArchiveTransfers machines={machineList} refresh={refresh} onDownload={setDownloading} uploads={tasks} />
+    </section>
   );
 }
 
@@ -447,22 +502,22 @@ function FilesSettingsSection({
             ))}
           </div>
           <p className="os-caption">
-            Where a Files window starts. The sort control in the browse toolbar keeps steering the
+            Where a Files window starts. The Sort menu in the search panel keeps steering the
             window you are in.
           </p>
         </fieldset>
 
         <fieldset className="os-field-group">
-          <legend>Archiving</legend>
+          <legend>Deleting</legend>
           <Check
             checked={settings.confirmBeforeArchive}
             onChange={(confirmBeforeArchive) => update({ confirmBeforeArchive })}
           >
-            Ask before archiving
+            Ask before deleting
           </Check>
           <p className="os-caption">
-            The confirm names what is about to move -- for a folder, the live count of everything
-            inside it. Archiving never deletes: everything archived lives in the Bin -- the
+            The confirm names what is about to go -- for a folder, the live count of everything
+            inside it. A deleted file is never erased: it waits in the Bin -- the
             browse rail's third place, and the app in the dock -- where it can be put back.
           </p>
         </fieldset>

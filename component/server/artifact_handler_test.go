@@ -228,6 +228,12 @@ func (f *fakeLibraryStore) StorageFootprint(_ context.Context) (int64, int64, in
 	return f.fileBytes, f.versionBytes, f.sessionBytes, nil
 }
 
+// SharedFile: this fake shares nothing. The shared path is exercised against a
+// real engine in integrations/library/share_db_test.go.
+func (f *fakeLibraryStore) SharedFile(context.Context, string) (*LibraryArtifactRow, *LibraryFileRow, error) {
+	return nil, nil, nil
+}
+
 func actorUserId(ctx context.Context) string {
 	if ac, ok := auth.AccessFromContext(ctx); ok && ac != nil {
 		return strings.TrimSpace(ac.UserId)

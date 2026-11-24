@@ -1,6 +1,6 @@
 import { parseCall } from "../callArgs";
 import type { ReactNode } from "react";
-import { act, fireEvent, render } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { vi } from "vitest";
 import { QueryClient, Result, SubscriptionManager, type Dispatcher, type QueryCallOptions, type Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -102,8 +102,20 @@ export interface FakeSeed {
   byId?: Record<string, Row>;
   /** The account choices -- what `clientAccountsAll` answers. */
   accounts?: Row[];
+  /** File sharing (useSharing.ts): the people a file can go to
+   *  (libraryShareDirectory), the caller's shares (librarySharesForArtifact
+   *  answers the active ones of the file it names, librarySharing all the
+   *  active ones), and the notices of files shared with the caller
+   *  (librarySharedWithMe). */
+  shareDirectory?: Row[];
+  shares?: Row[];
+  /** What librarySharesOverseen answers: the shares the caller may see and stop. */
+  overseen?: Row[];
+  sharedWithMe?: Row[];
   /** Refusal sentences, keyed by construct name (e.g. archiveArtifact). */
   refuse?: Record<string, string>;
+  /** Calls held unanswered until the promise settles, keyed by construct name. */
+  hold?: Record<string, Promise<unknown>>;
 }
 
 export interface FakeConnection {
@@ -118,6 +130,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
   const stub = {
     executeNamed: vi.fn(async (name: string, call: string, options?: QueryCallOptions) => {
       calls.push(call);
+      await seed.hold?.[name];
       const refusal = seed.refuse?.[name];
       if (refusal !== undefined) throw new Error(refusal);
 
@@ -155,6 +168,14 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         return rowsResult([{ folders: [...folders].map(([folderId, count]) => ({ folderId, count })), labelGroups: rows.map(row => row.labels ?? []) }]);
       }
       if (name === "clientAccountsAll") return rowsResult(seed.accounts ?? []);
+      if (name === "libraryShareDirectory") return rowsResult(seed.shareDirectory ?? []);
+      if (name === "librarySharesForArtifact") return rowsResult((seed.shares ?? []).filter(row => row.artifactId === args.artifactId && !row.revokedAt));
+      if (name === "librarySharing") return rowsResult((seed.shares ?? []).filter(row => !row.revokedAt));
+      if (name === "librarySharesOverseen") return rowsResult((seed.overseen ?? []).filter(row => !row.revokedAt));
+      if (name === "librarySharedWithMe") return rowsResult(seed.sharedWithMe ?? []);
+      if (name === "libraryShareFile") return rowsResult([{ shareId: "share-new", days: args.days, expiresAt: "2026-12-01T00:00:00Z" }]);
+      if (name === "libraryShareStop") return rowsResult([{ shareId: args.shareId, stopped: true }]);
+      if (name === "librarySaveSharedCopy") return rowsResult([{ artifactId: "copy-1", fileId: "copy-1-file" }]);
       if (name === "libraryFilesByIds") return rowsResult((seed.files ?? []).filter(row => (args.fileIds as string[] ?? []).includes(String(row.id))));
       if (name === "compositionOutputIndex") return rowsResult((seed.compositions ?? []).filter(row => args.fileIds == null || (args.fileIds as string[]).includes(String(row.outputFileId))).map(row => ({ id: row.id, ownerUserId: row.ownerUserId, name: row.name, status: row.status, outputFileId: row.outputFileId, format: row.format, archived: row.archived })));
       if (name === "libraryArtifactsInFolders") return page([...(seed.artifacts ?? []), ...(seed.archived ?? [])].filter(row => (args.folderIds as string[] ?? []).includes(String(row.folderId))), 50);
@@ -291,6 +312,8 @@ export async function renderFiles(opts: {
    * app is not there, and present when it is). Defaults to the real one.
    */
   registry?: OsRegistry;
+  /** The signed-in person's role, for the rank-decided surfaces (owner by default). */
+  role?: string;
 } = {}) {
   const frame = (intent: typeof opts.intent) => (
     withSession(
@@ -313,6 +336,7 @@ export async function renderFiles(opts: {
           />
         </MachinesProvider>
       </OsProvider>,
+      opts.role ? { role: opts.role } : {},
     )
   );
   const view = render(frame(opts.intent));
@@ -421,6 +445,37 @@ export function watchedFolderRow(over: Partial<Row> & { id: string }): Row {
   } as Row;
 }
 
+/** One active v1:library:share of the caller's (the sharer's) file. */
+export function shareRow(over: Partial<Row> & { id: string; artifactId: string; recipientUserId: string }): Row {
+  return {
+    ownerUserId: "u-me",
+    recipientDisplayName: over.recipientUserId,
+    days: 7,
+    expiresAt: "2099-01-08T00:00:00Z",
+    revokedAt: "",
+    createdAt: "2026-11-18T12:00:00Z",
+    ...over,
+  };
+}
+
+/** One v1:library:shareNotice: a file somebody shared with the caller. */
+export function noticeRow(over: Partial<Row> & { id: string; artifactId: string }): Row {
+  return {
+    ownerUserId: "u-me",
+    shareId: `share-${over.id}`,
+    sharerUserId: "u-sharer",
+    sharerDisplayName: "Someone",
+    title: `${over.artifactId}.pdf`,
+    mimeType: "application/pdf",
+    format: "pdf",
+    size: 2048,
+    expiresAt: "2099-01-08T00:00:00Z",
+    endedAt: "",
+    createdAt: "2026-11-18T12:00:00Z",
+    ...over,
+  };
+}
+
 export function folderRow(over: Partial<Row> & { id: string }): Row {
   return {
     ownerUserId: "u-me",
@@ -448,4 +503,17 @@ export async function click(el: Element | null | undefined): Promise<void> {
   await act(async () => {
     fireEvent.click(el);
   });
+}
+
+/**
+ * Opens a file's details page the way a person reaches it now: a click on a
+ * file only selects it (the Places browse, Nov 2026), so the page is its
+ * right-click menu's Details.
+ */
+export async function openDetails(name: string | RegExp): Promise<void> {
+  const tile = await screen.findByRole("button", { name: typeof name === "string" ? new RegExp(name) : name });
+  await act(async () => {
+    fireEvent.contextMenu(tile);
+  });
+  await click(within(screen.getByRole("menu", { name: "File" })).getByRole("menuitem", { name: "Details" }));
 }

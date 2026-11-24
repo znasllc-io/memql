@@ -1,3 +1,4 @@
+import { osScale } from "../system/scale";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { WizardStepHeaderContext } from "./WizardStepHeader";
 
@@ -215,8 +216,9 @@ export function Wizard({
     // and one of them is the desktop strip, which must never move sideways.
     const scroller = target?.closest<HTMLElement>(".os-wizard-scroll");
     if (target && scroller) {
-      const above = target.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
-      const below = target.getBoundingClientRect().bottom - scroller.getBoundingClientRect().bottom;
+      // Rects are screen pixels; scrollTop is CSS pixels (system/scale.ts).
+      const above = (target.getBoundingClientRect().top - scroller.getBoundingClientRect().top) / osScale();
+      const below = (target.getBoundingClientRect().bottom - scroller.getBoundingClientRect().bottom) / osScale();
       if (above < 0) scroller.scrollTop += above;
       else if (below > 0) scroller.scrollTop += Math.min(below, above);
     }
@@ -348,7 +350,7 @@ export function Wizard({
         tone={status.tone}
         meta={status.meta}
         live
-        acts={acts.map(act => ({ ...act, onAct: () => { focusNextQuestion.current = true; act.onAct(); } }))}
+        acts={acts.map(act => ({ ...act, onAct: () => { focusNextQuestion.current = true; return act.onAct(); } }))}
         scope={open}
       >
         {confirm}

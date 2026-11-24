@@ -47,5 +47,7 @@ export const SOURCE_VALUES = [
   "derived",
   "user_created",
   "live",
+  "app_session",
+  "vision_input",
   "pipeline",
 ] as const;

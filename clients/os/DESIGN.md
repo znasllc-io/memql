@@ -31,7 +31,10 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    accessible label and tooltip. Keep it borderless in light and dark, with
    theme-aware icon color, hover feedback and a visible keyboard focus ring.
    Use the shared component’s style for creation links too; never add per-app
-   borders. Do not replace it with a text button such as
+   borders. The one exception is the Files Head, where José asked for Add to
+   be easier to see (Nov 19 2026): `AddButton outlined` draws the plus and a
+   thin outline in the accent, still with no word (Jesús's pick, Nov 20).
+   Do not replace it with a text button such as
    "Connect GitHub account". A settings page is titled **Settings**; subjects
    such as **GitHub accounts** are sections beneath that title, with their Add
    control on the section heading (`kit` `Subhead` `actions`). Settings lists
@@ -68,6 +71,15 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    (`LocalTabs.actions`), keeping the Head’s Add button by itself. Without
    local tabs, use the right of the Head. The default order stays an
    app-settings preference.
+   **Files is the exception to rules 2 and 3** (José, Nov 19 2026; Jesús's
+   picks, Nov 20): one search button on its Head opens a hidden panel under
+   the Head that pushes the tiles down. Its first line is Fleet's search bar
+   (`CardCollectionSearch`, without its add) choosing a kind of file; its
+   second holds Sort (Name, Newest first, Oldest first, Size, Kind) and Added.
+   The kind menu also holds Label, Source and Client, each a group with its own
+   single choice under the kinds (Jesús, Nov 20 2026, draft p17 Option C); its
+   button reads the kind plus "+N" while N of those are on. Closing the panel
+   ends the search and clears all four, and keeps the order.
 
 4. **Micro-preferences live in the app's Settings section.** Show revoked,
    show deactivated, include archived, default sort -- preferences, not
@@ -81,7 +93,10 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    and icon controls, app-content text scale and page gutters; its sheet
    dimensions do not define a separate scale for its contents. Selects drop UA chrome
    (`Select` draws its own currentColor chevron). A date and time is
-   `DateTimeInput`, on the line like `Input`; prose is `TextArea`, the one field
+   `DateTimeInput`, on the line like `Input`; a single DAY chosen from a month
+   (the Files share view's "Pick a date…") is `kit/CalendarMonth`, the OS's own
+   calendar with the days that cannot be picked greyed out, never the browser's
+   picker; prose is `TextArea`, the one field
    taller than the line (two lines to start, resizable) with the same radius and
    text size. Forms use `Field` --
    label above, control on the line; nothing invents a third field size.
@@ -101,6 +116,24 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    "put something here" is asked once; as a muted, hairline-separated row
    between the Library tree and the Desktop place it still read as a folder
    you could open.
+
+   **An act runs once per press, however fast the presses come** (José, Nov
+   19: twenty clicks on Save made eighteen copies). A kit `Button`,
+   `IconButton`, `ActionBar` act or `Wizard` act whose handler returns the
+   act's promise takes no further press until it settles (`kit/oneAtATime`):
+   a labelled button says its busy word ("Saving…"), then, given a
+   `doneLabel`, its done word with a tick ("Saved ✓") for two seconds, still
+   taking no press; an icon-only button just dims. Either way a press holds
+   the button for at least half a second, however fast the act finishes (a
+   local download takes a few hundredths of a second, so a hold that ended
+   with the act let a burst through). Resolve `false` when the act
+   did not happen, so the button never says it did. Hand the promise back
+   (`onClick={() => save(file)}`, not `void save(file)`); the engine refuses
+   the same save while one runs, for agents with no button.
+   Download is one of these acts (Head icon, right-click, Shared with me, a
+   version's icon, and a double-click on a shared file's or a zip's tile): a burst downloads once, the icon dims for at least half a
+   second, and longer while the file is prepared, and the rail says `Downloaded "name".` for five seconds, as it
+   says `Saved ...` after Save.
 
 7. **Say it once.** A scope is named in one place. The rail highlights it,
    the Head names it, the list does not re-caption it, placeholders stay
@@ -228,7 +261,12 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
   people waiting for an owner to finish setup. Reuse `kit/ThemeSwitch` and the
   stored OS preference; never add a separate selector to each form or to
   identity panels inside the OS.
-- Sign-in and sign-out use one quiet `EntryPending` handoff in that frame.
+- Sign-in and sign-out use one quiet `EntryPending` handoff in that frame,
+  without the theme toggle (`EntryLayout preferences={false}`): the handoff
+  shows for a moment on every reload, and a toggle there only flashes in the
+  corner. Its mark is 86px and its text 24px (2x, Nov 20 2026), capped by
+  `min(…, 23vmin / 6.4vw)` so it fits a 375x667 phone; the first-load curtain
+  (`BootCurtain`) uses the same sizes so the two never jump.
   Keep same-origin authorization in the current document, preserve PKCE/state
   validation, and reveal the cluster destination after its initial facts arrive.
   Do not flash form skeletons, generic account pages, or the desktop on the way
@@ -238,6 +276,16 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
   opacity pulse. Reveal the destination after a bounded 160ms fade out; reduced
   motion stops the pulse and skips the visual delay. A reconnect never reopens
   this initial loading frame.
+- The first load of a page wears one `BootCurtain` over that frame: the mark is
+  the loading bar. It arrives dark, and each real step (signing you in, reaching
+  your cluster, loading your desktop, ready) lights dots along one walk through
+  the mark, each reached by a line from the dot before; any line whose dots
+  (and any dot it runs straight through) are lit lights too, and the small dot
+  outside lights last. Under the mark the current step reads in ink; finished
+  steps slide down, shrink and turn muted. Then it blooms open with a soft edge
+  onto the destination already drawn beneath, letting clicks through. It never
+  invents progress, never shows again in the same page load, opens by itself
+  after twelve seconds, and reduced motion removes it at once (Jesús, Nov 2026).
 - Keep one contextual information button at the far right of the shared
   `TrailRow`, after Back and breadcrumbs, on desktop and phone. It opens the
   current page's help modal; until documentation exists, say “Documentation is
@@ -280,6 +328,11 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
   state and retain the saved value on failure with an explicit retry. Keep routine success
   receipts, usage summaries and empty-directory explanations out of this flow;
   describe draining calls and overlapping grants in the page's single help.
+- An icon button's name is the browser's own tooltip, which the browser holds
+  back for a second or more. Where a row of icons is read by hovering along
+  it (the Files Head's picked-file icons), `IconButton tip="above"` draws the
+  same name at once, above the icon, out of the pointer's way (Jesús, Nov 20
+  2026). Other icon buttons keep the browser's tooltip.
 - Build with the kit pieces; a surface needing a control the kit lacks
   promotes it on second use (`src/kit/controls.tsx` header) rather than
   respelling it locally.
@@ -314,7 +367,14 @@ entity's reported facts and its configuration. Apply this pattern when building
 or revising comparable pages in other apps; keep their existing capabilities
 and permissions. Use the shared `Details`, `DetailsSection` and `SettingRow` kit
 components for this layout. They own the spacing and responsive alignment used
-by Fleet and Cluster; avoid app-specific copies of the same grid.
+by Fleet, Cluster and Files' file Details page (José, Nov 19: "this is how
+details should show up"; its Labels and Client are one short row each); avoid
+app-specific copies of the same grid.
+A details page shows details, not actions: no footer or action bar pinned to
+it. Acts on the thing live where it was opened from (its icons and right-click
+menu). A pinned footer belongs only to a wizard, the step-one, step-two flows
+(José, Nov 20 2026: "this footer should only show up in the wizards ... it's
+supposed to just show the details, not show actions").
 For a machine, Details follows Equipment and holds what the machine reported:
 connection advisories, System, Hardware, Connection, Features, Registration and
 Reported labels. Settings is the last tab, after Activity, and holds only what
@@ -457,12 +517,16 @@ Page to one card when two would crowd the details or action targets.
 Sharing's search is a multi-select picker: the first five eligible options,
 then a Load more row that reveals five more. Search the full directory before
 paging. Checked selections survive filters, searches and reopening; show one
-`N selected` indicator and enable the plus action only with a selection. Commit
+`N selected` indicator and enable the plus action only with a selection. Files'
+share view shows the selection as removable chips inside the search box instead,
+like an email's "To:" line, and keeps the count for screen readers only (José
+and Jesús, Nov 20 2026); Fleet keeps the visible count for now. Commit
 the selected batch in one write, retain it on failure, and exclude entries that
 already have access. Options toggle checkmarks and never save on click.
 Use `kit/AnchoredPicker` to join the popup to the text field, escape scroll and
 transform clipping, follow the field as its window moves, and flip above when
-space below is tight. Keep keyboard position distinct from checked state.
+space below is tight. The list is never narrower than 240px (within the
+screen), so a field squeezed by a half-desk window still shows whole names. Keep keyboard position distinct from checked state.
 
 ## Record lists
 
@@ -777,6 +841,74 @@ draft configuration proposal, observe its reviewed merge, prepare the exact
 installation plan, then apply it. No successful check or published candidate
 silently changes the selected installation release.
 
+### Windows on a desk: window, borderless, full screen
+
+Owner-set (Jesús, Nov 18-19 2026). A desk holds at most two apps, and
+placement is computed, never dragged freehand or resized (`system/placement.ts`,
+`system/desks.ts`).
+
+- **Window mode exists only for an app alone on its desk.** A newly opened app
+  that is alone opens as a centred window.
+- **Every window reaches down to the dock** (Jesús, Nov 20 2026, Draft B):
+  a window, a borderless one and a split pair all stop 4px above the dock's
+  top edge (`DOCK_GAP`; 16px until Jesús closed it on Nov 20), so the dock
+  never covers anything and no empty strip is left under an app. Full screen still covers the dock.
+- **Borderless** (`maximized`) fills the area above the dock; the dock's band
+  stays, and so does the title bar. **Full screen** covers the viewport and
+  hides the dock and desk dots, and it keeps its desk to itself: no second app
+  joins a desk holding a full-screen window, minimized or not.
+- **Two apps on one desk always split the borderless area**: each takes
+  exactly half, edge to edge, no gap and no rounded corners, whatever mode each
+  was in. A second app opened next to a lone borderless one joins that desk.
+- **The size button** (one icon in the title bar). Alone: window → borderless
+  → full screen → window, all on the same desk. Sharing a desk: straight to
+  full screen on a new desk of its own, and pressed again back to its half if
+  that desk still has room. Its label always says what the next press does.
+- **Double-click the title bar** (the app's logo or the empty bar; its buttons
+  and the app picker keep their own job). It never makes full screen: only the
+  size button does, from borderless. Alone: window ↔ borderless. Full screen:
+  back to a window on the desk it is on. Half of a pair: borderless on this
+  desk, and the other app moves to a new desk right after it, as a window.
+- **Drag to a side** (pointer within 24px of the left or right edge) lights
+  that half. Dropped there, a window with a partner takes that side. A lone
+  window rests on that half as a window (out of borderless or full screen),
+  and the other half stays empty, the desk and its icons showing and usable
+  there (Jesús, Nov 20 2026). With apps open on other desks, the empty half
+  darkens and offers them as app icons: a pick moves that app into the empty
+  half (out of full screen first); Escape or a press anywhere but an option,
+  the darkened half included, fades the options away and leaves the half
+  empty. With nothing else open there is no picker.
+- **A lone window resting on a half** stays there until something moves it.
+  It counts as a window: its size button makes it borderless (the label says
+  so), and so does a drag to the top. A drag to the other side moves it to
+  that half. A second app opened on, thrown to or brought back to its desk
+  fills the empty half; while it shares, the pair's order decides the sides,
+  and when the partner leaves it stays on the half it then holds. Like every
+  window placement, it is session state and does not survive a reload.
+- **Drag to the top** (within 24px) lights the whole area and makes a lone
+  window borderless on its desk. A pair is already borderless and stays as it is.
+- **Desk icons reach the same line.** The icon grid's rows run down to where
+  windows stop (`DEFAULT_PLACEMENT.dockReserve` above the bottom), so an icon
+  drags as low as a window reaches and never sits under the dock
+  (`gridForViewport` in `chrome/state.tsx`; Jesús, Nov 20 2026).
+- Snap highlights and the picker are static fills. The one motion is the
+  picker's fade when it is dismissed (`--os-duration-fast`), which reduced
+  motion removes: the options simply go. The phone layout has no desks or
+  windows.
+
+### The desktop scales with the screen
+
+Owner-set (Jesús, Nov 20 2026). The whole desktop -- windows, dock, icons and
+text -- grows with the screen: scale = screen width / 1440, never below x1,
+capped at x1.5 (`system/scale.ts`, `SCALE_BASE_WIDTH` and `SCALE_CAP`). A
+13-inch laptop stays x1, Full HD is x1.33, a 1440p monitor x1.5; past the cap
+a bigger screen only adds room. It is CSS `zoom` on the page, so every rule
+here is written in the desktop's own pixels and needs no change. Two things
+do: a length measured from the browser (a pointer position, a
+`getBoundingClientRect`) is in screen pixels and is divided by `osScale()`
+before it becomes a style, a scroll position or a grid cell; and a viewport
+unit is written `calc(Nvh / var(--os-scale, 1))`, which a test enforces.
+
 ### One trail row, and the window draws it
 
 Every window carries exactly one trail row (`kit` `TrailRow`), drawn by the
@@ -797,7 +929,8 @@ primary heading. Do not add a back button or a breadcrumb block anywhere in an
 app body. Outside a window (a section rendered alone) there is no row, and
 `Head` keeps its inline navigation so it still works.
 
-The row reads, left to right: **Back, a hairline, the trail.**
+The row reads, left to right: **Back, a hairline, the trail.** It is 40px
+tall, the same as the window bar above it.
 
 - **Back is first, and the hairline is a boundary.** 21px separates Back from
   the first crumb (10, a 1px rule, 10) so a cursor aimed at one cannot land on

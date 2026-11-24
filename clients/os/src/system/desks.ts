@@ -17,9 +17,21 @@ import {
 
 export const DESK_CAP = 2;
 
+/**
+ * At most this many empty desks at once (the owner and José, Nov 2026): the
+ * desks in use plus one. An empty desk deletes itself once you leave it
+ * (gcAutoDesks), so the only empty desk is the one you are on, and "+" waits,
+ * greyed, until it gets an app, a file or a widget.
+ */
+export const MAX_EMPTY_DESKS = 1;
+
 export interface Desk {
   id: DeskId;
-  /** "user" desks never garbage-collect; "auto" desks do when left empty. */
+  /**
+   * Who made it: "+" or a move ("user"), or the shell ("auto"). Both are
+   * collected once left empty; a "user" desk only when its surface can be
+   * checked (gcAutoDesks).
+   */
   createdBy: "user" | "auto";
   /** Ordered window ids; index 0 renders left (or solo/centered). */
   windows: WindowId[];
@@ -121,8 +133,47 @@ function replaceDesk(state: ShellState, desk: Desk): ShellState {
   return { ...state, desks: state.desks.map((d) => (d.id === desk.id ? desk : d)) };
 }
 
-function deskHasVacancy(desk: Desk, state?: ShellState): boolean {
-  return desk.windows.length < DESK_CAP && !desk.windows.some(id => state?.windows[id]?.expandedReturn);
+/**
+ * Room for one more window: under the cap, and no full-screen window there,
+ * minimized or not -- full screen stays solitary. A lone borderless window
+ * has room: the newcomer splits the area with it (Jesús, Nov 2026).
+ */
+export function deskHasVacancy(desk: Desk, state: ShellState): boolean {
+  return desk.windows.length < DESK_CAP && !desk.windows.some(id => {
+    const w = state.windows[id];
+    return w?.mode === "fullscreen" || w?.minimizedFrom === "fullscreen";
+  });
+}
+
+/** The window in `mode`, off any dedicated desk's return slot and off its half. */
+function withMode(state: ShellState, windowId: WindowId, mode: OsWindow["mode"]): ShellState {
+  const win = state.windows[windowId];
+  if (!win) return state;
+  const { expandedReturn: _return, minimizedFrom: _minimized, half: _half, ...rest } = win;
+  return { ...state, windows: { ...state.windows, [windowId]: { ...rest, mode } } };
+}
+
+/**
+ * Where a window joining `desk` sits: beside a lone window resting on a half,
+ * the empty half (Jesús, Nov 20 2026: a second app fills it); otherwise
+ * `otherwise`, by default after the windows already there.
+ */
+function joinAt(state: ShellState, desk: Desk, otherwise = desk.windows.length): number {
+  const half = desk.windows.length === 1 ? state.windows[desk.windows[0]!]?.half : undefined;
+  return half === undefined ? otherwise : 1 - half;
+}
+
+/**
+ * Put `ids` on `desk`, left to right. A window resting on a half takes the
+ * half it now sits on, so it stays on that side once its partner leaves.
+ */
+function seat(state: ShellState, desk: Desk, ids: WindowId[]): ShellState {
+  const windows = { ...state.windows };
+  ids.forEach((id, index) => {
+    const win = windows[id];
+    if (win?.half !== undefined && ids.length === DESK_CAP) windows[id] = { ...win, half: index as 0 | 1 };
+  });
+  return replaceDesk({ ...state, windows }, { ...desk, windows: ids });
 }
 
 /**
@@ -164,10 +215,9 @@ export function openApp(
   const win = newWindow(nextId("win"), appId, sectionId, intent);
   const current = activeDesk(state);
   if (deskHasVacancy(current, state)) {
-    const next = replaceDesk(
-      { ...state, windows: { ...state.windows, [win.id]: win }, focusedWindowId: win.id },
-      { ...current, windows: [...current.windows, win.id] },
-    );
+    const ids = [...current.windows];
+    ids.splice(joinAt(state, current), 0, win.id);
+    const next = seat({ ...state, windows: { ...state.windows, [win.id]: win }, focusedWindowId: win.id }, current, ids);
     return { state: next, effect: { kind: "placed", deskId: current.id, windowId: win.id } };
   }
 
@@ -256,34 +306,41 @@ export function setWindowSection(state: ShellState, windowId: WindowId, sectionI
   return { ...state, windows: { ...state.windows, [windowId]: { ...win, sectionId, sectionTrail, sectionNavigation: { origin, revision: (win.sectionNavigation?.revision ?? 0) + 1 } } } };
 }
 
-/** Normal → maximized above the dock → full viewport → original desk slot. */
+/**
+ * The size button (Jesús, Nov 2026). Alone on its desk: window → borderless
+ * (maximized, above the dock) → full screen → window, all on that desk; a
+ * window resting on a half is a window, so it goes borderless next and comes
+ * back centred. Sharing a desk: straight to full screen on a desk of its own,
+ * and back to its half while the old desk has room.
+ */
 export function cycleWindowMode(state: ShellState, windowId: WindowId, deskHasSurfaceContent?: (deskId: DeskId) => boolean): ShellState {
   const win = state.windows[windowId];
   const from = deskOfWindow(state, windowId);
   if (!win || !from || win.mode === "minimized") return state;
-  if (win.mode === "maximized") {
-    return { ...state, activeDeskId: from.id, focusedWindowId: windowId, windows: { ...state.windows, [windowId]: { ...win, mode: "fullscreen" } } };
-  }
   if (win.mode === "fullscreen") {
     const target = win.expandedReturn && deskById(state, win.expandedReturn.deskId);
     const { expandedReturn, minimizedFrom: _minimized, ...rest } = win;
     let next: ShellState = { ...state, windows: { ...state.windows, [windowId]: { ...rest, mode: "normal" } }, focusedWindowId: windowId, activeDeskId: from.id };
     if (target && target.id !== from.id && deskHasVacancy(target, state)) {
       const ids = [...target.windows];
-      ids.splice(Math.min(expandedReturn!.index, ids.length), 0, windowId);
+      ids.splice(joinAt(state, target, Math.min(expandedReturn!.index, ids.length)), 0, windowId);
       next = replaceDesk(next, { ...from, windows: from.windows.filter(id => id !== windowId) });
-      next = replaceDesk(next, { ...target, windows: ids });
+      next = seat(next, target, ids);
       next.activeDeskId = target.id;
     }
     // A filled return desk leaves this app on its current desk, without
     // displacing another window or losing the current app's state.
     return gcAutoDesks(next, deskHasSurfaceContent);
   }
+  if (from.windows.length === 1) {
+    return { ...withMode(state, windowId, win.mode === "normal" ? "maximized" : "fullscreen"), activeDeskId: from.id, focusedWindowId: windowId };
+  }
   const dedicated: Desk = { id: nextDeskId(state), createdBy: "auto", windows: [windowId] };
   const at = state.desks.findIndex(d => d.id === from.id) + 1;
   const desks = state.desks.map(d => d.id === from.id ? { ...d, windows: d.windows.filter(id => id !== windowId) } : d);
   desks.splice(at, 0, dedicated);
-  return { ...state, desks, activeDeskId: dedicated.id, focusedWindowId: windowId, windows: { ...state.windows, [windowId]: { ...win, mode: "maximized", expandedReturn: { deskId: from.id, index: from.windows.indexOf(windowId) } } } };
+  const { half: _half, ...kept } = win;
+  return { ...state, desks, activeDeskId: dedicated.id, focusedWindowId: windowId, windows: { ...state.windows, [windowId]: { ...kept, mode: "fullscreen", expandedReturn: { deskId: from.id, index: from.windows.indexOf(windowId) } } } };
 }
 
 /** Swap the two windows of a desk (left <-> right). No-op on a solo desk. */
@@ -292,7 +349,7 @@ export function swapSides(state: ShellState, deskId: DeskId): ShellState {
   if (!desk) return state;
   const [left, right] = desk.windows;
   if (!left || !right) return state;
-  return replaceDesk(state, { ...desk, windows: [right, left] });
+  return seat(state, desk, [right, left]);
 }
 
 /**
@@ -318,14 +375,68 @@ export function throwToDesk(state: ShellState, windowId: WindowId, target: DeskI
   next = replaceDesk(next, { ...from, windows: from.windows.filter((id) => id !== windowId) });
   const landed = deskById(next, targetDesk.id);
   if (!landed) throw new Error("shell invariant: throw target vanished");
-  next = replaceDesk(next, { ...landed, windows: [...landed.windows, windowId] });
+  const ids = [...landed.windows];
+  ids.splice(joinAt(next, landed), 0, windowId);
+  next = seat(next, landed, ids);
   next = { ...next, activeDeskId: landed.id, focusedWindowId: windowId };
   const moved = next.windows[windowId];
-  if (moved?.expandedReturn) {
-    const { expandedReturn: _return, minimizedFrom: _minimized, ...rest } = moved;
-    next = { ...next, windows: { ...next.windows, [windowId]: { ...rest, mode: "normal" } } };
-  }
+  if (moved?.expandedReturn || moved?.mode === "fullscreen") next = withMode(next, windowId, "normal");
   return { state: gcAutoDesks(next), effect: { kind: "placed", deskId: landed.id, windowId } };
+}
+
+/**
+ * Drag to the top (Jesús, Nov 2026): a lone window, resting on a half or not,
+ * fills the borderless area on its own desk. A pair already splits that
+ * area, so it stays as it is.
+ */
+export function makeBorderless(state: ShellState, windowId: WindowId): ShellState {
+  if (deskOfWindow(state, windowId)?.windows.length !== 1) return state;
+  return { ...withMode(state, windowId, "maximized"), focusedWindowId: windowId };
+}
+
+/**
+ * Double-click a window's bar (Jesús, Nov 2026): it never makes full screen.
+ * Alone: window <-> borderless. Full screen: a window on the desk it is on.
+ * Half of a pair: borderless here, and the other app moves to a new desk
+ * right after this one, as a window. A minimized partner does not count.
+ */
+export function toggleBorderless(state: ShellState, windowId: WindowId): ShellState {
+  const win = state.windows[windowId];
+  const desk = deskOfWindow(state, windowId);
+  if (!win || !desk || win.mode === "minimized") return state;
+  const done = (s: ShellState): ShellState => ({ ...s, activeDeskId: desk.id, focusedWindowId: windowId });
+  if (win.mode === "fullscreen") return done(withMode(state, windowId, "normal"));
+  const other = desk.windows.find(id => id !== windowId && state.windows[id]?.mode !== "minimized");
+  if (!other) return done(withMode(state, windowId, win.mode === "maximized" ? "normal" : "maximized"));
+  const own: Desk = { id: nextDeskId(state), createdBy: "auto", windows: [other] };
+  const desks = state.desks.map(d => d.id === desk.id ? { ...d, windows: d.windows.filter(id => id !== other) } : d);
+  desks.splice(desks.findIndex(d => d.id === desk.id) + 1, 0, own);
+  return done(withMode(withMode({ ...state, desks }, windowId, "maximized"), other, "normal"));
+}
+
+/**
+ * Drag a lone window to a side, then pick a partner (Jesús, Nov 2026):
+ * `bringId` leaves its desk for the other half of `keepId`'s, and `keepId`
+ * takes `side` (0 left, 1 right). Both leave full screen and any dedicated
+ * desk first, so the pair splits the borderless area.
+ */
+export function pairWindows(state: ShellState, keepId: WindowId, side: 0 | 1, bringId: WindowId): ShellState {
+  const desk = deskOfWindow(state, keepId);
+  if (!desk || desk.windows.length !== 1 || !state.windows[bringId]) return state;
+  // Resting on `side`, keepId's empty half is where the newcomer sits (joinAt).
+  return throwToDesk(withMode(restOnHalf(state, keepId, side), bringId, "normal"), bringId, desk.id).state;
+}
+
+/**
+ * Drag a lone window to a side (Jesús, Nov 20 2026): it rests on that half
+ * (0 left, 1 right) as a window, out of borderless, full screen and any
+ * dedicated desk, and the other half stays empty with the desk showing. A
+ * pair already splits the area and takes sides by swapping instead.
+ */
+export function restOnHalf(state: ShellState, windowId: WindowId, side: 0 | 1): ShellState {
+  if (deskOfWindow(state, windowId)?.windows.length !== 1) return state;
+  const next = withMode(state, windowId, "normal");
+  return { ...next, windows: { ...next.windows, [windowId]: { ...next.windows[windowId]!, half: side } }, focusedWindowId: windowId };
 }
 
 export interface SwitchDeskOptions {
@@ -356,8 +467,35 @@ function topWindowOf(state: ShellState, deskId: DeskId): WindowId | null {
 }
 
 /**
- * Drop auto-created desks that are inactive and completely empty. The desk
- * you are on is never collected under you; user-created desks never are.
+ * A desk with nothing on it: no window, no window waiting to return to it,
+ * and no items or widgets on its surface.
+ */
+export function isEmptyDesk(
+  state: ShellState,
+  desk: Desk,
+  deskHasSurfaceContent?: (deskId: DeskId) => boolean,
+): boolean {
+  return (
+    desk.windows.length === 0 &&
+    !Object.values(state.windows).some(w => w.expandedReturn?.deskId === desk.id) &&
+    !(deskHasSurfaceContent?.(desk.id) ?? false)
+  );
+}
+
+/** Whether "+" may add a desk: fewer than MAX_EMPTY_DESKS are empty. */
+export function canAddDesk(
+  state: ShellState,
+  deskHasSurfaceContent?: (deskId: DeskId) => boolean,
+): boolean {
+  return state.desks.filter((d) => isEmptyDesk(state, d, deskHasSurfaceContent)).length < MAX_EMPTY_DESKS;
+}
+
+/**
+ * Empty desks delete themselves once left (José, Nov 17 2026): drop every
+ * inactive desk with nothing on it. The desk you are on is never collected
+ * under you, so one always remains. A desk made with "+" or a move goes only
+ * when `deskHasSurfaceContent` is given: without it a file or widget on its
+ * surface could not be seen, and the desk would take them with it.
  */
 export function gcAutoDesks(
   state: ShellState,
@@ -366,17 +504,19 @@ export function gcAutoDesks(
   const keep = state.desks.filter(
     (d) =>
       d.id === state.activeDeskId ||
-      d.createdBy === "user" ||
-      d.windows.length > 0 ||
-      Object.values(state.windows).some(w => w.expandedReturn?.deskId === d.id) ||
-      (deskHasSurfaceContent?.(d.id) ?? false),
+      (d.createdBy === "user" && !deskHasSurfaceContent) ||
+      !isEmptyDesk(state, d, deskHasSurfaceContent),
   );
   if (keep.length === state.desks.length) return state;
   return { ...state, desks: keep };
 }
 
-/** Add a user desk explicitly (context menu / pager "+"). */
-export function addDesk(state: ShellState): ShellState {
+/** Add a user desk explicitly (pager "+"); refused while canAddDesk says no. */
+export function addDesk(
+  state: ShellState,
+  deskHasSurfaceContent?: (deskId: DeskId) => boolean,
+): ShellState {
+  if (!canAddDesk(state, deskHasSurfaceContent)) return state;
   const desk: Desk = { id: nextDeskId(state), createdBy: "user", windows: [] };
   return { ...state, desks: [...state.desks, desk], activeDeskId: desk.id, focusedWindowId: null };
 }

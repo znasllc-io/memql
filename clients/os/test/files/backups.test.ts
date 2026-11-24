@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   backupFingerprint,
   backupFromRow,
+  backupLine,
   fileBelongsToBackup,
   linkToneOf,
   ORIGIN_STATES,
@@ -234,5 +235,51 @@ describe("the form's pure helpers", () => {
     // rule -- somebody would believe those files were being skipped.
     expect(parseGlobs("node_modules/**, , *.tmp ,")).toEqual(["node_modules/**", "*.tmp"]);
     expect(parseGlobs("   ")).toEqual([]);
+  });
+});
+
+describe("backupLine (the list row, owner's pick 8A)", () => {
+  const ago = (iso: string) => `<${iso}>`;
+  const mac = { name: "Mac", online: true, lastSeenAt: "2026-09-01T10:00:00Z" };
+
+  it("an up-to-date backup names machine, schedule, last check and file count", () => {
+    const view = backupLine(backup({ intervalMinutes: 10, filesSeen: 1204 }), "settled", mac, 0, ago);
+    expect(view).toEqual({ secondary: "Mac · every 10 min · checked <2026-09-01T10:00:00Z> · 1,204 files", offline: false, state: "Up to date", tone: "accent" });
+  });
+
+  it("an absent originState is waiting, never up to date, and claims no count", () => {
+    const b = backup({ originState: "", filesSeen: 0 });
+    const view = backupLine(b, linkToneOf(b, ""), mac, 0, ago);
+    expect(view.state).toBe("Waiting");
+    expect(view.secondary).toBe("Mac · every 5 min · no report yet");
+  });
+
+  it("files behind read as copying, with the count of changed files when known", () => {
+    expect(backupLine(backup(), "behind", mac, 3, ago)).toMatchObject({ secondary: "Mac · every 5 min · copying 3 changed files", state: "Copying" });
+    expect(backupLine(backup(), "behind", mac, 1, ago).secondary).toContain("copying 1 changed file");
+    expect(backupLine(backup(), "behind", mac, 0, ago).secondary).toContain("copying changed files");
+  });
+
+  it("an offline machine wins over the link, in the warning line", () => {
+    const view = backupLine(backup(), "settled", { ...mac, online: false }, 0, ago);
+    expect(view).toEqual({ secondary: "Machine offline, last seen <2026-09-01T10:00:00Z> · resumes when it's back", offline: true, state: "Waiting", tone: "muted" });
+    expect(backupLine(backup(), "settled", { ...mac, online: false, lastSeenAt: "" }, 0, ago).secondary).toBe("Machine offline · resumes when it's back");
+  });
+
+  it("an unknown machine is not offline: it falls back to the worker id", () => {
+    const view = backupLine(backup(), "settled", undefined, 0, ago);
+    expect(view.offline).toBe(false);
+    expect(view.secondary.startsWith("wkr-1 · ")).toBe(true);
+  });
+
+  it("paused wins over offline; refused and broken keep their labels in warn", () => {
+    expect(backupLine(backup({ status: "paused" }), "paused", { ...mac, online: false }, 0, ago)).toMatchObject({ state: "Paused", tone: "muted", offline: false });
+    expect(backupLine(backup(), "refused", mac, 0, ago)).toMatchObject({ state: TONE_LABEL.refused, tone: "warn" });
+    expect(backupLine(backup(), "broken", mac, 0, ago)).toMatchObject({ state: TONE_LABEL.broken, tone: "warn" });
+  });
+
+  it("says the schedule in hours and days when it is one", () => {
+    expect(backupLine(backup({ intervalMinutes: 60 }), "waiting", mac, 0, ago).secondary).toContain("every hour");
+    expect(backupLine(backup({ intervalMinutes: 2880 }), "waiting", mac, 0, ago).secondary).toContain("every 2 days");
   });
 });

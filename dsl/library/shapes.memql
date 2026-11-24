@@ -313,3 +313,39 @@ shape artifact artifactFacet {
   folderId
   labels
 }
+
+/// A share as its sharer reads it (file sharing, 2026-11-18): who has the file, for how many days
+/// and until when. `id` is the shareId libraryShareStop takes.
+@row
+shape share libraryShareFull {
+  row.id
+  ownerUserId
+  recipientUserId
+  recipientGroupId
+  memberUserIds
+  recipientDisplayName
+  artifactId
+  title
+  days
+  expiresAt
+  revokedAt
+  row.createdAt
+}
+
+/// A shared-with-me notice as its recipient reads it: who shared what, and until when.
+@row
+shape shareNotice libraryShareNoticeFull {
+  row.id
+  ownerUserId
+  shareId
+  artifactId
+  sharerUserId
+  sharerDisplayName
+  title
+  mimeType
+  format
+  size
+  expiresAt
+  endedAt
+  row.createdAt
+}

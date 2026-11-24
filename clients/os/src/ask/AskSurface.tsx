@@ -1,3 +1,4 @@
+import { osScale } from "../system/scale";
 import { askFailure } from "./askFailure";
 import { ProposeLesson } from "../apps/training/ProposeLesson";
 import { AddButton } from "../kit/AddButton";
@@ -255,7 +256,8 @@ export function AskSurface({
     if (!question) return;
     nearBottom.current = false;
     const log = logRef.current!;
-    const target = Math.max(0, log.scrollTop + question.getBoundingClientRect().top - log.getBoundingClientRect().top - Math.max(0, (log.clientHeight - question.clientHeight) / 2));
+    // The rect difference is screen pixels; scrollTop is CSS pixels (system/scale.ts).
+    const target = Math.max(0, log.scrollTop + (question.getBoundingClientRect().top - log.getBoundingClientRect().top) / osScale() - Math.max(0, (log.clientHeight - question.clientHeight) / 2));
     conversationScroll.current = target;
     log.scrollTo({ top: target });
     question.querySelector<HTMLTextAreaElement>("textarea")?.focus({ preventScroll: true });

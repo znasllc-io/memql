@@ -153,7 +153,6 @@ const files: OsAppManifest = {
 const deployables: OsAppManifest = {
   id: "deployables",
   name: "Deployables",
-  searchSection: "deployables",
   // A deployable's pages (Statistics and its whole lists, Access codes,
   // Reviews, Visit, a version) change the page rather than opening a dialog,
   // so the browser's Back has to step out of them.
@@ -179,7 +178,6 @@ const pipelines: OsAppManifest = {
     { section: "repositories", idField: "packageId", query: "platform.packagesAll", labels: ["name", "repoUrl"] },
     { section: "runs", idField: "runId", query: "pipelines.pipelineRunsForOwner", labels: ["title", "repository", "headBranch"] },
   ],
-  searchSection: "repositories",
   settingsSection: "settings",
   logsSection: "logs",
   component: PipelinesApp,
@@ -197,7 +195,6 @@ const pipelines: OsAppManifest = {
 const fleet: OsAppManifest = {
   id: "fleet",
   name: "Fleet",
-  searchSection: "machines",
   icon: MonitorSmartphone,
   requires: "app:fleet",
   sections: FLEET_SECTIONS,

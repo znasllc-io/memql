@@ -7,7 +7,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: .75rem;
-  max-width: min(480px, calc(100vw - 48px));
+  max-width: min(480px, calc(calc(100vw / var(--os-scale, 1)) - 48px));
   padding: 1rem;
   background: var(--os-raised);
   color: var(--os-ink);

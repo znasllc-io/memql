@@ -21,12 +21,16 @@ import {
   focusWindow as focusWindowFn,
   gcAutoDesks,
   initialShell,
+  makeBorderless as makeBorderlessFn,
   nextId,
   nextIdAvoiding,
   openApp as openAppFn,
+  pairWindows as pairWindowsFn,
+  restOnHalf as restOnHalfFn,
   setWindowMode,
   setWindowSection,
   swapSides as swapSidesFn,
+  toggleBorderless as toggleBorderlessFn,
   switchDesk as switchDeskFn,
   switchDeskBy as switchDeskByFn,
   throwToDesk as throwToDeskFn,
@@ -37,7 +41,9 @@ import {
 import {
   addItem,
   emptySurface,
+  fitSurface,
   moveItem as moveItemFn,
+  placeFileAt,
   removeItem as removeItemFn,
   sortSurface,
   surfaceHasContent,
@@ -50,6 +56,7 @@ import {
   type GridSize,
 } from "../system/desktop";
 import { movePin as movePinFn, pin as pinFn, unpin as unpinFn, type DockState } from "../system/dock";
+import { DEFAULT_PLACEMENT } from "../system/placement";
 import { accessAdmits, canOpen, sectionsFor, widgetById, type OsRegistry } from "../system/registry";
 import {
   documentFromState,
@@ -58,10 +65,18 @@ import {
   type DesktopStore,
 } from "../system/store";
 import type { AppId, DeskId, WindowId } from "../system/windows";
-import { applyPackStyles, BUILT_IN_THEME_ID, type OsThemePack } from "../themes/registry";
+import { applyPackStyles, BUILT_IN_THEME_ID, themePackById, themePackCss, type OsThemePack } from "../themes/registry";
+import { rememberThemePack } from "../themes/bootHint";
 import type { ChromeLayout } from "../app/layout";
 
 export interface OsState {
+  /** False until a store that will hydrate has delivered the desktop; files on
+   *  that first document are the baseline, not arrivals (items/deskFileState.ts). */
+  deskResolved: boolean;
+  /** Counts desktops adopted as "hydrate". The store is swapped once (local ->
+   *  graph) and the new one hydrates again, after deskResolved is already true;
+   *  each hydrate re-baselines the arrival glow. */
+  deskHydrations: number;
   shell: ShellState;
   surfaces: Record<DeskId, DeskSurface>;
   dock: DockState;
@@ -117,6 +132,14 @@ export interface OsActions {
   focusWindow: (id: WindowId) => void;
   navigateSection: (id: WindowId, sectionId: string, origin?: "peer" | "content" | "back") => void;
   swapSides: (deskId: DeskId) => void;
+  /** A lone window fills the borderless area; a pair stays split. */
+  makeBorderless: (id: WindowId) => void;
+  /** Bar double-click: window <-> borderless, full screen -> window; a pair splits up. */
+  toggleBorderless: (id: WindowId) => void;
+  /** Bring `bringId` beside the lone `keepId`, which takes `side`. */
+  pairWindows: (keepId: WindowId, side: 0 | 1, bringId: WindowId) => void;
+  /** A lone window rests on `side` (0 left, 1 right); the other half stays empty. */
+  restOnHalf: (id: WindowId, side: 0 | 1) => void;
   throwToDesk: (id: WindowId, target: DeskId | "new") => ShellEffect;
   switchDesk: (deskId: DeskId) => void;
   switchDeskBy: (delta: 1 | -1) => void;
@@ -136,6 +159,10 @@ export interface OsActions {
    * can live now that apps can send too.
    */
   sendFileToDesk: (entry: Omit<FileEntry, "id">) => "placed" | "focused" | "full";
+  /** A Library file dragged out of Files and dropped at `cell` on the active
+   *  desk: placed there, or its existing icon moved there, never on a `hidden`
+   *  cell (under a window or the dock). False = no free cell in view. */
+  dropFileOnDesk: (entry: Omit<FileEntry, "id">, cell: GridPos, hidden: readonly GridPos[]) => boolean;
   /** The folder-shortcut sibling of sendFileToDesk, deduped by folderId. */
   sendFolderToDesk: (folderId: string, name: string) => "placed" | "focused" | "full";
   /** Place a folder shortcut at a cell (desk create-folder, after the
@@ -257,14 +284,22 @@ export function useOsIfPresent(): OsContextValue | null {
 
 /**
  * Grid size from the viewport (cell tokens are 96x104). The surface pads
- * 20px on each side and the dock reserves the bottom -- both come OUT of
- * the cell budget, or the last column paints past the viewport edge and
- * bleeds onto the neighboring desk plate.
+ * 20px on each side -- that comes OUT of the cell budget, or the last column
+ * paints past the viewport edge and bleeds onto the neighboring desk plate.
+ *
+ * The rows run from the 20px pad at the top down to the line windows stop
+ * at, `DEFAULT_PLACEMENT.dockReserve` above the bottom (system/placement.ts),
+ * so an icon never sits under the dock and the grid never stops short of it.
+ * It used to reserve a flat 200px, which Jesús met as "an invisible barrier"
+ * (Nov 20 2026): on his 881px-tall Safari window the grid ended at 644px with
+ * the dock's top at 805px, a whole row of room nobody could drag into. The
+ * viewport and the reserve are both the desk's own CSS pixels, so the line
+ * holds at any desktop scale.
  */
 export function gridForViewport(width: number, height: number): GridSize {
   return {
     cols: Math.max(3, Math.floor((width - 40) / 96)),
-    rows: Math.max(2, Math.floor((height - 200) / 104)),
+    rows: Math.max(2, Math.floor((height - 20 - DEFAULT_PLACEMENT.dockReserve) / 104)),
   };
 }
 
@@ -321,6 +356,8 @@ export function seedDocument(registry: OsRegistry, grid: GridSize, actorRole = "
     installedPacks: [],
     previewPack: null,
     selectedItemId: null,
+    deskResolved: true,
+    deskHydrations: 0,
   };
 }
 
@@ -339,6 +376,8 @@ function stateFromDocument(doc: DesktopDocument): OsState {
     installedPacks: doc.installedPacks,
     previewPack: null,
     selectedItemId: null,
+    deskResolved: true,
+    deskHydrations: 0,
   };
 }
 
@@ -407,6 +446,8 @@ export function adoptDocument(s: OsState, doc: DesktopDocument, origin: "hydrate
     // arriving desktop says nothing about it, and dropping it would snap the
     // theme out from under somebody mid-hover.
     previewPack: s.previewPack,
+    deskResolved: true,
+    deskHydrations: s.deskHydrations,
     // Selection survives adoption only while its item does: the arriving
     // desktop is a statement about ITEMS, and a selection of one it no
     // longer carries would highlight nothing.
@@ -482,7 +523,9 @@ export function OsProvider({
 
   const [state, setState] = useState<OsState>(() => {
     const loaded = storeRef.current.load();
-    return loaded ? stateFromDocument(loaded) : seedDocument(registry, grid, actorRole);
+    const first = loaded ? stateFromDocument(loaded) : seedDocument(registry, grid, actorRole);
+    // A store that can subscribe will deliver the desktop (origin "hydrate").
+    return { ...first, deskResolved: !storeRef.current.subscribe };
   });
   const [notice, setNotice] = useState<OsNotice | null>(null);
 
@@ -516,7 +559,11 @@ export function OsProvider({
         setNotice({ kind: "stale" });
         return;
       }
-      setState((s) => adoptDocument(s, event.document, event.origin));
+      // Counted here, not in adoptDocument, which must stay idempotent.
+      setState((s) => {
+        const next = adoptDocument(s, event.document, event.origin);
+        return event.origin === "hydrate" ? { ...next, deskHydrations: s.deskHydrations + 1 } : next;
+      });
       // `hydrate` is the desktop resolving for the first time, which is not
       // news -- it is what the person expected to see. Only a document that
       // arrived AFTER that means somebody else's machine saved.
@@ -545,7 +592,9 @@ export function OsProvider({
   }, [store]);
 
   const surfaceOf = useCallback(
-    (s: OsState, deskId: DeskId): DeskSurface => s.surfaces[deskId] ?? emptySurface(),
+    // Edits act on the spots the person SEES (fitSurface), not on spots saved
+    // past this screen's edge; gridRef is read at call time.
+    (s: OsState, deskId: DeskId): DeskSurface => fitSurface(s.surfaces[deskId] ?? emptySurface(), gridRef.current),
     [],
   );
 
@@ -581,7 +630,9 @@ export function OsProvider({
 
   const actionsRef = useRef<OsActions | null>(null);
   if (!actionsRef.current) {
-    const set = (updater: (s: OsState) => OsState) => setState((s) => pruneSurfaces(updater(s)));
+    // Every action ends with the empty-desk sweep, with the surfaces in view
+    // (gcState), so a desk left empty goes however it was left.
+    const set = (updater: (s: OsState) => OsState) => setState((s) => pruneSurfaces(gcState(updater(s))));
     let lastEffect: ShellEffect = { kind: "none" };
 
     actionsRef.current = {
@@ -618,6 +669,10 @@ export function OsProvider({
       focusWindow: (id) => set((s) => ({ ...s, shell: focusWindowFn(s.shell, id) })),
       navigateSection: (id, sectionId, origin) => set((s) => ({ ...s, shell: setWindowSection(s.shell, id, sectionId, origin) })),
       swapSides: (deskId) => set((s) => ({ ...s, shell: swapSidesFn(s.shell, deskId) })),
+      makeBorderless: (id) => set((s) => ({ ...s, shell: makeBorderlessFn(s.shell, id) })),
+      toggleBorderless: (id) => set((s) => ({ ...s, shell: toggleBorderlessFn(s.shell, id) })),
+      pairWindows: (keepId, side, bringId) => set((s) => ({ ...s, shell: pairWindowsFn(s.shell, keepId, side, bringId) })),
+      restOnHalf: (id, side) => set((s) => ({ ...s, shell: restOnHalfFn(s.shell, id, side) })),
       throwToDesk: (id, target) => {
         lastEffect = { kind: "none" };
         set((s) => {
@@ -631,7 +686,7 @@ export function OsProvider({
         set((s) => ({ ...s, shell: switchDeskFn(s.shell, deskId, { deskHasSurfaceContent: hasContent(s) }) })),
       switchDeskBy: (delta) =>
         set((s) => ({ ...s, shell: switchDeskByFn(s.shell, delta, { deskHasSurfaceContent: hasContent(s) }) })),
-      addDesk: () => set((s) => ({ ...s, shell: addDeskFn(s.shell) })),
+      addDesk: () => set((s) => ({ ...s, shell: addDeskFn(s.shell, hasContent(s)) })),
       pinApp: (appId) => set((s) => registry.apps.some(app => app.id === appId && app.listed === false) ? s : ({ ...s, dock: pinFn(s.dock, appId) })),
       unpinApp: (appId) => set((s) => ({ ...s, dock: unpinFn(s.dock, appId) })),
       movePin: (appId, toIndex) => set((s) => ({ ...s, dock: movePinFn(s.dock, appId, toIndex) })),
@@ -681,6 +736,15 @@ export function OsProvider({
         if (!placed) return "full";
         set((cur) => ({ ...withSurface(cur, deskId, placed), selectedItemId: id }));
         return "placed";
+      },
+      dropFileOnDesk: (entry, cell, hidden) => {
+        const s = stateRef.current;
+        if (!s) return false;
+        const deskId = s.shell.activeDeskId;
+        const landed = placeFileAt(surfaceOf(s, deskId), { id: mintItemId(s), ...entry }, cell, gridRef.current, hidden);
+        if (!landed) return false;
+        set((cur) => ({ ...withSurface(cur, deskId, landed.surface), selectedItemId: landed.itemId }));
+        return true;
       },
       sendFolderToDesk: (folderId, name) => {
         const s = stateRef.current;
@@ -834,9 +898,18 @@ export function OsProvider({
   const actorRoleRef = useRef(actorRole);
   actorRoleRef.current = actorRole;
 
+  // Every reader draws the desks as this grid can hold them (fitSurface): an
+  // item saved on a wider grid is shown at the nearest spot that fits.
+  const shown = useMemo<OsState>(() => {
+    const surfaces = Object.fromEntries(
+      Object.entries(state.surfaces).map(([id, surface]) => [id, surface && fitSurface(surface, grid)]),
+    ) as OsState["surfaces"];
+    return Object.entries(surfaces).every(([id, surface]) => surface === state.surfaces[id]) ? state : { ...state, surfaces };
+  }, [state, grid]);
+
   const value = useMemo<OsContextValue>(
-    () => ({ state, actions: actionsRef.current!, registry, actorRole, ladderLoaded, accessEpoch, grid, layout, notice }),
-    [state, registry, actorRole, ladderLoaded, accessEpoch, grid, layout, notice],
+    () => ({ state: shown, actions: actionsRef.current!, registry, actorRole, ladderLoaded, accessEpoch, grid, layout, notice }),
+    [shown, registry, actorRole, ladderLoaded, accessEpoch, grid, layout, notice],
   );
 
   // Every installed pack's CSS, in one style element, kept in step with the
@@ -857,7 +930,14 @@ export function OsProvider({
     // naming that pack, so it takes effect the moment it arrives instead of
     // being silently rewritten to graphite behind the person's back.
     document.documentElement.setAttribute("data-os-theme", state.previewPack ?? state.themePack);
-  }, [state.themePack, state.previewPack]);
+    // Remember what is on screen, so the next loading and sign-in screens
+    // start in it (themes/bootHint.ts; José, Nov 20 2026 call). Never a
+    // preview, and never a pack this bundle cannot draw yet.
+    if (state.previewPack === null) {
+      const pack = themePackById(state.themePack, state.installedPacks);
+      if (pack) rememberThemePack(pack.id, pack.id === BUILT_IN_THEME_ID ? "" : themePackCss(pack));
+    }
+  }, [state.themePack, state.previewPack, state.installedPacks]);
 
   return <OsContext.Provider value={value}>{children}</OsContext.Provider>;
 }
@@ -875,9 +955,10 @@ function defaultSection(registry: OsRegistry, appId: AppId): string {
   return sectionsFor(app)[0]?.id ?? "";
 }
 
-/** GC pass exposed for tests: prune desks then surfaces coherently. */
+/** Drop desks left empty, then their surfaces; unchanged state when none. */
 export function gcState(state: OsState): OsState {
   const shell = gcAutoDesks(state.shell, (deskId) => surfaceHasContent(state.surfaces[deskId]));
+  if (shell === state.shell) return state;
   const deskIds = new Set(shell.desks.map((d) => d.id));
   const surfaces = Object.fromEntries(Object.entries(state.surfaces).filter(([id]) => deskIds.has(id)));
   return { ...state, shell, surfaces };
