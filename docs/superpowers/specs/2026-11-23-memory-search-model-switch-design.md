@@ -1,6 +1,7 @@
 # Memory search: choosing and switching its model
 
-Design record, 2026-11-23/24. Status: proposed, for the owner's approval.
+Design record, 2026-11-23/24. Status: approved by the owner 2026-11-24; being
+built (plan `docs/superpowers/plans/2026-11-24-memory-search-switch.md`).
 Follows the vendor accounts work
 ([2026-11-21-vendor-accounts-and-api-keys-design.md](2026-11-21-vendor-accounts-and-api-keys-design.md)).
 
