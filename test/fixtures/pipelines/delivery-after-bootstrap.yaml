@@ -514,7 +514,7 @@ pipeline:
           only: db-gated
           shards: 5
           services: [postgres]
-          timeout: 40m
+          timeout: 50m
           run: |
             set -eu
             # Engine fixtures repeatedly load the DSL. Leave room for that live
