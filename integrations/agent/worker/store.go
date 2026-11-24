@@ -260,6 +260,21 @@ func (s *EngineStore) WorkersForOwner(ctx context.Context, ownerUserId string) (
 	return (&fleetcatalog.EngineStore{Engine: s.Engine}).WorkersForOwner(ctx, ownerUserId)
 }
 
+// ConnectionDrops reads one machine's recorded drops for network-aware
+// placement (connection.go), through the same catalog read WorkersForOwner
+// uses. The assertion below is what keeps it there: the dispatcher finds the
+// reader by a type assertion, and production wires it with this type
+// (app/integrations_worker_agent.go), so losing the method would turn the
+// preference off without a word.
+func (s *EngineStore) ConnectionDrops(ctx context.Context, ownerUserId, registrationId string, since time.Time) ([]workerservice.ConnectionDrop, error) {
+	if s == nil || s.Engine == nil {
+		return nil, nil
+	}
+	return (&fleetcatalog.EngineStore{Engine: s.Engine}).ConnectionDrops(ctx, ownerUserId, registrationId, since)
+}
+
+var _ ConnectionDropReader = (*EngineStore)(nil)
+
 // RoutingPolicyForOwner returns the owner's active policy, or nil when they
 // have none. Nil is the COMMON case and not an error: a user who never opened
 // the Fleet page routes on DefaultPolicy.

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -30,6 +31,36 @@ type fakeFleet struct {
 	readErr   error
 	policyErr error
 	touchErr  error
+
+	// drops are each machine's recorded connection drops, keyed by the BARE
+	// registration id, as the shared database holds them for every replica
+	// (network-aware fleet selection). Nil is a fleet with no drops, which is
+	// every test written before drops existed. dropsErr fails every read;
+	// dropReads counts them, by the id asked for.
+	drops     map[string][]workerservice.ConnectionDrop
+	dropsErr  error
+	dropReads []string
+}
+
+// ConnectionDrops answers as myWorkerConnectionDrops does: one machine's drops
+// at or after since, newest first, capped at 100, whichever spelling of the id
+// is asked for.
+func (f *fakeFleet) ConnectionDrops(_ context.Context, _ string, registrationId string, since time.Time) ([]workerservice.ConnectionDrop, error) {
+	f.dropReads = append(f.dropReads, registrationId)
+	if f.dropsErr != nil {
+		return nil, f.dropsErr
+	}
+	var out []workerservice.ConnectionDrop
+	for _, d := range f.drops[lastSegment(registrationId)] {
+		if !d.DroppedAt.Before(since) {
+			out = append(out, d)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].DroppedAt.After(out[j].DroppedAt) })
+	if len(out) > connectionDropReadCap {
+		out = out[:connectionDropReadCap]
+	}
+	return out, nil
 }
 
 // Fixture work is admitted unless a consent-specific store overrides this.
