@@ -391,6 +391,29 @@ query registration myMachineById {
   shape workerRegistrationFull
 }
 
+/// One of the caller's machines' dropped connections since a moment, newest first
+/// (network-aware fleet selection). Placement asks it once per candidate machine for the run's
+/// window, and Fleet asks it for a machine's last day. One machine per read, so a machine that
+/// drops in a loop cannot push another machine's drops past a shared cap and make it read steady.
+/// At most 100 rows: a machine with that many in a window is unsteady either way, and its count
+/// reads "100 or more".
+/// @cache(0) because the rows are written by the agent replica that held the machine's stream and
+/// read by whichever replica places the next step: a cached answer would miss a drop another
+/// replica wrote a moment ago, the reason myWorkersWithStatus reads live.
+@cache(0)
+@actor
+query connectionDrop myWorkerConnectionDrops {
+  args {
+    registrationId  string!
+    /// RFC3339 time; drops at or after it are returned.
+    since           string!
+  }
+  filter   row => row.ownerUserId == actor.userId && row.registrationId == args.registrationId && row.droppedAt >= args.since
+  sort     "droppedAt", "desc"
+  paginate 100
+  shape    workerConnectionDropFull
+}
+
 /// Every machine in the cluster, for a cluster owner; optionally narrowed to one owner. Backs
 /// /fleet/machines' operator view, which adds an owner column.
 /// Shared inference uses this same read, so heartbeat eligibility must not use cached status.

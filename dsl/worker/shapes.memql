@@ -220,6 +220,22 @@ shape modelPull workerModelPullFull {
   row.createdAt
 }
 
+/// Full projection of one dropped machine connection. Backs placement's read of a machine's
+/// recent drops (network-aware fleet selection) and the Connection drops fact in Fleet.
+@row
+shape connectionDrop workerConnectionDropFull {
+  row.id
+  ownerUserId
+  registrationId
+  droppedAt
+  connectedAt
+  cause
+  workInFlight
+  nodeId
+  code
+  reason
+}
+
 /// Full projection of one sign-in. Backs the Sign in action on a machine's Apps page.
 @row
 shape appSignIn workerAppSignInFull {

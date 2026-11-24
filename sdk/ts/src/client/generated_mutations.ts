@@ -5103,6 +5103,45 @@ QueryClient.prototype.recordWarmupState = function (this: QueryClient, args: Rec
   return this.executeNamed("recordWarmupState", buildRecordWarmupState(args), opts);
 };
 
+/** Record one dropped machine connection. NOT @serverOnly, for clearWorkerConnectedNode's reason: its caller is component/worker, which is not on call_origin.go's internal-origin allowlist and should not be -- every context in that package descends from a worker's own inbound stream. The concept's owner tier is the gate: the store stamps auth.ContextWithUserActor for the registration's owner, and ownerUserId comes from actor.userId and nothing else. The residue is that a signed-in person could add drop records for their own machine, which changes only where their own pipeline steps are placed. */
+// Bound concept: v1:worker:connectionDrop (machine-readable: BoundConcepts["recordWorkerConnectionDrop"] in generated_concepts.ts).
+export interface RecordWorkerConnectionDropArgs {
+  dropId: string;
+  registrationId: string;
+  droppedAt: string;
+  connectedAt?: string;
+  // Enum: replaced | workInFlight
+  cause: string;
+  workInFlight?: number;
+  nodeId?: string;
+  code?: string;
+  reason?: string;
+}
+
+export function buildRecordWorkerConnectionDrop(args: RecordWorkerConnectionDropArgs): string {
+  const parts: string[] = [];
+  parts.push("dropId: " + renderMemQLValue(args.dropId));
+  parts.push("registrationId: " + renderMemQLValue(args.registrationId));
+  parts.push("droppedAt: " + renderMemQLValue(args.droppedAt));
+  if (args.connectedAt !== undefined) parts.push("connectedAt: " + renderMemQLValue(args.connectedAt));
+  parts.push("cause: " + renderMemQLValue(args.cause));
+  if (args.workInFlight !== undefined) parts.push("workInFlight: " + renderMemQLValue(args.workInFlight));
+  if (args.nodeId !== undefined) parts.push("nodeId: " + renderMemQLValue(args.nodeId));
+  if (args.code !== undefined) parts.push("code: " + renderMemQLValue(args.code));
+  if (args.reason !== undefined) parts.push("reason: " + renderMemQLValue(args.reason));
+  return "mutation recordWorkerConnectionDrop(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    recordWorkerConnectionDrop(args: RecordWorkerConnectionDropArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.recordWorkerConnectionDrop = function (this: QueryClient, args: RecordWorkerConnectionDropArgs = {} as RecordWorkerConnectionDropArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("recordWorkerConnectionDrop", buildRecordWorkerConnectionDrop(args), opts);
+};
+
 /** Mark an approved device authorization redeemed. Single-use: the handler stamps this BEFORE minting tokens, so a concurrent second poll finds status=redeemed and is refused. */
 // Bound concept: v1:identity:deviceCode (machine-readable: BoundConcepts["redeemDeviceCode"] in generated_concepts.ts).
 export interface RedeemDeviceCodeArgs {

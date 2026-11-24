@@ -171,6 +171,44 @@ concept registration {
   @relationship(type="parent", field="revokedBy", target=user, direction="outgoing")
 }
 
+/// One dropped connection of one machine (network-aware fleet selection,
+/// docs/superpowers/specs/2026-11-24-network-aware-fleet-selection-design.md). Written by the agent
+/// replica that held the machine's WorkerService stream, at the moment the stream ended, and only
+/// when the end cannot have been Cockpit's own choice: the stream was REPLACED by a new connection
+/// for the same registration before the cluster saw it end (the old connection died silently), or
+/// it ended with WORK IN FLIGHT (Cockpit re-registers on purpose only when idle,
+/// cockpit/internal/worker loop.go Runner.busy). An end the cluster decided -- a drain, a
+/// revocation, an expired token -- is never a drop. The classification is
+/// component/worker/connection_drop.go classifyStreamEnd.
+///
+/// APPEND-ONLY, ONE ROW PER DROP, rather than a list on the registration row: the drop is written
+/// at the very moment the replacing connection registers and writes the registration row, so a
+/// read-merge of one row would lose it; separate rows have one writer each. Placement reads a
+/// machine's recent rows (myWorkerConnectionDrops) to try steady machines first, and Fleet shows
+/// the same rows, so the history a person reads is exactly what placement used. Rows expire after
+/// a week (@retention).
+///
+/// TIER: the composite `owner, clusterOwner`, as v1:worker:registration takes it: a drop is a fact
+/// about one person's machine, and the operator who supports it must see it too.
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@retention(ttl="7d", keepLatest=false, archive="none")
+@displayCard(primary="cause", secondary="registrationId", tertiary="droppedAt")
+@belongsTo(cluster)
+concept connectionDrop {
+  ownerUserId     string!  @serverSet  @description("v1:identity:user.id who owns the machine. THE ROW-AUTHZ OWNER FIELD, stamped from actor.userId by recordWorkerConnectionDrop and never accepted from caller args. component/worker's store runs the write under auth.ContextWithUserActor for the registration's owner, as every registration write in that store does.")
+  registrationId  string!  @description("v1:worker:registration.id of the machine whose connection dropped.")
+  droppedAt       datetime!  @description("When the replica holding the stream saw it end, on that replica's clock. Placement counts the drops whose droppedAt is inside the run's window (connection.unsteadyMinutes of the compute placement policy).")
+  connectedAt     datetime  @description("When the stream that dropped was admitted, on the same replica's clock. Absent when the replica did not know.")
+  cause           enum("replaced", "workInFlight")!  @description("Why this end counts as a drop. replaced: a new connection for the same registration replaced this one, on this replica or another, before the cluster saw it end. workInFlight: it ended with a tool call, app session, app sign-in, model call or model pull in flight and no cluster decision behind it. replaced is recorded when both hold.")
+  workInFlight    int  @description("How much work was in flight when the stream ended: pending tool calls, app sessions, open app sign-ins, model calls and model pulls together. Zero for a replaced stream that was idle.")
+  nodeId          string  @description("MEMQL_NODE_ID of the agent replica that held the stream and wrote this row.")
+  code            string  @description("The stream end's code as the replica's `worker disconnected` log line carries it (canceled, unknown, eof, or a gRPC code).")
+  reason          string  @description("The stream end's reason as the same log line carries it (superseded, context canceled, client_eof, or the transport's words).")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="parent", field="registrationId", target=registration, direction="outgoing")
+}
+
 /// One delegated run of a local app on a cockpit machine (memql#4360). A session is the unit
 /// because a headless `claude -p` can run for an hour: the row is created at start, its transcript
 /// appends from streamed chunks while the run is live, and it reaches a terminal status at end.

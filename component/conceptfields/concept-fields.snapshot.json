@@ -10783,6 +10783,33 @@
       }
     },
     {
+      "concept": "v1:worker:connectionDrop",
+      "file": "worker/concepts.memql",
+      "fields": [
+        "cause",
+        "code",
+        "connectedAt",
+        "droppedAt",
+        "nodeId",
+        "ownerUserId",
+        "reason",
+        "registrationId",
+        "workInFlight"
+      ],
+      "required": [
+        "cause",
+        "droppedAt",
+        "ownerUserId",
+        "registrationId"
+      ],
+      "enums": {
+        "cause": [
+          "replaced",
+          "workInFlight"
+        ]
+      }
+    },
+    {
       "concept": "v1:worker:delegationPolicy",
       "file": "worker/concepts.memql",
       "fields": [
