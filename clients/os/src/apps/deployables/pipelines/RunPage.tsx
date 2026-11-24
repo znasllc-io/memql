@@ -394,7 +394,8 @@ function StepAttempts({ step, label, attempts, files, machineName, onOpenFile }:
  * memql#5478), so the full log is already there by the time this renders; a
  * "Save" button would promise an act that has already happened. When the
  * Library refused the file -- a quota, no storage -- there is no log here and
- * the step's own note says so.
+ * the step's own note says so. The caption is omitted on a run the viewer does
+ * not own: that Library is its owner's, not the viewer's.
  */
 function FailedStep({ step, log, onOpenFile, pipelineRun }: { step: StepRow; log: RunFileRow | null; onOpenFile: ((sourceRef: string) => void) | null; pipelineRun: string }) {
   const auth = useAuthSource();

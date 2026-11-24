@@ -38,7 +38,8 @@ export type RunsFeed = PagedCollectionHandle<Row>;
 function useViewer(): { viewer: string; ready: boolean; developer: boolean } {
   const session = useSessionIfPresent();
   const viewer = session?.access?.userId ?? "";
-  return { viewer, ready: session === null || viewer !== "", developer: roleAdmits(session?.access?.role ?? "", { min: "developer" }) };
+  return { viewer, ready: session === null || viewer !== "", // The developer reads refuse an organization-scoped role whatever its rank, so it needs everyAccount too.
+    developer: roleAdmits(session?.access?.role ?? "", { min: "developer" }) && session?.access?.everyAccount === true };
 }
 
 /** Summary pages shared by every reader of the same owner and filter. `everyOwner` is the Runs list's: a developer's reads every run. */

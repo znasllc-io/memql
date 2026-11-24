@@ -24,12 +24,12 @@ function memStore() {
   return new LocalDeployablesSettingsStore({ getItem: (k) => data.get(k) ?? null, setItem: (k, v) => void data.set(k, v) });
 }
 
-function mount(connection: FakeConnection | null, opts: { intent?: { id: string; payload: Record<string, unknown> }; navigate?: (id: string) => void; role?: string } = {}) {
+function mount(connection: FakeConnection | null, opts: { intent?: { id: string; payload: Record<string, unknown> }; navigate?: (id: string) => void; role?: string; everyAccount?: boolean } = {}) {
   h.connection = connection;
   return render(
     withSession(
       <DeployablesApp surface="pipelines" sectionId="runs" navigate={opts.navigate ?? vi.fn()} askContext={vi.fn()} store={memStore()} {...(opts.intent ? { intent: opts.intent, consumeIntent: vi.fn() } : {})} />,
-      { role: opts.role ?? "owner", userId: VIEWER },
+      { role: opts.role ?? "owner", userId: VIEWER, ...(opts.everyAccount === undefined ? {} : { everyAccount: opts.everyAccount }) },
     ),
   );
 }
@@ -192,5 +192,13 @@ describe("the Runs tab", () => {
     expect(await screen.findByText("Their change")).toBeTruthy();
     expect(connection.callsNamed("pipelineRunsBrowseAll")).toHaveLength(1);
     expect(connection.callsNamed("pipelineRunsBrowse")).toHaveLength(0);
+  });
+
+  it.each([["writer", undefined], ["developer", false]])("keeps a %s who cannot use the developer reads on their own runs", async (role, everyAccount) => {
+    const connection = fakeConnection(seed({ pipelineRuns: [runRow({ id: "r-mine", ownerUserId: VIEWER, queuedAt: minutesAgo(5), title: "My change" })] }));
+    mount(connection, { role, ...(everyAccount === undefined ? {} : { everyAccount }) });
+    expect(await screen.findByText("My change")).toBeTruthy();
+    expect(connection.callsNamed("pipelineRunsBrowse")).toHaveLength(1);
+    expect(connection.callsNamed("pipelineRunsBrowseAll")).toHaveLength(0);
   });
 });
