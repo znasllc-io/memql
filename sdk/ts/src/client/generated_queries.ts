@@ -8115,6 +8115,28 @@ QueryClient.prototype.pipelineRunForOwner = function (this: QueryClient, args: P
   return this.executeNamed("pipelineRunForOwner", buildPipelineRunForOwner(args), opts);
 };
 
+/** One run by id, whoever owns it: a developer's run page. Never a basis for an act. */
+// Bound concept: v1:pipelines:run (machine-readable: BoundConcepts["pipelineRunView"] in generated_concepts.ts).
+export interface PipelineRunViewArgs {
+  runId: string;
+}
+
+export function buildPipelineRunView(args: PipelineRunViewArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query pipelineRunView(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelineRunView(args: PipelineRunViewArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelineRunView = function (this: QueryClient, args: PipelineRunViewArgs = {} as PipelineRunViewArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelineRunView", buildPipelineRunView(args), opts);
+};
+
 /** Browse runs without downloading execution policy and driver bookkeeping. Every search and facet narrows the authorized set before the ten-row page. Internal recovery and release readers retain their existing queries. */
 // Bound concept: v1:pipelines:run (machine-readable: BoundConcepts["pipelineRunsBrowse"] in generated_concepts.ts).
 export interface PipelineRunsBrowseArgs {
@@ -8143,6 +8165,36 @@ declare module "./query.js" {
 
 QueryClient.prototype.pipelineRunsBrowse = function (this: QueryClient, args: PipelineRunsBrowseArgs = {} as PipelineRunsBrowseArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("pipelineRunsBrowse", buildPipelineRunsBrowse(args), opts);
+};
+
+/** Browse every run on the cluster, ten at a time, newest first: pipelineRunsBrowse's facets without its owner conjunct, for a developer's Runs list. */
+// Bound concept: v1:pipelines:run (machine-readable: BoundConcepts["pipelineRunsBrowseAll"] in generated_concepts.ts).
+export interface PipelineRunsBrowseAllArgs {
+  changesOnly?: boolean;
+  search?: string;
+  pipelineId?: string;
+  branch?: string;
+  outcome?: string;
+}
+
+export function buildPipelineRunsBrowseAll(args: PipelineRunsBrowseAllArgs): string {
+  const parts: string[] = [];
+  if (args.changesOnly !== undefined) parts.push("changesOnly: " + renderMemQLValue(args.changesOnly));
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  if (args.pipelineId !== undefined) parts.push("pipelineId: " + renderMemQLValue(args.pipelineId));
+  if (args.branch !== undefined) parts.push("branch: " + renderMemQLValue(args.branch));
+  if (args.outcome !== undefined) parts.push("outcome: " + renderMemQLValue(args.outcome));
+  return "query pipelineRunsBrowseAll(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelineRunsBrowseAll(args: PipelineRunsBrowseAllArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelineRunsBrowseAll = function (this: QueryClient, args: PipelineRunsBrowseAllArgs = {} as PipelineRunsBrowseAllArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelineRunsBrowseAll", buildPipelineRunsBrowseAll(args), opts);
 };
 
 /** The caller's runs, most recently queued first, optionally narrowed to one pipeline -- the Runs list across every source, or one source's runs. */

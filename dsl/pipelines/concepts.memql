@@ -91,14 +91,19 @@ concept pipeline {
 /// later. A day rather than less keeps the last day's progress readable to whoever debugs a stuck
 /// drive, and is short enough that most expired versions sit in the chunk still taking inserts,
 /// whose freed space PostgreSQL reuses.
+///
+/// EVERY RUN IS READABLE FROM DEVELOPER RANK UP (rankFloor, design record 2026-11-24), memQL's own
+/// and a client's, so support can read a failure in a repository it did not connect. The floor
+/// widens reads only: the owner, the cluster-owner escape and the account arm still decide writes,
+/// and every act resolves a run through the owner-only pipelineRunForOwner.
 @serverWritten
-@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId", rankFloor="developer")
 @retention(ttl="1d", keepLatest=true, archive="none")
 @displayCard(primary="sha", secondary="title", tertiary="conclusion", status="status")
 @belongsTo(account, stated)
 concept run {
   ownerUserId        string  @serverSet  @description("v1:identity:user.id of the pipeline's owner, stamped from the actor by createPipelineRun -- the run is written under the owner's borrowed authority, so this is always the person whose grant drives it.")
-  accountId          string  @description("Copied from the pipeline at open, so the run is readable by exactly the people its pipeline is.")
+  accountId          string  @description("Copied from the pipeline at open, so the run is readable by the people its pipeline is (and, through rankFloor, by every developer).")
   pipelineId         string!  @description("The v1:pipelines:pipeline this run belongs to.")
   repository         string!  @description("The repository as lower-cased owner/name, copied from the pipeline at open.")
   sha                string!  @description("The head commit this run checks.")

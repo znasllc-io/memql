@@ -8635,6 +8635,28 @@ func PipelineRunForOwnerBuild(args PipelineRunForOwnerArgs) string {
 	return b.String()
 }
 
+// PipelineRunView -- One run by id, whoever owns it: a developer's run page. Never a basis for an act.
+//
+// Bound concept: v1:pipelines:run (machine-readable: BoundConcepts["pipelineRunView"] in generated_concepts.go).
+type PipelineRunViewArgs struct {
+	RunId string
+}
+
+// PipelineRunView calls the engine query pipelineRunView.
+func (qc *QueryClient) PipelineRunView(ctx context.Context, args PipelineRunViewArgs) (*Result, error) {
+	call := PipelineRunViewBuild(args)
+	return qc.executeNamed(ctx, "pipelineRunView", call)
+}
+
+func PipelineRunViewBuild(args PipelineRunViewArgs) string {
+	var b strings.Builder
+	b.WriteString("query pipelineRunView(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // PipelineRunsBrowse -- Browse runs without downloading execution policy and driver bookkeeping. Every search and facet narrows the authorized set before the ten-row page. Internal recovery and release readers retain their existing queries.
 //
 // Bound concept: v1:pipelines:run (machine-readable: BoundConcepts["pipelineRunsBrowse"] in generated_concepts.go).
@@ -8683,6 +8705,63 @@ func PipelineRunsBrowseBuild(args PipelineRunsBrowseArgs) string {
 	}
 	if args.Outcome != "" {
 		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("outcome: ")
+		b.WriteString(quoteMemQL(args.Outcome))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// PipelineRunsBrowseAll -- Browse every run on the cluster, ten at a time, newest first: pipelineRunsBrowse's facets without its owner conjunct, for a developer's Runs list.
+//
+// Bound concept: v1:pipelines:run (machine-readable: BoundConcepts["pipelineRunsBrowseAll"] in generated_concepts.go).
+type PipelineRunsBrowseAllArgs struct {
+	ChangesOnly    bool
+	ChangesOnlySet bool // set true to send changesOnly; required because zero-value bool is ambiguous
+	Search         string
+	PipelineId     string
+	Branch         string
+	Outcome        string
+}
+
+// PipelineRunsBrowseAll calls the engine query pipelineRunsBrowseAll.
+func (qc *QueryClient) PipelineRunsBrowseAll(ctx context.Context, args PipelineRunsBrowseAllArgs) (*Result, error) {
+	call := PipelineRunsBrowseAllBuild(args)
+	return qc.executeNamed(ctx, "pipelineRunsBrowseAll", call)
+}
+
+func PipelineRunsBrowseAllBuild(args PipelineRunsBrowseAllArgs) string {
+	var b strings.Builder
+	b.WriteString("query pipelineRunsBrowseAll(")
+	if args.ChangesOnlySet {
+		b.WriteString("changesOnly: ")
+		b.WriteString(fmt.Sprintf("%v", args.ChangesOnly))
+	}
+	if args.Search != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	if args.PipelineId != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("pipelineId: ")
+		b.WriteString(quoteMemQL(args.PipelineId))
+	}
+	if args.Branch != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("branch: ")
+		b.WriteString(quoteMemQL(args.Branch))
+	}
+	if args.Outcome != "" {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("outcome: ")

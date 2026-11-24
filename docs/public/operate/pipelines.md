@@ -50,8 +50,9 @@ checks to another source, disconnect the pipeline it has first
 A run compiles into one `v1:work:goal` with one `v1:work:step` per step, so the
 work spine's journal and the Nexus drawing show it like any other work. Every
 row is readable by its owner, by a cluster owner, and by members of the account
-its source belongs to -- exactly the people who read the source. None holds a
-token, a secret value or a log line.
+its source belongs to -- exactly the people who read the source -- and every
+run is also readable, never writable, by anyone at developer rank or above.
+None holds a token, a secret value or a log line.
 
 ---
 

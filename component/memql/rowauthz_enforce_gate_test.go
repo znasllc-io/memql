@@ -471,6 +471,19 @@ var tierDecidesTheRead = map[string]string{
 	"storeByDomain":        "Connect Shopify D3, as storeById -- the read resolveStore and the auto-deploy feed resolve a manifest's store through.",
 	"stores":               "Connect Shopify D3, as storeById.",
 	"developmentStoresFor": "Connect Shopify D3, as storeById.",
+
+	// The developer reads of pipeline runs (design record 2026-11-24), the
+	// store reads' argument with a surface floor to match. v1:pipelines:run
+	// declares `owner="ownerUserId", clusterOwner, account="accountId",
+	// rankFloor="developer"`, and @requiresRank("developer") bounds the
+	// callers to cluster roles at or above that floor (an organization-scoped
+	// role is refused the call), for whom the floor arm admits every row. An
+	// owner conjunct is what hid a failure in a repository the developer did
+	// not connect. pipelineRunForOwner keeps it: every act resolves through it.
+	// The test that fails if this is wrong is
+	// TestDevelopersReadEveryPipelineRunAndWriteNone.
+	"pipelineRunsBrowseAll": "design record 2026-11-24. @requiresRank(\"developer\") bounds the callers to exactly the set the run tier's rankFloor=\"developer\" admits every row for, so the tier decides the read. TestDevelopersReadEveryPipelineRunAndWriteNone.",
+	"pipelineRunView":       "design record 2026-11-24, as pipelineRunsBrowseAll: one run by id for a developer's run page, never a basis for an act.",
 }
 
 func TestRowAuthzEnforcementLandGate(t *testing.T) {

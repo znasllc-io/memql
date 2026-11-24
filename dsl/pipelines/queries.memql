@@ -5,7 +5,7 @@
 // to this domain's own concepts although v1:work:run, v1:bench:run and
 // v1:shopify:channel share the bare names.
 //
-// TWO KINDS OF READ, and they are separate constructs on purpose.
+// TWO KINDS OF READ, and they are separate constructs on purpose (a third, the developer reads, is described where they are declared).
 //
 // The PERSON-FACING reads carry `row.ownerUserId == actor.userId`: the Runs
 // list, the run page and the source page's Pipeline facts ask about the
@@ -123,6 +123,45 @@ query run pipelineRunForOwner {
     runId  string!
   }
   filter  row => row.id == args.runId && row.ownerUserId == actor.userId
+  shape   pipelineRunFull
+}
+
+// ---- developer reads, every owner's runs, view only ----
+//
+// Design record 2026-11-24. No owner conjunct: @requiresRank("developer")
+// bounds the callers to exactly the set the run tier's rankFloor="developer"
+// admits every row for, so the tier decides the read (tierDecidesTheRead,
+// TestDevelopersReadEveryPipelineRunAndWriteNone). These are for looking:
+// every act on a run resolves it through pipelineRunForOwner.
+
+/// Browse every run on the cluster, ten at a time, newest first: pipelineRunsBrowse's facets
+/// without its owner conjunct, for a developer's Runs list.
+@requiresRank("developer")
+query run pipelineRunsBrowseAll {
+  args {
+    changesOnly bool
+    search string
+    pipelineId string
+    branch string
+    outcome string
+  }
+  filter    row => (args.changesOnly != true || row.event == "pull_request" || row.event == "merge_group")
+                && (args.pipelineId == nil || args.pipelineId == "" || row.pipelineId == args.pipelineId)
+                && (args.branch == nil || args.branch == "" || row.headBranch == args.branch)
+                && (args.outcome == nil || args.outcome == "" || (args.outcome == "queued" && row.status == "queued") || (args.outcome == "running" && row.status == "in_progress") || (args.outcome == "passed" && isCompleted(row) && row.conclusion == "success") || (args.outcome == "failed" && isCompleted(row) && row.conclusion != "success" && row.conclusion != "cancelled" && row.conclusion != "refused") || (args.outcome == "cancelled" && isCompleted(row) && row.conclusion == "cancelled") || (args.outcome == "refused" && isCompleted(row) && row.conclusion == "refused"))
+                && (args.search == nil || trim(args.search) == "" || row.title.includes(trim(args.search), true) || row.repository.includes(trim(args.search), true) || row.headBranch.includes(trim(args.search), true) || row.sha.includes(trim(args.search), true) || row.failureMessage.includes(trim(args.search), true) || row.refusalMessage.includes(trim(args.search), true))
+  sort      "queuedAt", "desc", "row.id", "desc"
+  paginate  10
+  shape     pipelineRunSummary
+}
+
+/// One run by id, whoever owns it: a developer's run page. Never a basis for an act.
+@requiresRank("developer")
+query run pipelineRunView {
+  args {
+    runId  string!
+  }
+  filter  row => row.id == args.runId
   shape   pipelineRunFull
 }
 
