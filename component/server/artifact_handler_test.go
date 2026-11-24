@@ -1574,3 +1574,9 @@ func TestArtifactPathsCarryBothSpellings(t *testing.T) {
 		}
 	}
 }
+
+// PipelineRunFile: this fake reaches no pipeline run. The pointer is exercised
+// against a real engine in artifact_pipeline_run_db_test.go.
+func (f *fakeLibraryStore) PipelineRunFile(context.Context, string, string) (*LibraryArtifactRow, *LibraryFileRow, error) {
+	return nil, nil, nil
+}

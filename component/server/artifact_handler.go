@@ -120,6 +120,12 @@ const (
 	// under the one /artifacts/{id}/content rule that already exists.
 	libraryVersionQueryKey = "version"
 
+	// libraryPipelineRunQueryKey names a pipeline run whose log a developer
+	// who does not own it is reading (design record 2026-11-24). A query
+	// parameter on the existing route, for libraryVersionQueryKey's reason:
+	// the front-door path set is generated, and no new path is added.
+	libraryPipelineRunQueryKey = "pipelineRun"
+
 	// DefaultLibraryMaxUploadBytes is the cap when MEMQL_LIBRARY_MAX_UPLOAD_BYTES
 	// is unset. 4 GiB since memql#4782 (design D9): the chunked session path
 	// carries big files -- videos are the named case -- in bounded 16 MiB
@@ -273,6 +279,10 @@ type LibraryArtifactRow struct {
 	// (SharedFile): still the sharer's, and not in their Bin.
 	OwnerUserId string
 	Archived    bool
+	// Source and ProducedByRunId are what the pipeline-run pointer holds the
+	// row to (PipelineRunFile): a pipeline file of the run's own work run.
+	Source          string
+	ProducedByRunId string
 }
 
 // LibraryFileRow is the v1:library:file projection the download path needs --
@@ -396,6 +406,12 @@ type LibraryStore interface {
 	// anything else -- the content route cannot tell "not shared" from "not
 	// there", and must not.
 	SharedFile(ctx context.Context, artifactId string) (*LibraryArtifactRow, *LibraryFileRow, error)
+	// PipelineRunFile resolves a pipeline log for a developer reading a run
+	// they do not own (design record 2026-11-24): the caller must read the
+	// run through pipelineRunView, and the artifact must be the run owner's
+	// live pipeline file of the run's own work run, read under that owner.
+	// Nil, nil for anything else -- the route answers it with the same 404.
+	PipelineRunFile(ctx context.Context, runId, artifactId string) (*LibraryArtifactRow, *LibraryFileRow, error)
 	// FileByUploadedFrom resolves the LIVE file a machine pushed from a given
 	// path -- the (machine, path) key the watched-folder backup versions on
 	// (epic memql#4783). Nil when nothing matches, which is the ordinary
@@ -1403,14 +1419,23 @@ func requestedVersion(r *http.Request) (int, bool, string) {
 
 // serveSharedFile is the route's answer for an artifact the caller cannot read
 // as their own: a file somebody shared WITH them (file sharing, 2026-11-18),
-// resolved by SharedFile under the sharer while the share is open, or the same
-// 404 as every other refusal here.
+// resolved by SharedFile under the sharer while the share is open, or, with
+// ?pipelineRun=, a pipeline log of a run the caller may read (PipelineRunFile),
+// or the same 404 as every other refusal here.
 //
 // THE CURRENT VERSION ONLY. A share is of the file as it stands, so an older
 // version is not offered: ?version= is refused with the same 404, rather than
 // opening the version read to a second kind of caller.
 func (h *ArtifactHandler) serveSharedFile(w http.ResponseWriter, r *http.Request, artifactId string) {
-	artifact, row, err := h.store.SharedFile(r.Context(), artifactId)
+	lookup := h.store.SharedFile
+	if run := strings.TrimSpace(r.URL.Query().Get(libraryPipelineRunQueryKey)); run != "" {
+		// Everything after the lookup is the shared file's path: the version
+		// refusal, the 404s and serveFileRow's blob-key check.
+		lookup = func(ctx context.Context, id string) (*LibraryArtifactRow, *LibraryFileRow, error) {
+			return h.store.PipelineRunFile(ctx, run, id)
+		}
+	}
+	artifact, row, err := lookup(r.Context(), artifactId)
 	if err != nil {
 		h.logger.Error("library shared file lookup failed", "error", err, "artifactId", artifactId)
 		http.Error(w, "lookup failed", http.StatusInternalServerError)
@@ -2105,6 +2130,8 @@ func (s *EngineLibraryStore) Artifact(ctx context.Context, artifactId string) (*
 		Summary:          rowString(r, "summary"),
 		OwnerUserId:      rowString(r, "ownerUserId"),
 		Archived:         rowBool(r, "archived"),
+		Source:           rowString(r, "source"),
+		ProducedByRunId:  rowString(r, "producedByRunId"),
 	}, nil
 }
 
@@ -2183,6 +2210,45 @@ func (s *EngineLibraryStore) SharedFile(ctx context.Context, artifactId string) 
 		return artifact, file, nil
 	}
 	return nil, nil, nil
+}
+
+// PipelineRunFile is the pipeline-run pointer's resolver (design record
+// docs/superpowers/specs/2026-11-24-pipelines-developer-view-design.md, and
+// CLAUDE.md's HTTP exceptions table).
+//
+// THE CALLER READS THE RUN, then THE OWNER'S BORROWED AUTHORITY READS THE FILE,
+// as SharedFile reads under the sharer -- never internal origin. The run read
+// is pipelineRunView, @requiresRank("developer"), so a caller below developer
+// is refused there; that refusal is an error, and on this route a refusal is
+// the 404 every other one is, so it answers nil. The artifact must be the run
+// owner's, a live file, source "pipeline", produced by the run's own work run;
+// its backing file the owner's and live. The blob-key check stays with the
+// caller of this function.
+func (s *EngineLibraryStore) PipelineRunFile(ctx context.Context, runId, artifactId string) (*LibraryArtifactRow, *LibraryFileRow, error) {
+	res, err := s.exec(ctx, "pipelineRunView", map[string]any{"runId": strings.TrimSpace(runId)})
+	if err != nil {
+		return nil, nil, nil
+	}
+	runs := memql.MaterializeRows(res)
+	if len(runs) != 1 {
+		return nil, nil, nil
+	}
+	owner := memql.BareShortId(rowString(runs[0], "ownerUserId"))
+	workRun := memql.BareShortId(rowString(runs[0], "workRunId"))
+	if owner == "" || workRun == "" {
+		return nil, nil, nil
+	}
+	asOwner := auth.ContextWithUserActor(ctx, owner)
+	artifact, err := s.Artifact(asOwner, artifactId)
+	if err != nil || artifact == nil || artifact.Archived || artifact.Kind != libraryKindFile || artifact.Source != "pipeline" ||
+		memql.BareShortId(artifact.ProducedByRunId) != workRun || memql.BareShortId(artifact.OwnerUserId) != owner {
+		return nil, nil, err
+	}
+	file, err := s.File(asOwner, artifact.SourceConceptRef)
+	if err != nil || file == nil || file.Archived || memql.BareShortId(file.OwnerUserId) != owner {
+		return nil, nil, err
+	}
+	return artifact, file, nil
 }
 
 // shareReaches is the share's recipient half of SharedFile's decision. A
