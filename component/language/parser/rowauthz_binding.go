@@ -279,8 +279,17 @@ type RowAuthzDecl struct {
 	// orRankScope's reason: a cluster owner whose rank cannot be resolved must
 	// keep reading their own administrative rows.
 	//
-	// Set only for RowAuthzClusterOwner. On any other tier it is meaningless
-	// and FormatRowAuthz refuses it rather than dropping it silently.
+	// ALSO AN ARGUMENT OF THE OWNED TIER (design record 2026-11-24,
+	// docs/superpowers/specs/2026-11-24-pipelines-developer-view-design.md):
+	// `v1:pipelines:run` keeps its owner, cluster-owner and account arms and
+	// adds a floor, so a developer reads a run nobody tied to an account. It is
+	// not rankVisible under a second name: rankVisible compares the caller with
+	// the row OWNER's rank, a floor with one fixed rung, and neither widens a
+	// write.
+	//
+	// Set only for RowAuthzClusterOwner and RowAuthzOwned. On any other tier it
+	// is meaningless and FormatRowAuthz refuses it rather than dropping it
+	// silently.
 	RankFloor string `json:"rankFloor,omitempty"`
 }
 
@@ -340,7 +349,7 @@ var rowAuthzKeywordTiers = map[string]RowAuthzTier{
 // rowAuthzSpellings renders the accepted forms for a diagnostic, in a
 // stable order.
 func rowAuthzSpellings() string {
-	return `@rowAuthz(public), @rowAuthz(public, requiresIdentity), @rowAuthz(clusterOwner), @rowAuthz(clusterOwner, rankFloor="<role>"), @rowAuthz(owner="<field>"), @rowAuthz(via="<spec>"), @rowAuthz(owner="<field>", clusterOwner), @rowAuthz(owner="<field>", rankVisible[, rankStrict][, unowned="<role>"][, clusterOwner]), @rowAuthz(owner="<field>", account="<field>"[, rankVisible][, clusterOwner])`
+	return `@rowAuthz(public), @rowAuthz(public, requiresIdentity), @rowAuthz(clusterOwner), @rowAuthz(clusterOwner, rankFloor="<role>"), @rowAuthz(owner="<field>"), @rowAuthz(via="<spec>"), @rowAuthz(owner="<field>", clusterOwner), @rowAuthz(owner="<field>", rankVisible[, rankStrict][, unowned="<role>"][, clusterOwner]), @rowAuthz(owner="<field>", account="<field>"[, rankVisible][, rankFloor="<role>"][, clusterOwner])`
 }
 
 // rowAuthzOwnedModifiers is THE set of arguments that may accompany an
@@ -359,6 +368,7 @@ var rowAuthzOwnedModifiers = map[string]bool{
 	rowAuthzArgRankStrict:   true,
 	rowAuthzArgUnowned:      false,
 	rowAuthzArgAccount:      false,
+	rowAuthzArgRankFloor:    false,
 }
 
 // rowAuthzArgClusterOwner is the flag spelling that, BESIDE an `owner=`
@@ -629,6 +639,8 @@ func parseRowAuthzOwnedModifiers(args map[string]any) (*RowAuthzDecl, string, bo
 			decl.Unowned = strings.TrimSpace(v)
 		case rowAuthzArgAccount:
 			decl.Account = strings.TrimSpace(v)
+		case rowAuthzArgRankFloor:
+			decl.RankFloor = strings.TrimSpace(v)
 		}
 	}
 
@@ -856,15 +868,12 @@ func FormatRowAuthz(d RowAuthzDecl) (string, error) {
 		return "", fmt.Errorf("@%s: %s is an argument of the public tier -- it has no meaning on tier %q",
 			RowAuthzAnnotation, rowAuthzArgRequiresIdentity, d.Tier)
 	}
-	// RankFloor relaxes the CLUSTER-OWNER tier's read and means nothing on any
-	// other, and is refused rather than dropped for the same round-trip reason:
-	// a renderer that silently discards half a declaration emits something
-	// ParseRowAuthz reads back as a DIFFERENT decl. On the owned tier in
-	// particular there is already a rank vocabulary (rankVisible / unowned),
-	// and quietly accepting a third spelling there would give one behaviour two
-	// names.
-	if d.RankFloor != "" && d.Tier != RowAuthzClusterOwner {
-		return "", fmt.Errorf("@%s: %s is an argument of the clusterOwner tier -- it has no meaning on tier %q",
+	// RankFloor relaxes the read of the CLUSTER-OWNER and OWNED tiers and means
+	// nothing on any other, and is refused rather than dropped for the same
+	// round-trip reason: a renderer that silently discards half a declaration
+	// emits something ParseRowAuthz reads back as a DIFFERENT decl.
+	if d.RankFloor != "" && d.Tier != RowAuthzClusterOwner && d.Tier != RowAuthzOwned {
+		return "", fmt.Errorf("@%s: %s is an argument of the clusterOwner and owned tiers -- it has no meaning on tier %q",
 			RowAuthzAnnotation, rowAuthzArgRankFloor, d.Tier)
 	}
 	if d.RankStrict && !d.RankVisible {
@@ -915,6 +924,12 @@ func FormatRowAuthz(d RowAuthzDecl) (string, error) {
 		// that already spells it there.
 		if d.Account != "" {
 			out += fmt.Sprintf(", %s=%q", rowAuthzArgAccount, d.Account)
+		}
+		// The read floor sits after the account grant and before the
+		// cluster-owner escape, for the reason the account grant does: it is
+		// newer, and `clusterOwner` stays last on every declaration.
+		if d.RankFloor != "" {
+			out += fmt.Sprintf(", %s=%q", rowAuthzArgRankFloor, d.RankFloor)
 		}
 		if d.ClusterOwnerBypass {
 			out += ", " + rowAuthzArgClusterOwner

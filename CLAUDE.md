@@ -1398,6 +1398,11 @@ DENIES.** D4: `MaintenanceActor`, the seed materializer, an automation's system
 actor and borrowed authority carry `AccessContext.Unranked`, or every sweep
 and boot seed would become a peer-write and stop.
 
+**`rankFloor="<role>"` is a READ floor**, legal beside a bare `clusterOwner`
+(memql#5216) and on the owned tier (design record 2026-11-24,
+`v1:pipelines:run`): reads widen to every caller at or above that rung, writes
+never, and a role scoped to one organization never passes it.
+
 **`@requiresRank("<role>")` is the SURFACE half** (D6): an actor-rank FLOOR on
 a query / mutation / logic / tool (on a tool it judges the person the call is
 for, and decides what is listed to them, memql#5438), validated at LOAD and

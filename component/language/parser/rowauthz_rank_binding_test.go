@@ -62,6 +62,13 @@ func TestParseRowAuthzRankModifiers(t *testing.T) {
 			`@rowAuthz(owner="ownerUserId", clusterOwner)`,
 			RowAuthzDecl{Tier: RowAuthzOwned, Owner: "ownerUserId", ClusterOwnerBypass: true},
 		},
+		{
+			// The owner tier's read floor (design record 2026-11-24): the
+			// pipeline run's declaration, verbatim.
+			"a read floor beside the owner",
+			`@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId", rankFloor="developer")`,
+			RowAuthzDecl{Tier: RowAuthzOwned, Owner: "ownerUserId", ClusterOwnerBypass: true, Account: "accountId", RankFloor: "developer"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -103,6 +110,8 @@ func TestParseRowAuthzRefusesIncoherentRankCombinations(t *testing.T) {
 		// say the true thing: this tier takes `rankFloor` and the rank
 		// vocabulary `rankVisible` belongs to needs an `owner=` field.
 		{"rank modifiers with no owner field", `@rowAuthz(clusterOwner, rankVisible)`, "rankFloor"},
+		// A bare floor would store `true`, which ranks 0 and admits everyone.
+		{"a bare read floor beside the owner", `@rowAuthz(owner="ownerUserId", rankFloor)`, "quoted role slug"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -132,6 +141,7 @@ func TestFormatRowAuthzRoundTripsEveryRankCombination(t *testing.T) {
 	// modifier set is small enough that "all of them" is cheaper to read
 	// than an argument about which ones matter.
 	for _, d := range []RowAuthzDecl{
+		{Tier: RowAuthzOwned, Owner: "ownerUserId", Account: "accountId", RankFloor: "developer", ClusterOwnerBypass: true},
 		{Tier: RowAuthzOwned, Owner: "ownerUserId", RankVisible: true},
 		{Tier: RowAuthzOwned, Owner: "ownerUserId", RankVisible: true, RankStrict: true},
 		{Tier: RowAuthzOwned, Owner: "ownerUserId", RankVisible: true, Unowned: "developer"},

@@ -305,6 +305,11 @@ the owner conjunct.
   This names the actor rank from which such a row is readable. An
   **absent** owner key stays denied, which is what the owned tier has
   always done with one.
+- **`rankFloor="<role>"`** (design record 2026-11-24) — reads admit every
+  row to a caller at or above that rung; an organization-scoped role never
+  passes, and writes are untouched. Also legal beside a bare `clusterOwner`.
+  A read that relies on it carries `@requiresRank` at the same rung and no
+  owner conjunct, adjudicated in `tierDecidesTheRead`.
 
 Two properties an operator reading a refusal should know:
 

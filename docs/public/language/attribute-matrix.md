@@ -1156,7 +1156,7 @@ Shape kind: projects a concept's payload + row intrinsics (concept bound via the
 | `rankStrict` | flag | Beside owner= and rankVisible: writes widen to rows owned strictly below the caller's rank, and the cluster-owner write escape is withdrawn. |
 | `unowned` | string | Beside owner= and rankVisible: the actor rank from which a row with an empty owner is readable. |
 | `requiresIdentity` | flag | Beside public: readable by authenticated callers only (memql#4809). |
-| `rankFloor` | string | Beside clusterOwner: relaxes the READ to a rank floor while the write stays cluster-owner (memql#5216). |
+| `rankFloor` | string | Beside clusterOwner or owner=: relaxes the READ to a rank floor; writes are unchanged (memql#5216; owner tier: design record 2026-11-24). |
 
 Declares WHO MAY SEE this concept's rows, once on the concept, instead of as an `actor.*` term every filter over it must remember to carry. Four tiers, one spelling each: @rowAuthz(public) (globally readable by intent -- spelled explicitly, because "no annotation" and "declared public" are different states), @rowAuthz(clusterOwner) (administrative), @rowAuthz(owner="&lt;field>") (the field is compared against actor.userId; it must be a field the concept declares, OR the literal "id" for a SELF-OWNED concept whose owner is the row itself -- memql#3029; `id` and only `id`, since createdBy means who WROTE the row, not whose row it is), and @rowAuthz(via="&lt;spec>") (a relationship spec grants visibility).
 

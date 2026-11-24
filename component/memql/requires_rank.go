@@ -246,7 +246,7 @@ func (e *MemQLEngine) validateRowAuthzUnownedSlugs(ctx context.Context) []error 
 		// widening the read to every authenticated caller.
 		if slug := strings.TrimSpace(decl.RankFloor); slug != "" && ladder.rankOf(slug) == 0 {
 			problems = append(problems, fmt.Errorf(
-				"%s declares @rowAuthz(clusterOwner, rankFloor=%q), which names no role in dsl/rbac. "+
+				"%s declares @rowAuthz(..., rankFloor=%q), which names no role in dsl/rbac. "+
 					"An unresolvable floor ranks 0 and every rank clears 0, so this declaration "+
 					"would admit EVERY authenticated caller to every row of this concept while "+
 					"still reading like a narrowing. Known roles: %s",
