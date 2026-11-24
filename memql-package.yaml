@@ -549,7 +549,16 @@ pipeline:
           only: db-gated
           shards: 5
           services: [postgres]
-          timeout: 40m
+          # 50 minutes since 2026-11-24 (40 before). A shard's timeout has to
+          # hold its setup, its packages and the largest package alarm among
+          # them. On main's a734eb107 run the shard holding integrations/calls
+          # spent 555 s before that package began, and its class is now 1800 s
+          # (scripts/ci/db-test-budgets.yaml), so 40 minutes could end the shard
+          # before the alarm names the test it was running. The shard holding
+          # calls on 62d0d4711 already took 2003 s of the old 2400.
+          # scripts/ci/pipeline_db_tests_test.py holds the step 15 minutes
+          # above the largest class.
+          timeout: 50m
           run: |
             set -eu
             # Engine fixtures repeatedly load the DSL. Leave room for that live

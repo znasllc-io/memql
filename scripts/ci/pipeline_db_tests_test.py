@@ -1,4 +1,5 @@
 import importlib.util
+import re
 import tempfile
 from pathlib import Path
 import subprocess
@@ -37,8 +38,23 @@ class DatabaseBudgets(unittest.TestCase):
         commands = runner.commands(selected, self.classes, self.parallelism)
         self.assertCountEqual([p for _, command in commands for p in command[6:]], selected)
         by_class = dict(commands)
-        for name, timeout in [("memql", "1200s"), ("packages", "300s"), ("work", "480s"), ("library", "300s"), ("release", "600s"), ("installation", "1200s"), ("campaigns", "600s"), ("emailstats", "300s"), ("shopify", "600s"), ("datasync", "300s"), ("wholesale", "600s"), ("storestats", "1140s"), ("calls", "900s"), ("default", "180s")]:
+        for name, timeout in [("memql", "1200s"), ("packages", "300s"), ("work", "480s"), ("library", "300s"), ("release", "600s"), ("installation", "1200s"), ("campaigns", "600s"), ("emailstats", "300s"), ("shopify", "600s"), ("datasync", "300s"), ("wholesale", "600s"), ("storestats", "1140s"), ("calls", "1800s"), ("default", "180s")]:
             self.assertEqual(by_class[name][:6], ["go", "test", "-count=1", "-p=1", "-parallel=4", "-timeout=" + timeout])
+
+    def test_db_step_timeout_outlasts_the_largest_class_and_its_shard_setup(self):
+        # A shard spends minutes before its packages run (555s on main's
+        # a734eb107 run, before integrations/calls began), and smaller packages
+        # share it. A class that leaves the step less than 15 minutes of that
+        # lets the step's deadline end the shard before the package alarm names
+        # the test it was running, so a raised class raises the step with it.
+        manifest = yaml.safe_load((Path(__file__).resolve().parents[2] / "memql-package.yaml").read_text())
+        steps = [step for stage in manifest["pipeline"]["stages"] for step in stage.get("steps", []) if step.get("name") == "db-tests"]
+        self.assertEqual(len(steps), 1)
+        duration = re.fullmatch(r"(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?", steps[0]["timeout"])
+        self.assertIsNotNone(duration, steps[0]["timeout"])
+        step_seconds = sum(int(value or 0) * scale for value, scale in zip(duration.groups(), (3600, 60, 1)))
+        largest = max(int(timeout[:-1]) for _, _, timeout in self.classes)
+        self.assertGreaterEqual(step_seconds - largest, 900, "db-tests timeout %s leaves %ds beside the %ds class" % (steps[0]["timeout"], step_seconds - largest, largest))
 
     def test_shared_parallelism_is_bounded_and_not_inherited_from_cpu_count(self):
         for value in ("0", "33", "-1", "4 -run=None", "", None):
