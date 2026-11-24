@@ -271,10 +271,17 @@ the cluster's account does not pay for this person's calls.
   local model or not at all. That includes a picture described when a file is
   uploaded to the Library, and a vendor reached only because a local model or
   an app failed when it was called.
-- **Embeddings are the exception.** The memory space is the cluster's, one
-  model for everybody, and a person whose writes were not embedded would be
-  missing from everybody's search. Embeddings are paid by the cluster's
-  account for every caller.
+- **Embeddings are the exception.** Memory search compares vectors, and
+  vectors from two models cannot be compared, so the cluster indexes
+  everything with ONE embedding model, chosen once for the whole cluster.
+  That model is all that is shared; what each person may see in a result
+  is still their own. When the chosen model is a vendor's, the cluster's
+  account pays for every caller's embeddings, because a person whose writes
+  were not embedded would be missing from everybody's search. When it is a
+  model on a machine (the usual case, picked first when a cluster chooses
+  one), no vendor account pays at all: each person's writes are embedded on
+  their own machine or one lent to them, and the cluster's own work on
+  machines lent to cluster work.
 - **Not covered:** a cluster whose operator set `MEMQL_STT_PROVIDER` to one of
   the direct OpenAI transcription paths sends everybody's live transcription
   to OpenAI on the cluster's account. That variable is the operator's own

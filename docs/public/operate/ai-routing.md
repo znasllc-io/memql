@@ -713,9 +713,11 @@ the acting person may not use resolves nothing, exactly as a made-up one does.
 output. Vision, embeddings, speech, transcription and images take no key: they
 are the cluster's account or nothing. So for a person the cluster's account
 does not pay for, a picture, speech, transcription or an image at a vendor is
-passed over like a shut door, with that reason in `considered`. Embeddings are
-paid by the cluster's account for every caller: the memory space is the
-cluster's, one model for everybody.
+passed over like a shut door, with that reason in `considered`. Embeddings use
+the cluster's one memory-search model (`v1:platform:embedderBinding`), pinned
+on every call and never degraded: when it is a vendor's, the cluster's account
+pays for every caller; when it is a model on a machine, it runs on the
+caller's own machines or ones lent to them, and no vendor account pays.
 
 **Who a call is for is read from the call.** The request names a person, or
 its context does: a signed-in session, borrowed authority, or the owner of the
