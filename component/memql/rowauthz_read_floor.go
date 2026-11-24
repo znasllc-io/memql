@@ -1,6 +1,6 @@
 package memql
 
-// THE CLUSTER-OWNER TIER'S READ FLOOR (memql#5216).
+// THE READ FLOOR of the cluster-owner tier and the owner tier (reads only; memql#5216).
 //
 // ===========================================================================
 // WHAT WAS MISSING, AND WHY IT SHOWED UP AS A LIE RATHER THAN AS A REFUSAL
@@ -78,7 +78,7 @@ import (
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
-// ReadFloorExpression is the injected placeholder for a cluster-owner tier's
+// ReadFloorExpression is the injected placeholder for a cluster-owner or owner tier's
 // read floor.
 //
 // SYMBOLIC on purpose, exactly as RankScopeExpression is. The floor is a
@@ -169,7 +169,7 @@ func (e *MemQLEngine) readFloorAdmits(ctx context.Context, floor string) bool {
 //
 // A context no entry point stamped therefore DENIES. That is the correct
 // direction for a term that is OR-ed onto a gate: declining leaves exactly the
-// pre-floor behaviour, which is the cluster-owner tier alone.
+// pre-floor behaviour, which is the cluster-owner tier alone (the owner tier takes it too, for reads only).
 func readFloorAdmitsRow(ctx context.Context, decl *langparser.RowAuthzDecl) bool {
 	if !readFloorDeclared(decl) {
 		return false

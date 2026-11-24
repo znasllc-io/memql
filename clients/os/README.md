@@ -1299,7 +1299,7 @@ the QA views `repository-preparation-waiting-error` and
   pipelines parts (`connect`, `rerun`, `cancel`, `channels`) are read GLOBALLY,
   never per organization -- a pipeline is acted on by its owner alone.
 - **A DEVELOPER SEES EVERY RUN AND ACTS ON NONE BUT THEIR OWN** (design
-  record 2026-11-24). At developer rank or above the Runs list reads
+  record 2026-11-24). At developer rank or above with a cluster-wide role the Runs list reads
   `pipelineRunsBrowseAll` and a run by id `pipelineRunView`. On a run
   somebody else owns, the page reads its steps and pipeline files through
   `pipelinesRunDetail` (again whenever the run row moves: the step rows'

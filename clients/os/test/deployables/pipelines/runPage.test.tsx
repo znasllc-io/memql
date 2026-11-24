@@ -463,6 +463,7 @@ describe("a run somebody else owns", () => {
     await waitFor(() => expect(barActs()).toEqual(["Open on GitHub"]));
     expect(screen.queryByRole("button", { name: "Open the full log" })).toBeNull();
     expect(screen.queryByText(/Saved to/)).toBeNull();
+    expect(document.querySelector(".pipeline-log-acts")).toBeNull();
     const [url] = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0]!;
     expect(String(url)).toContain("/_memql/artifacts/artifact-log/content?pipelineRun=r-1");
   });

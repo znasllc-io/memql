@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // run_detail.go -- pipelinesRunDetail, a developer's view of a run they do not
@@ -18,7 +19,9 @@ import (
 // re-run, cancel and every other act still resolve through RunForOwner.
 
 func (i *Integration) handleRunDetail(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	ctx = handlerContext(ctx)
+	// Fresh: a run is read while it moves, and a cached read would freeze a
+	// developer's page on a stale step (as artifact_expiry.go reads).
+	ctx = memql.ContextWithFreshRead(handlerContext(ctx))
 	if _, err := personFrom(ctx); err != nil {
 		return nil, err
 	}

@@ -51,7 +51,7 @@ A run compiles into one `v1:work:goal` with one `v1:work:step` per step, so the
 work spine's journal and the Nexus drawing show it like any other work. Every
 row is readable by its owner, by a cluster owner, and by members of the account
 its source belongs to -- exactly the people who read the source -- and every
-run is also readable, never writable, by anyone at developer rank or above.
+run is also readable, never writable, by anyone at developer rank or above with a cluster-wide role.
 None holds a token, a secret value or a log line.
 
 ---
@@ -706,7 +706,7 @@ release publication or installation authority.
   fleet code at Compute, a secret code at Confirm, everything else at
   Repository. Nothing is written until Connect, and leaving keeps the answers.
 - **Runs** is a Pipelines section (`read app:pipelines/runs`):
-  every run of every source you connected -- at developer rank or above, every run on the cluster -- newest first, grouped by day,
+  every run of every source you connected -- at developer rank or above with a cluster-wide role, every run on the cluster -- newest first, grouped by day,
   Refine for the source, branch and outcome. A run rings once, when it has an
   answer.
 - **A run’s page** draws the stages down the left, or across a narrow window,

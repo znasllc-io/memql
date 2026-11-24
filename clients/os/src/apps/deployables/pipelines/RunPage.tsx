@@ -436,7 +436,7 @@ function FailedStep({ step, log, onOpenFile, pipelineRun }: { step: StepRow; log
       ) : (
         <Caption>The log is empty.</Caption>
       )}
-      {log !== null ? (
+      {log !== null && (onOpenFile || !pipelineRun) ? (
         <p className="pipeline-log-acts">
           {onOpenFile ? <button type="button" className="os-link" onClick={() => onOpenFile(log.artifactId)}>Open the full log</button> : null}
           {pipelineRun ? null : <span className="pipeline-log-saved">Saved to your Library</span>}

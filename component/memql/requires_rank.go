@@ -204,7 +204,7 @@ func (e *MemQLEngine) refusePlanBelowRequiredRank(ctx context.Context, plan *Que
 
 // validateRowAuthzUnownedSlugs is the load-time check for the two OTHER slugs a
 // declaration can name: `@rowAuthz(owner="f", rankVisible, unowned="<role>")`
-// and `@rowAuthz(clusterOwner, rankFloor="<role>")` (memql#5216).
+// and `@rowAuthz(clusterOwner, rankFloor="<role>")` (memql#5216; the owner tier takes a floor too, for reads only).
 //
 // ONE PASS OVER THE CONCEPTS, TWO SLUGS. They are the same question asked of
 // two declarations, and a second walk would be a second place to forget a
@@ -237,7 +237,7 @@ func (e *MemQLEngine) validateRowAuthzUnownedSlugs(ctx context.Context) []error 
 					"still reading like a gate. Known roles: %s",
 				name, slug, strings.Join(ladder.knownSlugs(), ", ")))
 		}
-		// The cluster-owner tier's READ FLOOR (memql#5216) is the same failure
+		// The READ FLOOR (memql#5216; cluster-owner and owner tiers, reads only) is the same failure
 		// with a wider blast radius, so it is checked in the same pass rather
 		// than in one of its own: `unowned=` relaxes an already-narrowed owned
 		// tier, while `rankFloor=` is the only thing between a caller and every

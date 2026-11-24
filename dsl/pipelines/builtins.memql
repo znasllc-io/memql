@@ -102,9 +102,9 @@ builtin pipelineRetentionReport { }
 // pipeline for disconnect, the run for re-run and cancel), so a caller who does
 // not own it resolves zero rows and is refused by name before anything is
 // written -- save a cluster owner's disconnect, which reaches any pipeline so
-// an operator can free a repository a departed owner's pipeline holds. pipelinesRunDetail is the one read that also
-// resolves through the developer read (pipelineRunView), and it writes nothing. The part
-// is the door, exactly as for the Deployables actions beside them in
+// an operator can free a repository a departed owner's pipeline holds.
+// pipelinesRunDetail is the one read that also resolves through the developer
+// read (pipelineRunView), and it writes nothing. The part is the door, exactly as for the Deployables actions beside them in
 // dsl/platform/builtins.memql, and each act has its own (task memql#5498):
 // previewing, connecting and disconnecting is `app:pipelines/connect`,
 // re-running and starting a disconnected manual rehearsal is

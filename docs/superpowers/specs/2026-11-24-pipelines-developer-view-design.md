@@ -39,7 +39,7 @@ Jesús's decisions:
 3. **Steps and files through one narrow builtin.** `pipelinesRunDetail(runId)` resolves the run as the caller (owner
    read, else the developer read), then reads that run's work steps and its `source == "pipeline"` artifacts under
    the run owner's borrowed authority, and returns a projection (not the rows), so no work or Library tier is widened.
-4. **Logs through the existing download.** `GET /artifacts/{id}/content?pipelineRun=<runId>` serves an artifact to a
+4. **A run's pipeline file (its logs and artifacts) through the existing download.** `GET /artifacts/{id}/content?pipelineRun=<runId>` serves an artifact to a
    caller at developer rank or above only when: the caller can read that run; the artifact's `source` is
    `pipeline`, its `producedByRunId` is the run's work run, and its owner is the run's owner; it is a live file. It is
    then read and served under the owner, as the shared-file fallback already does. No new route.
@@ -52,7 +52,7 @@ cancel (the owner-only read already refuses; a test pins it).
 
 ## For José
 
-The Library artifact content route in CLAUDE.md's HTTP exceptions table gains one allowed case: a pipeline log served
+The Library artifact content route in CLAUDE.md's HTTP exceptions table gains one allowed case: a pipeline file of that run (its logs and artifacts) served
 to a developer through the `pipelineRun` pointer, under the checks in point 4. No new HTTP endpoint is added.
 
 ## Tests
