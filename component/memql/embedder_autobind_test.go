@@ -9,6 +9,8 @@ package memql
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -222,4 +224,42 @@ func TestTheOwnerLookupIsCached(t *testing.T) {
 	_, err := f.db.DB.ExecContext(f.ctx, `DELETE FROM "MemoryNodes" WHERE id=$1`, f.owner)
 	require.NoError(t, err)
 	require.True(t, f.eng.IndexerIsActiveOwner(f.ctx, f.owner), "served from the cache inside the TTL")
+}
+
+// A refused indexer is a WAIT: it satisfies the fleet-unavailable check every
+// indexing caller already makes.
+func TestARefusedIndexerReadsAsUnavailable(t *testing.T) {
+	require.ErrorIs(t, ErrEmbeddingIndexerNotOwner, ErrFleetUnavailable)
+	require.ErrorIs(t, fmt.Errorf("wrapped: %w", ErrEmbeddingIndexerNotOwner), ErrEmbeddingIndexerNotOwner)
+}
+
+// A failed read keeps the last good set, is retried after a short backoff and
+// not on every call, and a replica with no earlier answer refuses.
+func TestTheOwnerLookupSurvivesAFailedRead(t *testing.T) {
+	e := &MemQLEngine{}
+	reads, fail := 0, false
+	e.indexerOwners.read = func(context.Context) ([]string, error) {
+		reads++
+		if fail {
+			return nil, errors.New("database unavailable")
+		}
+		return []string{"v1:identity:user:o1"}, nil
+	}
+	ctx := context.Background()
+	// No earlier answer and the read fails: refuse, and do not hammer.
+	fail = true
+	require.False(t, e.IndexerIsActiveOwner(ctx, "o1"))
+	require.False(t, e.IndexerIsActiveOwner(ctx, "o1"))
+	require.Equal(t, 1, reads, "a failed read is retried after a backoff, not on every call")
+	// Recovered: the set is read once the backoff passes.
+	fail = false
+	e.indexerOwners.retryAt = time.Time{}
+	require.True(t, e.IndexerIsActiveOwner(ctx, "o1"))
+	require.Equal(t, 2, reads)
+	// Stale, then the database fails: the last good set keeps answering.
+	e.indexerOwners.at = time.Now().Add(-2 * indexerOwnerTTL)
+	fail = true
+	require.True(t, e.IndexerIsActiveOwner(ctx, "o1"))
+	require.True(t, e.IndexerIsActiveOwner(ctx, "o1"))
+	require.Equal(t, 3, reads)
 }

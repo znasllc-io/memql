@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math"
 	"regexp"
 	"sort"
@@ -442,35 +443,64 @@ func (e *MemQLEngine) activeOwnerIds(ctx context.Context) ([]string, error) {
 	return ids, nil
 }
 
-// indexerOwnerTTL bounds how stale the resolver's owner re-check may be.
-const indexerOwnerTTL = 60 * time.Second
+// indexerOwnerTTL bounds how stale the resolver's owner re-check may be while
+// the database answers; indexerOwnerRetry is how soon a FAILED read is retried.
+const (
+	indexerOwnerTTL   = 60 * time.Second
+	indexerOwnerRetry = 5 * time.Second
+)
 
 type ownerSetCache struct {
-	mu     sync.Mutex
-	at     time.Time
-	owners map[string]bool
+	mu      sync.Mutex // guards the fields only; never held across a read
+	at      time.Time  // when owners was read
+	retryAt time.Time  // no read before this, after a failed one
+	owners  map[string]bool
+	reading bool
+	read    func(context.Context) ([]string, error) // nil: activeOwnerIds; set by tests
 }
 
 // IndexerIsActiveOwner reports whether userId is an active user with the
-// stored role `owner`, from a per-replica set cached for indexerOwnerTTL. A
-// failed read answers from the last good set while one exists and otherwise
-// false: an indexer that cannot be confirmed is refused, and the writer's
-// "until backfilled" path catches the item up later.
+// stored role `owner`, from a per-replica set.
+//
+// FRESHNESS. While the database answers, the set is at most indexerOwnerTTL
+// old. The refresh runs OUTSIDE the lock and one caller at a time; others keep
+// the current set meanwhile, so no embedding waits behind a read. A FAILED
+// read keeps the last good set and is retried after indexerOwnerRetry, not on
+// every call. DURING AN OUTAGE THE OLD SET IS SERVED WITHOUT AN AGE BOUND: the
+// 60 s bound is for a reachable database, and the same outage would stop the
+// embedding's own reads. A replica that never read a set refuses
+// (false): an indexer that cannot be confirmed is not trusted, and the
+// writer's "until backfilled" path catches the item up later.
 func (e *MemQLEngine) IndexerIsActiveOwner(ctx context.Context, userId string) bool {
 	userId = strings.TrimPrefix(strings.TrimSpace(userId), conceptIdentityUser+":")
 	if userId == "" {
 		return false
 	}
 	c := &e.indexerOwners
+	now := time.Now()
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.owners == nil || time.Since(c.at) > indexerOwnerTTL {
-		ids, err := e.activeOwnerIds(ctx)
+	due := (c.owners == nil || now.Sub(c.at) > indexerOwnerTTL) && !now.Before(c.retryAt) && !c.reading
+	if due {
+		c.reading = true
+	}
+	read := c.read
+	c.mu.Unlock()
+	if due {
+		if read == nil {
+			read = e.activeOwnerIds
+		}
+		ids, err := read(ctx)
+		c.mu.Lock()
+		c.reading = false
 		if err != nil {
-			e.safeLogger().Warn("memory search: could not confirm who the owners are", "error", err)
-			if c.owners == nil {
-				return false
+			c.retryAt = time.Now().Add(indexerOwnerRetry)
+			c.mu.Unlock()
+			lg := e.safeLogger()
+			if lg == nil {
+				lg = slog.Default()
 			}
+			lg.Warn("memory search: could not confirm who the owners are; keeping the last answer", "error", err)
+			c.mu.Lock()
 		} else {
 			c.owners = make(map[string]bool, len(ids))
 			for _, id := range ids {
@@ -478,6 +508,10 @@ func (e *MemQLEngine) IndexerIsActiveOwner(ctx context.Context, userId string) b
 			}
 			c.at = time.Now()
 		}
+		defer c.mu.Unlock()
+		return c.owners[userId]
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return c.owners[userId]
 }

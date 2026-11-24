@@ -177,7 +177,20 @@ func EmbeddingIndexerForCall(ctx context.Context, providerRef string) (string, e
 
 // ErrEmbeddingIndexerNotOwner refuses a memory-search embedding whose indexer
 // is no longer an active cluster owner.
-var ErrEmbeddingIndexerNotOwner = errors.New("memory search's indexer is no longer an active owner; an owner can choose the model again in Cluster > Settings > Memory search")
+var ErrEmbeddingIndexerNotOwner error = indexerNotOwnerError{}
+
+// indexerNotOwnerError IS-A ErrFleetUnavailable: an indexer who is not an owner
+// is "nobody can serve this embedding now", the WAIT every indexing caller
+// already handles (the release indexer defers rather than counting a failure;
+// writers log "until backfilled"). One sentinel those checks already accept,
+// instead of a second classification at each caller.
+type indexerNotOwnerError struct{}
+
+func (indexerNotOwnerError) Error() string {
+	return "memory search's indexer is no longer an active owner; an owner can choose the model again in Cluster > Settings > Memory search"
+}
+
+func (indexerNotOwnerError) Is(target error) bool { return target == ErrFleetUnavailable }
 
 var embeddingIndexerOwnerCheck struct {
 	sync.RWMutex
