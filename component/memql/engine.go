@@ -75,7 +75,11 @@ type MemQLEngine struct {
 	providers               *ProviderRegistry
 	// indexerOwners caches who the active owners are for the memory-search
 	// indexer re-check (IndexerIsActiveOwner), per replica.
-	indexerOwners       ownerSetCache
+	indexerOwners ownerSetCache
+	// memoryIndexSources, when set, replaces the registered memory sources the
+	// index job walks (memory_index_job.go). Nil in production; a db-gated test
+	// sets it so its walk covers its own rows and not the shared database's.
+	memoryIndexSources  func() []MemorySource
 	voiceTransport      audio.RoomTransport
 	askCoordinationPool func() *sql.DB
 	policies            *PolicyRegistry

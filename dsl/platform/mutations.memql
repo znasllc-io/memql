@@ -3371,7 +3371,9 @@ mutation embedderBinding activateEmbedderBinding {
 /// NOT @createOnly, unlike recordEmbedderBindingPlan: a switch is exactly the write that changes
 /// the model and its width on a row that exists. And it states the WHOLE new model: an omitted
 /// previousRef, indexedBy or chosenBy is written empty rather than inherited, because a flip that
-/// kept the previous model's indexer would embed the new model on machines nobody chose for it.
+/// kept the previous model's indexer would embed the new model on machines nobody chose for it --
+/// and reembedRunId is always written empty, because a run that filled the previous model's table
+/// filled nothing of this one (the index job fills it, and records its run on memoryIndexRun).
 ///
 /// @serverOnly, AND actor.userId SCOPING IS NOT THE FIX: no actor owns the deployment's one vector
 /// space, and a caller-reachable flip would let somebody perform the switch's last step alone --
@@ -3390,10 +3392,11 @@ mutation embedderBinding flipEmbedderBinding {
   update {
     accept { providerRef, dimensions, activatedAt }
     stamp {
-      id:           args.bindingId
-      previousRef:  args.previousRef ?? ""
-      indexedBy:    args.indexedBy ?? ""
-      chosenBy:     args.chosenBy ?? ""
+      id:            args.bindingId
+      previousRef:   args.previousRef ?? ""
+      indexedBy:     args.indexedBy ?? ""
+      chosenBy:      args.chosenBy ?? ""
+      reembedRunId:  ""
     }
   }
 }
@@ -3457,6 +3460,59 @@ mutation embedderBinding recordRetiredEmbedder {
       indexedBy:  args.indexedBy ?? ""
       retireAt:   args.retireAt ?? ""
       droppedAt:  args.droppedAt ?? ""
+    }
+  }
+}
+
+/// Write one run of the memory index job, WHOLE, at its literal id -- `switch` or `backfill`, the
+/// run's kind (component/memql memory_index_job.go, design record 2026-11-23 sections 4 and 6).
+///
+/// AN INSERT THAT STATES THE WHOLE ROW: every omitted field is written empty rather than
+/// inherited, so a new switch never carries the last one's cursor, counts or waiting reason, and a
+/// cursor that left a source does not keep naming it.
+///
+/// EVERY CALLER FENCES THE WRITE to the version it read (memql.ContextWithRowVersionFence, through
+/// writeMemoryIndexRun): the job writes after every batch, and an owner's Cancel or Switch anyway
+/// lands between two of them on another replica. Unfenced, the job's next batch would write the
+/// cancelled run back to `indexing`.
+///
+/// @serverOnly, AND actor.userId SCOPING IS NOT THE FIX: no actor owns the cluster's one index, and a
+/// caller-reachable write could start a switch on nobody's decision, name an indexer whose machines
+/// would then receive every person's memory text, or mark an unfinished rebuild ready to flip.
+@serverOnly
+mutation memoryIndexRun recordMemoryIndexRun {
+  args {
+    kind              string!  @enum("switch", "backfill")
+    state             string!  @enum("indexing", "catchingUp", "needsDecision", "switching", "finishing", "done", "cancelled", "waiting")
+    targetRef         string
+    targetDimensions  int      @minimum(0)
+    targetTable       string
+    previousRef       string
+    indexedBy         string
+    startedBy         string
+    startedAt         datetime
+    finishedAt        datetime
+    cursor            object
+    counts            object
+    waitingReason     string
+    lastPassAt        datetime
+  }
+  insert {
+    accept { kind, state }
+    stamp {
+      id:                args.kind
+      targetRef:         args.targetRef ?? ""
+      targetDimensions:  args.targetDimensions ?? 0
+      targetTable:       args.targetTable ?? ""
+      previousRef:       args.previousRef ?? ""
+      indexedBy:         args.indexedBy ?? ""
+      startedBy:         args.startedBy ?? ""
+      startedAt:         args.startedAt ?? ""
+      finishedAt:        args.finishedAt ?? ""
+      cursor:            args.cursor ?? {}
+      counts:            args.counts ?? {}
+      waitingReason:     args.waitingReason ?? ""
+      lastPassAt:        args.lastPassAt ?? ""
     }
   }
 }

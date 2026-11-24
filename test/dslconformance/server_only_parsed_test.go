@@ -1275,6 +1275,11 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "platform/mutations.memql", Name: "flipEmbedderBinding"}:      true,
 		{Path: "platform/mutations.memql", Name: "setEmbedderBindingChoice"}: true,
 		{Path: "platform/mutations.memql", Name: "recordRetiredEmbedder"}:    true,
+		// The memory index job's run rows. A caller-reachable write could start
+		// a switch nobody chose, name an indexer whose machines would then
+		// receive every person's memory text, or mark an unfinished rebuild
+		// ready to flip; only the job and the owner's builtins write it.
+		{Path: "platform/mutations.memql", Name: "recordMemoryIndexRun"}: true,
 		// memql#4270 / memql#4606 / memql#4601. The four writes of the
 		// user-invitation lifecycle, and none is caller-scopable for the same
 		// underlying reason: the row is not the caller's.

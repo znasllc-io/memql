@@ -883,6 +883,22 @@ builtin packageCampaigns {
 @args(profile="object")
 builtin bindEmbedder { provider string! }
 
+/// One bounded tick of the memory index job (design record 2026-11-23, section 4;
+/// component/memql memory_index_job.go): rebuild a switch's new index, flip it, or
+/// backfill what the active index is missing, on one replica at a time, for at most
+/// budgetSeconds (1 to 50) before the next tick carries on from the saved cursor.
+///
+/// NO @sdk, which keeps it off the client wire, and that keeps nothing out on its own:
+/// a builtin takes no @serverOnly and a signed-in client's query can name one. So the
+/// gate is in the HANDLER: a call without internal origin -- which the automation
+/// executor stamps on a tree-loaded automation's step and on nothing a client sends --
+/// is refused before anything is read. Its schedule is memoryIndexTick.
+@executor("memoryIndexStep")
+@args(profile="object")
+builtin memoryIndexStep {
+  budgetSeconds  integer
+}
+
 /// Reconcile one binding from the authorized sweep snapshot. DNS ownership and TLS readiness remain mandatory.
 @executor("integration.customDomain.customDomainReconcileBinding")
 @args(profile="object")

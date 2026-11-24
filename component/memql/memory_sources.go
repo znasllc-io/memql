@@ -39,8 +39,15 @@ import (
 //	v1:knowledge:documentChunk      integrations/knowledge (ingest, embed_domain, seeds)
 
 // MemoryItem is one item to embed: the id its vector is keyed by and its text.
+//
+// Failure is set, instead of Text, for an item that exists but whose text
+// cannot be rebuilt -- a row whose stored payload does not decode, a lesson
+// event that does not read as a lesson. The index job counts it as failed and
+// logs it, and never embeds it: an item a rebuild cannot produce must show in
+// the switch's counts, never silently drop out of search (design record
+// 2026-11-23, anti-goals).
 type MemoryItem struct {
-	Id, Text string
+	Id, Text, Failure string
 }
 
 // MemorySource says how to rebuild the text of one kind of indexed item.
@@ -197,7 +204,10 @@ func init() {
 // an older version would index text the row no longer has), under internal
 // origin and with a fresh read: a rebuild runs on the cluster's behalf, not an
 // actor's, and must not be answered from a replica's result cache. A row marked
-// deleted is skipped. A skipped row still advances the cursor.
+// deleted is skipped, and so is one its recipe does not index. A skipped row
+// still advances the cursor. A row whose payload does not decode is NOT
+// skipped: it comes back as an item with Failure set, so the index job counts
+// it instead of the row vanishing from search unnoticed.
 //
 // staged-data: MUST-NOT-GATE -- this feeds the WRITE side of the index, not a
 // reader. The live writers embed a row the moment it is written, staged or not;
@@ -228,7 +238,15 @@ func (e *MemQLEngine) memorySourceItems(ctx context.Context, s MemorySource, aft
 		for _, n := range nodes {
 			cursor = n.ID
 			var payload map[string]any
-			if json.Unmarshal(n.Payload, &payload) != nil || payload["deleted"] == true {
+			if err := json.Unmarshal(n.Payload, &payload); err != nil || payload == nil {
+				why := "its stored payload is not an object"
+				if err != nil {
+					why = "its stored payload does not decode: " + err.Error()
+				}
+				items = append(items, MemoryItem{Id: n.ID, Failure: why})
+				continue
+			}
+			if payload["deleted"] == true {
 				continue
 			}
 			if text, ok := s.Rows(payload); ok {

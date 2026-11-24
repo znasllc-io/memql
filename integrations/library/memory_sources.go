@@ -40,7 +40,13 @@ func init() {
 	})
 }
 
-// lessonHeadItems turns lesson event payloads into the items to index.
+// lessonEvent is one stored lesson event: its row id and its payload.
+type lessonEvent struct {
+	ID      string
+	Payload []byte
+}
+
+// lessonHeadItems turns lesson events into the items to index.
 //
 // Every lesson revision and decision is its own immutable observation, written
 // by AppendTrainingLessonEvent with a label as content. handleIndexTrainingLesson
@@ -49,28 +55,50 @@ func init() {
 // only if enabled and reviewed. Older events, and heads that are disabled or
 // not reviewed, carry no passage vector, so a rebuild must not give them one.
 // The workObservation source skips every lesson event for the same reason.
-func lessonHeadItems(payloads [][]byte) []memql.MemoryItem {
-	heads := map[string]trainingLesson{}
-	for _, raw := range payloads {
+//
+// An event that carries a lesson which does not read as one (it fails to
+// decode, or lacks its schema version, id or sequence) comes back as an item
+// with Failure set, keyed by the event's own id, and so does a current head
+// with no receipt to key its vector by: neither can be rebuilt, and the index
+// job must count them rather than let a lesson vanish from search. A row with
+// no lesson at all is not a lesson event and is not reported.
+func lessonHeadItems(events []lessonEvent) []memql.MemoryItem {
+	type head struct {
+		lesson trainingLesson
+		event  string
+	}
+	heads := map[string]head{}
+	var items []memql.MemoryItem
+	for _, ev := range events {
 		var row map[string]any
-		if json.Unmarshal(raw, &row) != nil {
+		if err := json.Unmarshal(ev.Payload, &row); err != nil {
+			items = append(items, memql.MemoryItem{Id: ev.ID, Failure: "the lesson event does not decode: " + err.Error()})
+			continue
+		}
+		if data, _ := row["data"].(map[string]any); data == nil || data["trainingLesson"] == nil {
 			continue
 		}
 		l, err := lessonFromRow(row)
-		if err != nil || l.Receipt == "" {
+		if err != nil {
+			items = append(items, memql.MemoryItem{Id: ev.ID, Failure: "the lesson event does not read as a lesson: " + err.Error()})
 			continue
 		}
 		// A lesson belongs to one owner; the key keeps two owners' ids apart.
 		key := fmt.Sprint(row["ownerUserId"]) + "\x00" + l.ID
-		if cur, ok := heads[key]; !ok || l.Sequence > cur.Sequence {
-			heads[key] = l
+		if cur, ok := heads[key]; !ok || l.Sequence > cur.lesson.Sequence {
+			heads[key] = head{lesson: l, event: ev.ID}
 		}
 	}
-	var items []memql.MemoryItem
-	for _, l := range heads {
-		if l.Enabled && l.Review == "reviewed" {
-			items = append(items, memql.MemoryItem{Id: "v1:work:observation:" + l.Receipt, Text: lessonPassage(l)})
+	for _, h := range heads {
+		l := h.lesson
+		if !l.Enabled || l.Review != "reviewed" {
+			continue
 		}
+		if l.Receipt == "" {
+			items = append(items, memql.MemoryItem{Id: h.event, Failure: "the current lesson head has no receipt to key its passage by"})
+			continue
+		}
+		items = append(items, memql.MemoryItem{Id: "v1:work:observation:" + l.Receipt, Text: lessonPassage(l)})
 	}
 	sort.Slice(items, func(a, b int) bool { return items[a].Id < items[b].Id })
 	return items
@@ -94,7 +122,7 @@ func pageMemoryItems(items []memql.MemoryItem, after string, limit int) ([]memql
 // rebuild), not a reader. A lesson's passage was embedded when it was indexed
 // whether or not its concept was staged; hiding rows here would drop it from
 // the rebuilt index.
-const lessonEventsSQL = `SELECT DISTINCT ON (id) payload FROM "MemoryNodes"
+const lessonEventsSQL = `SELECT DISTINCT ON (id) id, payload FROM "MemoryNodes"
  WHERE concept = 'v1:work:observation' AND payload->'data'->'trainingLesson' IS NOT NULL
  ORDER BY id, "createdAt" DESC`
 
@@ -112,17 +140,17 @@ func trainingLessonItems(ctx context.Context, after string, limit int) ([]memql.
 		return nil, "", err
 	}
 	defer rows.Close()
-	var payloads [][]byte
+	var events []lessonEvent
 	for rows.Next() {
-		var raw []byte
-		if err := rows.Scan(&raw); err != nil {
+		var ev lessonEvent
+		if err := rows.Scan(&ev.ID, &ev.Payload); err != nil {
 			return nil, "", err
 		}
-		payloads = append(payloads, raw)
+		events = append(events, ev)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, "", err
 	}
-	items, next := pageMemoryItems(lessonHeadItems(payloads), after, limit)
+	items, next := pageMemoryItems(lessonHeadItems(events), after, limit)
 	return items, next, nil
 }

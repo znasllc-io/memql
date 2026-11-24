@@ -5517,6 +5517,42 @@
       ]
     },
     {
+      "concept": "v1:platform:memoryIndexRun",
+      "file": "platform/concepts.memql",
+      "fields": [
+        "counts",
+        "cursor",
+        "finishedAt",
+        "indexedBy",
+        "kind",
+        "lastPassAt",
+        "previousRef",
+        "startedAt",
+        "startedBy",
+        "state",
+        "targetDimensions",
+        "targetRef",
+        "targetTable",
+        "waitingReason"
+      ],
+      "enums": {
+        "kind": [
+          "backfill",
+          "switch"
+        ],
+        "state": [
+          "cancelled",
+          "catchingUp",
+          "done",
+          "finishing",
+          "indexing",
+          "needsDecision",
+          "switching",
+          "waiting"
+        ]
+      }
+    },
+    {
       "concept": "v1:platform:missingCapability",
       "file": "platform/concepts.memql",
       "fields": [

@@ -295,6 +295,31 @@ automation accountDoorReconcileWorkflow {
  builtin customDomainRequireReservations()
 }
 
+/// The memory index job's tick (design record 2026-11-23, sections 4, 6 and 9; component/memql
+/// memory_index_job.go): rebuild a switch's new index while search keeps the active one, flip it
+/// when every item is in, and otherwise backfill what the active index is missing.
+///
+/// EVERY MINUTE, FOR AT MOST 45 SECONDS. A tick saves its cursor after every batch that embedded
+/// something and stops at its budget, so the next tick, on whichever replica, carries on from the
+/// cursor; budget plus the job's grace stays under the minute, and single keeps this process from
+/// starting a tick while one runs.
+///
+/// PLACED ON THE AGENT (node="agent", lease="memory-index"). Embedding with a machine model needs
+/// fleet inference, which an agent has and an identity, workbench or edge replica does not
+/// (app/cluster_worker*.go); left to the general cron leader, the job would wait forever whenever
+/// the leader landed on one of those. The agent also holds the machines' streams, so most calls
+/// need no hop. One replica works at a time whatever the lease says: the job takes its own advisory
+/// lock and fences every write of its run rows.
+///
+/// NOT A MAINTENANCE AUTOMATION: the step reads and writes as the job's own system actor, which the
+/// handler stamps after refusing any call without internal origin, and reads no person's rows
+/// through a tier.
+@trigger(schedule="0 * * * * *", node="agent", lease="memory-index")
+@mode(single)
+automation memoryIndexTick {
+  builtin memoryIndexStep(budgetSeconds: 45)
+}
+
 /// Resume declared retention from shared database cursors every hour.
 @trigger(schedule="0 40 * * * *")
 automation retireDeclaredConceptVersions {

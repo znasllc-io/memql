@@ -51,8 +51,10 @@ type EmbedderBinding struct {
 	// ActivatedAt is when this binding became active, RFC3339.
 	ActivatedAt string
 	// ReembedRunId names the work run that filled this binding's table, when
-	// the binding replaced another. Empty for the first binding a cluster ever
-	// activates, which has nothing to re-embed FROM.
+	// an activation named one. Empty for the first binding a cluster ever
+	// activates, which has nothing to re-embed FROM, and written empty by every
+	// switch: the memory index job fills the new model's table and keeps its
+	// progress on v1:platform:memoryIndexRun (memory_index_job.go).
 	ReembedRunId string
 	// PreviousRef is the ProviderRef this binding replaced.
 	//

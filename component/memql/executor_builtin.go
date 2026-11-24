@@ -37,6 +37,7 @@ func (e *MemQLEngine) initBuiltinExecutorHandlers() error {
 		"askRouteGoals":                 scopedAskRouteOperation,
 		"askRouteDecide":                scopedAskRouteOperation,
 		"bindEmbedder":                  e.bindEmbedderBuiltin,
+		BuiltinExecutorMemoryIndexStep:  e.memoryIndexStepBuiltin,
 		"workNavigate":                  e.workNavigateBuiltin,
 		"workCapabilities":              e.workCapabilitiesBuiltin,
 		"workExecute":                   e.workExecuteBuiltin,

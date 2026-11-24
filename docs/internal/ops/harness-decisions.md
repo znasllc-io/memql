@@ -2449,8 +2449,9 @@ indexer defers as `embedder-unavailable`, as before.
 
 **The binding's writes** (`dsl/platform/mutations.memql`, all `@serverOnly`).
 `flipEmbedderBinding` states the whole new model: an omitted previous
-reference, indexer or chooser is written empty, so a flip never inherits the
-previous model's indexer. `setEmbedderBindingChoice` writes only the fields it
+reference, indexer or chooser is written empty, and `reembedRunId` always is,
+so a flip never inherits the previous model's indexer or the run that filled
+the previous model's table. `setEmbedderBindingChoice` writes only the fields it
 is given. `recordRetiredEmbedder` writes a retired model's row at
 `retired-<16 hex>` (`RetiredEmbedderBindingID`, the hex of its vector table's
 name), states the whole row each time so a stale `droppedAt` does not survive
@@ -2492,6 +2493,89 @@ across the hop in process (`-tags agent`);
 `TestOwnedReleaseIndexing/ScheduledEmbedsAsTheIndexer` and
 `.../ScheduledDefersWithoutInventingFleetAuthority` in
 `integrations/knowledge/release_work_db_test.go`.
+
+## One job rebuilds, backfills and flips memory search (2026-11-24)
+
+From the same [design record](../../superpowers/specs/2026-11-23-memory-search-model-switch-design.md),
+sections 4, 6 and 9. The index stores vectors and no text, so a missing vector
+is made again from its row by the writer's own recipe (`memory_sources.go`).
+One scheduled job does all of it (`component/memql/memory_index_job.go`,
+automation `memoryIndexTick`, builtin `memoryIndexStep`): a switch's rebuild
+into the new model's table while search keeps the active one, the flip, and
+the backfill of what the active table is missing.
+
+**Where it runs.** Every minute, for a 45 s budget plus a 10 s grace, PLACED on
+the agent (`node="agent", lease="memory-index"`). Trigger: an embedding with a
+machine model needs fleet inference, which an identity, workbench or edge
+replica lacks (`app/cluster_worker*.go`); on the general cron leader the job
+would have waited forever whenever the lease landed there. Inside a tick, the
+job takes `pg_try_advisory_xact_lock(hashtextextended('memql:memory-index', 0))`
+on a write-gate connection and returns at once when another replica holds it.
+The transaction-scoped form on the gate pool, not a session lock on the request
+pool: a session lock does not survive a transaction pooler, and the request
+pool ends an idle transaction after 60 s. A replica that dies drops the lock.
+
+**State lives in Postgres, and every write is fenced.** Two run rows,
+`v1:platform:memoryIndexRun` at `switch` and `backfill`, carry the state, the
+target, the indexer, the cursor and the counts. Every write states the whole
+row (`recordMemoryIndexRun`) and is fenced to the version its writer read
+(`writeMemoryIndexRun`, `ContextWithRowVersionFence`): an owner's Cancel on the
+bff lands between two of the job's batches, and unfenced the job's next write
+would put the run back to `indexing`. A refused write stops the tick; the next
+one reads again. The job and the owner's builtins (Task 5) are the only writers
+and both go through `writeMemoryIndexRun`. A doubled tick (a lost lock) costs
+duplicate embeddings, never a wrong row. No broadcast rule (ruling R3): nothing
+subscribes, and one would put a mesh event per 32 items on every node.
+
+**The cursor and the counts.** The cursor names one source and the last item
+done in it; earlier sources in name order are done. A batch (32 items) that
+embedded or failed anything is saved before the next batch, so a restart or
+another replica resumes after the last item embedded and embeds nothing twice.
+A batch of items already present is saved with the tick's end instead: losing
+it costs presence checks, never an embedding, and the backfill walks every item
+every ten minutes. Rows keep only their newest version past a day
+(`@retention`). Counts are per walk: total = done + skipped + failed; unsourced,
+set at a walk's end, counts the active table's entries no source rebuilds. An
+item its source cannot rebuild (a payload that does not decode, a lesson event
+that does not read as a lesson, a lesson head with no receipt) arrives as a
+`MemoryItem` with `Failure` and is counted failed and logged; a source that
+cannot be read counts once. Nothing drops out silently.
+
+**Waiting is not failing.** An item is tried three times, then counted failed,
+and the walk goes on; the next walk tries it again. When the model cannot be
+reached at all (`memoryIndexWaitReason`: every door shut, no machine offering
+it online, `ErrFleetUnavailable`, the indexer not an owner, no embedding
+writer on the replica), the run goes to `waiting` with a plain reason, keeps
+its cursor and counts nothing; the next tick tries again. A vendor refusal
+waits too: counting every item failed during an outage would offer the owner
+"Switch anyway" over an empty index. The indexer is re-checked at the start of
+every tick (`IndexerIsActiveOwner`); a fleet model with no indexer waits, since
+it would resolve as the job and reach nobody's machines.
+
+**The flip.** Automatic only when the catch-up walk left nothing failed and
+nothing unsourced; otherwise `needsDecision`, the owner's move. A catch-up
+walk that embedded what arrived meanwhile still flips (rejected: walking again
+until a walk finds nothing, which never ends on a busy cluster); what is
+written after it goes to the active table and the walk after the flip catches
+it. `flipMemoryIndex` holds the binding lock around its fresh reads and writes
+and fences the binding write to the version read under it (memql#5431). It is
+ordered steps, not one SQL transaction: the engine writes only through its
+mutations and the lock is on another connection. Order: `switching` is saved
+first; the active model is recorded retired (`retireAt` = now + 30 days, its id
+derived by `RetiredEmbedderBindingID`); the binding flips, stating
+`reembedRunId` empty; `semantic_ai_cache` is emptied; the run goes to
+`finishing`. Every prefix is safe, and a tick that finds `switching` with the
+binding already moved does only the rest.
+
+**Limits.** Not run against a live cluster. The store path in the db tests is a
+stub of `integrations/embedding`'s contract (this package cannot import it);
+that integration's own tests hold the real one. A walk's `total` counts what it
+has visited, so a progress figure for a running switch needs the active
+index's count as its denominator. Tests: `component/memql/memory_index_job_test.go`
+(the decisions); `component/memql/memory_index_job_db_test.go` (two engines over
+one database: the lock, the resume on another replica, the flip, the width
+change, the backfill, the waits); `TestTheLessonSourceReadsItsEventsFromPostgres`
+in `integrations/library`.
 
 ## A vendor model is chosen for a job, and API is a route of them (2026-11-22)
 

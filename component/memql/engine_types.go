@@ -631,6 +631,11 @@ const (
 	// capability the builtin declares is its whole gate. See
 	// executor_language_status.go.
 	BuiltinExecutorLanguageStatus = "languageStatus"
+	// BuiltinExecutorMemoryIndexStep is one bounded tick of the memory index
+	// job (design record 2026-11-23, section 4): rebuild a switch's index, flip
+	// it, or backfill the active one. Refused without internal origin, because
+	// only its schedule (memoryIndexTick) runs it. See memory_index_job.go.
+	BuiltinExecutorMemoryIndexStep = "memoryIndexStep"
 )
 
 // ModuleReadinessConcept is the canonical id of one node's per-module
