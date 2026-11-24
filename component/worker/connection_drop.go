@@ -54,6 +54,54 @@ type ConnectionDrop struct {
 	NodeId, Code, Reason string
 }
 
+// WorkInFlight is the live work a stream carried when it ended: EXACTLY the
+// kinds Cockpit's Runner.busy() guards (cockpit/internal/worker/loop.go) --
+// tool calls, app sessions, app sign-ins, model calls and model pulls. Cockpit
+// closes its own stream on purpose (to re-advertise models, a pipeline policy or
+// a workbench change) only while busy() is false, so an end with any of these
+// live was not its choice. Model probes are deliberately NOT counted: busy()
+// does not cover them, so a deliberate reconnect can happen during one, and
+// counting them would file Cockpit's own reconnect as a dropped link. If
+// busy() ever changes, this set must change with it.
+type WorkInFlight struct {
+	ToolCalls, AppSessions, AppSignIns, ModelCalls, ModelPulls int
+}
+
+// Total is the count a drop records.
+func (w WorkInFlight) Total() int {
+	return w.ToolCalls + w.AppSessions + w.AppSignIns + w.ModelCalls + w.ModelPulls
+}
+
+// classifyStreamEnd decides whether a stream end is a drop, from the two facts
+// only the replica holding the stream has when it ends (design record section
+// 3):
+//
+//   - REPLACED (drainReason superseded, set by Registry.Add for a reconnect on
+//     this replica and by the registration watcher for one on another): a new
+//     connection for the same registration arrived before this replica saw the
+//     old one end. A deliberate reconnect closes the old connection first and
+//     dials again after at least a one-second backoff, so on a working link the
+//     old end is seen first; a replacement means the old connection died
+//     silently (or the machine slept for less than the keepalive window).
+//   - WORK IN FLIGHT with no decision of the cluster's behind the end (no
+//     drainReason): see WorkInFlight for why that cannot be Cockpit's choice.
+//
+// Every other reason is the CLUSTER'S decision -- server_drain, revoked,
+// token_expired -- and never a drop whatever was in flight: it says nothing
+// about the machine's link. An idle end with no reason is Cockpit closing its
+// own stream, or a lost link the cluster happened to notice first; the two are
+// indistinguishable here, so it is not counted (the known gap, section 12).
+func classifyStreamEnd(drainReason string, inFlight WorkInFlight) (cause string, drop bool) {
+	switch {
+	case drainReason == DisconnectReasonSuperseded:
+		return DropCauseReplaced, true
+	case drainReason == "" && inFlight.Total() > 0:
+		return DropCauseWorkInFlight, true
+	default:
+		return "", false
+	}
+}
+
 // ConnectionDropRecorder writes one drop. The stream session finds it by a type
 // assertion on its Store rather than through the Store interface, so the many
 // test stores of this package need not grow a method they never exercise; the
