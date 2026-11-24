@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalS
 import { FileText } from "lucide-react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
+import { useSessionIfPresent } from "../../../chrome/access";
 import { useOsIfPresent } from "../../../chrome/state";
 import { useAuthSource } from "../../../auth/context";
 import { AutoRefresh, Button, Caption, ContentSkeleton, Head, Notice, Panel, RecordListSkeleton, Subhead, useAppReach } from "../../../kit";
@@ -16,11 +17,11 @@ import { copyFor, toneFor } from "../packages/refusals";
 import type { PartsHeld } from "../parts";
 import { runBarFor, type RunActName } from "./acts";
 import { cancelRun, problemFrom, rerunRun, type Problem } from "./calls";
-import { useRunFiles, useRunSteps, usePipelineRun } from "./feeds";
+import { useRunDetail, useRunFiles, useRunSteps, usePipelineRun } from "./feeds";
 import { useExpiredRunFiles } from "./expiry";
 import { runGithubUrl } from "./github";
 import { fetchLogTail, type LogTail } from "./logTail";
-import { artifactDisplayName, isFinished, runFailureOf, runFromRow, type PipelineRow, type RunFileRow, type RunRow, type StepAttempt, type StepRow } from "./rows";
+import { artifactDisplayName, isFinished, runFailureOf, runFromRow, sameId, type PipelineRow, type RunFileRow, type RunRow, type StepAttempt, type StepRow } from "./rows";
 import { newerAttemptOf, runById } from "./runs";
 import { Mark } from "./Mark";
 import { StopsAcross } from "./StopsAcross";
@@ -54,6 +55,12 @@ import "./pipelines.css";
 // NOTHING HERE IS A COPY OF A RUN'S STATE. The run is the root's retained
 // feed's row; the steps and files are this page's own feeds, retained while it
 // is open; a re-run's new attempt arrives on the runs feed like any other run.
+//
+// A RUN SOMEBODY ELSE OWNS IS VIEW ONLY (design record 2026-11-24). A
+// developer reads every run; its steps and files come from
+// `useRunDetail`, its log tail through the content route's `pipelineRun`
+// pointer, and Re-run, Cancel, Open in Files and the follow-up goal are
+// absent: those are the owner's.
 
 export interface RunPageProps {
   runId: string;
@@ -115,9 +122,16 @@ function RunPageFor({ run, runs, pipeline, sourceName, breadcrumbs, back, can, o
   const nexus = useAppReach("nexus");
   const os = useOsIfPresent();
   const machineName = useMachineNames();
-  const { steps, state: stepsState } = useRunSteps(run.workRunId);
-  const files = useRunFiles(run.workRunId);
-  const expiry = useExpiredRunFiles(run.id, steps, files.byFileId, files.state === "live" && stepsState === "live");
+  const viewer = useSessionIfPresent()?.access?.userId ?? "";
+  const owned = viewer === "" || sameId(run.ownerUserId, viewer);
+  const ownSteps = useRunSteps(owned ? run.workRunId : "");
+  const ownFiles = useRunFiles(owned ? run.workRunId : "");
+  const viewed = useRunDetail(owned ? "" : run.id, JSON.stringify(run));
+  const { steps, state: stepsState } = owned ? ownSteps : viewed;
+  const files = owned ? ownFiles : viewed;
+  // Expiry receipts are the owner's (pipelinesExpiredArtifacts resolves the run owner-scoped).
+  const expiry = useExpiredRunFiles(run.id, steps, files.byFileId, owned && files.state === "live" && stepsState === "live");
+  const openFile = owned && os ? (artifactId: string) => os.actions.openApp("files", "browse", { artifactId }) : null;
   const stops = useMemo(() => stopsForRun(run, steps), [run, steps]);
   const uncertainSteps = stops.flatMap((stop) => stop.steps.filter(executionUncertain).map((step) => ({ step, label: `${stop.name} / ${stepLabel(step, shardsOf(step, stop))}` })));
 
@@ -137,7 +151,7 @@ function RunPageFor({ run, runs, pipeline, sourceName, breadcrumbs, back, can, o
 
   const githubUrl = runGithubUrl(run);
   const newer = newerAttemptOf(run, runs);
-  const bar = runBarFor({ run, steps, newer, pipelineActive: pipeline?.status !== "disconnected", can, onGithub: githubUrl !== "" });
+  const bar = runBarFor({ run, steps, newer, pipelineActive: pipeline?.status !== "disconnected", can: owned ? can : { rerun: false, cancel: false }, onGithub: githubUrl !== "" });
 
   async function act(name: RunActName) {
     if (name === "Open on GitHub") {
@@ -208,7 +222,7 @@ function RunPageFor({ run, runs, pipeline, sourceName, breadcrumbs, back, can, o
             {whenWords(run.queuedAt, new Date()) !== "" ? <time dateTime={run.queuedAt}>{whenWords(run.queuedAt, new Date())}</time> : null}
           </p>
 
-          {run.maintenanceState && run.maintenanceState !== "none" ? <Notice tone={run.maintenanceState === "human" ? "warn" : "info"} sentence={run.maintenanceState === "analysis" ? "A follow-up is investigating this failure." : run.maintenanceState === "human" ? "This failure needs a person’s attention." : "A follow-up is being prepared."} detail={run.maintenanceMessage || undefined}>{run.maintenanceGoalId && nexus.sections.includes("goals") ? <Button tone="quiet" onClick={() => nexus.open("goals", { goalId: run.maintenanceGoalId })}>Open follow-up goal</Button> : null}</Notice> : null}
+          {run.maintenanceState && run.maintenanceState !== "none" ? <Notice tone={run.maintenanceState === "human" ? "warn" : "info"} sentence={run.maintenanceState === "analysis" ? "A follow-up is investigating this failure." : run.maintenanceState === "human" ? "This failure needs a person’s attention." : "A follow-up is being prepared."} detail={run.maintenanceMessage || undefined}>{owned && run.maintenanceGoalId && nexus.sections.includes("goals") ? <Button tone="quiet" onClick={() => nexus.open("goals", { goalId: run.maintenanceGoalId })}>Open follow-up goal</Button> : null}</Notice> : null}
           {run.notes.map((note) => (
             <ProblemNotice key={note.code} problem={{ code: note.code, message: note.message }} tone="warn" />
           ))}
@@ -231,7 +245,7 @@ function RunPageFor({ run, runs, pipeline, sourceName, breadcrumbs, back, can, o
                 {openStop === null ? null : openStop.steps.length === 0 ? (
                   stepsState === "seeding" || run.workRunId === "" && !isFinished(run) ? <RecordListSkeleton label="Loading the steps" rows={2} /> : <Caption>{stageSummary(openStop)}</Caption>
                 ) : (
-                  <StageSteps stop={openStop} files={files.byFileId} expired={expiry.files} machineName={machineName} onOpenFile={os ? (artifactId) => os.actions.openApp("files", "browse", { artifactId }) : null} />
+                  <StageSteps stop={openStop} files={files.byFileId} expired={expiry.files} machineName={machineName} onOpenFile={openFile} pipelineRun={owned ? "" : run.id} />
                 )}
               </section></div>
             </>
@@ -248,7 +262,7 @@ function RunPageFor({ run, runs, pipeline, sourceName, breadcrumbs, back, can, o
                     name={artifactDisplayName(file?.name || expiry.files.get(id) || "Artifact")}
                     secondary={step.key}
                     state={file ? undefined : expiry.files.has(id) ? "Expired" : files.state === "seeding" || expiry.loading ? "Checking availability" : "Unavailable"}
-                    {...(file && os ? { label: `Open ${artifactDisplayName(file.name)} in Files`, onOpen: () => os.actions.openApp("files", "browse", { artifactId: file.artifactId }) } : {})}
+                    {...(file && openFile ? { label: `Open ${artifactDisplayName(file.name)} in Files`, onOpen: () => openFile(file.artifactId) } : {})}
                   />
                 ))}
               </RecordList>
@@ -292,12 +306,13 @@ function stageSummary(stop: RunStop): string {
   return stop.word + (stop.took ? `, ${stop.took}` : "") + ".";
 }
 
-function StageSteps({ stop, files, expired, machineName, onOpenFile }: {
+function StageSteps({ stop, files, expired, machineName, onOpenFile, pipelineRun }: {
   stop: RunStop;
   files: ReadonlyMap<string, RunFileRow>;
   expired: ReadonlyMap<string, string>;
   machineName: (workerId: string) => string;
   onOpenFile: ((artifactId: string) => void) | null;
+  pipelineRun: string;
 }) {
   return (
     <ul className="os-record-list pipeline-steps" data-density="compact" aria-label={`Steps of ${stop.name}`}>
@@ -321,7 +336,7 @@ function StageSteps({ stop, files, expired, machineName, onOpenFile }: {
             />
             {attempts.length > 0 ? <StepAttempts step={step} label={label} attempts={attempts} files={files} machineName={machineName} onOpenFile={onOpenFile} /> : null}
             {step.status === "failed" || (step.status === "cancelled" && step.errorMessage !== "") ? (
-              <FailedStep step={step} log={log} onOpenFile={onOpenFile} />
+              <FailedStep step={step} log={log} onOpenFile={onOpenFile} pipelineRun={pipelineRun} />
             ) : null}
             {step.notes.map((note) => <ProblemNotice key={note.code} problem={{ code: note.code, message: note.message }} tone="warn" />)}
             {expired.has(step.logFileId) ? <Caption>Log expired.</Caption> : null}
@@ -381,7 +396,7 @@ function StepAttempts({ step, label, attempts, files, machineName, onOpenFile }:
  * Library refused the file -- a quota, no storage -- there is no log here and
  * the step's own note says so.
  */
-function FailedStep({ step, log, onOpenFile }: { step: StepRow; log: RunFileRow | null; onOpenFile: ((sourceRef: string) => void) | null }) {
+function FailedStep({ step, log, onOpenFile, pipelineRun }: { step: StepRow; log: RunFileRow | null; onOpenFile: ((sourceRef: string) => void) | null; pipelineRun: string }) {
   const auth = useAuthSource();
   const [tail, setTail] = useState<LogTail | null>(null);
   const [tailError, setTailError] = useState("");
@@ -399,11 +414,11 @@ function FailedStep({ step, log, onOpenFile }: { step: StepRow; log: RunFileRow 
     setTailError("");
     if (artifactId === "") return;
     const abort = new AbortController();
-    fetchLogTail({ artifactId, bearer: () => auth.bearer(), signal: abort.signal })
+    fetchLogTail({ artifactId, pipelineRun, bearer: () => auth.bearer(), signal: abort.signal })
       .then((t) => { if (!abort.signal.aborted) setTail(t); })
       .catch((err) => { if (!abort.signal.aborted) setTailError(err instanceof Error ? err.message : String(err)); });
     return () => abort.abort();
-  }, [artifactId, auth]);
+  }, [artifactId, pipelineRun, auth]);
 
   const coded = step.errorCode !== "" && step.errorCode !== "pipeline_executor_error";
   return (
@@ -423,7 +438,7 @@ function FailedStep({ step, log, onOpenFile }: { step: StepRow; log: RunFileRow 
       {log !== null ? (
         <p className="pipeline-log-acts">
           {onOpenFile ? <button type="button" className="os-link" onClick={() => onOpenFile(log.artifactId)}>Open the full log</button> : null}
-          <span className="pipeline-log-saved">Saved to your Library</span>
+          {pipelineRun ? null : <span className="pipeline-log-saved">Saved to your Library</span>}
         </p>
       ) : null}
     </div>

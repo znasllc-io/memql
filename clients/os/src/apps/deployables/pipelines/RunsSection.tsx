@@ -101,7 +101,7 @@ export function RunsSection(props: RunsSectionProps) {
 
   const search = useDebouncedValue(filter.search, TEXT_DEBOUNCE_MS);
   const criteria = { ...filter, search };
-  const feed = usePipelineRuns(active, criteria);
+  const feed = usePipelineRuns(active, criteria, true);
   const runs = useLiveView(feed.source, "runs", rows => rows.map(runFromRow).filter(row => row.id !== ""));
   const snapshot = runs?.snapshot ?? null;
   const listed = snapshot?.rows ?? [];

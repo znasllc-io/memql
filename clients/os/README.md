@@ -1298,6 +1298,14 @@ the QA views `repository-preparation-waiting-error` and
   pipeline, Re-run failed only with a failed or cancelled step), and the
   pipelines parts (`connect`, `rerun`, `cancel`, `channels`) are read GLOBALLY,
   never per organization -- a pipeline is acted on by its owner alone.
+- **A DEVELOPER SEES EVERY RUN AND ACTS ON NONE BUT THEIR OWN** (design
+  record 2026-11-24). At developer rank or above the Runs list reads
+  `pipelineRunsBrowseAll` and a run by id `pipelineRunView`. On a run
+  somebody else owns, the page reads its steps and pipeline files through
+  `pipelinesRunDetail` (again whenever the run row moves: the step rows'
+  events are the owner's), the log tail through the content route's
+  `pipelineRun` pointer, and offers no Re-run, Cancel, Open in Files or
+  follow-up goal. `runPage.test.tsx` and `runsSection.test.tsx` cover it.
 
 ## Training, the fourth app (memql#4737, re-keyed to the Library in memql#4970)
 

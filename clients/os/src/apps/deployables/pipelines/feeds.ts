@@ -1,9 +1,11 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { filterRuns, NO_RUN_FILTER, type RunFilter } from "./runs";
 import { getRowByConceptAndId, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useSessionIfPresent } from "../../../chrome/access";
 import { flatten } from "../../../kit/rows";
+import { useOsConnection } from "../../../live/connection";
+import { roleAdmits } from "../../../system/roles";
 import { useLiveCollection, usePagedCollection, type LiveCollectionHandle, type PagedCollectionHandle } from "../../../live/useLiveCollection";
 import { LIBRARY_ARTIFACT_CONCEPT, PIPELINE_CONCEPT, RUN_CONCEPT, WORK_STEP_CONCEPT, runFileFromRow, runFromRow, sameId, stepFromRow, type RunFileRow, type StepRow } from "./rows";
 
@@ -25,46 +27,60 @@ import { LIBRARY_ARTIFACT_CONCEPT, PIPELINE_CONCEPT, RUN_CONCEPT, WORK_STEP_CONC
 // run's step feed. The person-facing reads are owner-scoped and run-scoped;
 // folding an event the read would not have returned makes a row appear that a
 // refresh then removes.
+//
+// A DEVELOPER READS EVERY OWNER'S RUNS (design record 2026-11-24). At
+// developer rank and above the Runs list and a run by id use the developer
+// reads, and their scope is every owner; a run someone else owns gets its
+// steps and files from `useRunDetail`, because those rows stay its owner's.
 
 export type RunsFeed = PagedCollectionHandle<Row>;
 
-function useViewer(): { viewer: string; ready: boolean } {
+function useViewer(): { viewer: string; ready: boolean; developer: boolean } {
   const session = useSessionIfPresent();
   const viewer = session?.access?.userId ?? "";
-  return { viewer, ready: session === null || viewer !== "" };
+  return { viewer, ready: session === null || viewer !== "", developer: roleAdmits(session?.access?.role ?? "", { min: "developer" }) };
 }
 
-/** Summary pages shared by every reader of the same owner and filter. */
-export function usePipelineRuns(enabled = true, filter: RunFilter = NO_RUN_FILTER): RunsFeed {
-  const { viewer, ready } = useViewer();
+/** Summary pages shared by every reader of the same owner and filter. `everyOwner` is the Runs list's: a developer's reads every run. */
+export function usePipelineRuns(enabled = true, filter: RunFilter = NO_RUN_FILTER, everyOwner = false): RunsFeed {
+  const { viewer, ready, developer } = useViewer();
+  const all = everyOwner && developer;
   const criteria = { ...filter, search: filter.search.trim() };
-  return usePagedCollection<Row>(enabled && ready ? `deployables:pipelineRuns:${viewer}:${JSON.stringify(criteria)}` : null, connection => ({
+  return usePagedCollection<Row>(enabled && ready ? `deployables:pipelineRuns:${viewer}:${all ? "all" : "own"}:${JSON.stringify(criteria)}` : null, connection => ({
     concept: RUN_CONCEPT,
     comparePageRows: (a, b) => {
       const left = runFromRow(a), right = runFromRow(b);
       return right.queuedAt.localeCompare(left.queuedAt) || right.id.localeCompare(left.id);
     },
     seed: async (cursor, signal) => {
-      const result = await connection.query.pipelineRunsBrowse(criteria, { signal, ...(cursor ? { cursor } : {}) });
+      const opts = { signal, ...(cursor ? { cursor } : {}) };
+      const result = all ? await connection.query.pipelineRunsBrowseAll(criteria, opts) : await connection.query.pipelineRunsBrowse(criteria, opts);
       return { rows: result.rows(), nextCursor: result.meta()?.cursor ?? "" };
     },
-    inScope: row => (viewer === "" || sameId(rowString(flatten(row), "ownerUserId"), viewer))
+    inScope: row => (all || viewer === "" || sameId(rowString(flatten(row), "ownerUserId"), viewer))
       && filterRuns([runFromRow(row)], criteria).length > 0,
-    reread: async (runId, signal) => (await connection.query.pipelineRunForOwner({ runId }, { signal })).rows()[0] ?? null,
+    reread: async (runId, signal) => (all
+      ? await connection.query.pipelineRunView({ runId }, { signal })
+      : await connection.query.pipelineRunForOwner({ runId }, { signal })).rows()[0] ?? null,
   }));
 }
 
 /** Deep links must not depend on how far someone has paged through history. */
 export function usePipelineRun(runId: string): LiveCollectionHandle<Row> {
-  const { viewer, ready } = useViewer();
-  return useLiveCollection<Row>(runId && ready ? `deployables:pipelineRun:${viewer}:${runId}` : null, connection => ({
-    concept: RUN_CONCEPT,
-    eventInScope: id => sameId(id, runId),
-    seed: async (_cursor, signal) => ({ rows: (await connection.query.pipelineRunForOwner({ runId }, { signal })).rows(), nextCursor: "" }),
-    inScope: row => sameId(rowString(flatten(row), "id"), runId) && (viewer === "" || sameId(rowString(flatten(row), "ownerUserId"), viewer)),
-    reread: async (id, signal) => sameId(id, runId) ? (await connection.query.pipelineRunForOwner({ runId }, { signal })).rows()[0] ?? null : null,
-    paged: false,
-  }));
+  const { viewer, ready, developer } = useViewer();
+  return useLiveCollection<Row>(runId && ready ? `deployables:pipelineRun:${viewer}:${developer ? "all" : "own"}:${runId}` : null, connection => {
+    const read = (signal: AbortSignal) => developer
+      ? connection.query.pipelineRunView({ runId }, { signal })
+      : connection.query.pipelineRunForOwner({ runId }, { signal });
+    return {
+      concept: RUN_CONCEPT,
+      eventInScope: id => sameId(id, runId),
+      seed: async (_cursor, signal) => ({ rows: (await read(signal)).rows(), nextCursor: "" }),
+      inScope: row => sameId(rowString(flatten(row), "id"), runId) && (developer || viewer === "" || sameId(rowString(flatten(row), "ownerUserId"), viewer)),
+      reread: async (id, signal) => sameId(id, runId) ? (await read(signal)).rows()[0] ?? null : null,
+      paged: false,
+    };
+  });
 }
 
 /** The caller's pipelines -- one per source they connected -- live. */
@@ -162,4 +178,41 @@ export function usePipelineChannels(enabled = true): LiveCollectionHandle<Row> {
     inScope: row => viewer === "" || sameId(rowString(flatten(row), "ownerUserId"), viewer),
     reread: async (rowId, signal) => (await getRowByConceptAndId(connection.query, "v1:pipelines:channel", rowId, { signal })) as Row ?? null,
   }));
+}
+
+export interface RunDetailFeed {
+  steps: StepRow[];
+  byFileId: ReadonlyMap<string, RunFileRow>;
+  state: LiveCollectionHandle<Row>["snapshot"]["state"];
+}
+
+const NO_DETAIL: RunDetailFeed = { steps: [], byFileId: new Map(), state: "seeding" };
+
+/**
+ * A run somebody else owns, for a developer: its steps and pipeline files,
+ * which stay their owner's rows, projected by `pipelinesRunDetail`. Not live --
+ * the step rows' events are the owner's -- so it is read again whenever the
+ * run row moves (`revision`); the driver rewrites the row after every step.
+ * "" reads nothing.
+ */
+export function useRunDetail(runId: string, revision: string): RunDetailFeed {
+  const connection = useOsConnection();
+  const [detail, setDetail] = useState<RunDetailFeed>(NO_DETAIL);
+  useEffect(() => {
+    if (!connection || runId === "") return;
+    const abort = new AbortController();
+    connection.query.pipelinesRunDetail({ runId }, { signal: abort.signal }).then((result) => {
+      if (abort.signal.aborted) return;
+      const raw = result.rows()[0];
+      const row = raw ? flatten(raw) : {};
+      const list = (key: string) => (Array.isArray(row[key]) ? (row[key] as Row[]) : []);
+      const byFileId = new Map<string, RunFileRow>();
+      for (const file of list("files").map(runFileFromRow)) if (file.fileId !== "" && !file.archived) byFileId.set(file.fileId, file);
+      setDetail({ steps: list("steps").map(stepFromRow).filter((s) => s.key !== ""), byFileId, state: "live" });
+    }).catch(() => {
+      if (!abort.signal.aborted) setDetail((held) => ({ ...held, state: "degraded" }));
+    });
+    return () => abort.abort();
+  }, [connection, runId, revision]);
+  return detail;
 }

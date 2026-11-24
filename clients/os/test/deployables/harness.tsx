@@ -503,9 +503,9 @@ export interface FakeSeed {
   pipelineChannels?: Row[];
   /** v1:pipelines:pipeline rows `pipelinesForOwner` answers. */
   pipelines?: Row[];
-  /** v1:work:step rows, by the bare work run id `workStepsForOwnerRun` names. */
+  /** v1:work:step rows, by the bare work run id `workStepsForOwnerRun` names; also what pipelinesRunDetail answers for a run naming that work run. */
   workSteps?: Record<string, Row[]>;
-  /** v1:library:artifact rows, by the work run id `artifactsForRun` names. */
+  /** v1:library:artifact rows, by the work run id `artifactsForRun` names; also what pipelinesRunDetail answers for a run naming that work run. */
   runArtifacts?: Record<string, Row[]>;
   expiredRunFiles?: Record<string, { fileId: string; name: string }[]>;
   expiredRunFilesError?: string;
@@ -801,7 +801,8 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         const at = opts?.cursor?.startsWith("runs-page-") ? Number(opts.cursor.slice("runs-page-".length)) : 0;
         return rowsResultWithCursor(pages[at] ?? [], at + 1 < pages.length ? `runs-page-${at + 1}` : "");
       }
-      if (call.startsWith("query pipelineRunsBrowse(")) {
+      // The developer read answers the same rows: the fake keeps no owners apart.
+      if (call.startsWith("query pipelineRunsBrowse(") || call.startsWith("query pipelineRunsBrowseAll(")) {
         const value = (name: string) => new RegExp(name + ': "([^\"]*)"').exec(call)?.[1] ?? "";
         const filter: RunFilter = { changesOnly: call.includes("changesOnly: true"), search: value("search"), pipelineId: value("pipelineId"), branch: value("branch"), outcome: value("outcome") as RunFilter["outcome"] };
         const pages = seed.pipelineRunPages ?? [seed.pipelineRuns ?? [], ...(seed.olderPipelineRuns ? [seed.olderPipelineRuns] : [])];
@@ -810,7 +811,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         const at = opts?.cursor?.startsWith("browse-") ? Number(opts.cursor.slice(7)) : 0;
         return rowsResultWithCursor(matched.slice(at, at + 10).map(row => byId.get(row.id)!), at + 10 < matched.length ? `browse-${at + 10}` : "");
       }
-      if (call.startsWith("query pipelineRunForOwner(")) {
+      if (call.startsWith("query pipelineRunForOwner(") || call.startsWith("query pipelineRunView(")) {
         const id = /runId: "([^\"]*)"/.exec(call)?.[1] ?? "";
         const rows = (seed.pipelineRunPages ?? [seed.pipelineRuns ?? [], seed.olderPipelineRuns ?? []]).flat();
         return rowsResult(rows.filter(row => row.id === id));
@@ -829,6 +830,12 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       if (call.startsWith("query artifactsForRun(")) {
         const id = /runId: "([^"]*)"/.exec(call)?.[1] ?? "";
         return rowsResult(seed.runArtifacts?.[id] ?? []);
+      }
+      if (call.startsWith("builtin pipelinesRunDetail(")) {
+        const id = /runId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        const run = (seed.pipelineRunPages ?? [seed.pipelineRuns ?? [], seed.olderPipelineRuns ?? []]).flat().find(row => row.id === id);
+        const work = String(run?.["workRunId"] ?? "");
+        return builtinReply("pipelinesRunDetail", [{ steps: seed.workSteps?.[work] ?? [], files: seed.runArtifacts?.[work] ?? [] } as unknown as Row]);
       }
       if (call.startsWith("builtin pipelinesExpiredArtifacts(")) {
         if (seed.expiredRunFilesError) throw Error(seed.expiredRunFilesError);

@@ -13,7 +13,7 @@ import { LocalDeployablesSettingsStore } from "../../../src/apps/deployables/set
 import { RUN_CONCEPT } from "../../../src/apps/deployables/pipelines/rows";
 import { chooseOption } from "../../selectControl";
 import { click, emit, fakeConnection, withSession, type FakeConnection, type FakeSeed } from "../harness";
-import { VIEWER, minutesAgo, packageRow, pipelineRow, runRow } from "./fixtures";
+import { OWNER, VIEWER, minutesAgo, packageRow, pipelineRow, runRow } from "./fixtures";
 
 // The Runs tab (epic memql#5479, issue memql#5499), through the real app: the
 // real feeds, projections and generated builders run, and the assertions are
@@ -24,12 +24,12 @@ function memStore() {
   return new LocalDeployablesSettingsStore({ getItem: (k) => data.get(k) ?? null, setItem: (k, v) => void data.set(k, v) });
 }
 
-function mount(connection: FakeConnection | null, opts: { intent?: { id: string; payload: Record<string, unknown> }; navigate?: (id: string) => void } = {}) {
+function mount(connection: FakeConnection | null, opts: { intent?: { id: string; payload: Record<string, unknown> }; navigate?: (id: string) => void; role?: string } = {}) {
   h.connection = connection;
   return render(
     withSession(
       <DeployablesApp surface="pipelines" sectionId="runs" navigate={opts.navigate ?? vi.fn()} askContext={vi.fn()} store={memStore()} {...(opts.intent ? { intent: opts.intent, consumeIntent: vi.fn() } : {})} />,
-      { role: "owner", userId: VIEWER },
+      { role: opts.role ?? "owner", userId: VIEWER },
     ),
   );
 }
@@ -145,14 +145,14 @@ describe("the Runs tab", () => {
     const first = mount(connection);
     await screen.findByText("Paged change 9");
     expect(screen.queryByText("Paged change 10")).toBeNull();
-    expect(connection.calls.filter(call => call.startsWith("query pipelineRunsBrowse("))).toHaveLength(1);
+    expect(connection.calls.filter(call => call.startsWith("query pipelineRunsBrowseAll("))).toHaveLength(1);
     await scrollNextPage();
     expect(await screen.findByText("Paged change 19")).toBeTruthy();
     expect(screen.queryByText("Paged change 20")).toBeNull();
     first.unmount();
     mount(connection);
     expect(await screen.findByText("Paged change 19")).toBeTruthy();
-    expect(connection.calls.filter(call => call.startsWith("query pipelineRunsBrowse("))).toHaveLength(2);
+    expect(connection.calls.filter(call => call.startsWith("query pipelineRunsBrowseAll("))).toHaveLength(2);
   });
 
   it("searches runs beyond the loaded page on the server", async () => {
@@ -174,8 +174,8 @@ describe("the Runs tab", () => {
     mount(connection, { intent: { id: "open-old", payload: { runId: "r-page-24" } } });
     expect(await screen.findByRole("heading", { name: "Paged change 24" })).toBeTruthy();
     expect(await screen.findByText("shop")).toBeTruthy();
-    expect(connection.callsNamed("pipelineRunForOwner")).toHaveLength(1);
-    expect(connection.callsNamed("pipelineRunsBrowse")).toHaveLength(1);
+    expect(connection.callsNamed("pipelineRunView")).toHaveLength(1);
+    expect(connection.callsNamed("pipelineRunsBrowseAll")).toHaveLength(1);
     expect(connection.callsNamed("packagesAll")).toHaveLength(0);
   });
 
@@ -184,5 +184,13 @@ describe("the Runs tab", () => {
     mount(fakeConnection(seed()), { navigate, intent: { id: "i-1", payload: { runId: "r-failed" } } });
     expect(navigate).toHaveBeenCalledWith("runs");
     expect(await screen.findByRole("heading", { name: "Show the cart" })).toBeTruthy();
+  });
+
+  it("lists every owner's runs for a developer, through the developer read", async () => {
+    const connection = fakeConnection(seed({ pipelineRuns: [runRow({ id: "r-theirs", ownerUserId: OWNER, queuedAt: minutesAgo(5), title: "Their change" })] }));
+    mount(connection, { role: "developer" });
+    expect(await screen.findByText("Their change")).toBeTruthy();
+    expect(connection.callsNamed("pipelineRunsBrowseAll")).toHaveLength(1);
+    expect(connection.callsNamed("pipelineRunsBrowse")).toHaveLength(0);
   });
 });
