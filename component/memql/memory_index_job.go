@@ -26,8 +26,9 @@ package memql
 // A switch's states: indexing -> catchingUp -> switching -> finishing -> done.
 // A catch-up walk that left an item failed, or found the active table holding
 // items no source rebuilds, goes to needsDecision instead, and stays there: the
-// owner decides (Switch anyway, or Cancel; Task 5's builtins). Any walking state
-// can go to waiting and back. A backfill: indexing -> done, and waiting.
+// owner decides, with memorySearchSwitchAnyway (which writes `switching`; this
+// job flips) or memorySearchCancel (memory_search_builtins.go). Any walking
+// state can go to waiting and back. A backfill: indexing -> done, and waiting.
 //
 // # One replica at a time
 //
@@ -115,7 +116,7 @@ package memql
 // # Nothing is broadcast (ruling R3)
 //
 // The run rows have no routing rule (component/node/routing.go). Nothing
-// subscribes to them: the OS polls a status builtin, and a broadcast on every
+// subscribes to them: the OS polls memorySearchStatus, and a broadcast on every
 // batch's write would put a mesh event on every node per 32 items. The
 // binding's own rule already tells every replica about a flip.
 //

@@ -204,6 +204,14 @@ func (e *MemQLEngine) initBuiltinExecutorHandlers() error {
 		BuiltinExecutorLanguageStatus: func(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			return e.evaluateLanguageStatusExpression(ctx)
 		},
+		// The owner's memory-search builtins and their cleanup (memory_search_builtins.go).
+		BuiltinExecutorMemorySearchStatus:       e.memorySearchStatusBuiltin,
+		BuiltinExecutorMemorySearchChoices:      e.memorySearchChoicesBuiltin,
+		BuiltinExecutorMemorySearchSwitch:       e.memorySearchSwitchBuiltin,
+		BuiltinExecutorMemorySearchCancel:       e.memorySearchCancelBuiltin,
+		BuiltinExecutorMemorySearchSwitchAnyway: e.memorySearchSwitchAnywayBuiltin,
+		BuiltinExecutorMemorySearchConfirm:      e.memorySearchConfirmBuiltin,
+		BuiltinExecutorMemoryIndexRetire:        e.memoryIndexRetireBuiltin,
 	}
 
 	if e.functions != nil {

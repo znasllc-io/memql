@@ -209,6 +209,7 @@ var appReadFloors = map[string][]Role{
 	"app:cluster/audit":          {RoleOwner},
 	"app:cluster/logs":           {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:cluster/automations":    {RoleOwner, RoleDeveloper, RoleAdmin},
+	"app:cluster/memorysearch":   {RoleOwner},
 	"app:concepts":               {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:concepts/logs":          {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:files":                  {RoleOwner, RoleDeveloper, RoleAdmin, RoleWriter, RoleReader},
@@ -375,6 +376,11 @@ var appPartGrants = map[string][]Role{
 	// flips any pack there without asking this table.
 	"app:cluster/modules":  {RoleOwner, RoleDeveloper},
 	"app:cluster/capacity": {RoleOwner},
+	// Changing memory search's model, cancelling or forcing a switch, and
+	// confirming a vendor model nobody chose (design record 2026-11-23,
+	// section 8). Owner only: the model decides whose machines receive every
+	// person's memory text, or which vendor account pays for all of it.
+	"app:cluster/memorysearch": {RoleOwner},
 }
 
 // The app tables fold into capabilitySets before anything reads it, so the

@@ -320,6 +320,20 @@ automation memoryIndexTick {
   builtin memoryIndexStep(budgetSeconds: 45)
 }
 
+/// The daily cleanup of memory search's retired indexes (design record 2026-11-23, section 7;
+/// component/memql memory_search_builtins.go): a switch keeps the model it replaced for 30 days,
+/// and so does a cancelled switch's partly built index, so switching back is quick. Past that
+/// date the table is dropped and its row records when -- but never the active model's table or a
+/// running switch's target, whatever a retired row says.
+///
+/// ON THE GENERAL CRON LEADER: dropping a table needs the database and no machine. The handler
+/// refuses any call without internal origin and works under the embedder binding's lock, so it
+/// never drops a table a switch or a flip on another replica is making active.
+@trigger(schedule="0 20 3 * * *")
+automation memoryIndexRetentionSweep {
+  builtin memoryIndexRetire()
+}
+
 /// Resume declared retention from shared database cursors every hour.
 @trigger(schedule="0 40 * * * *")
 automation retireDeclaredConceptVersions {

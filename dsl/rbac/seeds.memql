@@ -402,6 +402,13 @@ seed capability cap-owner-read-app-cluster-automations { roleSlug: "owner"  verb
 seed capability cap-developer-read-app-cluster-automations { roleSlug: "developer"  verb: "read"  resourceType: "app:cluster/automations"  predefined: true }
 @description("admin: open the automations section of the cluster app -- the automation graph and the loops it stopped, the capability automationGraph and automationLoopStops require (memql#5384).")
 seed capability cap-admin-read-app-cluster-automations { roleSlug: "admin"  verb: "read"  resourceType: "app:cluster/automations"  predefined: true }
+// Memory search's model (design record 2026-11-23, sections 1 and 8). OWNER
+// ONLY: the model decides whose machines receive every person's memory text, or
+// which vendor account the cluster pays from for all of it.
+@description("owner: open the memory search section of the cluster app -- the model memory search uses, its index, its backlog and the indexes kept for switching back (memorySearchStatus, memorySearchChoices).")
+seed capability cap-owner-read-app-cluster-memorysearch { roleSlug: "owner"  verb: "read"  resourceType: "app:cluster/memorysearch"  predefined: true }
+@description("owner: change memory search's model, cancel a switch, switch anyway, and confirm a vendor model nobody chose (memorySearchSwitch, memorySearchCancel, memorySearchSwitchAnyway, memorySearchConfirm).")
+seed capability cap-owner-execute-app-cluster-memorysearch { roleSlug: "owner"  verb: "execute"  resourceType: "app:cluster/memorysearch"  predefined: true }
 
 // ---- app:concepts (registry floor: min admin) ----
 @description("owner: open the concepts app -- reproduces the OS registry floor min admin (memql#5300).")

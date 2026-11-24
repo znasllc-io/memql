@@ -20,9 +20,11 @@ import (
 //
 // Runtime activation probes the chosen model and records one active binding.
 // Vectors are separated by provider identity AND width. Every replica reads the
-// durable binding; switching an existing corpus is refused until its reindex
-// workflow exists. Legacy vectors remain stored, but are not mixed into a new
-// model space whose provenance cannot be established.
+// durable binding; switching an existing corpus rebuilds it into the new
+// model's own table first (memorySearchSwitch and the memory index job,
+// memory_search_builtins.go and memory_index_job.go). Legacy vectors remain
+// stored, but are not mixed into a new model space whose provenance cannot be
+// established.
 //
 // WHY A LITERAL ID. The same reason v1:cluster:database is at `primary`
 // (memql#4766): a re-write is then a new VERSION of one logical row rather than

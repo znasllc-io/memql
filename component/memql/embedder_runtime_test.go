@@ -56,7 +56,7 @@ func TestEmbedderActivationProbesPersistsAndReadsAcrossReplicas(t *testing.T) {
 	_, err = b.ReadEmbedderBinding(ctx)
 	require.ErrorIs(t, err, ErrNoEmbedderBound)
 	_, err = a.bindEmbedderBuiltin(ownerCtx, map[string]any{"provider": "other-model"}, 0)
-	require.ErrorContains(t, err, "reindexing")
+	require.ErrorContains(t, err, "Cluster > Settings > Memory search", "a change of model is a switch, made where it is offered")
 	require.Zero(t, probe.calls)
 	_, err = a.bindEmbedderBuiltin(ownerCtx, args, 0)
 	require.NoError(t, err)
@@ -73,7 +73,7 @@ func TestEmbedderActivationProbesPersistsAndReadsAcrossReplicas(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, probe.calls)
 	_, err = b.bindEmbedderBuiltin(ownerCtx, map[string]any{"provider": "other-model"}, 0)
-	require.ErrorContains(t, err, "reindexing")
+	require.ErrorContains(t, err, "Cluster > Settings > Memory search", "a change of model is a switch, made where it is offered")
 }
 
 func TestEmbeddingSpacesAndInvalidVectors(t *testing.T) {

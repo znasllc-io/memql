@@ -153,8 +153,10 @@ func EnsureEmbeddingVectorTable(ctx context.Context, db *sql.DB, provider string
 }
 
 // Initial activation is deliberately distinct from switching an existing
-// corpus. Switching needs a complete, source-validated reindex and remains
-// refused until that workflow is available; no partial space becomes active.
+// corpus. A switch rebuilds the whole index first and is the owner's
+// memorySearchSwitch (memory_search_builtins.go), which the memory index job
+// carries out; this builtin binds only a cluster's first model, so no partial
+// space ever becomes active.
 func (e *MemQLEngine) bindEmbedderBuiltin(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	ac, _ := auth.AccessFromContext(ctx)
 	if ac == nil || ac.Role != auth.RoleOwner {
@@ -182,7 +184,8 @@ type embedderChoice struct{ IndexedBy, ChosenBy string }
 // bindEmbedder makes provider the cluster's embedder: it embeds one sentence to
 // learn the vector width, creates the table for it, and records and activates
 // the binding, under the binding's advisory lock. The FIRST binding needs no
-// re-embed; changing an active one is the migration workflow's and is refused.
+// re-embed; changing an active one rebuilds the index first, which is a switch
+// (memorySearchSwitch and the memory index job), and is refused here.
 func (e *MemQLEngine) bindEmbedder(ctx context.Context, provider string, choice embedderChoice) ([]memorynodes.MemoryNode, error) {
 	unlock, err := e.lockAskConversationKind(ctx, "active", "embedder-binding")
 	if err != nil {
@@ -192,7 +195,7 @@ func (e *MemQLEngine) bindEmbedder(ctx context.Context, provider string, choice 
 	current, readErr := e.readEmbedderPlan(ctx)
 	if readErr == nil {
 		if current.ProviderRef != provider {
-			return nil, fmt.Errorf("changing the active embedder requires reindexing the existing corpus; that workflow is not available yet")
+			return nil, fmt.Errorf("changing the active memory-search model rebuilds its whole index first; choose the model in Cluster > Settings > Memory search")
 		}
 		if current.ActivatedAt != "" {
 			raw, _ := json.Marshal(map[string]any{"provider": provider, "dimensions": current.Dimensions, "active": true})
@@ -202,26 +205,17 @@ func (e *MemQLEngine) bindEmbedder(ctx context.Context, provider string, choice 
 	if readErr != nil && readErr != ErrNoEmbedderBound {
 		return nil, readErr
 	}
-	// The readiness probe runs on the machines that will index, not the
-	// caller's: a candidate owner's model is probed as that owner.
-	model, _, err := ResolveAITyped[EmbeddingAIProvider](ContextWithEmbeddingIndexer(ctx, choice.IndexedBy), e, airoute.ResolveRequest{Level: airoute.LevelEmbeddings, Modality: airoute.ModalityEmbedding, ExplicitProvider: provider, UserId: choice.IndexedBy})
+	dims, err := e.probeEmbedder(ctx, provider, choice.IndexedBy)
 	if err != nil {
 		return nil, err
 	}
-	vector, err := model.Embed(ctx, "MemQL embedding readiness check")
-	if err != nil {
-		return nil, err
-	}
-	if err = ValidateEmbeddingVector(ctx, provider, model.Dimensions(), vector); err != nil {
-		return nil, err
-	}
-	if current.Valid() && current.Dimensions != len(vector) {
+	if current.Valid() && current.Dimensions != dims {
 		return nil, fmt.Errorf("the pending binding has a different vector width")
 	}
 	if e.database() == nil {
 		return nil, fmt.Errorf("embedding storage is unavailable")
 	}
-	if _, err = EnsureEmbeddingVectorTable(ctx, e.database().DB, provider, len(vector)); err != nil {
+	if _, err = EnsureEmbeddingVectorTable(ctx, e.database().DB, provider, dims); err != nil {
 		return nil, err
 	}
 	internal := auth.ContextWithInternalOrigin(ctx)
@@ -229,7 +223,7 @@ func (e *MemQLEngine) bindEmbedder(ctx context.Context, provider string, choice 
 		name string
 		args map[string]any
 	}{
-		{"platform.recordEmbedderBindingPlan", map[string]any{"bindingId": "active", "providerRef": provider, "dimensions": len(vector)}},
+		{"platform.recordEmbedderBindingPlan", map[string]any{"bindingId": "active", "providerRef": provider, "dimensions": dims}},
 		{"platform.activateEmbedderBinding", map[string]any{"bindingId": "active", "activatedAt": time.Now().UTC().Format(time.RFC3339Nano)}},
 	} {
 		call, _ := parser.RenderCall(write.name, write.args)
@@ -246,11 +240,32 @@ func (e *MemQLEngine) bindEmbedder(ctx context.Context, provider string, choice 
 	if err != nil {
 		return nil, err
 	}
-	if bound.ProviderRef != provider || bound.Dimensions != len(vector) {
+	if bound.ProviderRef != provider || bound.Dimensions != dims {
 		return nil, fmt.Errorf("the binding changed during activation")
 	}
-	raw, _ := json.Marshal(map[string]any{"provider": provider, "dimensions": len(vector), "active": true})
+	raw, _ := json.Marshal(map[string]any{"provider": provider, "dimensions": dims, "active": true})
 	return []memorynodes.MemoryNode{{ID: "active", Payload: raw}}, nil
+}
+
+// probeEmbedder embeds one sentence with provider and answers the vector width
+// it produced, after checking the vector is usable (ValidateEmbeddingVector).
+// The probe runs where the model will index, not on the caller's machines: a
+// fleet model is resolved as indexer (their machines and the ones lent to
+// them); a vendor model, with no indexer, on the cluster's account. bindEmbedder
+// learns a first model's width this way, and memorySearchSwitch a new one's.
+func (e *MemQLEngine) probeEmbedder(ctx context.Context, provider, indexer string) (int, error) {
+	model, _, err := ResolveAITyped[EmbeddingAIProvider](ContextWithEmbeddingIndexer(ctx, indexer), e, airoute.ResolveRequest{Level: airoute.LevelEmbeddings, Modality: airoute.ModalityEmbedding, ExplicitProvider: provider, UserId: indexer})
+	if err != nil {
+		return 0, err
+	}
+	vector, err := model.Embed(ctx, "MemQL embedding readiness check")
+	if err != nil {
+		return 0, err
+	}
+	if err = ValidateEmbeddingVector(ctx, provider, model.Dimensions(), vector); err != nil {
+		return 0, err
+	}
+	return len(vector), nil
 }
 
 // autoBindEmbedder binds the cluster's FIRST embedder by itself (design record

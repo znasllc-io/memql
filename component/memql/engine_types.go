@@ -636,6 +636,20 @@ const (
 	// it, or backfill the active one. Refused without internal origin, because
 	// only its schedule (memoryIndexTick) runs it. See memory_index_job.go.
 	BuiltinExecutorMemoryIndexStep = "memoryIndexStep"
+	// The cluster owner's memory-search builtins (design record 2026-11-23,
+	// sections 3, 6 and 8): the status and choices are `read` on
+	// app:cluster/memorysearch, the four acts `execute` on it. None flips the
+	// model; the index job does. See memory_search_builtins.go.
+	BuiltinExecutorMemorySearchStatus       = "memorySearchStatus"
+	BuiltinExecutorMemorySearchChoices      = "memorySearchChoices"
+	BuiltinExecutorMemorySearchSwitch       = "memorySearchSwitch"
+	BuiltinExecutorMemorySearchCancel       = "memorySearchCancel"
+	BuiltinExecutorMemorySearchSwitchAnyway = "memorySearchSwitchAnyway"
+	BuiltinExecutorMemorySearchConfirm      = "memorySearchConfirm"
+	// BuiltinExecutorMemoryIndexRetire is the daily cleanup of retired
+	// memory-search indexes (section 7), refused without internal origin
+	// because only its schedule (memoryIndexRetentionSweep) runs it.
+	BuiltinExecutorMemoryIndexRetire = "memoryIndexRetire"
 )
 
 // ModuleReadinessConcept is the canonical id of one node's per-module

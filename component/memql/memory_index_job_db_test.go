@@ -276,9 +276,9 @@ func (f *memoryIndexDBFixture) write(e *MemQLEngine, ids ...string) {
 	}
 }
 
-// startSwitch writes the switch run as an owner's switch does (Task 5's
-// memorySearchSwitch): indexing toward ref, indexed by and started by the
-// indexer, with the target's table ensured.
+// startSwitch writes the switch run as an owner's switch does
+// (memorySearchSwitch, memory_search_builtins.go): indexing toward ref, indexed
+// by and started by the indexer, with the target's table ensured.
 func (f *memoryIndexDBFixture) startSwitch(ref, indexer string) MemoryIndexRun {
 	f.t.Helper()
 	run := MemoryIndexRun{Kind: memoryIndexKindSwitch, State: memoryIndexStateIndexing, TargetRef: ref, TargetDimensions: f.widths[ref],

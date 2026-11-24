@@ -596,7 +596,7 @@ QueryClient.prototype.automationLoopStops = function (this: QueryClient, args: A
   return this.executeNamed("automationLoopStops", buildAutomationLoopStops(args), opts);
 };
 
-/** Choose the cluster's first embedding model, after verifying its output. Existing bindings are idempotent; changing the model requires a reindex. */
+/** Choose the cluster's first embedding model, after verifying its output. Existing bindings are idempotent; changing the model is a switch that rebuilds the index first (memorySearchSwitch). */
 export interface BindEmbedderArgs {
   provider: string;
 }
@@ -4928,6 +4928,122 @@ declare module "./query.js" {
 
 QueryClient.prototype.logsTail = function (this: QueryClient, args: LogsTailArgs = {} as LogsTailArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("logsTail", buildLogsTail(args), opts);
+};
+
+/** Cancel the switch in progress. Search keeps the current model, and the partly built index is kept for 30 days, so choosing the same model again resumes it. Refused once the switch has happened: switching back is a new switch. */
+export interface MemorySearchCancelArgs {
+}
+
+export function buildMemorySearchCancel(args: MemorySearchCancelArgs): string {
+  void args;
+  return "builtin memorySearchCancel()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    memorySearchCancel(args?: MemorySearchCancelArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.memorySearchCancel = function (this: QueryClient, args: MemorySearchCancelArgs = {} as MemorySearchCancelArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("memorySearchCancel", buildMemorySearchCancel(args), opts);
+};
+
+/** The models the caller may choose for memory search, one row each: {providerRef, kind, label, machines, paidByCluster, available, hint}. Machine models are the embedding models of the caller's own machines and the ones lent to them, counted by the machines that offer them; vendor embedding models appear only where the cluster's vendor account is set up, and each is paid by it. */
+export interface MemorySearchChoicesArgs {
+}
+
+export function buildMemorySearchChoices(args: MemorySearchChoicesArgs): string {
+  void args;
+  return "builtin memorySearchChoices()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    memorySearchChoices(args?: MemorySearchChoicesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.memorySearchChoices = function (this: QueryClient, args: MemorySearchChoicesArgs = {} as MemorySearchChoicesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("memorySearchChoices", buildMemorySearchChoices(args), opts);
+};
+
+/** Confirm a vendor model memory search was bound to without anybody choosing it: records the caller as its chooser, once. */
+export interface MemorySearchConfirmArgs {
+}
+
+export function buildMemorySearchConfirm(args: MemorySearchConfirmArgs): string {
+  void args;
+  return "builtin memorySearchConfirm()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    memorySearchConfirm(args?: MemorySearchConfirmArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.memorySearchConfirm = function (this: QueryClient, args: MemorySearchConfirmArgs = {} as MemorySearchConfirmArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("memorySearchConfirm", buildMemorySearchConfirm(args), opts);
+};
+
+/** Memory search's model and index, as ONE row (id `current`): providerRef, kind (machine or vendor), label; indexedBy and indexedByName (whose machines embed for it; empty for a vendor model, which the cluster's account pays for), chosenBy, and needsConfirmation (a vendor model nobody chose); indexed (the entries in its index); backlog (items the backfill found missing and could not index; a lower bound while it waits) and waitingReason; switch (state, targetRef, targetLabel, counts, startedAt, startedBy, waitingReason, and estimatedTotal, an ESTIMATE: the active index plus the backlog), or null; retained, the kept indexes as {providerRef, retireAt}. */
+export interface MemorySearchStatusArgs {
+}
+
+export function buildMemorySearchStatus(args: MemorySearchStatusArgs): string {
+  void args;
+  return "builtin memorySearchStatus()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    memorySearchStatus(args?: MemorySearchStatusArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.memorySearchStatus = function (this: QueryClient, args: MemorySearchStatusArgs = {} as MemorySearchStatusArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("memorySearchStatus", buildMemorySearchStatus(args), opts);
+};
+
+/** Choose memory search's model. With none bound it is bound at once. The model in use moves nothing (it records who chose it). Otherwise the whole index is rebuilt with the new model in the background while search keeps the current one, and search switches over by itself when the rebuild is complete; a machine model is indexed on the chooser's machines and the ones lent to them, a vendor model is paid by the cluster's vendor account. Refused while a switch runs. */
+export interface MemorySearchSwitchArgs {
+  provider: string;
+}
+
+export function buildMemorySearchSwitch(args: MemorySearchSwitchArgs): string {
+  const parts: string[] = [];
+  parts.push("provider: " + renderMemQLValue(args.provider));
+  return "builtin memorySearchSwitch(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    memorySearchSwitch(args: MemorySearchSwitchArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.memorySearchSwitch = function (this: QueryClient, args: MemorySearchSwitchArgs = {} as MemorySearchSwitchArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("memorySearchSwitch", buildMemorySearchSwitch(args), opts);
+};
+
+/** Switch over although some items failed or no source rebuilds them (a switch waiting for the owner's decision only). Those items drop out of search until they are written again or a later pass picks them up. The flip itself happens at the index job's next tick. */
+export interface MemorySearchSwitchAnywayArgs {
+}
+
+export function buildMemorySearchSwitchAnyway(args: MemorySearchSwitchAnywayArgs): string {
+  void args;
+  return "builtin memorySearchSwitchAnyway()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    memorySearchSwitchAnyway(args?: MemorySearchSwitchAnywayArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.memorySearchSwitchAnyway = function (this: QueryClient, args: MemorySearchSwitchAnywayArgs = {} as MemorySearchSwitchAnywayArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("memorySearchSwitchAnyway", buildMemorySearchSwitchAnyway(args), opts);
 };
 
 /** The cluster-wide readiness verdict per module (design record 2026-09-06-configuration-readiness, section 4.5): reads every node's latest moduleReadiness row and the live cluster nodes, folds them with component/memql/readiness -- worst state wins, disagreement is partial with the nodes named, no live reporter is unreported -- and answers one row per module on v1:platform:moduleVerdict. */

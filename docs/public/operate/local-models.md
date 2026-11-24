@@ -713,13 +713,19 @@ returns the wrong neighbours.
 One row now says which embedder is active
 (`v1:platform:embedderBinding` at the id `active`), and the width belongs to the
 provider: a provider record declares it, and a fleet model's comes from its
-catalog row. Vectors live in one table per width, `node_vectors_<dims>`.
+catalog row. Each model's vectors live in a table of their own, named by the
+width and the model: `node_vectors_<dims>_<16 hex>`.
 
-**Switching is not an edit.** It creates the new width's table, records the
-binding as a plan, re-embeds the corpus, and flips `active` only when the counts
-match. Until then every read follows the binding that is still active — so a
-switch interrupted half way leaves a cluster that still works, rather than one
-whose vectors half mean one thing and half another.
+**Switching is not an edit.** A cluster owner changes the model in
+Cluster > Settings > Memory search (`memorySearchSwitch`). The memory index job
+rebuilds the whole index into the new model's table in the background while
+every search keeps reading the model still active, and flips the binding by
+itself once every item is in. So a switch interrupted half way leaves a cluster
+that still works, rather than one whose vectors half mean one thing and half
+another. If some items fail, or no source can rebuild them, the switch waits
+for the owner to switch anyway or cancel. The replaced model's index is kept
+for 30 days, so switching back only fills in what was written since, and is
+dropped after.
 
 Two consequences worth knowing:
 
