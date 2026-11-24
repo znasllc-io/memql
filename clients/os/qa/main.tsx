@@ -71,6 +71,7 @@ import { installQaConnection } from "./connectionShim";
 import {
   ALLOWED_MACHINE,
   FAILED_LOG,
+  PIPELINES_EVERYONE_SEED,
   HOST_COMMANDS_OFF_MACHINE,
   PIPELINES_HOST_COMMANDS_SEED,
   PIPELINES_NO_RUNS_SEED,
@@ -1277,6 +1278,17 @@ const VIEWS: Record<
     },
     framed: true,
     render: () => <RunsWindow runId="r-7" />,
+  },
+  // A developer (cluster-wide) reading other people's runs, view only.
+  "pipeline-runs-everyone": { seed: PIPELINES_EVERYONE_SEED, role: "developer", framed: true, render: () => <RunsWindow /> },
+  "pipeline-run-not-owned": {
+    connect: () => {
+      installContentRoute(FAILED_LOG);
+      return fakeConnection(PIPELINES_EVERYONE_SEED);
+    },
+    role: "developer",
+    framed: true,
+    render: () => <RunsWindow runId="r-other-1" />,
   },
   "pipeline-run-failed-outside": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow runId="r-10" /> },
   "pipeline-run-running": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow runId="r-8" /> },

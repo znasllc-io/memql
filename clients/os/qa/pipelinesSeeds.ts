@@ -386,3 +386,21 @@ export function mapPipelines(): Pick<FakeSeed, "pipelines" | "pipelineRuns"> {
     ],
   };
 }
+
+/**
+ * A developer's cluster-wide Runs list: the viewer's own runs plus other
+ * people's. r-other-1 is another owner's failed run (its steps and log tail
+ * are readable, nothing on it can be changed); r-other-2 is one that passed.
+ */
+const OTHER = "u-maya";
+const OTHER_FAILED_STEPS: Row[] = FAILED_STEPS.map(row => ({ ...row, runId: "v1:work:run:wr-other-1" }) as Row);
+export const PIPELINES_EVERYONE_SEED: FakeSeed = {
+  ...PIPELINES_SEED,
+  pipelineRuns: [
+    runRow({ id: "r-other-1", ownerUserId: OTHER, pullRequest: 51, headBranch: "gift-wrap", title: "Offer gift wrapping at checkout", workRunId: "wr-other-1", ...finishedAfter(20, 460000) }),
+    runRow({ id: "r-other-2", ownerUserId: OTHER, pullRequest: 50, headBranch: "faster-search", title: "Speed up the catalog search", conclusion: "success", workRunId: "", ...finishedAfter(35, 300000) }),
+    ...(PIPELINES_SEED.pipelineRuns as Row[]),
+  ],
+  workSteps: { ...PIPELINES_SEED.workSteps, "wr-other-1": OTHER_FAILED_STEPS },
+  runArtifacts: { ...PIPELINES_SEED.runArtifacts, "wr-other-1": FAILED_FILES },
+};
