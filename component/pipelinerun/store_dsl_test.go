@@ -114,6 +114,8 @@ func everyStoreCall(s Store, value string) []struct {
 		{"PipelineForPackage", func() error { _, err := s.PipelineForPackage(ctx, value); return err }},
 		{"PipelinesForOwner", func() error { _, err := s.PipelinesForOwner(ctx); return err }},
 		{"RunForOwner", func() error { _, err := s.RunForOwner(ctx, value); return err }},
+		{"RunView", func() error { _, err := s.RunView(ctx, value); return err }},
+		{"RunDetailRows", func() error { _, _, err := s.RunDetailRows(ctx, value, value); return err }},
 		{"RunsForOwner (one pipeline)", func() error { _, err := s.RunsForOwner(ctx, value); return err }},
 		{"RunsForOwner (every pipeline)", func() error { _, err := s.RunsForOwner(ctx, ""); return err }},
 		{"InboundDelivery", func() error { _, err := s.InboundDelivery(ctx, value); return err }},
@@ -287,7 +289,7 @@ func TestEveryCallNamesAConstructAndArgumentsTheDSLDeclares(t *testing.T) {
 		mCreatePipeline, mUpdatePipeline, mCreatePipelineRun, mUpdatePipelineRun, qPackageByID, qInboundRequestByID,
 		qPipelineChannelsForOwner, qPipelineChannelForOwnerByName, qPipelineRunsForPipelineEvent, mCreatePipelineChannel, mUpdatePipelineChannel,
 		mStageServerOutboundRequest, mStageOutboundRequestToSecret, qOutboundRequestByID, qLibraryFileByID,
-		qGlobalVariable, mSetGlobalVariable,
+		qGlobalVariable, mSetGlobalVariable, qPipelineRunView, qWorkStepsForOwnerRun, qArtifactsForRun,
 	} {
 		if !seen[want] {
 			t.Errorf("%s is named in store_dsl.go and no Store method calls it", want)

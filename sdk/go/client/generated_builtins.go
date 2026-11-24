@@ -7612,6 +7612,26 @@ func PipelinesRerunBuild(args PipelinesRerunArgs) string {
 	return b.String()
 }
 
+// PipelinesRunDetail -- One run's steps and pipeline files, for a caller who may read the run and not its owner's work and Library rows: a developer's run page (design record 2026-11-24). Resolves the run as the caller (their own, else pipelineRunView, which needs developer rank), then reads its steps and its source=="pipeline" artifacts under the run owner's borrowed authority, and answers {steps, files}: a projection of what the run page reads, never the rows. Acts on nothing.
+type PipelinesRunDetailArgs struct {
+	RunId string
+}
+
+// PipelinesRunDetail calls the engine builtin pipelinesRunDetail.
+func (qc *QueryClient) PipelinesRunDetail(ctx context.Context, args PipelinesRunDetailArgs) (*Result, error) {
+	call := PipelinesRunDetailBuild(args)
+	return qc.executeNamed(ctx, "pipelinesRunDetail", call)
+}
+
+func PipelinesRunDetailBuild(args PipelinesRunDetailArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin pipelinesRunDetail(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // PipelinesRunLatest -- Start a full manual rehearsal of a branch head for one of the caller's pipelines: the branch named, or the repository's default branch when none is. Automatic delivery remains as configured. The manual run has its own deduplicated event key and a separate check context that cannot satisfy a required PR or merge-candidate check. The source owner's GitHub grant reads the branch, the exact SHA is pinned in the run, and the run writes its check run on that commit. A name GitHub would not accept is refused pipeline_branch_invalid before GitHub is asked. The sealed workflow includes stages with no `on` list and stages explicitly marked `on: [manual]`; it does not treat manual as push or release, so future publication steps remain opted out. Repeated requests for the same head resolve to the existing attempt, whichever branch named it; re-run that attempt to start another.
 type PipelinesRunLatestArgs struct {
 	// The caller's v1:pipelines:pipeline.

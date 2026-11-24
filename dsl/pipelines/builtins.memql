@@ -10,6 +10,19 @@ builtin pipelinesExpiredArtifacts {
   fileIds []string!
 }
 
+/// One run's steps and pipeline files, for a caller who may read the run and not its owner's work
+/// and Library rows: a developer's run page (design record 2026-11-24). Resolves the run as the
+/// caller (their own, else pipelineRunView, which needs developer rank), then reads its steps and
+/// its source=="pipeline" artifacts under the run owner's borrowed authority, and answers
+/// {steps, files}: a projection of what the run page reads, never the rows. Acts on nothing.
+@sdk
+@executor("integration.pipelines.runDetail")
+@args(profile="object")
+@requiresCapability("read", "app:pipelines")
+builtin pipelinesRunDetail {
+  runId string!
+}
+
 /// Enroll a pre-receipt log in retention after verifying its bytes. The owned
 /// completed step supplies the file; this accepts no object path or file ID.
 /// enrollLegacyPipelineLogs enrolls every such log on its own, including those
@@ -89,7 +102,8 @@ builtin pipelineRetentionReport { }
 // pipeline for disconnect, the run for re-run and cancel), so a caller who does
 // not own it resolves zero rows and is refused by name before anything is
 // written -- save a cluster owner's disconnect, which reaches any pipeline so
-// an operator can free a repository a departed owner's pipeline holds. The part
+// an operator can free a repository a departed owner's pipeline holds. pipelinesRunDetail is the one read that also
+// resolves through the developer read (pipelineRunView), and it writes nothing. The part
 // is the door, exactly as for the Deployables actions beside them in
 // dsl/platform/builtins.memql, and each act has its own (task memql#5498):
 // previewing, connecting and disconnecting is `app:pipelines/connect`,

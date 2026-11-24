@@ -308,6 +308,24 @@ func (s *memStore) RunForOwner(ctx context.Context, runID string) (*Run, error) 
 	return &r, nil
 }
 
+// RunView is pipelineRunView: any run, whoever owns it. The developer floor is
+// the engine's (@requiresRank), tested against a real one.
+func (s *memStore) RunView(_ context.Context, runID string) (*Run, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.runs[bareID(runID)]
+	if !ok {
+		return nil, nil
+	}
+	return &r, nil
+}
+
+// RunDetailRows answers nothing: pipelinesRunDetail is tested over the real
+// DSL store (run_detail_test.go).
+func (s *memStore) RunDetailRows(context.Context, string, string) ([]WorkStep, []map[string]any, error) {
+	return nil, nil, nil
+}
+
 func (s *memStore) RunsForOwner(ctx context.Context, pipelineID string) ([]Run, error) {
 	who, _ := callerOf(ctx)
 	s.mu.Lock()
