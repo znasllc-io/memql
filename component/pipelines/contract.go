@@ -1,6 +1,9 @@
 package pipelines
 
-import "slices"
+import (
+	"slices"
+	"time"
+)
 
 // Mode is how much of the suite a run executes (design record D1, D5).
 type Mode string
@@ -256,10 +259,14 @@ type StepRequest struct {
 //     budget-admitted cloud job. A false CloudFallback keeps waiting for Fleet
 //     within the existing run bound.
 //   - Retries limits the driver's retries of EVERY command step.
+//   - Connection says how long a dropped connection makes a fleet machine
+//     unsteady for every fleet or pool step's placement (network-aware fleet
+//     selection, docs/superpowers/specs/2026-11-24-network-aware-fleet-selection-design.md).
 type ComputePlacementPolicy struct {
-	FleetWaitSeconds int         `json:"fleetWaitSeconds"`
-	CloudFallback    bool        `json:"cloudFallback"`
-	Retries          RetryPolicy `json:"retries"`
+	FleetWaitSeconds int              `json:"fleetWaitSeconds"`
+	CloudFallback    bool             `json:"cloudFallback"`
+	Retries          RetryPolicy      `json:"retries"`
+	Connection       ConnectionPolicy `json:"connection"`
 }
 
 // Clone returns a policy that shares no storage with p. The retry delays are a
@@ -302,6 +309,44 @@ type RetryPolicy struct {
 // reads.
 func DefaultRetryPolicy() RetryPolicy {
 	return RetryPolicy{SameMachine: 2, DelaysSeconds: []int{30, 120}, OtherMachines: true}
+}
+
+// MaxUnsteadyMinutes bounds ConnectionPolicy.UnsteadyMinutes: a day. A machine
+// held back longer than that for one drop is not being judged on its connection
+// any more, and a typo (12000) is refused naming the field rather than read as
+// intent.
+const MaxUnsteadyMinutes = 1440
+
+// ConnectionPolicy is how long one dropped connection makes a fleet machine
+// UNSTEADY for placement (network-aware fleet selection, decision D4 and
+// section 7 of its design record). The agent replica that held a machine's
+// stream records every drop it can prove was not Cockpit's own choice
+// (component/worker connection_drop.go); a machine with a drop inside this
+// window is tried after the steady ones, and a fleet step waits for a steady
+// machine that is busy running work rather than starting on it
+// (integrations/agent/worker connection.go). Zero turns the preference off.
+//
+// The zero value is OFF, which is what a policy built by hand should mean. The
+// portable window is DefaultConnectionPolicy, and the policy reader fills it in
+// when an installed policy names no connection at all.
+type ConnectionPolicy struct {
+	// UnsteadyMinutes is the window, 0 to MaxUnsteadyMinutes.
+	UnsteadyMinutes int `json:"unsteadyMinutes"`
+}
+
+// DefaultConnectionPolicy is the portable window: two hours. On 2026-11-24 a
+// Mac on weak Wi-Fi dropped 1 to 56 minutes apart for an hour and a half, and a
+// macOS lane needs about 40 unbroken minutes; two hours covers such a burst.
+func DefaultConnectionPolicy() ConnectionPolicy {
+	return ConnectionPolicy{UnsteadyMinutes: 120}
+}
+
+// Window is the policy as a duration; zero when the preference is off.
+func (p ConnectionPolicy) Window() time.Duration {
+	if p.UnsteadyMinutes <= 0 {
+		return 0
+	}
+	return time.Duration(p.UnsteadyMinutes) * time.Minute
 }
 
 // AttemptPlacement is where the driver sends one attempt of a step, and the

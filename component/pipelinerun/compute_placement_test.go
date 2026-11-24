@@ -234,13 +234,18 @@ func TestRetriesParseStrictly(t *testing.T) {
 		if _, written := returned["retries"]; !written {
 			t.Fatalf("the shipped template returns %v: it must state the portable retry limits, so an installation that copies it sees them", returned)
 		}
+		// The connection window is written out for the same reason: an
+		// installation that copies the template sees the window it is choosing.
+		if _, written := returned["connection"]; !written {
+			t.Fatalf("the shipped template returns %v: it must state the portable connection window, so an installation that copies it sees it", returned)
+		}
 		got, err := parseComputePlacement(value)
 		if err != nil {
 			t.Fatalf("the shipped template returns something its own parser refuses: %v", err)
 		}
-		want := &pipelines.ComputePlacementPolicy{Retries: pipelines.DefaultRetryPolicy()}
+		want := &pipelines.ComputePlacementPolicy{Retries: pipelines.DefaultRetryPolicy(), Connection: pipelines.DefaultConnectionPolicy()}
 		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("dsl/pipelines/automations.memql pipelineComputePlacementPolicy returns %+v, want %+v: no Fleet wait, no cloud, the default retries", got, want)
+			t.Fatalf("dsl/pipelines/automations.memql pipelineComputePlacementPolicy returns %+v, want %+v: no Fleet wait, no cloud, the default retries and connection window", got, want)
 		}
 	})
 }
@@ -265,12 +270,86 @@ func legacyPolicySnapshot(t *testing.T) map[string]any {
 	return snapshot.Map()
 }
 
+// The connection window (how long a dropped connection makes a fleet machine
+// unsteady, network-aware fleet selection D4 and section 7) is read as strictly
+// as the retry limits: absent is the portable default, so every policy installed
+// before the setting existed keeps working and gets the preference, and a value
+// that cannot be read exactly is refused naming the field rather than rounded.
+func TestConnectionPolicyParsesStrictly(t *testing.T) {
+	policy := func(connection any, present bool) map[string]any {
+		out := map[string]any{"fleetWaitSeconds": 0, "cloudFallback": false}
+		if present {
+			out["connection"] = connection
+		}
+		return out
+	}
+	t.Run("what is accepted", func(t *testing.T) {
+		for _, c := range []struct {
+			name  string
+			value any
+			want  int
+		}{
+			{"absent connection is the portable default", policy(nil, false), 120},
+			{"zero turns the preference off", policy(map[string]any{"unsteadyMinutes": 0}, true), 0},
+			{"the largest window", policy(map[string]any{"unsteadyMinutes": 1440}, true), 1440},
+			{"a value as Go code hands it over", policy(map[string]any{"unsteadyMinutes": int64(90)}, true), 90},
+		} {
+			t.Run(c.name, func(t *testing.T) {
+				got, err := parseComputePlacement(c.value)
+				if err != nil || got == nil {
+					t.Fatalf("refused: %v", err)
+				}
+				if got.Connection.UnsteadyMinutes != c.want {
+					t.Fatalf("connection = %+v, want unsteadyMinutes %d", got.Connection, c.want)
+				}
+				if got.Retries.SameMachine != pipelines.DefaultRetryPolicy().SameMachine {
+					t.Fatalf("the retry limits changed with the connection window: %+v", got.Retries)
+				}
+			})
+		}
+	})
+	t.Run("what is refused, and what the refusal names", func(t *testing.T) {
+		for _, c := range []struct {
+			name, field string
+			value       any
+		}{
+			{"a negative window", "connection.unsteadyMinutes", policy(map[string]any{"unsteadyMinutes": -1}, true)},
+			{"a window past a day", "connection.unsteadyMinutes", policy(map[string]any{"unsteadyMinutes": 1441}, true)},
+			{"a window as text", "connection.unsteadyMinutes", policy(map[string]any{"unsteadyMinutes": "120"}, true)},
+			{"a fractional window", "connection.unsteadyMinutes", policy(map[string]any{"unsteadyMinutes": 1.5}, true)},
+			{"a null window", "connection.unsteadyMinutes", policy(map[string]any{"unsteadyMinutes": nil}, true)},
+			{"an absent window", "connection.unsteadyMinutes", policy(map[string]any{}, true)},
+			{"an extra connection field", "connection.window", policy(map[string]any{"unsteadyMinutes": 120, "window": 1}, true)},
+			{"null connection", "connection", policy(nil, true)},
+			{"connection as a number", "connection", policy(120, true)},
+		} {
+			t.Run(c.name, func(t *testing.T) {
+				got, err := parseComputePlacement(c.value)
+				if err == nil || got != nil {
+					t.Fatalf("accepted %+v as %+v", c.value, got)
+				}
+				if !strings.Contains(err.Error(), c.field) {
+					t.Fatalf("the refusal %q does not name %q", err, c.field)
+				}
+			})
+		}
+	})
+	if got := pipelines.DefaultConnectionPolicy().Window(); got.Minutes() != 120 {
+		t.Fatalf("the default window is %s, want two hours", got)
+	}
+	if got := (pipelines.ConnectionPolicy{}).Window(); got != 0 {
+		t.Fatalf("a window of zero minutes is %s, want none: zero turns the preference off", got)
+	}
+}
+
 // Retries apply to every step, so every run that has a command step gets the
 // installed policy, whether or not it has a pool step to prefer capacity for.
 // Before this the policy was computed only for a pool step, and a run of
-// dedicated steps never read it.
+// dedicated steps never read it. The connection window is in the same position:
+// a run with no policy phase, and one whose snapshot carries the portable
+// template, both get the default window (network-aware fleet selection, section 7).
 func TestEveryRunGetsAPolicyEvenWithoutPoolSteps(t *testing.T) {
-	want := pipelines.ComputePlacementPolicy{Retries: pipelines.DefaultRetryPolicy()}
+	want := pipelines.ComputePlacementPolicy{Retries: pipelines.DefaultRetryPolicy(), Connection: pipelines.DefaultConnectionPolicy()}
 
 	if got, err := (&runDriver{}).selectComputePlacement(context.Background()); err != nil || !reflect.DeepEqual(got, &want) {
 		t.Fatalf("a driver with no policy phase selected %+v, %v; want no Fleet wait, no cloud and the default retries", got, err)
@@ -525,7 +604,7 @@ func TestComputePlacementDriverBindsPolicyBeforePoolEffects(t *testing.T) {
 			for _, req := range dh.exec.sent() {
 				// Every command step carries the one installed policy: its retries
 				// apply to all of them. Only the pool step uses the rest of it.
-				want := pipelines.ComputePlacementPolicy{FleetWaitSeconds: 60, CloudFallback: true, Retries: pipelines.DefaultRetryPolicy()}
+				want := pipelines.ComputePlacementPolicy{FleetWaitSeconds: 60, CloudFallback: true, Retries: pipelines.DefaultRetryPolicy(), Connection: pipelines.DefaultConnectionPolicy()}
 				if req.ComputePlacement == nil || !reflect.DeepEqual(*req.ComputePlacement, want) {
 					t.Fatalf("step %s lost the installed policy: %+v", req.StepKey, req.ComputePlacement)
 				}
