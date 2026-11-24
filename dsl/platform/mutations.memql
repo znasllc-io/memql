@@ -3407,6 +3407,12 @@ mutation embedderBinding flipEmbedderBinding {
 /// EVERY person's items and searches, so a caller-reachable write would let somebody route the
 /// whole cluster's memory text to machines of their choosing. Only the owner's choice, made through
 /// the engine, writes it.
+///
+/// EVERY CALLER HOLDS THE BINDING LOCK (`lockAskConversationKind(ctx, "active", "embedder-binding")`)
+/// around its read and this write. The update read-merges the `active` row, so a flip on another
+/// replica between the caller's read and this write would be silently reverted (memql#5431: lock,
+/// fresh read, newer version). The callers are bindEmbedder and adoptEmbedderIndexer in
+/// component/memql/embedder_runtime.go.
 @serverOnly
 mutation embedderBinding setEmbedderBindingChoice {
   args {

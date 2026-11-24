@@ -266,7 +266,10 @@ func (a *App) visionForCaller() common.VisionAIProvider {
 //
 // Regression tests: embedding_indexer_test.go.
 func (a *App) resolveEmbeddingProvider(ctx context.Context, name string) (memql.EmbeddingAIProvider, error) {
-	indexer := memql.EmbeddingIndexerForCall(ctx, name)
+	indexer, err := memql.EmbeddingIndexerForCall(ctx, name)
+	if err != nil {
+		return nil, err
+	}
 	provider, _, err := memql.ResolveAITyped[memql.EmbeddingAIProvider](ctx, a.engine, embeddingResolveRequest(name, indexer))
 	if err != nil {
 		return nil, err

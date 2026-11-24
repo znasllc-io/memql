@@ -8,13 +8,14 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/language/parser"
-	"github.com/znasllc-io/memql/component/memql/readiness"
 	"github.com/znasllc-io/memql/core/airoute"
 )
 
@@ -162,14 +163,26 @@ func (e *MemQLEngine) bindEmbedderBuiltin(ctx context.Context, args map[string]a
 	if provider == "" {
 		return nil, fmt.Errorf("choose an embedding model")
 	}
-	return e.bindEmbedder(ctx, provider)
+	// The owner's own choice: they chose it, and a fleet model is indexed on
+	// their machines (and the ones lent to them). A vendor model has no
+	// machines, so no indexer (IndexerFor).
+	choice := embedderChoice{ChosenBy: ac.UserId}
+	if _, fleet := IsFleetReference(provider); fleet {
+		choice.IndexedBy = ac.UserId
+	}
+	return e.bindEmbedder(ctx, provider, choice)
 }
+
+// embedderChoice records, with a binding, whose machines index it and who
+// chose it (design record 2026-11-23, sections 1 and 2). ChosenBy is empty for
+// the automatic first choice: nobody chose it, so nobody is told they did.
+type embedderChoice struct{ IndexedBy, ChosenBy string }
 
 // bindEmbedder makes provider the cluster's embedder: it embeds one sentence to
 // learn the vector width, creates the table for it, and records and activates
 // the binding, under the binding's advisory lock. The FIRST binding needs no
 // re-embed; changing an active one is the migration workflow's and is refused.
-func (e *MemQLEngine) bindEmbedder(ctx context.Context, provider string) ([]memorynodes.MemoryNode, error) {
+func (e *MemQLEngine) bindEmbedder(ctx context.Context, provider string, choice embedderChoice) ([]memorynodes.MemoryNode, error) {
 	unlock, err := e.lockAskConversationKind(ctx, "active", "embedder-binding")
 	if err != nil {
 		return nil, err
@@ -188,7 +201,9 @@ func (e *MemQLEngine) bindEmbedder(ctx context.Context, provider string) ([]memo
 	if readErr != nil && readErr != ErrNoEmbedderBound {
 		return nil, readErr
 	}
-	model, _, err := ResolveAITyped[EmbeddingAIProvider](ctx, e, airoute.ResolveRequest{Level: airoute.LevelEmbeddings, Modality: airoute.ModalityEmbedding, ExplicitProvider: provider})
+	// The readiness probe runs on the machines that will index, not the
+	// caller's: a candidate owner's model is probed as that owner.
+	model, _, err := ResolveAITyped[EmbeddingAIProvider](ContextWithEmbeddingIndexer(ctx, choice.IndexedBy), e, airoute.ResolveRequest{Level: airoute.LevelEmbeddings, Modality: airoute.ModalityEmbedding, ExplicitProvider: provider, UserId: choice.IndexedBy})
 	if err != nil {
 		return nil, err
 	}
@@ -221,6 +236,11 @@ func (e *MemQLEngine) bindEmbedder(ctx context.Context, provider string) ([]memo
 			return nil, err
 		}
 	}
+	// Still under the binding lock taken above, which writeEmbedderChoice
+	// requires.
+	if err = e.writeEmbedderChoice(internal, choice); err != nil {
+		return nil, err
+	}
 	bound, err := e.ReadEmbedderBinding(ctx)
 	if err != nil {
 		return nil, err
@@ -233,44 +253,231 @@ func (e *MemQLEngine) bindEmbedder(ctx context.Context, provider string) ([]memo
 }
 
 // autoBindEmbedder binds the cluster's FIRST embedder by itself (design record
-// 2026-10-18-routes): when none is bound and an online machine advertises an
-// embedding model -- which a Local setup always pulls -- or a federated vendor
-// here can embed, it is bound. There are no vectors yet, so binding plans no
-// re-embed, and the inference verdict needs an embedder before it lifts the
-// core gate: without this an owner who did everything the setup asked would
-// sit at a gate waiting on a step nobody showed them.
+// 2026-10-18-routes, narrowed by 2026-11-23 section 2): when none is bound and
+// an ONLINE machine of an active cluster OWNER -- their own, or one lent to
+// them -- advertises an embedding model, it is bound, indexed by that owner.
+// There are no vectors yet, so binding plans no re-embed, and the inference
+// verdict needs an embedder before it lifts the core gate.
+//
+// WHAT IT NEVER DOES. It never binds a vendor model: that spends the cluster's
+// account on a choice nobody made, and an owner can still pick one. It never
+// binds a model only a non-owner's machines offer: memory search is the
+// owner's index (embedder_indexer.go) and a writer's laptop is not theirs to
+// give. With no owner candidate it binds nothing and the next pass tries again.
 //
 // It never CHANGES a binding, and it runs under the binding's advisory lock,
-// so every node may try it and exactly one binds. A fleet model is bound as
-// the machine's owner, because a fleet call resolves against the acting
-// person's machines.
+// so every node may try it and exactly one binds. It also runs
+// adoptEmbedderIndexer, the same pass, for a binding made before indexers.
 func (e *MemQLEngine) autoBindEmbedder(ctx context.Context) {
 	if e == nil || e.providers == nil {
 		return
 	}
-	if _, err := e.ReadEmbedderBinding(ctx); err == nil || err != ErrNoEmbedderBound {
+	_, err := e.ReadEmbedderBinding(ctx)
+	if err == nil {
+		if adoptErr := e.adoptEmbedderIndexer(ctx); adoptErr != nil {
+			e.safeLogger().Warn("embedder: could not name the indexer of the active binding", "error", adoptErr)
+		}
 		return
 	}
-	var tries []struct{ provider, owner string }
-	if regs, err := e.readInferenceRegistrations(readinessEvaluateContext(ctx)); err == nil {
-		for _, c := range readiness.EmbeddingCandidates(regs, time.Now()) {
-			tries = append(tries, struct{ provider, owner string }{FleetReferencePrefix + c.ModelId, c.OwnerUserId})
-		}
+	if err != ErrNoEmbedderBound {
+		return
 	}
-	for _, name := range e.providers.federationEmbedders() {
-		tries = append(tries, struct{ provider, owner string }{name, ""})
+	candidates, err := e.ownerEmbeddingCandidates(ctx)
+	if err != nil {
+		e.safeLogger().Warn("embedder: could not read the owners' machine models", "error", err)
+		return
 	}
-	for _, t := range tries {
-		bctx := readinessEvaluateContext(ctx)
-		if t.owner != "" {
-			bctx = auth.ContextWithInternalOrigin(auth.ContextWithUserActor(ctx, t.owner))
-		}
-		if _, err := e.bindEmbedder(bctx, t.provider); err != nil {
+	for _, c := range candidates {
+		bctx := auth.ContextWithInternalOrigin(auth.ContextWithUserActor(ctx, c.OwnerUserId))
+		if _, err := e.bindEmbedder(bctx, c.ProviderRef, embedderChoice{IndexedBy: c.OwnerUserId}); err != nil {
 			e.safeLogger().Warn("embedder: could not bind the first embedding model automatically; trying the next",
-				"provider", t.provider, "error", err)
+				"provider", c.ProviderRef, "error", err)
 			continue
 		}
-		e.safeLogger().Info("embedder: bound the cluster's first embedding model", "provider", t.provider)
+		e.safeLogger().Info("embedder: bound the cluster's first embedding model", "provider", c.ProviderRef, "indexedBy", c.OwnerUserId)
 		return
 	}
+}
+
+// embedderCandidate is one embedding model an owner's machines offer.
+type embedderCandidate struct{ ProviderRef, OwnerUserId string }
+
+// ownerEmbeddingCandidates lists the online embedding models of every active
+// owner's fleet catalog -- their own machines and those lent to them, which is
+// what the catalog reader returns for a person -- sorted by model id, then
+// owner id, so every replica proposes the same first one.
+func (e *MemQLEngine) ownerEmbeddingCandidates(ctx context.Context) ([]embedderCandidate, error) {
+	owners, err := e.activeOwnerIds(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []embedderCandidate
+	for _, owner := range owners {
+		models, err := e.providers.FleetCatalog(readinessEvaluateContext(ctx), owner)
+		if err != nil {
+			e.safeLogger().Warn("embedder: could not read an owner's machine catalog", "owner", owner, "error", err)
+			continue
+		}
+		for _, m := range models {
+			if m.Embeddings && m.Online() && m.ModelId != "" {
+				out = append(out, embedderCandidate{ProviderRef: FleetReferencePrefix + m.ModelId, OwnerUserId: owner})
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].ProviderRef != out[j].ProviderRef {
+			return out[i].ProviderRef < out[j].ProviderRef
+		}
+		return out[i].OwnerUserId < out[j].OwnerUserId
+	})
+	return out, nil
+}
+
+// adoptEmbedderIndexer names an indexer for an active `fleet:` binding that has
+// none -- production's binding, made when a model resolved against whoever
+// asked. TRIGGER: boot readiness (autoBindEmbedder). EVIDENCE: the first active
+// owner, in id order, whose catalog OFFERS the model, online or not: an
+// offline machine is still the one that holds the model, and waiting for it to
+// wake would leave search resolving as each caller meanwhile. If no owner
+// offers it nothing is written and the binding keeps resolving as the caller
+// until one does. ChosenBy stays empty: adoption is not a choice, and nobody is
+// shown as having made one. It writes only when IndexedBy is still empty after
+// a fresh read under the binding lock, so a concurrent switch or choice on
+// another replica is never overwritten (memql#5431).
+func (e *MemQLEngine) adoptEmbedderIndexer(ctx context.Context) error {
+	b, err := e.ReadEmbedderBinding(ctx)
+	if err != nil {
+		return nil
+	}
+	modelId, fleet := IsFleetReference(b.ProviderRef)
+	if !fleet || strings.TrimSpace(b.IndexedBy) != "" {
+		return nil
+	}
+	owners, err := e.activeOwnerIds(ctx)
+	if err != nil {
+		return err
+	}
+	adopted := ""
+	for _, owner := range owners {
+		models, cErr := e.providers.FleetCatalog(readinessEvaluateContext(ctx), owner)
+		if cErr != nil {
+			continue
+		}
+		for _, m := range models {
+			if m.ModelId == modelId {
+				adopted = owner
+				break
+			}
+		}
+		if adopted != "" {
+			break
+		}
+	}
+	if adopted == "" {
+		e.safeLogger().Info("embedder: no owner's machines offer the bound memory-search model yet; it keeps resolving as the caller", "provider", b.ProviderRef)
+		return nil
+	}
+	unlock, err := e.lockAskConversationKind(ctx, "active", "embedder-binding")
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	fresh, err := e.readEmbedderPlan(ctx)
+	if err != nil || fresh.ProviderRef != b.ProviderRef || strings.TrimSpace(fresh.IndexedBy) != "" {
+		return nil
+	}
+	if err := e.writeEmbedderChoice(auth.ContextWithInternalOrigin(ctx), embedderChoice{IndexedBy: adopted}); err != nil {
+		return err
+	}
+	e.safeLogger().Info("embedder: named the indexer of the active memory-search model", "provider", b.ProviderRef, "indexedBy", adopted)
+	return nil
+}
+
+// writeEmbedderChoice records the indexer and/or chooser on the active binding
+// through setEmbedderBindingChoice, which read-merges the row and so REQUIRES
+// the caller to hold the binding lock (lockAskConversationKind "active",
+// "embedder-binding") around its own read and this write: a flip on another
+// replica between the two would otherwise be silently reverted (memql#5431).
+// Only non-empty fields are sent, so an empty chooser never clears one.
+func (e *MemQLEngine) writeEmbedderChoice(ctx context.Context, choice embedderChoice) error {
+	args := map[string]any{"bindingId": "active"}
+	if v := strings.TrimSpace(choice.IndexedBy); v != "" {
+		args["indexedBy"] = v
+	}
+	if v := strings.TrimSpace(choice.ChosenBy); v != "" {
+		args["chosenBy"] = v
+	}
+	if len(args) == 1 {
+		return nil
+	}
+	call, err := parser.RenderCall("platform.setEmbedderBindingChoice", args)
+	if err != nil {
+		return err
+	}
+	_, err = e.Execute(auth.ContextWithInternalOrigin(ctx), "mutation "+call)
+	return err
+}
+
+// activeOwnerIds lists every ACTIVE user whose stored role is `owner`, sorted.
+// It reads through activeUsers (@serverOnly, internal origin), the read the
+// identity admin and the seed sweep use; a role that only ALIASES owner is not
+// an owner here, because the design names the stored role.
+func (e *MemQLEngine) activeOwnerIds(ctx context.Context) ([]string, error) {
+	ictx := auth.ContextWithInternalOrigin(systemActorContext(ctx))
+	var ids []string
+	seen := map[string]bool{}
+	err := WalkQueryPages(ictx, e.Execute, `query activeUsers(role: "owner")`, 100, func(result *ExecuteResult) error {
+		for _, id := range extractRowIds(result) {
+			if !seen[id] {
+				seen[id] = true
+				ids = append(ids, id)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("activeUsers(owner): %w", err)
+	}
+	sort.Strings(ids)
+	return ids, nil
+}
+
+// indexerOwnerTTL bounds how stale the resolver's owner re-check may be.
+const indexerOwnerTTL = 60 * time.Second
+
+type ownerSetCache struct {
+	mu     sync.Mutex
+	at     time.Time
+	owners map[string]bool
+}
+
+// IndexerIsActiveOwner reports whether userId is an active user with the
+// stored role `owner`, from a per-replica set cached for indexerOwnerTTL. A
+// failed read answers from the last good set while one exists and otherwise
+// false: an indexer that cannot be confirmed is refused, and the writer's
+// "until backfilled" path catches the item up later.
+func (e *MemQLEngine) IndexerIsActiveOwner(ctx context.Context, userId string) bool {
+	userId = strings.TrimPrefix(strings.TrimSpace(userId), conceptIdentityUser+":")
+	if userId == "" {
+		return false
+	}
+	c := &e.indexerOwners
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.owners == nil || time.Since(c.at) > indexerOwnerTTL {
+		ids, err := e.activeOwnerIds(ctx)
+		if err != nil {
+			e.safeLogger().Warn("memory search: could not confirm who the owners are", "error", err)
+			if c.owners == nil {
+				return false
+			}
+		} else {
+			c.owners = make(map[string]bool, len(ids))
+			for _, id := range ids {
+				c.owners[strings.TrimPrefix(id, conceptIdentityUser+":")] = true
+			}
+			c.at = time.Now()
+		}
+	}
+	return c.owners[userId]
 }

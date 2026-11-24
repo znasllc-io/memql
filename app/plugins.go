@@ -26,6 +26,7 @@ import (
 // instead, so the app still boots.
 func (a *App) materializePlugins() {
 	memql.SetEmbedderBindingReader(a.engine.ReadEmbedderBinding)
+	memql.SetEmbeddingIndexerOwnerCheck(a.engine.IndexerIsActiveOwner)
 	plugins := memql.RegisteredPlugins()
 	if len(plugins) == 0 {
 		return

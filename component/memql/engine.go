@@ -73,9 +73,12 @@ type MemQLEngine struct {
 	seeds                   *SeedRegistry
 	seedMaterializer        *SeedMaterializer
 	providers               *ProviderRegistry
-	voiceTransport          audio.RoomTransport
-	askCoordinationPool     func() *sql.DB
-	policies                *PolicyRegistry
+	// indexerOwners caches who the active owners are for the memory-search
+	// indexer re-check (IndexerIsActiveOwner), per replica.
+	indexerOwners       ownerSetCache
+	voiceTransport      audio.RoomTransport
+	askCoordinationPool func() *sql.DB
+	policies            *PolicyRegistry
 	// rules is the routing-rule corpus (epic memql#5127). Unpopulated until
 	// the rule loader lands: every reader is nil-safe, and a nil registry
 	// reports NOTHING rather than an empty set, so nobody can read "no rules

@@ -29,7 +29,8 @@ package memql
 //     the binding is not read a second time;
 //  2. the ACTIVE binding's indexer, when the name is the active binding's own
 //     providerRef;
-//  3. nobody: the call is its caller's, as every other fleet call is.
+//  3. nobody: the call is its caller's, as every other fleet call is. This
+//     includes a binding that names no indexer yet (see below).
 //
 // A vendor reference is never changed. The answer reaches the router as the
 // request's UserId (app/ai_call_sites.go, embeddingResolveRequest), which the
@@ -43,21 +44,38 @@ package memql
 // that the router cannot do: the assertion the call carries across a replica
 // hop. Its comment has the why.
 //
-// # Known limitation
+// # The indexer must still be an owner (R5)
 //
-// The rule follows the binding row. It does not re-check on every call that
-// the indexer is still an active cluster owner: the design pauses indexing
-// when they stop being one and lets an owner take over by choosing again, and
-// that check belongs where indexing is driven and the choice is made, not in a
-// second read on every embedding.
+// Only a cluster owner -- stored role `owner`, active -- is ever an indexer,
+// because the indexer's machines see every person's memory text. A binding
+// row outlives the person: if its indexer is demoted or deactivated their
+// machines must stop embedding the cluster's text at once, not at the next
+// boot. TRIGGER: every resolution that names an indexer, whether from the
+// context or from the binding. EVIDENCE: the engine's own read of active
+// users with the stored role `owner` (IndexerIsActiveOwner, cached 60 s per
+// replica, so a demotion reaches every replica within a minute and the hot
+// embedding path costs no read). CHOSEN PATH: the embedding is REFUSED with a
+// plain reason (ErrEmbeddingIndexerNotOwner); writers already log "until
+// backfilled" and skip, and a later backfill catches the item up once an owner
+// chooses the model again (Cluster > Settings > Memory search). ALTERNATIVE
+// rejected: falling back to the caller, which would quietly send the text to
+// the machines of whoever wrote it and mix two machines' vectors in one
+// index. STOP CONDITION: an owner chooses the model, which writes a new
+// indexer. An EMPTY indexer is not refused: it is a binding made before
+// indexers existed, resolved as its caller until adoptEmbedderIndexer names an
+// owner at boot. With no check installed (SetEmbeddingIndexerOwnerCheck, set
+// by the app) nothing is re-checked, which only tests without an engine see.
 //
 // Regression tests: embedder_indexer_test.go, app/embedding_indexer_test.go,
 // integrations/agent/worker/memory_search_hop_test.go.
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -121,26 +139,63 @@ func EmbeddingIndexerFromContext(ctx context.Context) (string, bool) {
 }
 
 // EmbeddingIndexerForCall is the rule above: who an embedding of providerRef
-// on ctx is resolved as, or "" when it is its caller's own.
+// on ctx is resolved as, or "" when it is its caller's own. A non-empty indexer
+// that is no longer an active owner is an error (ErrEmbeddingIndexerNotOwner).
 //
 // The binding is read only for a fleet reference the context names no indexer
 // for, so a caller that already holds the binding costs no second read. A read
 // that fails borrows nobody's machines: the call is its caller's, which is
-// what it was before indexers existed.
-func EmbeddingIndexerForCall(ctx context.Context, providerRef string) string {
+// what it was before indexers existed -- and is logged, because it also means
+// the cluster's one index may be getting vectors from a writer's machine.
+func EmbeddingIndexerForCall(ctx context.Context, providerRef string) (string, error) {
 	ref := strings.TrimSpace(providerRef)
 	if _, fleet := IsFleetReference(ref); !fleet {
-		return ""
+		return "", nil
 	}
-	if userId, ok := EmbeddingIndexerFromContext(ctx); ok {
-		return userId
+	indexer, ok := EmbeddingIndexerFromContext(ctx)
+	if !ok {
+		b, err := CurrentEmbedderBinding(ctx)
+		if err != nil {
+			if !errors.Is(err, ErrNoEmbedderBound) {
+				slog.Warn("memory search: reading the embedder binding failed; embedding as the caller", "provider", ref, "error", err)
+			}
+			return "", nil
+		}
+		if strings.TrimSpace(b.ProviderRef) != ref {
+			return "", nil
+		}
+		indexer, _ = IndexerFor(b)
 	}
-	b, err := CurrentEmbedderBinding(ctx)
-	if err != nil || strings.TrimSpace(b.ProviderRef) != ref {
-		return ""
+	if indexer == "" {
+		return "", nil
 	}
-	userId, _ := IndexerFor(b)
-	return userId
+	if check := indexerOwnerCheck(); check != nil && !check(ctx, indexer) {
+		return "", ErrEmbeddingIndexerNotOwner
+	}
+	return indexer, nil
+}
+
+// ErrEmbeddingIndexerNotOwner refuses a memory-search embedding whose indexer
+// is no longer an active cluster owner.
+var ErrEmbeddingIndexerNotOwner = errors.New("memory search's indexer is no longer an active owner; an owner can choose the model again in Cluster > Settings > Memory search")
+
+var embeddingIndexerOwnerCheck struct {
+	sync.RWMutex
+	check func(context.Context, string) bool
+}
+
+// SetEmbeddingIndexerOwnerCheck installs the re-check of an indexer's role
+// (the app installs Engine.IndexerIsActiveOwner on every replica). Nil removes it.
+func SetEmbeddingIndexerOwnerCheck(check func(context.Context, string) bool) {
+	embeddingIndexerOwnerCheck.Lock()
+	defer embeddingIndexerOwnerCheck.Unlock()
+	embeddingIndexerOwnerCheck.check = check
+}
+
+func indexerOwnerCheck() func(context.Context, string) bool {
+	embeddingIndexerOwnerCheck.RLock()
+	defer embeddingIndexerOwnerCheck.RUnlock()
+	return embeddingIndexerOwnerCheck.check
 }
 
 // EmbedAsIndexer hands back an embedding provider resolved for the indexer

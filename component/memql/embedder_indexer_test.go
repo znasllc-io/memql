@@ -97,6 +97,15 @@ func TestRetiredIdsFollowTheTableHash(t *testing.T) {
 
 // countingBinding installs a durable reader that answers b and counts reads,
 // as production's ReadEmbedderBinding is a database read on every call.
+// indexerOf is EmbeddingIndexerForCall for tests with no owner check installed,
+// where it cannot refuse.
+func indexerOf(t *testing.T, ctx context.Context, ref string) string {
+	t.Helper()
+	got, err := EmbeddingIndexerForCall(ctx, ref)
+	require.NoError(t, err)
+	return got
+}
+
 func countingBinding(t *testing.T, b EmbedderBinding, err error) *int {
 	t.Helper()
 	reads := 0
@@ -118,27 +127,27 @@ func TestTheIndexerIsTheContextsThenTheActiveBindingsThenNobody(t *testing.T) {
 	reads := countingBinding(t, EmbedderBinding{ProviderRef: bound, Dimensions: 1024, IndexedBy: "owner-1"}, nil)
 	caller := auth.ContextWithUserActor(context.Background(), "writer-1")
 
-	require.Equal(t, "owner-1", EmbeddingIndexerForCall(caller, bound))
+	require.Equal(t, "owner-1", indexerOf(t, caller, bound))
 	require.Equal(t, 1, *reads)
 
 	job := ContextWithEmbeddingIndexer(caller, "owner-2")
-	require.Equal(t, "owner-2", EmbeddingIndexerForCall(job, bound))
+	require.Equal(t, "owner-2", indexerOf(t, job, bound))
 	// The job's model need not be the active one: a switch fills its target.
-	require.Equal(t, "owner-2", EmbeddingIndexerForCall(job, "fleet:nomic-embed-text"))
+	require.Equal(t, "owner-2", indexerOf(t, job, "fleet:nomic-embed-text"))
 	require.Equal(t, 1, *reads, "a context that names the indexer must not read the binding again")
 
 	// A fleet model that is not the bound one is nobody's index: its caller's.
-	require.Empty(t, EmbeddingIndexerForCall(caller, "fleet:nomic-embed-text"))
+	require.Empty(t, indexerOf(t, caller, "fleet:nomic-embed-text"))
 	// A vendor has no machines, whoever the context names.
-	require.Empty(t, EmbeddingIndexerForCall(job, "embedding3Small"))
-	require.Empty(t, EmbeddingIndexerForCall(caller, "embedding3Small"))
+	require.Empty(t, indexerOf(t, job, "embedding3Small"))
+	require.Empty(t, indexerOf(t, caller, "embedding3Small"))
 	require.Equal(t, 2, *reads, "a vendor ref must not read the binding at all")
 
 	// An unbound cluster, and a read that failed, borrow nobody's machines.
 	countingBinding(t, EmbedderBinding{}, ErrNoEmbedderBound)
-	require.Empty(t, EmbeddingIndexerForCall(caller, bound))
+	require.Empty(t, indexerOf(t, caller, bound))
 	countingBinding(t, EmbedderBinding{}, errors.New("database unavailable"))
-	require.Empty(t, EmbeddingIndexerForCall(caller, bound))
+	require.Empty(t, indexerOf(t, caller, bound))
 }
 
 // The engine's attribution fills a request's caller from the context only when

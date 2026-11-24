@@ -2458,9 +2458,30 @@ a new retirement, and refuses any other id. All of it is binding rows in
 Postgres; a replica holds none of it and reads the binding fresh on each call,
 so a retry, a restart or another replica sees the same indexer.
 
-**Limits.** The rule follows the row and does not re-check on each call that
-the indexer is still an active owner; the design pauses indexing then, and the
-check belongs where indexing is driven and the model is chosen. Embedding
+**The indexer must still be an owner.** Trigger: every resolution that names
+an indexer. Evidence: the engine's read of active users whose stored role is
+`owner` (`IndexerIsActiveOwner`, cached 60 s per replica, so a demotion reaches
+every replica within a minute and the hot path costs no read). Path: when the
+indexer is not an active owner the embedding is REFUSED with a plain reason
+(`ErrEmbeddingIndexerNotOwner`); writers log their usual "until backfilled"
+line and a later backfill catches up once an owner chooses the model again.
+Rejected: falling back to the caller, which would send memory text to a
+writer's machine and mix two machines' vectors in one index. Stop: an owner
+chooses the model. An EMPTY indexer is not refused: it is a binding made
+before indexers existed, resolved as its caller until `adoptEmbedderIndexer`
+names the first active owner whose catalog offers the model (boot readiness,
+`WriteModuleReadiness`). A lookup that fails and has no earlier answer refuses.
+
+**The automatic first choice** (`autoBindEmbedder`) binds only an ONLINE
+embedding model of an active owner's catalog (their machines and the ones lent
+to them), indexed by that owner, chosen by nobody. It never binds a vendor model
+and never one only a non-owner's machine offers; with no candidate it binds
+nothing and the next readiness pass retries. `setEmbedderBindingChoice`
+read-merges the row, so every caller holds the binding lock
+(`lockAskConversationKind(ctx, "active", "embedder-binding")`) around its read
+and write (memql#5431). Tests: `component/memql/embedder_autobind_test.go`.
+
+**Limits.** Embedding
 resolutions write no `v1:router:call` row (`resolveDirect` has no observer),
 so the indexer is named on the request and the resolution, not in a ledger
 row. A test persona's memory-search embedding fails rather than running on its
