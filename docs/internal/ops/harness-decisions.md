@@ -2850,7 +2850,21 @@ backfill's, and choosing the model again starts the new one
 `TestTheSwitchAsksTheActiveIndexOnlyWhetherItHoldsAnything`).
 
 `bindEmbedder` still refuses to change an active binding, and now names
-Cluster > Settings > Memory search.
+Cluster > Settings > Memory search. **An unfinished first binding is named.**
+Trigger: a replica that dies between `bindEmbedder`'s two writes leaves a plan
+that was recorded and never activated, and every other first model was then
+refused as a binding that landed meanwhile, "changed meanwhile, try again",
+for ever, with nothing saying what would clear it. The plan write is
+`@createOnly` on the model and its width, which is what keeps a plan from ever
+re-pointing a row that is active, so another model's plan cannot replace the
+stuck one. Chosen path: the refusal names the plan's model
+(`errEmbedderPlanUnfinished`, "an unfinished binding of <model> is in the way;
+choose <model> to finish it"), which `memorySearchSwitch` passes on, and
+choosing that model finishes the binding. Rejected: lifting `@createOnly`, which
+would let a plan write move an active binding's model while its `activatedAt`
+survived the read-merge. Limit: if the plan's model is never offered again,
+the row has to be removed by hand. Test:
+`TestAnUnfinishedPlanIsNamedSoItCanBeFinished` (db).
 
 **The take-over (design section 1, ruling R9; `memorySearchTakesOver`).**
 Choosing a machine model again makes the caller its indexer and chooser when

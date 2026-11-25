@@ -211,6 +211,19 @@ func (e *MemQLEngine) bindEmbedderBuiltin(ctx context.Context, args map[string]a
 // a binding that landed meanwhile rather than passing its direction on.
 var errEmbedderBindingActive = errors.New("changing the active memory-search model rebuilds its whole index first; choose the model in Cluster > Settings > Memory search")
 
+// errEmbedderPlanUnfinished is bindEmbedder refusing a first model while an
+// unfinished plan of another one -- recorded, never activated -- holds the
+// row: it names that model, which is the one choice that finishes it.
+type errEmbedderPlanUnfinished struct{ ref string }
+
+func (e errEmbedderPlanUnfinished) Error() string {
+	model := e.ref
+	if id, fleet := IsFleetReference(e.ref); fleet {
+		model = id
+	}
+	return fmt.Sprintf("an unfinished binding of %s is in the way; choose %s to finish it", model, model)
+}
+
 // embedderChoice records, with a binding, whose machines index it and who
 // chose it (design record 2026-11-23, sections 1 and 2). ChosenBy is empty for
 // the automatic first choice: nobody chose it, so nobody is told they did.
@@ -220,7 +233,9 @@ type embedderChoice struct{ IndexedBy, ChosenBy string }
 // learn the vector width, creates the table for it, and records and activates
 // the binding, under the binding's advisory lock. The FIRST binding needs no
 // re-embed; changing an active one rebuilds the index first, which is a switch
-// (memorySearchSwitch and the memory index job), and is refused here.
+// (memorySearchSwitch and the memory index job), and is refused here. A plan
+// left unfinished -- recorded, never activated -- is finished by choosing its
+// own model; another model is refused, naming it (errEmbedderPlanUnfinished).
 func (e *MemQLEngine) bindEmbedder(ctx context.Context, provider string, choice embedderChoice) ([]memorynodes.MemoryNode, error) {
 	unlock, err := e.lockAskConversationKind(ctx, "active", "embedder-binding")
 	if err != nil {
@@ -229,12 +244,23 @@ func (e *MemQLEngine) bindEmbedder(ctx context.Context, provider string, choice 
 	defer unlock()
 	current, readErr := e.readEmbedderPlan(ctx)
 	if readErr == nil {
-		if current.ProviderRef != provider {
+		switch {
+		case current.ActivatedAt != "" && current.ProviderRef != provider:
 			return nil, errEmbedderBindingActive
-		}
-		if current.ActivatedAt != "" {
+		case current.ActivatedAt != "":
 			raw, _ := json.Marshal(map[string]any{"provider": provider, "dimensions": current.Dimensions, "active": true})
 			return []memorynodes.MemoryNode{{ID: "active", Payload: raw}}, nil
+		case current.ProviderRef != provider:
+			// An UNFINISHED plan of another model: written, never activated
+			// (a replica died between the two writes). The plan write is
+			// @createOnly on the model and its width -- what keeps a plan
+			// from ever re-pointing a row that is active -- so another
+			// model's plan cannot replace it, and only its own model can
+			// finish it. The refusal NAMES that model: refused as a binding
+			// that landed meanwhile, as it was, every other first model
+			// answered "changed meanwhile, try again" for ever, with nothing
+			// saying what would clear it.
+			return nil, errEmbedderPlanUnfinished{ref: current.ProviderRef}
 		}
 	}
 	if readErr != nil && readErr != ErrNoEmbedderBound {

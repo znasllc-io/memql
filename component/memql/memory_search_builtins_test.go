@@ -918,6 +918,14 @@ func TestABindingThatLandsMeanwhileIsAChangeNotADirection(t *testing.T) {
 	f.job.active = EmbedderBinding{}
 	f.bindErr = errors.New("no machine offering new-embedder is online")
 	require.EqualError(t, memorySearchSwitch(ctx, f, fakeOwner, fakeNewRef), "no machine offering new-embedder is online")
+
+	// An unfinished first binding of another model is named, never read as a
+	// change meanwhile: retrying would meet it for ever.
+	f = newMemorySearchFake(3).noSwitch()
+	f.job.active = EmbedderBinding{}
+	f.bindErr = errEmbedderPlanUnfinished{ref: "fleet:stuck-embedder"}
+	require.EqualError(t, memorySearchSwitch(ctx, f, fakeOwner, fakeNewRef),
+		"an unfinished binding of stuck-embedder is in the way; choose stuck-embedder to finish it")
 }
 
 // An owner check that could not be made is reported, never read as "you are

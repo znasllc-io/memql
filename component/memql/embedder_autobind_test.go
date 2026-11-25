@@ -18,6 +18,7 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/airoute"
 )
 
@@ -184,6 +185,39 @@ func TestBindEmbedderRecordsWhoChoseIt(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, f.owner, b.ChosenBy)
 	require.Equal(t, f.owner, b.IndexedBy, "a fleet model is indexed on the chooser's machines")
+}
+
+// An unfinished first binding -- its plan recorded, its activation never
+// reached, as when a replica dies between the two writes -- is NAMED to whoever
+// chooses another model: the plan write never moves a row's model (@createOnly),
+// so only its own model can finish it, and the refusal says which, where it
+// used to answer "changed meanwhile, try again" for ever. Nothing is probed for
+// the refused model. Choosing the named one finishes the binding.
+func TestAnUnfinishedPlanIsNamedSoItCanBeFinished(t *testing.T) {
+	f := newAutobindFixture(t)
+	model := "embed-stuck-" + uniqueSuffix("p")
+	stuck := FleetReferencePrefix + model
+	call, err := parser.RenderCall("platform.recordEmbedderBindingPlan", map[string]any{"bindingId": ActiveEmbedderBindingID,
+		"providerRef": stuck, "dimensions": 1024, "versionTime": time.Now().UTC().Format(time.RFC3339Nano)})
+	require.NoError(t, err)
+	_, err = f.eng.Execute(auth.ContextWithInternalOrigin(f.ctx), "mutation "+call)
+	require.NoError(t, err)
+	_, err = f.binding(t)
+	require.ErrorIs(t, err, ErrNoEmbedderBound, "a plan is not a binding")
+
+	ownerCtx := auth.ContextWithAccess(f.ctx, &auth.AccessContext{UserId: f.owner, Role: auth.RoleOwner})
+	_, err = f.eng.bindEmbedderBuiltin(ownerCtx, map[string]any{"provider": FleetReferencePrefix + "embed-" + uniqueSuffix("q")}, 0)
+	require.EqualError(t, err, "an unfinished binding of "+model+" is in the way; choose "+model+" to finish it")
+	require.Zero(t, f.probe.calls, "nothing probed for the refused model")
+
+	table, _ := EmbeddingVectorTable(stuck, 1024)
+	t.Cleanup(func() { _, _ = f.db.DB.ExecContext(context.Background(), `DROP TABLE IF EXISTS `+table) })
+	_, err = f.eng.bindEmbedderBuiltin(ownerCtx, map[string]any{"provider": stuck}, 0)
+	require.NoError(t, err)
+	b, err := f.binding(t)
+	require.NoError(t, err)
+	require.Equal(t, stuck, b.ProviderRef)
+	require.Equal(t, f.owner, b.ChosenBy)
 }
 
 // R5: the resolver re-checks that the indexer is still an active owner, and a

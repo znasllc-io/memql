@@ -89,13 +89,14 @@ func TestEmbedderActivationProbesPersistsAndReadsAcrossReplicas(t *testing.T) {
 	_, err = a.bindEmbedderBuiltin(ctx, args, 0)
 	require.ErrorContains(t, err, "cluster owner")
 	require.Zero(t, probe.calls)
-	// A dormant plan cannot be activated under another provider's name.
+	// A dormant plan cannot be activated under another provider's name, and
+	// the refusal names the model that finishes it.
 	_, err = a.Execute(auth.ContextWithInternalOrigin(ownerCtx), `mutation platform.recordEmbedderBindingPlan(bindingId:"active",providerRef:"activation-probe",dimensions:1024,versionTime:"`+time.Now().UTC().Format(time.RFC3339Nano)+`")`)
 	require.NoError(t, err)
 	_, err = b.ReadEmbedderBinding(ctx)
 	require.ErrorIs(t, err, ErrNoEmbedderBound)
 	_, err = a.bindEmbedderBuiltin(ownerCtx, map[string]any{"provider": "other-model"}, 0)
-	require.ErrorContains(t, err, "Cluster > Settings > Memory search", "a change of model is a switch, made where it is offered")
+	require.EqualError(t, err, "an unfinished binding of activation-probe is in the way; choose activation-probe to finish it")
 	require.Zero(t, probe.calls)
 	_, err = a.bindEmbedderBuiltin(ownerCtx, args, 0)
 	require.NoError(t, err)
