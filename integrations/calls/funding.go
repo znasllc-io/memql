@@ -47,7 +47,8 @@ func fundingConflict(reason string) error {
 	return callrules.Refuse(callrules.ErrConflict, reason, "the simulated funding operation was refused")
 }
 
-// accountFunding commits state and its receipt in ONE immutable row. The next
+// accountFunding activates a simulated pass from existing credit. It commits
+// state and its receipt in ONE immutable row. The next
 // entry carries the complete new balance/pass, so there is no debit/receipt gap
 // to reconcile after a process crash. The account+key gates serialize all entry
 // writers with admission, and the version-fenced deterministic id prevents replay.
@@ -109,33 +110,26 @@ func (s *Service) accountFunding(ctx context.Context, site callrules.SiteRef, to
 		entry.BalanceCents, entry.Pass = previous.BalanceCents, previous.Pass
 		entry.Version = memql.VersionTimeAfter(previous.Version, now)
 	}
-	if req.Action == "simulate_topup" {
-		if entry.BalanceCents > simulatedMaximumBalanceCents-req.AmountCents {
-			return callrules.AccountResult{}, fundingConflict("balance_limit")
-		}
-		entry.Kind, entry.CreditedCents = "topup", req.AmountCents
-		entry.BalanceCents += req.AmountCents
-	} else {
-		if entry.Pass != nil && now.Before(entry.Pass.ExpiresAt) {
-			return callrules.AccountResult{}, fundingConflict("active_pass")
-		}
-		open, err := s.store.openRoomsForKey(fresh, site.OwnerUserID, h.row.KeyID)
-		if err != nil {
-			return callrules.AccountResult{}, err
-		}
-		if len(open) != 0 {
-			return callrules.AccountResult{}, fundingConflict("hosted_room_open")
-		}
-		pass, cost := simulatedPlan(req.Plan, id, now)
-		if pass == nil {
-			return callrules.AccountResult{}, callrules.ErrInvalid
-		}
-		if entry.BalanceCents < cost {
-			return callrules.AccountResult{}, fundingConflict("insufficient_balance")
-		}
-		entry.Kind, entry.DebitedCents, entry.Plan, entry.Pass = "activation", cost, req.Plan, pass
-		entry.BalanceCents -= cost
+	// Only activation reaches here: it spends existing credit and creates none.
+	if entry.Pass != nil && now.Before(entry.Pass.ExpiresAt) {
+		return callrules.AccountResult{}, fundingConflict("active_pass")
 	}
+	open, err := s.store.openRoomsForKey(fresh, site.OwnerUserID, h.row.KeyID)
+	if err != nil {
+		return callrules.AccountResult{}, err
+	}
+	if len(open) != 0 {
+		return callrules.AccountResult{}, fundingConflict("hosted_room_open")
+	}
+	pass, cost := simulatedPlan(req.Plan, id, now)
+	if pass == nil {
+		return callrules.AccountResult{}, callrules.ErrInvalid
+	}
+	if entry.BalanceCents < cost {
+		return callrules.AccountResult{}, fundingConflict("insufficient_balance")
+	}
+	entry.Kind, entry.DebitedCents, entry.Plan, entry.Pass = "activation", cost, req.Plan, pass
+	entry.BalanceCents -= cost
 	if err := s.store.createSimulatedWalletEntry(fresh, site.OwnerUserID, entry); err != nil {
 		return callrules.AccountResult{}, err
 	}

@@ -19,7 +19,7 @@ func meteredAccount(t *testing.T, cw *callWorld) (accountTestKey, callrules.Sess
 	_, err := cw.builtin(actorContext(cw.developer, auth.RoleDeveloper), "callsPolicySet", map[string]any{"siteId": cw.site, "simulatedFunding": 1, "callConfiguration": 1, "maxPeople": 100, "maxScheduledMinutes": 1440, "roomJoinsPerMinute": 1000})
 	require.NoError(t, err)
 	k := accountRegister(t, cw, newSoftwareAuthenticator(t))
-	fundAction(t, cw, k, topupRequest(k, 1000, "metered-top-up-0001"))
+	seedSimulatedCredit(t, cw, k.result.Account.KeyID, 1000)
 	return k, *k.result.Session
 }
 func meteredQuote(t *testing.T, cw *callWorld, k accountTestKey, n, minutes int) *callrules.CallQuote {

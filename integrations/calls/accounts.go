@@ -83,7 +83,12 @@ func (s *Service) Account(ctx context.Context, site callrules.SiteRef, token str
 	if req.Action == "quote_call" {
 		return s.quoteCall(ctx, site, token, req)
 	}
-	if req.Action == "simulate_topup" || req.Action == "activate_pass" {
+	// Credit only ever comes from a payment result, which needs the tester
+	// password while payments are simulated; there is no direct simulated top-up.
+	if req.Action == "simulate_topup" {
+		return callrules.AccountResult{}, accountRefusal("checkout_required")
+	}
+	if req.Action == "activate_pass" {
 		if s.commerceConfig().enabled() {
 			return callrules.AccountResult{}, accountRefusal("checkout_required")
 		}

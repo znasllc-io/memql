@@ -59,7 +59,7 @@ func TestUsageRemainderCarriesAcrossShortCallsTopupsAndReplicaReplays(t *testing
 		require.NoError(t, err)
 		require.Equal(t, cost, replay)
 		if i == 0 {
-			fundAction(t, cw, k, topupRequest(k, 1000, "carry-preserving-topup"))
+			seedSimulatedCredit(t, cw, k.result.Account.KeyID, 1000)
 		}
 		wallet := remainderWallet(t, cw, k)
 		require.EqualValues(t, 2000-(i+1)/4, wallet.BalanceCents)
@@ -94,8 +94,7 @@ func TestUsageRemainderConcurrentSettlementAndFunding(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		_, e := allowanceReplica(t, cw).Account(context.Background(), cw.ref, k.result.Session.Token, topupRequest(k, 1000, "carry-concurrent-topup"))
-		errs <- e
+		errs <- seedSimulatedCreditErr(cw, k.result.Account.KeyID, 1000)
 	}()
 	wg.Wait()
 	close(errs)
@@ -125,7 +124,7 @@ func TestUsageRemainderFullReservationNeverOverdrawsBalance(t *testing.T) {
 	require.Zero(t, wallet.BalanceCents)
 	require.EqualValues(t, usageUnitsPerCent-1, wallet.UsageRemainderUnits)
 	// Added funding must retain, rather than forgive, the pending measured fraction.
-	fundAction(t, cw, k, topupRequest(k, 1000, "carry-after-zero-balance"))
+	seedSimulatedCredit(t, cw, k.result.Account.KeyID, 1000)
 	_, err = remainderSettle(cw.svc, remainderRoom(t, cw, k, 1, time.Minute))
 	require.NoError(t, err)
 	wallet = remainderWallet(t, cw, k)

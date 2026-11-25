@@ -2,7 +2,6 @@ package calls
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -94,12 +93,8 @@ func TestHistoryAnalyticsReceiptDateLegacyPassAndUnknownFeatureCounts(t *testing
 	ctx := context.Background()
 	enableFunding(t, cw)
 	key := accountRegister(t, cw, newSoftwareAuthenticator(t))
-	broken, fault := qualificationAfterCommit(cw, "createCallsSimulatedWalletEntry(")
-	_, err := broken.Account(ctx, cw.ref, key.result.Session.Token, topupRequest(key, 1000, "analytics-old-topup"))
-	require.Error(t, err)
-	require.True(t, fault.failed)
+	seedSimulatedCredit(t, cw, key.result.Account.KeyID, 1000)
 	require.EqualValues(t, 1000, *analyticsOverview(t, cw.svc, *key.result.Session, 7).Ledger.CreditedCents)
-	fundAction(t, cw, key, topupRequest(key, 1000, "analytics-old-topup"))
 	cw.clock.Advance(8 * 24 * time.Hour)
 	signed, err := accountAssert(t, cw, key, "", "login", "")
 	require.NoError(t, err)
@@ -170,13 +165,13 @@ func TestHistoryAnalyticsRetriesConcurrentPostingAndNeverReturnsPartialTotals(t 
 		return
 	}
 	key, host := meteredAccount(t, cw)
-	once, _ := analyticsInterleave(cw, "callsWalletEntriesForPeriod(", false, func() { fundAction(t, cw, key, topupRequest(key, 1000, "analytics-interleave")) })
+	once, _ := analyticsInterleave(cw, "callsWalletEntriesForPeriod(", false, func() { seedSimulatedCredit(t, cw, key.result.Account.KeyID, 1000) })
 	out := analyticsOverview(t, once, host, 30)
 	require.Equal(t, "complete", out.Ledger.Status)
 	require.EqualValues(t, 2000, *out.Ledger.CreditedCents)
 	require.EqualValues(t, 2000, *out.AvailableCents)
 	i := 0
-	churn, fault := analyticsInterleave(cw, "callsWalletEntriesForPeriod(", true, func() { i++; fundAction(t, cw, key, topupRequest(key, 1000, fmt.Sprintf("analytics-churn-%03d", i))) })
+	churn, fault := analyticsInterleave(cw, "callsWalletEntriesForPeriod(", true, func() { i++; seedSimulatedCredit(t, cw, key.result.Account.KeyID, 1000) })
 	out = analyticsOverview(t, churn, host, 30)
 	require.Equal(t, 3, fault.called)
 	require.Equal(t, "incomplete", out.Ledger.Status)
