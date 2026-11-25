@@ -384,19 +384,30 @@ describe("Cluster > Settings > Memory search", () => {
 });
 
 describe("Fleet's model board", () => {
+  const GiB = 2 ** 30;
+  const view = modelSetupFromRow({
+    id: "machine", revision: "one", usableBytes: 32 * GiB, boundEmbeddingModel: "embed",
+    choices: { embeddings: "embed" }, suggestedChoices: { embeddings: "embed" },
+    catalog: [
+      { modelId: "embed", installed: true, memoryBytes: 2 * GiB, purposes: ["embeddings"] },
+      { modelId: "new-embed", installed: true, memoryBytes: 3 * GiB, purposes: ["embeddings"] },
+    ],
+  });
+  const board = () => render(<ModelAssignmentBoard view={view} choices={view.choices} saving={false} canSave onChange={vi.fn()} onSave={vi.fn()} onDiscard={vi.fn()} />);
+
   it("the Fleet board points to Cluster settings", () => {
-    const GiB = 2 ** 30;
-    const view = modelSetupFromRow({
-      id: "machine", revision: "one", usableBytes: 32 * GiB, boundEmbeddingModel: "embed",
-      choices: { embeddings: "embed" }, suggestedChoices: { embeddings: "embed" },
-      catalog: [
-        { modelId: "embed", installed: true, memoryBytes: 2 * GiB, purposes: ["embeddings"] },
-        { modelId: "new-embed", installed: true, memoryBytes: 3 * GiB, purposes: ["embeddings"] },
-      ],
-    });
     const sentence = "Memory search keeps embed. Change it in Cluster > Settings > Memory search.";
-    render(<ModelAssignmentBoard view={view} choices={view.choices} saving={false} canSave onChange={vi.fn()} onSave={vi.fn()} onDiscard={vi.fn()} />);
+    board();
     expect(screen.getByText(sentence)).toBeTruthy();
+    expect(assignmentProposal(view.choices, "new-embed", ["embeddings"], view).refusal).toBe(sentence);
+  });
+
+  it("points there only for whoever can open it; anybody else is told who can change it (ruling R15)", () => {
+    installSeededAccess("developer");
+    const sentence = "Memory search keeps embed. A cluster owner can change it.";
+    board();
+    expect(screen.getByText(sentence)).toBeTruthy();
+    expect(screen.queryByText(/Cluster > Settings > Memory search/)).toBeNull();
     expect(assignmentProposal(view.choices, "new-embed", ["embeddings"], view).refusal).toBe(sentence);
   });
 });

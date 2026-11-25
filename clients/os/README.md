@@ -2932,7 +2932,10 @@ record `docs/superpowers/specs/2026-11-23-memory-search-model-switch-design.md`,
 section 8) is where an owner sees which model memory search uses, whose machines
 index it, how many items the index holds and what waits, and changes it. Settings
 links to it with a row showing the model in use. Fleet's model board keeps the
-bound model locked and says where to change it.
+bound model locked and says where to change it, to whoever can open Memory
+search; anybody else reads that a cluster owner can change it (ruling R15:
+`memorySearchKeeps`, `src/apps/fleet/machines/modelSetup.ts`, says it for the
+board's caption, its refusal and the Models page's help).
 
 - **THE PART IS THE GATE.** The section and the link row require
   `app:cluster/memorysearch`, seeded on the owner alone, which the six

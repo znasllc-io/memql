@@ -1,5 +1,21 @@
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { flatten } from "../../../kit/rows";
+import { holds } from "../../../system/roles";
+
+/**
+ * What Fleet says about memory search's model, which a machine's board keeps
+ * locked to the embeddings task (design record 2026-11-23, section 8: the board
+ * says where to change it). WHERE is a page only to somebody who can open it
+ * (ruling R15): Cluster > Settings > Memory search needs `read` on
+ * app:cluster/memorysearch (MEMORY_SEARCH_RESOURCE, seeded on the owner alone),
+ * so anybody else is told who can change it instead. The board's caption, its
+ * refusal and the Models page's help all say it through here.
+ */
+export function memorySearchKeeps(model: string): string {
+  return holds("read", "app:cluster/memorysearch")
+    ? `Memory search keeps ${model}. Change it in Cluster > Settings > Memory search.`
+    : `Memory search keeps ${model}. A cluster owner can change it.`;
+}
 
 export const MODEL_PURPOSES = [
   ["conversation", "Conversation"], ["structured", "Structured output"],
@@ -57,7 +73,7 @@ export function assignmentProposal(choices: ModelChoices, modelId: string, purpo
   const model = view.catalog.find(m => m.modelId === modelId);
   for (const purpose of purposes) {
     if (!MODEL_PURPOSES.some(([id]) => id === purpose)) return { choices, refusal: "That task is unavailable." };
-    if (purpose === "embeddings" && view.boundEmbeddingModel && modelId !== view.boundEmbeddingModel) return { choices, refusal: `Memory search keeps ${view.boundEmbeddingModel}. Change it in Cluster > Settings > Memory search.` };
+    if (purpose === "embeddings" && view.boundEmbeddingModel && modelId !== view.boundEmbeddingModel) return { choices, refusal: memorySearchKeeps(view.boundEmbeddingModel) };
     if (modelId) {
       if (!model?.installed) return { choices, refusal: "Install this model before assigning it." };
       if (model.blocked) return { choices, refusal: model.blocked };

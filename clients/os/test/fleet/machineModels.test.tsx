@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
+import { installSeededAccess } from "../seededAccess";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 
@@ -84,6 +85,18 @@ describe("the Models group", () => {
     fireEvent.click(screen.getByRole("button",{name:/hf.co/}));
     await act(async()=>{screen.getByRole("button",{name:"Install model"}).click();});
     expect(connection.query.fleetModelPull).toHaveBeenCalledWith({registrationId:"laptop",model:"hf.co/TheBloke/Llama-2-70B-GGUF:Q4_K_M"});
+  });
+  it("says where memory search's model is changed only to whoever can open that page (ruling R15)",async()=>{
+    const setup={ id:"laptop",revision:"",choices:{},usableBytes:48e9,diskFreeBytes:100e9,boundEmbeddingModel:"embed",catalog:[] };
+    await mount({"model:embed":"embeddings=1"},{setup});
+    expect(screen.getByText(/Memory search keeps embed\. Change it in Cluster > Settings > Memory search\./)).toBeTruthy();
+    cleanup();
+
+    installSeededAccess("developer");
+    onTestFinished(()=>installSeededAccess("owner"));
+    await mount({"model:embed":"embeddings=1"},{setup});
+    expect(screen.getByText(/Memory search keeps embed\. A cluster owner can change it\./)).toBeTruthy();
+    expect(screen.queryByText(/Cluster > Settings > Memory search/)).toBeNull();
   });
   it("shows a failed installation without changing the setup",async()=>{
     const connection=await mount({"runtime:ollama":"1"});

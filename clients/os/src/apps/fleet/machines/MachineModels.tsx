@@ -26,7 +26,7 @@ import { machineModelsFrom, modelPurposeLabel } from "./models";
 import { LivePull, PullHistory, SetupLiveDownload } from "./ModelDownloads";
 import { setupDownloading, setupNow } from "./setup";
 import { useModelPulls } from "./useModelPulls";
-import { MODEL_PURPOSES, modelSetupFromRow, safeModelSource, sameModelChoices, setupCapacity, type ModelChoices, type ModelSetupView, type SetupModel } from "./modelSetup";
+import { MODEL_PURPOSES, memorySearchKeeps, modelSetupFromRow, safeModelSource, sameModelChoices, setupCapacity, type ModelChoices, type ModelSetupView, type SetupModel } from "./modelSetup";
 import { ModelAssignmentBoard } from "./ModelAssignmentBoard";
 import "./machineModels.css";
 
@@ -154,7 +154,7 @@ export function MachineModels({ machine, navigation }: { machine: MachineRow; st
     <PageHelp title="Models on this machine">
       <p>Installed models occupy storage. Your setup chooses which model serves each task. One model can serve several tasks; its memory counts once. Automatic means MemQL chooses among the models this machine offers.</p>
       <p>Memory is a planning estimate at up to 32K context, with room left for the operating system. It is not a live measurement. With Automatic, it counts the model MemQL picks for each task. Saved setups limit subsequent calls to that context and run one model call at a time. Other applications and larger images can change actual use.</p>
-      <p>{`Catalog recommendations favor local models that fit. Installing does not change your setup. Memory search keeps ${view?.boundEmbeddingModel || "its model"}. Change it in Cluster > Settings > Memory search.`}</p>
+      <p>{`Catalog recommendations favor local models that fit. Installing does not change your setup. ${memorySearchKeeps(view?.boundEmbeddingModel || "its model")}`}</p>
       <p>In Model setup, select an installed model and click a task, or drag the model onto it. Highlighted tasks use the selected model. Plain solid borders mark available assignments; dashed borders mark unavailable ones. Use matching tasks to share one model across them. Save setup applies the choices to new calls; existing work finishes.</p>
       <p>Use suggested fills in MemQL’s picks as your own choices, so saving them keeps a saved setup’s limits. Return to automatic removes your choices and those limits.</p>
       <p>Catalog research can review primary sources weekly using a local model. It starts off and must be enabled separately. It cannot install models or change your choices.</p>
