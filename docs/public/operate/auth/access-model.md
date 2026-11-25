@@ -1175,9 +1175,9 @@ with more than 50 registered machines has only the apps on the 50 most
 recently written counted. Machines are not limited by it: they come through
 the catalog's own reads of the person's machines and of every machine lent to
 them, which page at 200. Through MemQL OS, a person holding a copy of somebody
-else's reference gets their own. The check does not close MemQL's API, the SDK or Cockpit to a held
-person; the server already refuses their model calls, and the rule is about
-MemQL OS. Code: `component/memql/desktop_access.go`,
+else's reference gets their own. The check does not close MemQL's API, the SDK
+or Cockpit to a held person; the server already refuses their model calls,
+and the rule is about MemQL OS. Code: `component/memql/desktop_access.go`,
 `component/logstore/access_hold.go`; client:
 `clients/os/src/chrome/useDesktopAccess.ts`, `AccessHeld.tsx`, `CoreGate.tsx`.
 The design record is
