@@ -2680,9 +2680,10 @@ embedding failure is logged as it happens (`logEmbedFailure`). LIMIT: the
 table's `embedding` column is `vector(1536)` (migration 20260622000000), so it
 holds only a model 1536 wide, as `embedding3Small` is; under any other width
 (`qwen3-embedding:0.6b` is 1024), every lookup and store of an enabled
-namespace fails at the column, is counted and falls through to a fresh call. Nothing is enabled by default, so this costs nothing until an
-operator enables a namespace; a column per width, as the vector tables have, is
-not built. Tests:
+namespace fails at the column, is counted and falls through to a fresh call.
+Nothing is enabled by default, so this costs nothing until an operator enables
+a namespace; a column per width, as the vector tables have, is not built.
+Tests:
 `TestTheSemanticCacheFollowsTheBinding`,
 `TestTheSemanticCacheIsWiredBeforeAModelIsBound`,
 `TestTheSemanticCacheSaysOnceThatNoModelIsBound`.

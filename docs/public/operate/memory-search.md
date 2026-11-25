@@ -197,9 +197,9 @@ more than the cluster's account pays for.
 
 It is offered for the model the current one replaced, while that model can be
 chosen (one of your machines offering it is online, or the vendor account is
-set up), and not while another switch is being rebuilt. A cancelled switch's partial index is
-kept too, but is not offered here: it was never in use. Choosing that model
-again reuses it all the same.
+set up), and not while another switch is being rebuilt. A cancelled switch's
+partial index is kept too, but is not offered here: it was never in use.
+Choosing that model again reuses it all the same.
 
 ## The answer cache
 
