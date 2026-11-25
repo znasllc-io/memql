@@ -1169,9 +1169,13 @@ for something lent to this person; no machine or key is ever named.
 what is offline (their machine, a lent machine, a lent key, their key, an app)
 and whom to ask, and offers Fleet only to somebody who can open it.
 
-**Limits.** A person with more than 50 registered machines is read on the
-first page only. Through MemQL OS, a person holding a copy of somebody else's
-reference gets their own. The check does not close MemQL's API, the SDK or Cockpit to a held
+**Limits.** Apps are read from the person's registrations through
+`workersForUser`, whose first page of 50 is all the check reads, so a person
+with more than 50 registered machines has only the apps on the 50 most
+recently written counted. Machines are not limited by it: they come through
+the catalog's own reads of the person's machines and of every machine lent to
+them, which page at 200. Through MemQL OS, a person holding a copy of somebody
+else's reference gets their own. The check does not close MemQL's API, the SDK or Cockpit to a held
 person; the server already refuses their model calls, and the rule is about
 MemQL OS. Code: `component/memql/desktop_access.go`,
 `component/logstore/access_hold.go`; client:

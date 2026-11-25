@@ -41,7 +41,9 @@ package memql
 //     person's behalf carries a stand-in role (RoleStandIn) that says nothing
 //     about who they are. An account-scoped owner or developer (design section
 //     2, "per-account roles arrive later") is not exempt: only the stored
-//     cluster role is.
+//     cluster role is. The cluster owners the server itself makes, the
+//     troubleshooting shim and the operator credential's owner, are exempt
+//     by what the server stamps on them (auth.ServerMadeClusterOwner).
 //   - Admitted: any source counts. Held: none does.
 //   - A held answer carries a reference (ERR- and six hex digits, the shape the
 //     logs already use) and the line that explains it is written BEFORE the
@@ -68,11 +70,20 @@ package memql
 //     client reads that as "unknown" and lets the person in. A person is held
 //     only on an answer the engine is sure of.
 //
-// Tests: desktop_access_test.go (sources), desktop_access_hold_test.go (hold),
-// desktop_access_db_test.go (real rows: apps, the stored role, a scoped role).
-// Not verified here: the builtin that exposes it (task 3) and the recorder
-// that writes the line to the log store (task 4); until one is installed every
-// held answer carries no reference.
+// The builtin is evaluateDesktopAccess, below. The line is written by
+// component/logstore's RecordAccessHold, which app/database.go installs on
+// every node (SetAccessHoldRecorder); a node with none holds people with no
+// reference.
+//
+// Tests: desktop_access_test.go (sources and the builtin's row),
+// desktop_access_hold_test.go (hold, exemption, failures),
+// desktop_access_bound_test.go (the write bound), desktop_access_db_test.go
+// (real rows: apps, the stored role, a scoped role); the line itself is
+// logstore's TestRecordAccessHoldWritesTheDocumentedLine and the db-gated
+// TestInsertNowLineIsFoundBySearchingItsReference. Not verified here: an app's
+// real login or quota session through appBlock (the tests stub Block), and
+// two replicas over one database (TestAnotherReplicaKeepsThePassedReference
+// is two engines in one process).
 
 import (
 	"context"
