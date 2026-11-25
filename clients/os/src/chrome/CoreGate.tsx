@@ -18,6 +18,7 @@ import { AccessHeld } from "./AccessHeld";
 import { useKeyLetsIn } from "./keyLetsIn";
 import { useOs } from "./state";
 import { Mark } from "./Mark";
+import { DesktopAccessContext } from "./desktopAccessContext";
 import { useDesktopAccess } from "./useDesktopAccess";
 
 // THE CORE GATE (design record 2026-09-07-core-gate-and-honest-install, D1,
@@ -96,6 +97,19 @@ import { useDesktopAccess } from "./useDesktopAccess";
 export function CoreGate({ onSignOut, children, waitForReadiness = true }: {
   onSignOut: () => void; children: ReactNode; waitForReadiness?: boolean;
 }) {
+  // The one access read, shared with the desk through a context: Ask words its
+  // refusals from the same sources and makes no read of its own.
+  const desktopAccess = useDesktopAccess(true);
+  return (
+    <DesktopAccessContext.Provider value={desktopAccess}>
+      <CoreGateBody onSignOut={onSignOut} waitForReadiness={waitForReadiness} desktopAccess={desktopAccess}>{children}</CoreGateBody>
+    </DesktopAccessContext.Provider>
+  );
+}
+
+function CoreGateBody({ onSignOut, children, waitForReadiness, desktopAccess }: {
+  onSignOut: () => void; children: ReactNode; waitForReadiness: boolean; desktopAccess: ReturnType<typeof useDesktopAccess>;
+}) {
   const { access, ladderLoaded, readiness } = useSession();
   const { state } = useOs();
   const facts = useSetupFacts();
@@ -109,7 +123,6 @@ export function CoreGate({ onSignOut, children, waitForReadiness = true }: {
   const [waitExpired, setWaitExpired] = useState(false);
   const unconfigured = readiness?.of("ai")?.state === "unconfigured";
   const windowsOpen = Object.keys(state.shell.windows).length > 0;
-  const desktopAccess = useDesktopAccess(true);
   // Asked with the verdict while it is not yet known who is looking, as it was
   // before the question became an owner's or developer's alone, so an owner's
   // way in does not wait on the identity read and then on this one. Once the

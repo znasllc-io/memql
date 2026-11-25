@@ -1,5 +1,5 @@
 import { osScale } from "../system/scale";
-import { askFailure } from "./askFailure";
+import { askFailure, type AskAccess } from "./askFailure";
 import { ProposeLesson } from "../apps/training/ProposeLesson";
 import { AddButton } from "../kit/AddButton";
 import { ContentSkeleton } from "../kit/ContentSkeleton";
@@ -113,6 +113,7 @@ export function AskSurface({
   onOpenFile,
   onOpenWork,
   onOpenFleet,
+  access,
   onClose,
   onToggleMaximize,
   maximized = false,
@@ -136,6 +137,8 @@ export function AskSurface({
   maximized?: boolean;
   availability?: AskAvailability;
   onOpenFleet?: () => void;
+  /** Who is asking, for recovery wording; absent is a person who can open Fleet. */
+  access?: AskAccess;
   draft?: string;
   onDraftChange?: (draft: string) => void;
   /** Absent = this window has no voice wiring; the control says so. */
@@ -397,19 +400,19 @@ export function AskSurface({
           {exchanges.length === 0 && !state.loading ? <div className="os-ask-empty"><strong>What would you like to do?</strong><p>Ask a question, explore your workspace, or let MemQL help you get something done.</p></div> : null}
           {conversationFeed(exchanges).map(({ turn, completion, key, workState, responseAt, showAssistant }) => <div key={key} className="os-ask-exchange" data-state={turn.state}>
             {!completion ? <AskMessageRow messageKey={`${key}:user`} turn={originalTurns.get(turn.id)!} conversationId={state.selectedId} role="user" kind="request" text={turn.prompt} at={turn.startedAt} avatar={<AccountAvatar className="os-ask-avatar" />} onActivity={openMessageActivity}><div className="os-ask-byline"><strong>You</strong>{turn.routed?.targets?.length ? <span>Guidance</span> : null}<time dateTime={turn.startedAt}>{messageTime(turn.startedAt)}</time></div><p>{turn.prompt}</p><AskSentAttachments attachments={turn.attachments} onOpenFile={onOpenFile} />{turn.routed?.targets?.map((target, index) => <p key={`${target.runId}:${index}`} className="os-caption os-ask-route-label">{`To ${targetTitle(target, exchanges)} · ${routeLabel(target.status)}`}</p>)}{turn.routed?.targets?.some(target => !target.approvalId) && state.selectedId ? <ProposeLesson conversationId={state.selectedId} turnId={turn.id} text={turn.prompt} /> : null}{turn.approvalId && state.discussion?.approval.id !== turn.approvalId ? <button type="button" className="os-ask-retry" onClick={() => { void conversation.discussApproval(turn.approvalId!); }}>View request</button> : null}</AskMessageRow> : null}
-            {showAssistant ? <AskMessageRow messageKey={`${key}:assistant`} turn={originalTurns.get(turn.id)!} conversationId={state.selectedId} role="assistant" kind={!completion && turn.acknowledgement ? "acknowledgement" : "response"} text={[!completion ? routeReply(turn) : "", turn.answer, !completion ? turn.question?.text : "", turn.error ? askErrorSummary(turn.error) : ""].filter(Boolean).join("\n\n")} at={responseAt} avatar={<span className="os-avatar os-ask-avatar os-ask-avatar-memql" aria-hidden><Mark size={22} /></span>} onActivity={openMessageActivity}><div className="os-ask-byline"><strong>{turn.advisor ? "Another agent" : "MemQL"}</strong>{turn.approvalId ? <span>Advice</span> : null}{responseAt ? <time dateTime={responseAt} title={new Date(responseAt).toLocaleString()}>{messageTime(responseAt)}</time> : null}</div>
+            {showAssistant ? <AskMessageRow messageKey={`${key}:assistant`} turn={originalTurns.get(turn.id)!} conversationId={state.selectedId} role="assistant" kind={!completion && turn.acknowledgement ? "acknowledgement" : "response"} text={[!completion ? routeReply(turn) : "", turn.answer, !completion ? turn.question?.text : "", turn.error ? askErrorSummary(turn.error, access) : ""].filter(Boolean).join("\n\n")} at={responseAt} avatar={<span className="os-avatar os-ask-avatar os-ask-avatar-memql" aria-hidden><Mark size={22} /></span>} onActivity={openMessageActivity}><div className="os-ask-byline"><strong>{turn.advisor ? "Another agent" : "MemQL"}</strong>{turn.approvalId ? <span>Advice</span> : null}{responseAt ? <time dateTime={responseAt} title={new Date(responseAt).toLocaleString()}>{messageTime(responseAt)}</time> : null}</div>
               {completion ? <p className="os-ask-result-context">{turn.workTitle || turn.prompt}</p> : routeReply(turn) ? <p className="os-ask-route-reply">{routeReply(turn)}</p> : null}
               {turn.answer ? <AskMessage text={turn.answer} trailing={!turn.approvalId && (!completion || !turn.acknowledgement) && !isConversationalWait(turn) && (turn.background || turn.acknowledgement || turn.state === "queued" || turn.state === "waiting") && turn.runId && onOpenWork ? <AskWorkLink title={turn.workTitle || turn.prompt} state={workState} onOpen={() => onOpenWork(turn.runId, state.selectedId ?? undefined)} /> : undefined} /> : null}
               {turn.question && !completion ? <AskQuestion key={turn.question.id} question={turn.question} onAnswer={answer => conversation.answerQuestion(turn.question!, answer)} /> : null}
               {turn.activity.filter(event => event.kind === "artifact" && event.phase === "completed" && typeof event.arguments?.fileId === "string").map(event => <span key={event.id} className="os-ask-file-actions"><FileDownloadLink fileId={event.arguments!.fileId as string} name={event.name || "file"} />{onOpenFile ? <> · <button type="button" className="os-ask-retry" onClick={() => onOpenFile(event.arguments!.fileId as string)}>Open in Files</button></> : null}</span>)}
               {turn.state === "streaming" || isConversationalWait(turn) ? <AskWait activity={turn.activity} startedAt={turn.startedAt} hasText={Boolean(turn.answer)} /> : null}
-              {turn.error ? <div className="os-ask-error"><p role="alert">{askErrorSummary(turn.error)}</p>{askErrorSummary(turn.error) !== turn.error ? <details><summary>Details</summary><p>{turn.error}</p></details> : null}{!busy ? <button type="button" className="os-ask-retry" onClick={() => { void editFailedTurn(turn); }}>{turn.approvalId && turn.advisor ? "Edit and ask another agent" : "Edit and try again"}</button> : null}{onOpenFleet && askFailure(turn.error).fleet ? <button type="button" className="os-ask-retry" onClick={onOpenFleet}>Open Fleet</button> : null}</div> : null}
+              {turn.error ? <div className="os-ask-error"><p role="alert">{askErrorSummary(turn.error, access)}</p>{askErrorSummary(turn.error, access) !== turn.error ? <details><summary>Details</summary><p>{turn.error}</p></details> : null}{!busy ? <button type="button" className="os-ask-retry" onClick={() => { void editFailedTurn(turn); }}>{turn.approvalId && turn.advisor ? "Edit and ask another agent" : "Edit and try again"}</button> : null}{onOpenFleet && askFailure(turn.error, access).fleet ? <button type="button" className="os-ask-retry" onClick={onOpenFleet}>Open Fleet</button> : null}</div> : null}
             </AskMessageRow> : null}
           </div>)}
         </div>
       </div>
       }
-      {error ? <p className="os-ask-error" role="alert">{askErrorSummary(error)}</p> : null}
+      {error ? <p className="os-ask-error" role="alert">{askErrorSummary(error, access)}</p> : null}
       {state.guidanceNotice ? <p className="os-ask-guidance-notice" role="status">{state.guidanceNotice}</p> : null}
       {liveVoice && !state.voiceActive ? <AskLiveVoice session={liveVoice} errorsOnly /> : null}
       {!state.voiceActive && panel === "conversation" ? <AskWorkQueue turns={exchanges.filter(turn => !turn.approvalId)} onOpen={onOpenWork ? runId => onOpenWork(runId, state.selectedId ?? undefined) : undefined} deciding={state.stopDecisions} onDecideStop={transport.decideStop ? (turnId, runId, decision) => { void conversation.decideStop(turnId, runId, decision); } : undefined} /> : null}
@@ -574,8 +577,8 @@ function routeReply(turn: AskTurn): string {
 }
 
 /** Keep diagnostic context available without making the conversation a log viewer. */
-function askErrorSummary(message: string): string {
-  return askFailure(message).summary;
+function askErrorSummary(message: string, access?: AskAccess): string {
+  return askFailure(message, access).summary;
 }
 
 function approvalDiscussionStatus(state: ConversationState, exchanges: AskTurn[]): string {

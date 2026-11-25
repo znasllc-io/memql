@@ -5,6 +5,8 @@ import { useSession } from "../chrome/access";
 import { useConnectionStatus, type ShellConnectionStatus } from "../chrome/connection";
 import { useOsConnection } from "../live/connection";
 import { holds } from "../system/roles";
+import type { AskAccess } from "./askFailure";
+import { LENDER_FALLBACK, unavailableSentence } from "./accessWords";
 
 export interface AskAvailability {
   state: "checking" | "ready" | "unavailable" | "error" | "disconnected" | "reconnecting";
@@ -51,6 +53,7 @@ export function connectionDotTone(
 /** Hover tooltip copy by dock tone — replaces bouncing Open Fleet banners. */
 export function connectionDotTooltip(
   tone: ReturnType<typeof connectionDotTone>,
+  access?: AskAccess,
 ): string {
   switch (tone) {
     case "reachable":
@@ -58,6 +61,9 @@ export function connectionDotTooltip(
     case "unreachable":
       return "Connecting Ask to inference…";
     case "failed":
+      // Someone who cannot open Fleet is told what is offline and whom to ask,
+      // never to open a Fleet they have no way into.
+      if (access && !access.canOpenFleet) return unavailableSentence(access.sources ?? [], access.nameOf ?? (() => LENDER_FALLBACK));
       return "Ask has no usable inference. Open Fleet to connect a machine or check its models.";
     case "off":
       return "Not connected to the cluster.";

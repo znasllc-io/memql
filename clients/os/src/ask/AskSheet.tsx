@@ -3,6 +3,7 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { useOs } from "../chrome/state";
 import { useAsk } from "./AskProvider";
 import { AskSurface } from "./AskSurface";
+import { useAskAccess } from "./useAskAccess";
 
 // The Ask sheet: anchored above the dock, or filling the phone's content
 // area below its header. It stays
@@ -13,6 +14,7 @@ import { AskSurface } from "./AskSurface";
 
 export function AskSheet({ dockReserve = 0, embedded = false, onOpenApp }: { dockReserve?: number; embedded?: boolean; onOpenApp?: (appId: string, sectionId?: string, payload?: Record<string, unknown>) => void }) {
   const { canAsk, sheet, closeAsk, transport, voice, uploads, settings, availability, conversation, liveVoice } = useAsk();
+  const access = useAskAccess();
   const { actions } = useOs();
   const [maximized, setMaximized] = useState(false);
   const openApp = onOpenApp ?? actions.openApp;
@@ -52,6 +54,7 @@ export function AskSheet({ dockReserve = 0, embedded = false, onOpenApp }: { doc
           maximized={maximized}
           onToggleMaximize={embedded ? undefined : () => setMaximized(value => !value)}
           onOpenFleet={() => { openApp("fleet"); closeAsk(); }}
+          access={access}
           voicePorts={voice}
           settings={settings}
           context={sheet.context}

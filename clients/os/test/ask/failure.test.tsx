@@ -25,3 +25,25 @@ it.each([
   expect(ask).toHaveBeenCalledOnce();
   expect(screen.getByRole("textbox", {name:"Ask"})).toHaveProperty("value", "Create my requested artifact");
 });
+
+it("shows no Open Fleet to a person who cannot open Fleet, and names what is offline", () => {
+  let callbacks: AskCallbacks;
+  const ask = vi.fn((_p: string, _c: string | null, on: AskCallbacks) => { callbacks = on; return { cancel: vi.fn() }; });
+  render(<AskSurface transport={{ ask }} variant="sheet" availability={{ state:"ready",message:"",refresh:vi.fn() }} onOpenFleet={vi.fn()}
+    access={{ canOpenFleet: false, sources: [{ kind: "key", state: "outOfCredit", own: true }], nameOf: () => "x" }} />);
+  fireEvent.change(screen.getByRole("textbox", {name:"Ask"}), {target:{value:"hello"}});
+  fireEvent.click(screen.getByRole("button", {name:"Send"}));
+  act(() => callbacks.error("every_door_shut: nothing"));
+  expect(screen.getByRole("alert").textContent).toBe("Your API key is out of credit.");
+  expect(screen.queryByRole("button", {name:"Open Fleet"})).toBeNull();
+});
+it("keeps Open Fleet for a person who can open Fleet", () => {
+  let callbacks: AskCallbacks;
+  const ask = vi.fn((_p: string, _c: string | null, on: AskCallbacks) => { callbacks = on; return { cancel: vi.fn() }; });
+  render(<AskSurface transport={{ ask }} variant="sheet" availability={{ state:"ready",message:"",refresh:vi.fn() }} onOpenFleet={vi.fn()}
+    access={{ canOpenFleet: true, sources: [], nameOf: () => "x" }} />);
+  fireEvent.change(screen.getByRole("textbox", {name:"Ask"}), {target:{value:"hello"}});
+  fireEvent.click(screen.getByRole("button", {name:"Send"}));
+  act(() => callbacks.error("every_door_shut: nothing"));
+  expect(screen.getByRole("button", {name:"Open Fleet"})).toBeTruthy();
+});

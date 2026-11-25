@@ -21,6 +21,7 @@ import {
 
 import { AskSurface } from "../ask/AskSurface";
 import { useAsk } from "../ask/AskProvider";
+import { useAskAccess } from "../ask/useAskAccess";
 import { Mark } from "../chrome/Mark";
 import type { OsAppManifest, OsRegistry, OsWidgetManifest } from "../system/registry";
 import { ACCOUNTS_SECTIONS } from "./accounts/settings";
@@ -634,6 +635,7 @@ const materializer: OsAppManifest = {
 function AskWidgetBody() {
   const { transport, voice, uploads, settings, availability, conversation, liveVoice } = useAsk();
   const { actions } = useOs();
+  const access = useAskAccess();
   // The widget hands a prompt off exactly as the sheet does (epic memql#4785).
   // One Ask, three entry points, and an act that exists on one of them is an
   // act somebody learns and then cannot find.
@@ -644,6 +646,7 @@ function AskWidgetBody() {
           liveVoice={liveVoice}
       availability={availability}
       onOpenFleet={() => { actions.openApp("fleet"); }}
+      access={access}
       voicePorts={voice}
       settings={settings}
       variant="widget"
