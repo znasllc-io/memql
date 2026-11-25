@@ -185,6 +185,23 @@ func (s *Service) accountCommerce(ctx context.Context, site callrules.SiteRef, t
 		if c.Mode != providers.Mock {
 			return callrules.AccountResult{}, accountRefusal("simulation_disabled")
 		}
+		// A mismatched or unknown result is invalid before the tester gate, so it is
+		// never counted as a wrong password.
+		kind := strings.TrimSuffix(strings.TrimPrefix(req.Action, "mock_"), "_complete")
+		if o.Kind != kind || !mockOutcomeKnown(kind, req.Outcome) {
+			return callrules.AccountResult{}, callrules.ErrInvalid
+		}
+		changed, gateErr := testerGate(c, v, kind, req, s.now())
+		if changed {
+			// A recorded failure must survive the refusal, and a cleared count the
+			// result; both are saved under the gates this request already holds.
+			if err = s.store.saveCommerce(fresh, site.OwnerUserID, v, s.now()); err != nil {
+				return callrules.AccountResult{}, err
+			}
+		}
+		if gateErr != nil {
+			return callrules.AccountResult{}, gateErr
+		}
 		if err = s.completeMockCommerce(fresh, site, v, o, req); err != nil {
 			return callrules.AccountResult{}, err
 		}
@@ -211,11 +228,26 @@ func (s *Service) accountCommerce(ctx context.Context, site callrules.SiteRef, t
 	return s.accountSnapshot(fresh, site, token)
 }
 
+// mockOutcomeKnown lists the results the local provider simulation can apply.
+func mockOutcomeKnown(kind, outcome string) bool {
+	switch kind {
+	case "checkout":
+		switch outcome {
+		case "paid", "declined", "requires_action", "cancelled", "pending":
+			return true
+		}
+	case "verification":
+		switch outcome {
+		case "approved", "underage", "declined", "in_review", "abandoned", "expired":
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Service) completeMockCommerce(ctx context.Context, site callrules.SiteRef, v *commerceState, o *commerceOperation, req callrules.AccountRequest) error {
 	if req.Action == "mock_checkout_complete" && o.Kind == "checkout" {
-		switch req.Outcome {
-		case "paid", "declined", "requires_action", "cancelled", "pending":
-		default:
+		if !mockOutcomeKnown("checkout", req.Outcome) {
 			return callrules.ErrInvalid
 		}
 		if !paymentPending(o.Status) {
@@ -239,9 +271,7 @@ func (s *Service) completeMockCommerce(ctx context.Context, site callrules.SiteR
 		return nil
 	}
 	if req.Action == "mock_verification_complete" && o.Kind == "verification" {
-		switch req.Outcome {
-		case "approved", "underage", "declined", "in_review", "abandoned", "expired":
-		default:
+		if !mockOutcomeKnown("verification", req.Outcome) {
 			return callrules.ErrInvalid
 		}
 		if !verificationPending(o.Status) {

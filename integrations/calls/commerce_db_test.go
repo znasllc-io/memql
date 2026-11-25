@@ -24,6 +24,7 @@ func commerceFixture(t *testing.T, name string) (*callWorld, accountTestKey, *Co
 	require.NoError(t, err)
 	k := accountRegister(t, cw, newSoftwareAuthenticator(t))
 	c := &CommerceConfig{Mode: providers.Mock, ValidUntil: cw.clock.Now().Add(time.Hour), AvailableCashCents: 1000000, ProtectedCents: 10000, FixedCents: 10000, VerificationUnitCents: 100, VerificationBudgetCents: 10000, ProviderCreditCents: 10000, CallBudgetCents: 100000, FulfillmentReserveBPS: 5000, MaxAccounts: 900, MaxPendingVerifications: 50, MaxVerificationAttempts: 3, MaxOpenCalls: 20, MaxParticipants: 1000}
+	c.TesterPassword = testTesterHash(t)
 	cw.svc.commerce = func() CommerceConfig { return *c }
 	return cw, k, c
 }
@@ -37,7 +38,7 @@ func commerceDo(t *testing.T, cw *callWorld, k accountTestKey, req callrules.Acc
 func commercePurchase(t *testing.T, cw *callWorld, k accountTestKey, nonce string) callrules.AccountResult {
 	t.Helper()
 	out := commerceDo(t, cw, k, callrules.AccountRequest{Action: "checkout_begin", AmountCents: 1000, IdempotencyKey: nonce, AdultDeclared: true, TermsAccepted: true, SaveMethod: true})
-	return commerceDo(t, cw, k, callrules.AccountRequest{Action: "mock_checkout_complete", OperationID: out.Lifecycle.Checkout.ID, Outcome: "paid"})
+	return commerceDo(t, cw, k, callrules.AccountRequest{Action: "mock_checkout_complete", OperationID: out.Lifecycle.Checkout.ID, Outcome: "paid", TesterPassword: testTesterPassword})
 }
 func commerceBeginVerification(t *testing.T, cw *callWorld, k accountTestKey, nonce string) callrules.AccountResult {
 	t.Helper()
@@ -47,7 +48,7 @@ func commerceVerified(t *testing.T, cw *callWorld, k accountTestKey) callrules.A
 	t.Helper()
 	commercePurchase(t, cw, k, "commerce-purchase-001")
 	out := commerceBeginVerification(t, cw, k, "commerce-verify-0001")
-	return commerceDo(t, cw, k, callrules.AccountRequest{Action: "mock_verification_complete", OperationID: out.Lifecycle.Verification.ID, Outcome: "approved"})
+	return commerceDo(t, cw, k, callrules.AccountRequest{Action: "mock_verification_complete", OperationID: out.Lifecycle.Verification.ID, Outcome: "approved", TesterPassword: testTesterPassword})
 }
 
 func TestCommercePurchaseFirstReuseAndReplica(t *testing.T) {
@@ -62,15 +63,15 @@ func TestCommercePurchaseFirstReuseAndReplica(t *testing.T) {
 	pending := commerceDo(t, cw, k, callrules.AccountRequest{Action: "checkout_begin", AmountCents: 1000, IdempotencyKey: "commerce-checkout-001", AdultDeclared: true, TermsAccepted: true, SaveMethod: true})
 	require.Zero(t, *pending.Account.BalanceCents)
 	require.False(t, pending.Account.CanHost)
-	paid := commerceDo(t, cw, k, callrules.AccountRequest{Action: "mock_checkout_complete", OperationID: pending.Lifecycle.Checkout.ID, Outcome: "paid"})
+	paid := commerceDo(t, cw, k, callrules.AccountRequest{Action: "mock_checkout_complete", OperationID: pending.Lifecycle.Checkout.ID, Outcome: "paid", TesterPassword: testTesterPassword})
 	require.EqualValues(t, 1000, *paid.Account.BalanceCents)
 	require.False(t, paid.Account.CanHost)
-	replay := commerceDo(t, cw, k, callrules.AccountRequest{Action: "mock_checkout_complete", OperationID: pending.Lifecycle.Checkout.ID, Outcome: "paid"})
+	replay := commerceDo(t, cw, k, callrules.AccountRequest{Action: "mock_checkout_complete", OperationID: pending.Lifecycle.Checkout.ID, Outcome: "paid", TesterPassword: testTesterPassword})
 	require.EqualValues(t, 1000, *replay.Account.BalanceCents)
 	v := commerceBeginVerification(t, cw, k, "commerce-verification-001")
 	require.Equal(t, "not_started", v.Lifecycle.Verification.Status)
 	require.EqualValues(t, 100, v.Lifecycle.VerificationReservedCents)
-	done := commerceDo(t, cw, k, callrules.AccountRequest{Action: "mock_verification_complete", OperationID: v.Lifecycle.Verification.ID, Outcome: "approved"})
+	done := commerceDo(t, cw, k, callrules.AccountRequest{Action: "mock_verification_complete", OperationID: v.Lifecycle.Verification.ID, Outcome: "approved", TesterPassword: testTesterPassword})
 	require.True(t, done.Account.CanHost)
 	require.EqualValues(t, 100, done.Lifecycle.VerificationSpentCents)
 	other := allowanceReplica(t, cw)
@@ -104,21 +105,21 @@ func TestCommerceCapsRetriesAndUnderage(t *testing.T) {
 	second := commerceBeginVerification(t, cw, k, "commerce-resume-check")
 	require.Equal(t, first.Lifecycle.Verification.ID, second.Lifecycle.Verification.ID)
 	require.Equal(t, 1, second.Lifecycle.VerificationAttempts)
-	review := commerceDo(t, cw, k, callrules.AccountRequest{Action: "mock_verification_complete", OperationID: first.Lifecycle.Verification.ID, Outcome: "in_review"})
+	review := commerceDo(t, cw, k, callrules.AccountRequest{Action: "mock_verification_complete", OperationID: first.Lifecycle.Verification.ID, Outcome: "in_review", TesterPassword: testTesterPassword})
 	require.EqualValues(t, 100, review.Lifecycle.VerificationReservedCents)
 	resumed := commerceBeginVerification(t, cw, k, "commerce-review-resume")
 	require.Equal(t, 1, resumed.Lifecycle.VerificationAttempts)
-	commerceDo(t, cw, k, callrules.AccountRequest{Action: "mock_verification_complete", OperationID: first.Lifecycle.Verification.ID, Outcome: "declined"})
+	commerceDo(t, cw, k, callrules.AccountRequest{Action: "mock_verification_complete", OperationID: first.Lifecycle.Verification.ID, Outcome: "declined", TesterPassword: testTesterPassword})
 	next := commerceBeginVerification(t, cw, k, "commerce-second-check")
 	require.Equal(t, 2, next.Lifecycle.VerificationAttempts)
 	require.EqualValues(t, 100, next.Lifecycle.VerificationSpentCents)
-	commerceDo(t, cw, k, callrules.AccountRequest{Action: "mock_verification_complete", OperationID: next.Lifecycle.Verification.ID, Outcome: "declined"})
+	commerceDo(t, cw, k, callrules.AccountRequest{Action: "mock_verification_complete", OperationID: next.Lifecycle.Verification.ID, Outcome: "declined", TesterPassword: testTesterPassword})
 	_, err := cw.svc.Account(context.Background(), cw.ref, k.result.Session.Token, &callrules.AccountRequest{Action: "verification_begin", AccountID: k.result.Account.AccountID, IdempotencyKey: "commerce-third-check", AdultDeclared: true, TermsAccepted: true})
 	require.ErrorContains(t, err, "verification_attempt_limit")
 	// Underage is a terminal account gate, not a switch a new nonce defeats.
 	c.MaxVerificationAttempts = 3
 	last := commerceBeginVerification(t, cw, k, "commerce-underage-check")
-	blocked := commerceDo(t, cw, k, callrules.AccountRequest{Action: "mock_verification_complete", OperationID: last.Lifecycle.Verification.ID, Outcome: "underage"})
+	blocked := commerceDo(t, cw, k, callrules.AccountRequest{Action: "mock_verification_complete", OperationID: last.Lifecycle.Verification.ID, Outcome: "underage", TesterPassword: testTesterPassword})
 	require.Equal(t, "blocked", blocked.Lifecycle.Adult.Status)
 	require.False(t, blocked.Account.CanHost)
 	_, err = cw.svc.Account(context.Background(), cw.ref, k.result.Session.Token, &callrules.AccountRequest{Action: "checkout_begin", AccountID: k.result.Account.AccountID, AmountCents: 1000, IdempotencyKey: "commerce-after-underage", AdultDeclared: true, TermsAccepted: true})
@@ -255,7 +256,7 @@ func TestCommerceUnknownCreateWebhookRecoveryAndStrictAge(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "verified", answer.Lifecycle.Adult.Status)
 	require.Equal(t, 1, fake.creates)
-	_, err = cw.svc.Account(ctx, cw.ref, k.result.Session.Token, &callrules.AccountRequest{Action: "mock_verification_complete", AccountID: k.result.Account.AccountID, OperationID: op.ID, Outcome: "approved"})
+	_, err = cw.svc.Account(ctx, cw.ref, k.result.Session.Token, &callrules.AccountRequest{Action: "mock_verification_complete", AccountID: k.result.Account.AccountID, OperationID: op.ID, Outcome: "approved", TesterPassword: testTesterPassword})
 	require.ErrorContains(t, err, "simulation_disabled")
 	require.False(t, errors.Is(err, providers.ErrOutcomeUnknown))
 	// A late create timeout cannot replace an already-reconciled approval.
@@ -301,7 +302,7 @@ func TestCommercePaidFactSurvivesInterruptedCredit(t *testing.T) {
 	store.engine = broken
 	service := *cw.svc
 	service.store = &store
-	_, err := service.Account(ctx, cw.ref, k.result.Session.Token, &callrules.AccountRequest{Action: "mock_checkout_complete", AccountID: k.result.Account.AccountID, OperationID: pending.Lifecycle.Checkout.ID, Outcome: "paid"})
+	_, err := service.Account(ctx, cw.ref, k.result.Session.Token, &callrules.AccountRequest{Action: "mock_checkout_complete", AccountID: k.result.Account.AccountID, OperationID: pending.Lifecycle.Checkout.ID, Outcome: "paid", TesterPassword: testTesterPassword})
 	require.Error(t, err)
 	require.True(t, broken.failed)
 	state, err := cw.svc.store.commerceState(ctx, cw.owner, cw.site, k.result.Account.AccountID)

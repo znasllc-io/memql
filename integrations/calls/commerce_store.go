@@ -49,6 +49,10 @@ type commerceState struct {
 	CustomerID           string                  `json:"customerId,omitempty"`
 	PaymentMethodID      string                  `json:"paymentMethodId,omitempty"`
 	Operations           []commerceOperation     `json:"operations"`
+	// TesterFailures are this account's wrong tester passwords in the current
+	// window (at most five); TesterPausedUntil ends the pause the fifth starts.
+	TesterFailures    []time.Time `json:"testerFailures,omitempty"`
+	TesterPausedUntil time.Time   `json:"testerPausedUntil,omitzero"`
 }
 
 func commerceID(site, key string) string {
@@ -60,7 +64,7 @@ func newCommerceState(site, key string, mode providers.Mode) *commerceState {
 func commerceFromRow(row map[string]any) (*commerceState, error) {
 	var v commerceState
 	raw := rowString(row, "stateData")
-	if len(raw) > 524288 || json.Unmarshal([]byte(raw), &v) != nil || len(v.Operations) > commerceJournalLimit || v.PaidCents < 0 || v.PaidCents > commerceJournalLimit*50000 {
+	if len(raw) > 524288 || json.Unmarshal([]byte(raw), &v) != nil || len(v.Operations) > commerceJournalLimit || v.PaidCents < 0 || v.PaidCents > commerceJournalLimit*50000 || len(v.TesterFailures) > testerFailureLimit {
 		return nil, allowanceUnavailable()
 	}
 	v.ID = memql.BareShortId(rowString(row, "id"))
