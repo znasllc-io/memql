@@ -221,8 +221,10 @@ type inferenceDoors struct {
 // MinimumContextWindow. It asks nothing about whether a machine is awake.
 // inferenceDoors adds the online test (a door that can answer now) and
 // desktopAccessSources does not (a machine that is asleep is still set up),
-// and both read this one profile so the two never drift apart in anything
-// else. It deliberately does NOT exclude Embeddings: a model that chats and
+// and both read this one profile so the two never drift apart on it. They
+// differ in one deliberate way (desktop_access.go, top): desktop access judges
+// each machine by its own entry, inferenceDoors each model by the union over
+// every machine behind it. It deliberately does NOT exclude Embeddings: a model that chats and
 // also embeds counts (ruling R-D5), and one that ONLY embeds is already out
 // because it cannot answer structured output. Regression tests:
 // TestAnEmbeddingOnlyModelIsNotAccess, TestAModelThatAlsoEmbedsStillCounts.

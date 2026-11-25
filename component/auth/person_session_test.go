@@ -267,3 +267,14 @@ func TestServerMadeClusterOwnerReadsOnlyWhatTheServerStamps(t *testing.T) {
 		}
 	}
 }
+
+// The claim alone recognises the forwarded no-auth shim: the subject here is a
+// person's, and only the marker a peer node sets says otherwise
+// (isLocalDevShim's second branch).
+func TestServerMadeClusterOwnerRecognisesTheForwardedLocalDevClaimAlone(t *testing.T) {
+	ctx := ContextWithClaims(context.Background(), map[string]any{"sub": sessionPerson, forwardedClaimLocalDev: "1"})
+	ctx = ContextWithAccess(ctx, &AccessContext{UserId: sessionPerson, Role: RoleOwner})
+	if !ServerMadeClusterOwner(ctx, sessionPerson) {
+		t.Fatal("a forwarded context with the local-dev claim and a non-local-dev subject was not recognised")
+	}
+}

@@ -175,8 +175,8 @@ type AccessSource struct {
 	Own          bool   `json:"own"`
 }
 
-// desktopAccessSources lists what actingUserId has set up and, for each source
-// that does not count, one reason. ctx must be the person's own (a machine
+// desktopAccessSources lists what actingUserId has set up and, for what does
+// not count, one reason per distinct cause. ctx must be the person's own (a machine
 // catalog and a key are read as them). A read that fails is an error and not
 // an empty answer, because "we could not ask" must never be reported as "they
 // have nothing set up".
