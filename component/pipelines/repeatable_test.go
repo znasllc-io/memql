@@ -212,7 +212,7 @@ func TestAPolicyCloneSharesNoStorage(t *testing.T) {
 // missing on another node.
 func TestRetryAndRepeatableWireNamesArePinned(t *testing.T) {
 	raw, err := json.Marshal(StepRequest{
-		ComputePlacement: &ComputePlacementPolicy{FleetWaitSeconds: 60, CloudFallback: true, Retries: DefaultRetryPolicy()},
+		ComputePlacement: &ComputePlacementPolicy{FleetWaitSeconds: 60, CloudFallback: true, Retries: DefaultRetryPolicy(), Connection: DefaultConnectionPolicy()},
 		Step:             Step{Repeatable: true},
 	})
 	if err != nil {
@@ -223,8 +223,15 @@ func TestRetryAndRepeatableWireNamesArePinned(t *testing.T) {
 		t.Fatal(err)
 	}
 	policy, _ := request["computePlacement"].(map[string]any)
-	if keys := sortedKeys(policy); !reflect.DeepEqual(keys, []string{"cloudFallback", "fleetWaitSeconds", "retries"}) {
-		t.Errorf("ComputePlacementPolicy JSON keys = %v, want [cloudFallback fleetWaitSeconds retries]", keys)
+	// connection (network-aware fleet selection) is an ADDITION: a peer that
+	// predates it decodes with encoding/json's default, which ignores an unknown
+	// key, and a policy reaching a newer peer without it reads as no preference.
+	if keys := sortedKeys(policy); !reflect.DeepEqual(keys, []string{"cloudFallback", "connection", "fleetWaitSeconds", "retries"}) {
+		t.Errorf("ComputePlacementPolicy JSON keys = %v, want [cloudFallback connection fleetWaitSeconds retries]", keys)
+	}
+	connection, _ := policy["connection"].(map[string]any)
+	if keys := sortedKeys(connection); !reflect.DeepEqual(keys, []string{"unsteadyMinutes"}) || connection["unsteadyMinutes"] != float64(120) {
+		t.Errorf("connection on the wire = %v, want unsteadyMinutes 120", connection)
 	}
 	retries, _ := policy["retries"].(map[string]any)
 	if keys := sortedKeys(retries); !reflect.DeepEqual(keys, []string{"delaysSeconds", "otherMachines", "sameMachine"}) {
