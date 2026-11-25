@@ -2934,11 +2934,11 @@ owner sees which model memory search uses, whose machines
 index it, how many items the index holds and what waits, and changes it. Settings
 links to it with a row showing the model in use. Fleet's model board keeps the
 bound model locked and says where to change it, to whoever can open Memory
-search; anybody else reads that a cluster owner can change it (ruling R15:
-`memorySearchWhere`, `memorySearchChooses` and `memorySearchKeeps`,
-`src/apps/fleet/machines/modelSetup.ts`, say it for the board's caption, its
-refusal, the Models page's help and the Routes job board's Search and memory
-job).
+search; anybody else reads that a cluster owner can change it, since a page they
+cannot open is no answer to where (`memorySearchWhere`, `memorySearchChooses`
+and `memorySearchKeeps`, `src/apps/fleet/machines/modelSetup.ts`, say it for the
+board's caption, its refusal, the Models page's help and the Routes job board's
+Search and memory job).
 
 - **THE PART IS THE GATE, AND ONLY AN OWNER ACTS.** The section and the link
   row require `app:cluster/memorysearch`, seeded on the owner alone, which the
@@ -2950,7 +2950,7 @@ job).
   and acts on nothing. The Start page does not offer the section: it is a page
   of Settings.
 - **POLLED, NEVER SUBSCRIBED.** The status is a row the engine computes per call
-  and the index job's run rows broadcast nothing (ruling R3), so the page reads it
+  and the index job's run rows have no graph routing rule, so the page reads it
   every 5 s while a switch runs and every 30 s otherwise, only while visible and
   connected (`useReleaseRead`). Every act answers the status after it, shown at
   once; a refusal is the engine's sentence beside the act, and the status is read
@@ -2975,13 +2975,14 @@ job).
   cancelled switch's partial index, which `retained` also lists; it is offered only
   while that model can be chosen.
 - **THE TAKE-OVER IS OFFERED ONLY WHERE IT CHANGES SOMETHING**: when the status's
-  `takeOver` says choosing the model in use again would make you its indexer
-  (ruling R13), as "Index on my machines", during a switch too; and when a
-  running switch's own `takeOver` says choosing its target again would make you
-  the RUN's indexer (ruling R14), as "Re-index on my machines" on the Switching
-  row, held with Cancel. A wait is said from the reader's side: "your machines",
-  or the indexer's by name -- the binding's for the backlog, the run's for a
-  switch, which need not be the same person.
+  `takeOver` says choosing the model in use again would make you its indexer,
+  as "Index on my machines", during a switch too (search and new items embed as
+  the binding's indexer until the flip); and when a running switch's own
+  `takeOver` says choosing its target again would make you the RUN's indexer,
+  as "Re-index on my machines" on the Switching row, held with Cancel. A wait is
+  said from the reader's side: "your machines", or the indexer's by name -- the
+  binding's for the backlog, the run's for a switch, which need not be the same
+  person.
 - QA views: `memory-search*` (`qa/README.md`). Tests:
   `test/cluster/memorySearch.test.tsx`.
 

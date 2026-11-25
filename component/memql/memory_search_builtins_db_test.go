@@ -287,7 +287,7 @@ func TestTheActiveAndTargetTablesAreNeverDropped(t *testing.T) {
 }
 
 // Every write of the binding, the retired rows and the run rows is stamped
-// after the version it read (ruling R12; memql#5431's third part), so a writer
+// after the version it read (memql#5431's third part), so a writer
 // whose clock lags the last writer's still writes the CURRENT version rather
 // than an older one that reads as lost. Here each last version was stamped an
 // hour ahead of this process's clock, as a replica whose clock runs ahead
@@ -348,7 +348,7 @@ func TestEveryWriteIsStampedAfterTheVersionItRead(t *testing.T) {
 
 // A cluster's first model is bound by bindEmbedder, whose own writes -- the
 // plan and the activation -- are stamped after the binding's newest version,
-// as every other binding write is (ruling R12). Here a plan row was left an
+// as every other binding write is. Here a plan row was left an
 // hour ahead of this process's clock, as a replica whose clock runs ahead
 // leaves it: stamped at this clock, the activation would be an older version
 // than that plan, and the binding would read as never activated.

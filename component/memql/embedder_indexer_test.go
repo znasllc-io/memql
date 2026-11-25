@@ -270,8 +270,8 @@ func TestTheBindingWritesRecordWhoIndexesAndWhatWasRetired(t *testing.T) {
 		_, _ = db.DB.ExecContext(context.Background(), `INSERT INTO "MemoryNodes" SELECT * FROM jsonb_populate_recordset(NULL::"MemoryNodes",$1::jsonb)`, saved)
 	})
 	// Every write of the binding and the retired rows is stamped with a
-	// version (ruling R12); this test writes them directly, so it stamps each
-	// itself.
+	// version after the newest one read; this test writes them directly, so it
+	// stamps each itself.
 	write := func(name string, args map[string]any) {
 		t.Helper()
 		args["versionTime"] = time.Now().UTC().Format(time.RFC3339Nano)

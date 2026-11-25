@@ -288,7 +288,7 @@ func (e *MemQLEngine) bindEmbedder(ctx context.Context, provider string, choice 
 		{"platform.activateEmbedderBinding", map[string]any{"bindingId": "active", "activatedAt": time.Now().UTC().Format(time.RFC3339Nano)}},
 	} {
 		// Each write is stamped after the binding's newest version, read here
-		// under the binding lock (ruling R12), as every other binding write is:
+		// under the binding lock, as every other binding write is:
 		// a plan left by a replica whose clock runs ahead would otherwise stay
 		// the newest version, and the binding would read as never activated.
 		version, err := e.latestRowVersion(ctx, EmbedderBindingConceptID, ActiveEmbedderBindingID)
@@ -493,8 +493,8 @@ func (e *MemQLEngine) adoptEmbedderIndexer(ctx context.Context) error {
 // replica between the two would otherwise be silently reverted (memql#5431).
 // Only non-empty fields are sent, so an empty chooser never clears one.
 //
-// The new version is stamped after the binding's newest one (ruling R12,
-// memql#5431's third part), read here under the caller's lock: written at this
+// The new version is stamped after the binding's newest one (memql#5431's
+// third part), read here under the caller's lock: written at this
 // replica's clock alone, a choice made on a replica whose clock lags the last
 // binding writer's would be an OLDER version, and every reader would go on
 // seeing the binding without it.

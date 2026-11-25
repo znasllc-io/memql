@@ -58,8 +58,9 @@ func TestOrdinaryAndRejectedChunks(t *testing.T) {
 	require.Equal(t, "<!--seed:oops", KnowledgeChunkEmbedText("<!--seed:oops"))
 }
 
-// Only a chunk whose id hashes its own text is presence-only for memory search
-// (ruling R7). Ingest, the seed corpora and the canonical and release seeds
+// Only a chunk whose id hashes its own text is presence-only for memory search,
+// which otherwise embeds again a vector older than its row. Ingest, the seed
+// corpora and the canonical and release seeds
 // key their chunks by chunkIdFor, so the text under such an id never changes,
 // and a review stamp or a boot's re-seed sends nothing to be embedded again.
 // Every other id is versioned, so new text under it is embedded again: an

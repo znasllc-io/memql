@@ -51,7 +51,8 @@ import (
 //
 // Version is when the row version the text was rebuilt from was written. The
 // index job takes a vector older than it as missing: the row changed after it
-// was embedded (ruling R7). Zero for a row whose id is a hash of its own text
+// was embedded, a vector older than its row being as missing as an absent one.
+// Zero for a row whose id is a hash of its own text
 // (MemorySource.ContentAddressed), and for an item of a source that pages its
 // own items, where the text under an id never changes.
 type MemoryItem struct {

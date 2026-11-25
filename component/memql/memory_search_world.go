@@ -207,7 +207,7 @@ func (w engineMemorySearchWorld) retired(ctx context.Context) ([]retiredMemoryIn
 
 // recordRetired writes a retired model's row WHOLE (recordRetiredEmbedder), at
 // the id derived from its model and width, never one taken from input. Its
-// version is stamped after the row's newest (ruling R12), read here under the
+// version is stamped after the row's newest, read here under the
 // binding lock every caller holds, so a replica whose clock lags the last
 // writer's still writes the current version.
 func (w engineMemorySearchWorld) recordRetired(ctx context.Context, r retiredMemoryIndex) error {

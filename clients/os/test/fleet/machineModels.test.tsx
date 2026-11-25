@@ -86,7 +86,7 @@ describe("the Models group", () => {
     await act(async()=>{screen.getByRole("button",{name:"Install model"}).click();});
     expect(connection.query.fleetModelPull).toHaveBeenCalledWith({registrationId:"laptop",model:"hf.co/TheBloke/Llama-2-70B-GGUF:Q4_K_M"});
   });
-  it("says where memory search's model is changed only to whoever can open that page (ruling R15)",async()=>{
+  it("says where memory search's model is changed only to whoever can open that page",async()=>{
     const setup={ id:"laptop",revision:"",choices:{},usableBytes:48e9,diskFreeBytes:100e9,boundEmbeddingModel:"embed",catalog:[] };
     await mount({"model:embed":"embeddings=1"},{setup});
     expect(screen.getByText(/Memory search keeps embed\. Change it in Cluster > Settings > Memory search\./)).toBeTruthy();

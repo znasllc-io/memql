@@ -3313,7 +3313,7 @@ mutation moduleReadiness recordModuleReadiness {
 //
 // Every write below takes a REQUIRED `versionTime`, written as the row's
 // version: every caller stamps it after the newest version it read
-// (memql.VersionTimeAfter, ruling R12; memql#5431's third part), so a replica
+// (memql.VersionTimeAfter; memql#5431's third part), so a replica
 // whose clock lags the last writer's still writes the newest version instead
 // of an older one every reader passes over.
 

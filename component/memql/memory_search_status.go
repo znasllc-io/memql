@@ -34,11 +34,11 @@ func memorySearchMayAct(ctx context.Context, w memorySearchWorld, caller string)
 }
 
 // memorySearchOffersTakeOver is a status `takeOver`: whether caller, choosing
-// ref again, would become its indexer in place of indexer -- memorySearchSwitch's
-// own take-over (memorySearchTakesOver), asked without writing. It is asked of
-// the model in use and the BINDING's indexer (the row's takeOver, ruling R13),
-// and of a running switch's target and the RUN's indexer (the switch summary's,
-// ruling R14), and only of a caller who may act (mayAct): to anybody else
+// ref again, would become its indexer in place of indexer --
+// memorySearchSwitch's own take-over (memorySearchTakesOver), asked without
+// writing. It is asked of the model in use and the BINDING's indexer (the row's
+// takeOver), and of a running switch's target and the RUN's indexer (the switch
+// summary's), and only of a caller who may act (mayAct): to anybody else
 // choosing again is refused, so it takes over nothing.
 //
 // A catalog that cannot be read answers false, logged, rather than failing the
@@ -70,9 +70,9 @@ func memorySearchOffersTakeOver(ctx context.Context, w memorySearchWorld, caller
 //     (memorySearchMayAct): an active cluster owner holding the part's
 //     `execute`. Nobody else is offered an act, a take-over included.
 //   - takeOver: whether caller, choosing the model in use again, would become
-//     its indexer (memorySearchOffersTakeOver; ruling R13). It is how the status
-//     says the binding's indexer cannot index the model, asked from the caller's
-//     side so that the screen offers the act only where it changes something.
+//     its indexer (memorySearchOffersTakeOver). It is how the status says the
+//     binding's indexer cannot index the model, asked from the caller's side
+//     so that the screen offers the act only where it changes something.
 //   - indexed: the entries in its vector table, as this replica last counted
 //     them: kept for memorySearchIndexedTTL (vectorCountCache), so it may lag
 //     the table by up to that long.
@@ -80,9 +80,9 @@ func memorySearchOffersTakeOver(ctx context.Context, w memorySearchWorld, caller
 //     it is about this model: backlog is the items its last count found absent
 //     from the index or older there than their row (MemoryIndexRun.Missing:
 //     what its last completed walk left missing, or what the counting walk a
-//     waiting backfill takes found -- ruling R10), and backlogCountedAt when
-//     that count was taken; empty when none has been. waitingReason says why
-//     the backfill waits, if it does.
+//     waiting backfill takes found), and backlogCountedAt when that count was
+//     taken; empty when none has been. waitingReason says why the backfill
+//     waits, if it does.
 //   - switch: the switch run's state, target, counts, start and starter, and
 //     its own waitingReason; null when there has never been one. counts.total
 //     is the items the CURRENT walk has visited and starts again with each
@@ -93,8 +93,8 @@ func memorySearchOffersTakeOver(ctx context.Context, w memorySearchWorld, caller
 //     indexedByName name the RUN's indexer, whose machines the rebuild embeds
 //     on, so the screen can say its waitingReason from the viewer's side; and
 //     takeOver says whether caller, choosing the switch's target again, would
-//     become that indexer (ruling R14; R11 b is the act). It is false once the
-//     switch has flipped -- its target is then the model in use, whose
+//     become that indexer (memorySearchTakeOverRun is the act). It is false
+//     once the switch has flipped -- its target is then the model in use, whose
 //     take-over the row's takeOver says, and one act is offered once -- and
 //     once the switch is over.
 //   - retained: the retired indexes still kept, {providerRef, retireAt}, by

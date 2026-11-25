@@ -69,7 +69,8 @@ func init() {
 // corpora and the canonical and release seeds write, under which the text never
 // changes, though the row is written again (a review stamp, a boot's re-seed).
 // Memory search then takes such a row as current whenever its vector is
-// present (ruling R7).
+// present, where any other row's vector older than its newest version is
+// embedded again.
 //
 // RECOMPUTED FROM THE ROW, not inferred from its source or provenance, so any
 // other way of keying a chunk is versioned by construction, and new text under

@@ -220,7 +220,7 @@ func TestAnUnfinishedPlanIsNamedSoItCanBeFinished(t *testing.T) {
 	require.Equal(t, f.owner, b.ChosenBy)
 }
 
-// R5: the resolver re-checks that the indexer is still an active owner, and a
+// The resolver re-checks that the indexer is still an active owner, and a
 // refusal reaches the writer as an error so its usual "until backfilled" line
 // is logged.
 func TestAnIndexerWhoIsNoLongerAnOwnerIsRefused(t *testing.T) {

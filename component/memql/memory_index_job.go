@@ -102,7 +102,7 @@ package memql
 // unanswered item of a hung machine is counted failed, which one item cannot
 // tell apart from a slow one.
 //
-// # The backlog: what is missing, counted (ruling R10)
+// # The backlog: what is missing, counted, waiting or not
 //
 // Every walk that ends records what it LEFT missing -- items absent from the
 // target or older there than their row whose embedding failed
@@ -119,13 +119,13 @@ package memql
 // # What counts as missing
 //
 // An item is missing from the target when its vector is absent OR older than
-// its row's newest version (memoryIndexCurrent, ruling R7): a rewritten row's
+// its row's newest version (memoryIndexCurrent): a rewritten row's
 // old vector no longer says what the row says, and presence alone cannot see
 // that. A row whose id hashes its own text is exempt
 // (MemorySource.ContentAddressed, asked of each row): its text never changes
 // under the id.
 //
-// # The flip: ordered steps, every prefix finished (ruling R6)
+// # The flip: ordered steps, every prefix finished
 //
 // flipMemoryIndex, under the binding lock. It is ORDERED STEPS, not one
 // transaction: the engine writes rows only through its mutations, each its own
@@ -153,12 +153,12 @@ package memql
 //     runs again.
 //  5. `finishing` recorded: the flip is over, and the walk after it follows.
 //
-// # No graph routing rule (ruling R3)
+// # No graph routing rule
 //
 // The run rows have no graph.node.* routing rule (component/node/routing.go).
 // Nothing subscribes to their row events: the OS polls memorySearchStatus, and
 // forwarding one on every batch's write would wake every node's graph
-// subscribers per 32 items. R3 removed only that rule. Like every graph write,
+// subscribers per 32 items. Only that rule is left out. Like every graph write,
 // a run-row write still emits cache.invalidate.v1:platform:memoryIndexRun,
 // which the cache.invalidate.* rule carries to every node, where the result
 // cache's evictor alone reads it: one small mesh event per write. The
@@ -242,7 +242,7 @@ var memoryIndexClockSlack = 2 * time.Second
 // memoryIndexCurrent reports whether the target already holds item's vector AS
 // ITS ROW NOW IS: present, and not older than the row's newest version.
 //
-// WHY A PRESENT VECTOR CAN BE MISSING (ruling R7). A vector is keyed by (id,
+// WHY A PRESENT VECTOR CAN BE MISSING. A vector is keyed by (id,
 // vector_field) and carries no text, so presence alone cannot see a row
 // rewritten after it was embedded. During a switch the writers write only the
 // active table, so a row the first walk embedded into the target and someone
@@ -330,8 +330,9 @@ type MemoryIndexRun struct {
 	Counts MemoryIndexCounts
 	// Missing is what the last COMPLETED walk left missing (its Counts.Missing),
 	// or what a counting walk found missing, and MissingAt when that walk
-	// ended: the backlog Memory search shows (ruling R10). It is kept across
-	// the walks of one model, so the last count stands while the next is taken.
+	// ended: the backlog Memory search shows, counted while it waits too. It is
+	// kept across the walks of one model, so the last count stands while the
+	// next is taken.
 	Missing   int
 	MissingAt time.Time
 	// Counting is a waiting backfill's counting walk in progress (count).
@@ -431,15 +432,15 @@ func memoryIndexSwitchActive(state string) bool {
 // A SWITCH WHOSE BINDING NAMES ITS TARGET BUT WHOSE RUN NAMES NO PREVIOUS MODEL
 // resumes to `switching`. The flip records the previous model together with
 // `finishing` (flipMemoryIndex), so such a run never recorded the end of its
-// flip: a tick that had lost the job lock wrote its wait between another
-// tick's binding write and that `finishing`, and the other tick's write was
-// refused by the fence. Resumed as `finishing`, the rest of the flip -- the
-// semantic answer cache emptied, the previous model recorded -- would never
-// run; resumed as `switching`, it runs (ruling R6), and work takes it without
-// the indexer check. ONLY A BINDING A FLIP WROTE is that case: the flip's
-// binding write records the model it replaced (previousRef), and a binding
-// written otherwise -- a cluster's first, or by hand -- records none. Such a
-// binding left no flip part done; taken for one, the run was resumed to
+// flip: a tick that had lost the job lock wrote its wait between another tick's
+// binding write and that `finishing`, and the other tick's write was refused by
+// the fence. Resumed as `finishing`, the rest of the flip -- the semantic
+// answer cache emptied, the previous model recorded -- would never run; resumed
+// as `switching`, it runs (every prefix of a flip is finished), and work takes
+// it without the indexer check. ONLY A BINDING A FLIP WROTE is that case: the
+// flip's binding write records the model it replaced (previousRef), and a
+// binding written otherwise -- a cluster's first, or by hand -- records none.
+// Such a binding left no flip part done; taken for one, the run was resumed to
 // `switching` on every tick, emptied the answer cache and was written three
 // times each time its indexer could not index. It resumes as `finishing`.
 func memoryIndexResumeState(run MemoryIndexRun, active EmbedderBinding) string {
@@ -609,15 +610,15 @@ func (t *memoryIndexTick) pick(ctx context.Context) (bool, error) {
 //
 // The indexer is re-checked before the first step of the tick that embeds or
 // moves the binding (indexerWait). ONE STEP IS EXEMPT: the rest of a flip whose
-// binding already names its target (ruling R6). A flip that moved the binding
-// and stopped before recording `finishing` has left only steps that embed
-// nothing and choose no machine -- emptying the semantic answer cache,
-// recording `finishing` and the model replaced -- so they run whatever the
-// indexer's standing. Parked instead, those steps would wait for an owner
-// they do not need. So a run in `switching` with the binding moved takes them
-// at once, and so does a run parked as `waiting` in that state, which resumes
-// to `switching` (memoryIndexResumeState). The walk after the flip is checked
-// as usual, and waits for an owner.
+// binding already names its target (every prefix of a flip is finished). A flip
+// that moved the binding and stopped before recording `finishing` has left only
+// steps that embed nothing and choose no machine -- emptying the semantic
+// answer cache, recording `finishing` and the model replaced -- so they run
+// whatever the indexer's standing. Parked instead, those steps would wait for
+// an owner they do not need. So a run in `switching` with the binding moved
+// takes them at once, and so does a run parked as `waiting` in that state,
+// which resumes to `switching` (memoryIndexResumeState). The walk after the
+// flip is checked as usual, and waits for an owner.
 func (t *memoryIndexTick) work(ctx context.Context) error {
 	// The sources and the table first: a waiting backfill still counts its
 	// backlog over them (count).
@@ -694,16 +695,16 @@ func (t *memoryIndexTick) bindingNamesTarget() bool {
 	return t.active.ProviderRef == t.run.TargetRef && t.active.Dimensions == t.run.TargetDimensions
 }
 
-// indexerWait is the indexer re-check of every tick (R5 at the job's level),
-// made before the tick's first step that embeds or moves the binding. A fleet
-// model is embedded on its indexer's machines, and the
-// indexer's machines see every person's memory text, so an indexer who is no
-// longer an active owner indexes nothing; a fleet model with no indexer named
-// would resolve as the job itself and reach no one's machines. A vendor model
-// has no indexer: the cluster's account pays, as it does for every embedding.
-// The check is indexerOwnerAnswer's, which tells "not an owner" from "could
-// not be read" (no owner set read on this replica yet): both wait, and only
-// the first is said as a demotion.
+// indexerWait is the indexer re-check of every tick (the indexer must still be
+// an active owner, at the job's level), made before the tick's first step that
+// embeds or moves the binding. A fleet model is embedded on its indexer's
+// machines, and the indexer's machines see every person's memory text, so an
+// indexer who is no longer an active owner indexes nothing; a fleet model with
+// no indexer named would resolve as the job itself and reach no one's machines.
+// A vendor model has no indexer: the cluster's account pays, as it does for
+// every embedding. The check is indexerOwnerAnswer's, which tells "not an
+// owner" from "could not be read" (no owner set read on this replica yet): both
+// wait, and only the first is said as a demotion.
 func (t *memoryIndexTick) indexerWait(ctx context.Context) (string, bool) {
 	indexer, fleet := IndexerFor(EmbedderBinding{ProviderRef: t.run.TargetRef, IndexedBy: t.run.IndexedBy})
 	if !fleet {
@@ -740,7 +741,7 @@ func (t *memoryIndexTick) wait(ctx context.Context, reason string) error {
 	return err
 }
 
-// count takes the steps of a waiting backfill's COUNTING WALK (ruling R10).
+// count takes the steps of a waiting backfill's COUNTING WALK.
 // While the model cannot be reached nothing is embedded, but Memory search must
 // still say how many items wait ("37 items waiting: ..."), and a wait stops the
 // embed walk at its first missing item, so its counts cannot say. TRIGGER: a

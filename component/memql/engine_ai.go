@@ -76,7 +76,7 @@ func (e *MemQLEngine) RegisterIntegration(provider IntegrationProvider) error {
 // no-op and every AI call behaves exactly as pre-5.9).
 //
 // embeddingProviderName selects the embedding model. EMPTY MEANS "the model
-// memory search is bound to, AT EACH CALL" (boundSemanticEmbedder, ruling R8),
+// memory search is bound to, AT EACH CALL" (boundSemanticEmbedder),
 // not "embedding3Small" (epic memql#5137, D6: that literal was one of five
 // copies of the same paid pin) and no longer "the model bound at boot": a
 // cache wired with the boot binding went on embedding with the replaced model

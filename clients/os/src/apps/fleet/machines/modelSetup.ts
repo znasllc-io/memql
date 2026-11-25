@@ -5,7 +5,7 @@ import { holds } from "../../../system/roles";
 /**
  * Where memory search's model is changed, said to the reader (design record
  * 2026-11-23, section 8: Fleet says where to change it). WHERE is a page only
- * to somebody who can open it (ruling R15): Cluster > Settings > Memory search
+ * to somebody who can open it: Cluster > Settings > Memory search
  * needs `read` on app:cluster/memorysearch (MEMORY_SEARCH_RESOURCE, seeded on
  * the owner alone), so anybody else is told who can change it instead. Every
  * Fleet pointer to it says it through here: the board's caption, its refusal,

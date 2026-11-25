@@ -736,7 +736,7 @@ describe("Fleet's model board", () => {
     expect(assignmentProposal(view.choices, "new-embed", ["embeddings"], view).refusal).toBe(sentence);
   });
 
-  it("points there only for whoever can open it; anybody else is told who can change it (ruling R15)", () => {
+  it("points there only for whoever can open it; anybody else is told who can change it", () => {
     installSeededAccess("developer");
     const sentence = "Memory search keeps embed. A cluster owner can change it.";
     board();

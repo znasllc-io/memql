@@ -617,8 +617,8 @@ func tickUntil(t *testing.T, job *memoryIndexFake, state string) {
 }
 
 // Choosing the model in use again moves nothing, rebuilds nothing and probes
-// nothing. Under the binding lock it is the TAKE-OVER (design section 1, ruling
-// R9): the caller becomes the indexer and the chooser of a machine model whose
+// nothing. Under the binding lock it is the TAKE-OVER (design section 1): the
+// caller becomes the indexer and the chooser of a machine model whose
 // indexer is missing, is no longer an active owner, or has no machine, own or
 // lent, offering the model for embeddings while one of the caller's does.
 // Otherwise only an empty chooser is filled. A vendor model has no indexer: only
@@ -703,7 +703,7 @@ func TestChoosingTheModelInUseTakesOverAnIndexerWhoCannotIndex(t *testing.T) {
 	require.Len(t, f.choices, 1)
 }
 
-// A switch whose binding already names its target (ruling R11) has a way out.
+// A switch whose binding already names its target has a way out.
 // Its walk after the flip embeds as the run's indexer, and when that indexer
 // cannot index, an owner choosing the model in use again takes over both the
 // binding and the run, and the next tick finishes. Cancel stays refused: the
@@ -765,7 +765,7 @@ func TestAFlippedSwitchWhoseIndexerCannotIndexIsTakenOverByChoosingItAgain(t *te
 }
 
 // Before the flip, choosing the running switch's target again takes over the
-// RUN's indexer under the same triggers (ruling R11 b): the switch goes on, and
+// RUN's indexer under the same triggers: the switch goes on, and
 // flips with the new indexer.
 func TestChoosingTheRunningSwitchsTargetAgainTakesItOver(t *testing.T) {
 	ctx := context.Background()
@@ -789,7 +789,7 @@ func TestChoosingTheRunningSwitchsTargetAgainTakesItOver(t *testing.T) {
 }
 
 // Before the flip, choosing the MODEL IN USE again is the take-over of the
-// BINDING's indexer (ruling R13, R9's rule): search and every writer embed as
+// BINDING's indexer, by the same rule: search and every writer embed as
 // that indexer for the whole rebuild, so one who cannot index would leave search
 // refused until the flip. The running switch is left as it is -- its state, its
 // indexer, its counts -- nothing is probed, and the choice is written under the
@@ -834,7 +834,7 @@ func TestChoosingTheModelInUseDuringASwitchTakesOverTheBindingsIndexer(t *testin
 
 // Choosing another model while the walk after a flip runs -- switching back
 // included -- closes the flipped switch as done, leaving its remaining walk to
-// the backfill, and starts the new switch (ruling R11 a).
+// the backfill, and starts the new switch.
 func TestSwitchingBackDuringTheWalkAfterTheFlipStartsANewSwitch(t *testing.T) {
 	ctx := context.Background()
 	f := newMemorySearchFake(4)
@@ -1106,10 +1106,10 @@ func TestSwitchAnywayFlipsWithTheHeldItems(t *testing.T) {
 
 // The status says what is in use and who indexes it, how many items the index
 // holds, the backlog -- the items the backfill's last count found missing, with
-// when it was counted (ruling R10) -- and why it waits, the switch in progress
-// with an ESTIMATED total, the indexes kept for switching back, and which model
-// the binding replaced: the one Switch back names, which a cancelled switch's
-// kept target is not.
+// when it was counted, counted while it waits too -- and why it waits, the
+// switch in progress with an ESTIMATED total, the indexes kept for switching
+// back, and which model the binding replaced: the one Switch back names, which
+// a cancelled switch's kept target is not.
 func TestStatusReportsTheBacklogAndWhyItWaits(t *testing.T) {
 	ctx := context.Background()
 	f := newMemorySearchFake(10).noSwitch()
@@ -1216,7 +1216,7 @@ func TestAKeptIndexPastItsDateIsNotListed(t *testing.T) {
 }
 
 // The status says when the binding's indexer cannot index the model in use and
-// choosing it again would make the caller its indexer (ruling R13): `takeOver`.
+// choosing it again would make the caller its indexer: `takeOver`.
 // It is the take-over rule itself (memorySearchTakesOver) asked for the caller,
 // who must be an active owner to index a machine model, so the screen offers the
 // act only where it changes something -- never to the indexer themself, never
@@ -1301,7 +1301,7 @@ func TestStatusSaysWhenChoosingTheModelInUseTakesOver(t *testing.T) {
 }
 
 // A running switch says too when choosing its TARGET again would take over its
-// own indexer (ruling R14): the switch summary's takeOver -- the take-over rule
+// own indexer: the switch summary's takeOver -- the take-over rule
 // asked for the caller, the run's indexer and its target -- beside whose
 // machines the rebuild embeds on (indexedBy, indexedByName), so the screen can
 // offer the act on the Switching row and say the waiting reason from the
@@ -1342,7 +1342,7 @@ func TestTheSwitchSaysWhenChoosingItsTargetAgainTakesOver(t *testing.T) {
 	require.Equal(t, "Ana Owner", sw["indexedByName"])
 	require.Zero(t, f.runAttempts, "a status writes nothing")
 
-	// Choosing the target again is the act it offers (ruling R11 b).
+	// Choosing the target again is the act it offers (memorySearchTakeOverRun).
 	require.NoError(t, memorySearchSwitch(ctx, f, other, fakeNewRef))
 	sw = summary(t, f, other)
 	require.Equal(t, false, sw["takeOver"], "the caller indexes the rebuild now")

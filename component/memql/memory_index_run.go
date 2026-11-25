@@ -154,8 +154,8 @@ func (e *MemQLEngine) readMemoryIndexRun(ctx context.Context, kind string) (Memo
 // writers carry one: an unfenced write would silently revert a cancel, or a
 // cancel would roll back a cursor.
 //
-// THE NEW VERSION IS STAMPED AFTER THE ONE READ (ruling R12, memql#5431's third
-// part): VersionTimeAfter(version, now) is the write's versionTime, so a
+// THE NEW VERSION IS STAMPED AFTER THE ONE READ (memql#5431's third part):
+// VersionTimeAfter(version, now) is the write's versionTime, so a
 // replica whose clock lags the last writer's still writes the newest version
 // rather than one that reads as older and is lost. (The fence's own clock,
 // fenceWriteClock, makes the same guarantee for a fenced write; the stamp here

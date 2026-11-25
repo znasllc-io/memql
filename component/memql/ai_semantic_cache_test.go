@@ -327,7 +327,7 @@ func semanticCacheOnBinding(t *testing.T, calls *[]string, binding *EmbedderBind
 	return cache, store
 }
 
-// THE SEMANTIC ANSWER CACHE FOLLOWS THE BINDING (ruling R8). It embeds every
+// THE SEMANTIC ANSWER CACHE FOLLOWS THE BINDING. It embeds every
 // lookup and every write with the model memory search is bound to at that
 // moment, so after a switch it neither keeps embedding with the replaced model
 // nor compares vectors of two models: a row is a hit only for the model that

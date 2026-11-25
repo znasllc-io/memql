@@ -91,7 +91,7 @@ func TestConversationSemanticEvidenceAcrossReplicasAndSourceChanges(t *testing.T
 			{"platform.recordEmbedderBindingPlan", map[string]any{"bindingId": "active", "providerRef": "memory-index-test", "dimensions": 1536}},
 			{"platform.activateEmbedderBinding", map[string]any{"bindingId": "active", "activatedAt": time.Now().UTC().Format(time.RFC3339Nano)}},
 		} {
-			// Stamped when written, as bindEmbedder stamps them (ruling R12).
+			// Stamped when written, as bindEmbedder stamps them: after the last.
 			write.args["versionTime"] = time.Now().UTC().Format(time.RFC3339Nano)
 			call, _ := parser.RenderCall(write.name, write.args)
 			_, err := a.Execute(auth.ContextWithInternalOrigin(ctx), "mutation "+call)

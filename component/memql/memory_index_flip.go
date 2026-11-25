@@ -83,7 +83,7 @@ func (e *MemQLEngine) flipMemoryIndex(ctx context.Context, run MemoryIndexRun) e
 		// Retired FIRST: once the binding has moved, the old model's index
 		// must already be dated for keeping, or the daily cleanup could not
 		// tell it from an index nobody needs.
-		// Each write is stamped after the version it read (ruling R12): the
+		// Each write is stamped after the version it read: the
 		// retired row's own, and the binding's read under this lock.
 		retiredVersion, err := e.latestRowVersion(ctx, EmbedderBindingConceptID, retired)
 		if err != nil {

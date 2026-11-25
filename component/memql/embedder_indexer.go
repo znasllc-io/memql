@@ -44,7 +44,7 @@ package memql
 // that the router cannot do: the assertion the call carries across a replica
 // hop. Its comment has the why.
 //
-// # The indexer must still be an owner (R5)
+// # The indexer must still be an owner
 //
 // Only a cluster owner -- stored role `owner`, active -- is ever an indexer,
 // because the indexer's machines see every person's memory text. A binding

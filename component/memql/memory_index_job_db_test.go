@@ -215,7 +215,7 @@ func (f *memoryIndexDBFixture) bind(ref string, indexer string) {
 		{"platform.setEmbedderBindingChoice", map[string]any{"bindingId": "active", "indexedBy": indexer, "chosenBy": indexer}},
 	}
 	for _, w := range writes {
-		// Each stamped when written, after the one before it (ruling R12): a
+		// Each stamped when written, after the one before it: a
 		// version taken before an earlier write would read as the older one.
 		w.args["versionTime"] = time.Now().UTC().Format(time.RFC3339Nano)
 		call, err := parser.RenderCall(w.name, w.args)
@@ -793,7 +793,7 @@ func TestAWidthChangeMovesTablesOnlyAtTheFlip(t *testing.T) {
 // again, the semantic answer cache is emptied, and the run names the model the
 // binding replaced. That holds even when the indexer stopped being an owner in
 // between: the rest of the flip embeds nothing, so it is not parked, and only
-// the walk after it waits (ruling R6: every prefix of the flip finishes).
+// the walk after it waits: every prefix of the flip is finished.
 func TestAResumedFlipFinishesFromTheBinding(t *testing.T) {
 	// crashedFlip leaves a switch the way a replica dying mid-flip does:
 	// `switching` saved, the binding moved, `finishing` never written.
@@ -878,7 +878,7 @@ func TestAResumedFlipFinishesFromTheBinding(t *testing.T) {
 }
 
 // Only a `switching` run flips. Switch anyway writes `switching` and the tick
-// flips it (ruling R2 as amended), so a switch still held in needsDecision is
+// flips it (no builtin flips), so a switch still held in needsDecision is
 // the owner's to decide, and a flip asked of it moves nothing.
 func TestOnlyASwitchingRunFlips(t *testing.T) {
 	f := newMemoryIndexDBFixture(t)
@@ -981,7 +981,7 @@ func TestARunWriteAnswersTheVersionItStored(t *testing.T) {
 	require.Equal(t, run.Counts, back.Counts, "every count, the streak included, reads back as written")
 }
 
-// A vector older than its row's newest version is MISSING (ruling R7): the row
+// A vector older than its row's newest version is MISSING: the row
 // was rewritten after it was embedded, so its vector no longer says what the
 // row says. A row its writer embedded after writing it is not touched.
 func TestARowRewrittenAfterItsVectorIsEmbeddedAgain(t *testing.T) {

@@ -2539,10 +2539,10 @@ the row it reads is the row just written.
 The job and the owner's builtins (`memorySearchSwitch`, `memorySearchCancel`
 and `memorySearchSwitchAnyway`, `component/memql/memory_search_builtins.go`)
 are the only writers and all go through `writeMemoryIndexRun`. A doubled tick (a lost lock) costs
-duplicate embeddings, never a wrong row. No graph routing rule (ruling R3):
-nothing subscribes to the rows' graph events, and forwarding one would wake every
-node's graph subscribers per 32 items. R3 removed only that rule: like every
-graph write, each run-row write still emits
+duplicate embeddings, never a wrong row. No graph routing rule for the run
+rows: nothing subscribes to their graph events (the OS polls the status), and
+forwarding one would wake every node's graph subscribers per 32 items. Only
+that rule is left out: like every graph write, each run-row write still emits
 `cache.invalidate.v1:platform:memoryIndexRun`, which the `cache.invalidate.*`
 rule carries to every node for its result-cache evictor, one small mesh event
 per write.
@@ -2571,7 +2571,7 @@ source reads only the columns the walk uses, `id`, `createdAt` and `payload`
 crossed the wire for every item of every walk, and the backfill walks the
 whole corpus every ten minutes (`TestTheSourceWalkReadsOnlyTheColumnsItUses`).
 
-**What counts as missing (ruling R7).** An item is missing from the target when
+**What counts as missing.** An item is missing from the target when
 its vector is absent OR older than its row's newest version
 (`memoryIndexCurrent`): a vector is keyed by `(id, vector_field)` and carries no
 text, so presence alone cannot see a row rewritten after it was embedded.
@@ -2647,7 +2647,7 @@ machine's first unanswered item is counted failed. Tests:
 `TestTwoItemsInARowThatNeverAnswerMakeTheRunWait`, and the streak's round trip
 in `TestARunWriteAnswersTheVersionItStored` (db).
 
-**The backlog is counted, waiting or not (ruling R10).** Trigger: design
+**The backlog is counted, waiting or not.** Trigger: design
 section 8's "37 items waiting: none of your machines offering ... is online",
 which no count the job kept could say. A waiting walk stops at its first
 missing item, and `counts.failed` is often 0 while it waits. Every walk that
@@ -2674,7 +2674,7 @@ written after it goes to the active table and the walk after the flip catches
 it. `flipMemoryIndex` holds the binding lock around its fresh reads and writes
 and fences the binding write to the version read under it (memql#5431).
 
-**The flip is ordered steps, and every prefix is finished (ruling R6).** It is
+**The flip is ordered steps, and every prefix is finished.** It is
 not one transaction: the engine writes only through its mutations, each its own
 statement, and the lock is on another connection. `switching` is saved first,
 and the next tick finishes whatever prefix a crash left. What each prefix
@@ -2714,7 +2714,7 @@ Switch anyway leaves by writing `switching` for the tick to flip. Tests:
 longer an owner; parked as waiting after the binding moved),
 `TestAWaitingRunResumesTheWalkItWasIn`, `TestOnlyASwitchingRunFlips`.
 
-**The semantic answer cache follows the binding (ruling R8).** It was wired once
+**The semantic answer cache follows the binding.** It was wired once
 at boot with the model bound then (`WireSemanticCache`), so after a flip every
 running replica went on embedding its keys and lookups with the replaced model,
 refilling `semantic_ai_cache` in that model's space, and a replica restarted
@@ -2808,11 +2808,11 @@ would be a guess. Tests: `TestEveryActIsAnActiveOwners`,
 FIRST model (`bindEmbedder`): nothing is indexed under another. Every other
 change of model is a `switch` run row that the job's tick carries out. Trigger
 for the rule: the flip is ordered steps that the next tick finishes from
-`switching` (R6), and a builtin that died after moving the binding would leave a
-run the tick never resumes. So `memorySearchSwitchAnyway` (from `needsDecision`
-only) writes `switching`, and a switch over an active index that holds no
-vector is written `switching` directly; either way the tick flips within a
-minute.
+`switching`, every prefix of it, and a builtin that died after moving the
+binding would leave a run the tick never resumes. So `memorySearchSwitchAnyway`
+(from `needsDecision` only) writes `switching`, and a switch over an active
+index that holds no vector is written `switching` directly; either way the tick
+flips within a minute.
 
 **`memorySearchSwitch`.** No model bound: bound at once. A binding that lands
 between that read and `bindEmbedder`'s own, under its lock, makes
@@ -2829,11 +2829,10 @@ lock, from the run and the binding read there (a state that moved meanwhile is
 - A switch before the flip refuses another model, before anything is probed.
   One held in `needsDecision` names Switch anyway and Cancel; any other says to
   cancel it or let it finish. Its own target chosen again is the take-over of
-  the RUN's indexer (below; ruling R11 b), or nothing. The model in use chosen
-  again is the take-over of the BINDING's indexer, the switch left as it is
-  (below; ruling R13).
+  the RUN's indexer (below), or nothing. The model in use chosen again is the
+  take-over of the BINDING's indexer, the switch left as it is (below).
 - A FLIPPED switch (the binding names its target; `finishing` or `waiting`) is
-  the way out (ruling R11 a). Trigger: its walk after the flip embeds as the
+  the way out. Trigger: its walk after the flip embeds as the
   run's indexer, and with that indexer demoted or without the model every act
   was refused, while search refused queries and the previous model's kept index
   neared its drop. The model in use chosen again takes over the binding and
@@ -2874,7 +2873,7 @@ survived the read-merge. Limit: if the plan's model is never offered again,
 the row has to be removed by hand. Test:
 `TestAnUnfinishedPlanIsNamedSoItCanBeFinished` (db).
 
-**The take-over (design section 1, ruling R9; `memorySearchTakesOver`).**
+**The take-over (design section 1; `memorySearchTakesOver`).**
 Choosing a machine model again makes the caller its indexer and chooser when
 the indexer is empty, is no longer an active owner, or has no machine, own or
 lent, offering the model for embeddings (online or not, as adoption reads it)
@@ -2901,7 +2900,7 @@ explicit act on the same model that re-indexes nothing. Tests:
 `TestChoosingTheRunningSwitchsTargetAgainTakesItOver`,
 `TestSwitchingBackDuringTheWalkAfterTheFlipStartsANewSwitch`.
 
-**The take-over while a switch runs (ruling R13).** Design section 1 lets an
+**The take-over while a switch runs.** Design section 1 lets an
 owner take over by choosing again at any time. Trigger: before the flip,
 `memorySearchSwitch` refused the model in use as "another model", yet search
 queries and every writer embed as the BINDING's indexer for the whole rebuild,
@@ -2909,7 +2908,7 @@ so with that indexer demoted or without the model, search stayed refused until
 the flip. Chosen path: the model in use chosen before the flip runs the same
 take-over as with no switch (`memorySearchKeep`, under the binding lock), and
 the running switch is not written: its own indexer is the run's, taken over by
-choosing its target (R11 b), and the flip names that one. Rejected: moving the
+choosing its target (above), and the flip names that one. Rejected: moving the
 run's indexer too, which would replace a run indexer who can index, and
 leaving the refusal, which keeps search down for hours on a large corpus.
 **The status says when it applies** (`takeOver`): whether the caller, choosing
@@ -2922,9 +2921,9 @@ next read asks again; the status itself still answers. Tests:
 `TestChoosingTheModelInUseDuringASwitchTakesOverTheBindingsIndexer`,
 `TestStatusSaysWhenChoosingTheModelInUseTakesOver`.
 
-**The switch says it too (ruling R14).** A running switch whose OWN indexer
+**The switch says it too.** A running switch whose OWN indexer
 cannot index was told only by its `waitingReason`, though choosing its target
-again is the take-over of the run's indexer (R11 b), and design section 1 lets
+again is the take-over of the run's indexer (above), and design section 1 lets
 an owner take over at any time. So the switch summary carries `takeOver`, the
 same rule asked for the caller, the RUN's indexer and the switch's target, and
 `indexedBy` and `indexedByName` for the run's indexer, so the Switching row can
@@ -2948,7 +2947,7 @@ working in this conversation", which are Ask's) never reach an owner
 (`errAskConversationHeld`, `memorySearchLock`;
 `TestOnlyALockHeldElsewhereReadsAsBeingChangedElsewhere`).
 
-**A version stamped after the one read (ruling R12; memql#5431's third part).**
+**A version stamped after the one read (memql#5431's third part).**
 Trigger: a fence checks that a row did not change; it does not make the new
 version later, and a replica whose clock lags the last writer's would stamp an
 OLDER version, which every reader passes over as superseded. Every write of
@@ -2997,7 +2996,7 @@ kept until a day already gone, with Switch back offered over it
 (`TestAKeptIndexPastItsDateIsNotListed`). `previousRef` is the model
 the binding replaced, which is the kept index Switch back names: `retained` also
 holds a cancelled switch's partial index, a model that was never in use.
-`mayAct` is above, and so are `takeOver` (R13) and the switch summary's (R14).
+`mayAct` is above, and so are `takeOver` and the switch summary's.
 
 **The choices** are the embedding models of the caller's own catalog (their
 machines and the ones lent to them), counted by the machines that embed with

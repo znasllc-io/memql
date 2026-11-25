@@ -9,7 +9,7 @@ import { useReleaseRead } from "../releases/useReleaseRead";
 //
 // Both reads are POLLED, through useReleaseRead: nothing about them is
 // broadcast. The status is a row the engine computes per call, and the index
-// job's run rows have no routing rule (ruling R3), so a subscription would
+// job's run rows have no graph routing rule, so a subscription would
 // never move. The status is read every 5 s while a switch runs, because its
 // progress is what the page is for then, and every 30 s otherwise. The choices
 // are read every 30 s even then: a running switch hides them (one switch at a
@@ -47,7 +47,7 @@ export interface MemorySearchSwitch {
   /** The RUN's indexer, whose machines the rebuild embeds on, BARE as the wire carries it. */
   indexedBy: string;
   indexedByName: string;
-  /** Choosing the switch's target again would make the caller the run's indexer (ruling R14). */
+  /** Choosing the switch's target again would make the caller the run's indexer: the run's indexer cannot index it. */
   takeOver: boolean;
 }
 
@@ -66,7 +66,7 @@ export interface MemorySearchStatus {
   previousRef: string;
   /** Whether the reader may act at all: an active cluster owner holding the part's execute (the engine's answer). */
   mayAct: boolean;
-  /** Choosing the model in use again would make the caller its indexer (ruling R13). */
+  /** Choosing the model in use again would make the caller its indexer: the binding's indexer cannot index it. */
   takeOver: boolean;
   indexed: number;
   backlog: number;
@@ -123,8 +123,8 @@ export function switchRunning(status: MemorySearchStatus | null): boolean {
 
 /**
  * The switch has happened -- the binding names its target -- and only its walk
- * after the flip remains (memorySearchFlipped, ruling R11). The page then reads
- * as after a switch: another model may be chosen, and Cancel is refused.
+ * after the flip remains (memorySearchFlipped). The page then reads as after a
+ * switch: another model may be chosen, and Cancel is refused.
  */
 export function switchFlipped(status: MemorySearchStatus | null): boolean {
   const sw = status?.switch;

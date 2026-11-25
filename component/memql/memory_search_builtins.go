@@ -46,38 +46,39 @@ package memql
 // another model. Every other change of model is the index job's
 // (memory_index_job.go): a builtin writes the `switch` run row and the job's
 // tick rebuilds and flips. No builtin calls flipMemoryIndex, Switch anyway
-// included. TRIGGER for that rule: the flip is ordered steps finished by the
-// next tick from `switching` (ruling R6); a builtin that died after moving the
-// binding would leave the run in a state the tick never resumes. So
-// memorySearchSwitchAnyway writes `switching` and the tick flips within a
-// minute, and a switch over an index that holds no vector is written
+// included. TRIGGER for that rule: the flip is ordered steps, and the next
+// tick finishes from `switching` whatever prefix a crash left; a builtin that
+// died after moving the binding would leave the run in a state the tick never
+// resumes. So memorySearchSwitchAnyway writes `switching` and the tick flips
+// within a minute, and a switch over an index that holds no vector is written
 // `switching` directly for the same reason.
 //
 // # The take-over, and the way out of a flipped switch
 //
 // Choosing the model in use again is how an owner TAKES OVER indexing it
-// (design record section 1, ruling R9; memorySearchTakesOver): when its indexer
-// is missing, is no longer an active owner, has no machine -- own or lent,
+// (design record section 1; memorySearchTakesOver): when its indexer is
+// missing, is no longer an active owner, has no machine -- own or lent,
 // embeddings only -- offering the model while one of the caller's does, or has
 // none online while one of the caller's is, the caller becomes its indexer and
-// chooser. Otherwise only an empty chooser is filled. Choosing a running switch's own target is the same take-over of the
-// RUN's indexer. Choosing the model in use while a switch runs, before its flip,
-// is still the take-over of the BINDING's (ruling R13): search queries and every
-// writer embed as the binding's indexer for the whole rebuild, and refusing it
-// as "another model" left search refused until the flip whenever that indexer
-// could not index. The running switch is left as it is: its own indexer is the
-// run's, taken over by choosing its target, and the flip names that one. The
-// status says when choosing the model in use would take over (`takeOver`), and
-// its switch summary when choosing the running switch's target again would
-// take over the run's (ruling R14), so the screen offers each act only where it
-// changes something. And a switch that has FLIPPED (memorySearchFlipped) is no
-// longer one switch at a time's to guard (ruling R11): its walk after the flip
-// embeds as the run's indexer, and with that indexer demoted or without the
-// model every other act would be refused while search refuses queries and the
-// previous model's kept index nears its drop. So choosing the model in use
-// takes over the binding and the run, and choosing another model closes the
-// flipped switch as done -- its remaining walk is the backfill's -- and starts
-// the new one. Cancel stays refused after the flip: the switch happened.
+// chooser. Otherwise only an empty chooser is filled. Choosing a running
+// switch's own target is the same take-over of the RUN's indexer. Choosing the
+// model in use while a switch runs, before its flip, is still the take-over of
+// the BINDING's: search queries and every writer embed as the binding's indexer
+// for the whole rebuild, and refusing it as "another model" left search refused
+// until the flip whenever that indexer could not index. The running switch is
+// left as it is: its own indexer is the run's, taken over by choosing its
+// target, and the flip names that one. The status says when choosing the model
+// in use would take over (`takeOver`), and its switch summary when choosing the
+// running switch's target again would take over the run's, so the screen offers
+// each act only where it changes something. And a switch that has FLIPPED
+// (memorySearchFlipped) is no longer one switch at a time's to guard: its walk
+// after the flip embeds as the run's indexer, and with that indexer demoted or
+// without the model every other act would be refused while search refuses
+// queries and the previous model's kept index nears its drop. So choosing the
+// model in use takes over the binding and the run, and choosing another model
+// closes the flipped switch as done -- its remaining walk is the backfill's --
+// and starts the new one. Cancel stays refused after the flip: the switch
+// happened.
 //
 // # Every run-row write is fenced, and a refusal is answered
 //
@@ -87,17 +88,17 @@ package memql
 // owner as "changed meanwhile, try again" (errMemorySearchChanged) and is never
 // retried here: the state it was decided on is gone, and deciding again is the
 // owner's call. Every write of the run, binding and retired rows is stamped
-// after the version it read (VersionTimeAfter, ruling R12), so a replica whose
-// clock lags the last writer's still writes the newest version. The acts that
-// read the binding and decide on it -- switch, cancel, confirm, and the cleanup
-// -- hold the binding lock (lockAskConversationKind "active",
-// "embedder-binding") around those reads and their writes, which is what the
-// flip holds, so neither can interleave with a flip on another replica
-// (memql#5431). The lock is a try-lock: held by another request, the act says
-// the model is being changed elsewhere and to try again, rather than waiting;
-// a lock that could not be taken at all is reported as the failure it is
-// (memorySearchLock). So is an owner check that could not be made, which is
-// never read as "not an owner" (indexerOwnerAnswer).
+// after the version it read (VersionTimeAfter), so a replica whose clock lags
+// the last writer's still writes the newest version. The acts that read the
+// binding and decide on it -- switch, cancel, confirm, and the cleanup -- hold
+// the binding lock (lockAskConversationKind "active", "embedder-binding")
+// around those reads and their writes, which is what the flip holds, so neither
+// can interleave with a flip on another replica (memql#5431). The lock is a
+// try-lock: held by another request, the act says the model is being changed
+// elsewhere and to try again, rather than waiting; a lock that could not be
+// taken at all is reported as the failure it is (memorySearchLock). So is an
+// owner check that could not be made, which is never read as "not an owner"
+// (indexerOwnerAnswer).
 //
 // # The 30-day retention
 //
@@ -338,9 +339,10 @@ func memorySearchSwitchRunning(w memorySearchWorld, sw MemoryIndexRun) error {
 		memorySearchLabel(w, sw.TargetRef), sw.State)
 }
 
-// memorySearchFlipped reports whether sw is a switch whose binding already names
-// its target and whose walk after the flip is under way or waiting: the switch
-// happened, and only that walk remains (ruling R11).
+// memorySearchFlipped reports whether sw is a switch whose binding already
+// names its target and whose walk after the flip is under way or waiting: the
+// switch happened, and only that walk remains: it is the way out of a switch
+// whose walk after the flip cannot go on (the header's "The take-over").
 func memorySearchFlipped(sw MemoryIndexRun, active EmbedderBinding) bool {
 	return (sw.State == memoryIndexStateFinishing || sw.State == memoryIndexStateWaiting) &&
 		active.ProviderRef == sw.TargetRef && active.Dimensions == sw.TargetDimensions
@@ -381,9 +383,9 @@ func memorySearchOffering(models []FleetModel, model string) (offers, online boo
 	return offers, false
 }
 
-// memorySearchTakesOver is the TAKE-OVER rule (design record section 1, ruling
-// R9): whether caller, choosing ref again, becomes its indexer in place of
-// indexer. A machine model's indexer is replaced when it
+// memorySearchTakesOver is the TAKE-OVER rule (design record section 1):
+// whether caller, choosing ref again, becomes its indexer in place of indexer.
+// A machine model's indexer is replaced when it
 //
 //   - is empty, or no longer an active owner;
 //   - has no machine -- own or lent, embeddings only -- offering the model while
@@ -469,14 +471,15 @@ func memorySearchCaller(ctx context.Context) (string, error) {
 //
 //   - A FLIPPED switch (memorySearchFlipped). The model in use: the take-over
 //     of the binding (memorySearchKeep) and of the run's indexer, so the walk
-//     after the flip resumes on machines that can serve it (ruling R11 a).
-//     Another model, switching back included: that switch is closed as done --
-//     its remaining walk is the backfill's, over the model it made active --
-//     and the new switch starts.
+//     after the flip resumes on machines that can serve it. Another model,
+//     switching back included: that switch is closed as done -- its remaining
+//     walk is the backfill's, over the model it made active -- and the new
+//     switch starts.
 //   - A switch before the flip. Its own target: the take-over of the run's
-//     indexer (ruling R11 b). The model in use: the take-over of the BINDING's
-//     indexer (memorySearchKeep; ruling R13), the switch left as it is. Another
-//     model: refused (one switch at a time).
+//     indexer. The model in use: the take-over of the BINDING's indexer
+//     (memorySearchKeep), the switch left as it is, since search and every
+//     writer embed as the binding's indexer until the flip. Another model:
+//     refused (one switch at a time).
 //   - No switch in progress. The model in use: memorySearchKeep. Another: a new
 //     switch -- the target's table ensured (a kept table is reused, so the walk
 //     embeds only what it is missing) and the run written `indexing`, or
@@ -558,7 +561,7 @@ func memorySearchSwitch(ctx context.Context, w memorySearchWorld, caller, provid
 	case running && !flipped && provider == sw.TargetRef:
 		return memorySearchTakeOverRun(ctx, w, caller, sw, version)
 	case running && !flipped && bound && provider == active.ProviderRef:
-		// Ruling R13: the take-over of the BINDING's indexer. The switch is left
+		// The take-over of the BINDING's indexer. The switch is left
 		// as it is; search and the writers embed as the binding's indexer until
 		// the flip, which names the run's.
 		_, err := memorySearchKeep(ctx, w, caller, active)

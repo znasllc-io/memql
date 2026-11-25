@@ -73,8 +73,8 @@ function indexingLine(status: MemorySearchStatus, me: string): string {
  * machines" (memoryIndexWaitReason), which is "your machines" to the indexer
  * and the indexer's by name to anybody else. Which indexer is meant follows
  * which run waits: the backfill embeds as the BINDING's indexer, a switch's
- * rebuild as the RUN's (ruling R14), and the two need not be one person. Any
- * other wording is shown as the engine wrote it.
+ * rebuild as the RUN's, and the two need not be one person. Any other wording
+ * is shown as the engine wrote it.
  */
 function asReader(reason: string, indexer: Indexer, me: string): string {
   const whose = indexerIsMe(indexer, me) ? "your machines" : indexer.indexedByName ? `${indexer.indexedByName}'s machines` : "";
@@ -97,7 +97,7 @@ function takeOverLine(status: MemorySearchStatus): string {
   return `${status.indexedByName || "Its indexer"} can no longer index it, so search and new items wait.`;
 }
 
-/** Why a running switch's take-over is offered (its own takeOver, ruling R14): the RUN's indexer cannot index its target. */
+/** Why a running switch's take-over is offered (its own takeOver): the RUN's indexer cannot index its target. */
 function switchTakeOverLine(sw: MemorySearchSwitch): string {
   if (sw.indexedBy === "") return `The switch waits until an owner indexes ${sw.targetLabel}.`;
   return `${sw.indexedByName || "Its indexer"} can no longer index ${sw.targetLabel}, so the switch waits.`;
@@ -272,7 +272,7 @@ function InUse({ status, me, search, mayChange, refusal, act }: { status: Memory
  * estimate is the active index plus its backlog, not a count of the corpus, and
  * a walk that finds more than it would otherwise read "8,400 of 8,310".
  *
- * THE SWITCH'S OWN TAKE-OVER (ruling R14). The rebuild embeds as the RUN's
+ * THE SWITCH'S OWN TAKE-OVER. The rebuild embeds as the RUN's
  * indexer, so a run whose indexer cannot index its target waits however healthy
  * the binding's indexer is. Choosing the target again makes the caller the
  * run's indexer (memorySearchTakeOverRun), and it is offered only where the

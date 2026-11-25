@@ -650,7 +650,7 @@ func TestTheIndexRunKeepsOnlyItsNewestVersionPastADay(t *testing.T) {
 // A vector counts as its row's while it is not older than the row's newest
 // version, give or take the clock slack between the writing replica and the
 // database; an item with no version (content-addressed) is current whenever
-// its vector is present (ruling R7).
+// its vector is present.
 func TestAVectorOlderThanItsRowIsMissing(t *testing.T) {
 	at := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
 	written := map[string]time.Time{"v": at}
@@ -671,7 +671,7 @@ func TestAVectorOlderThanItsRowIsMissing(t *testing.T) {
 	}
 }
 
-// A waiting backfill still counts what is missing (ruling R10). While the model
+// A waiting backfill still counts what is missing. While the model
 // cannot be reached nothing is embedded, but at the backfill's cadence the job
 // walks every source again, reading presence and staleness only, and records
 // the count and when it was taken: the backlog Memory search shows ("37 items

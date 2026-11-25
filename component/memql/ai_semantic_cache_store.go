@@ -42,7 +42,7 @@ func (e *providerEmbedder) Embed(ctx context.Context, text string) ([]float32, e
 }
 
 // boundSemanticEmbedder embeds with the model memory search is bound to AT THE
-// MOMENT OF THE CALL, and says which (ruling R8). The cache was wired once at
+// MOMENT OF THE CALL, and says which. The cache was wired once at
 // boot with whatever model was bound then, so after a switch every running
 // replica went on embedding cache keys and lookups with the replaced model and
 // refilled the cache in its vector space; a replica restarted later then
