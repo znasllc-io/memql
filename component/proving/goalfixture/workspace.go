@@ -88,7 +88,7 @@ var (
 	// Widening it costs a hung test nothing: -timeout=20s ends one, and `go test`
 	// kills a binary that ignores that at 1m20s and reports FAIL (measured: 85 s).
 	// Only a wedged toolchain reaches this bound. Five minutes stays under the
-	// go-tests step's -timeout=600s per package, so a stall ends in the oracle's
+	// go-tests step's -timeout=900s per package, so a stall ends in the oracle's
 	// own answer instead of the package's panic, and well inside a case's
 	// wallClockMinutes.
 	//
