@@ -2721,6 +2721,17 @@ there (a state that moved meanwhile is "changed meanwhile, try again"):
   from earlier is reused: the walk embeds only what it is missing
   (`TestSwitchingBackReusesTheKeptIndex`).
 
+A new switch starts only after the steps that can fail: the target's table
+ensured, and the active index asked whether it holds anything at all, with
+EXISTS (`hasVectors`) rather than a count, which would hold the binding lock
+for a scan of a large index. A failure among them writes nothing, so a flipped
+switch is never closed for a switch that did not start. Closing it and writing
+the new switch are still two writes of one row: if the second is refused (a
+writer between them) or fails, the flipped switch is closed, its walk is the
+backfill's, and choosing the model again starts the new one
+(`TestASwitchStartsOnlyOnceItsTableIsReady`,
+`TestTheSwitchAsksTheActiveIndexOnlyWhetherItHoldsAnything`).
+
 `bindEmbedder` still refuses to change an active binding, and now names
 Cluster > Settings > Memory search.
 

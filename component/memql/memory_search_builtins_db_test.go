@@ -306,3 +306,39 @@ func TestEveryWriteIsStampedAfterTheVersionItRead(t *testing.T) {
 	assert.Empty(t, replaced["droppedAt"], "the flip's retired row: its retirement is current, not the older drop")
 	assert.WithinDuration(t, time.Now().Add(30*24*time.Hour), monthAhead(replaced), time.Minute)
 }
+
+// The switch asks the active index only whether it holds anything
+// (hasVectors, an EXISTS): a table that does not exist and an empty one hold
+// nothing, one entry is enough, and a name that is not a vector table's never
+// reaches a statement.
+func TestTheSwitchAsksTheActiveIndexOnlyWhetherItHoldsAnything(t *testing.T) {
+	f := newMemoryIndexDBFixture(t)
+	w := engineMemorySearchWorld{e: f.a}
+	ref := f.ref("probe", 8)
+	table, err := EmbeddingVectorTable(ref, 8)
+	require.NoError(t, err)
+
+	held, err := w.hasVectors(f.ctx, table)
+	require.NoError(t, err)
+	require.False(t, held, "a table that does not exist holds nothing")
+
+	_, err = EnsureEmbeddingVectorTable(f.ctx, f.db.DB, ref, 8)
+	require.NoError(t, err)
+	held, err = w.hasVectors(f.ctx, table)
+	require.NoError(t, err)
+	require.False(t, held, "an empty table holds nothing")
+
+	id := f.concept + ":one"
+	_, err = f.db.DB.ExecContext(f.ctx, `INSERT INTO `+table+` (id, concept, vector_field, embedding) VALUES ($1, $2, 'content', $3::vector)`,
+		id, f.concept, memoryIndexVector(id, 8))
+	require.NoError(t, err)
+	held, err = w.hasVectors(f.ctx, table)
+	require.NoError(t, err)
+	require.True(t, held, "one entry is enough")
+	n, err := w.vectors(f.ctx, table)
+	require.NoError(t, err)
+	require.Equal(t, 1, n, "and the count agrees")
+
+	_, err = w.hasVectors(f.ctx, "node_vectors_8; DROP TABLE x")
+	require.ErrorContains(t, err, "cannot read vector table")
+}

@@ -160,6 +160,9 @@ type memorySearchWorld interface {
 	ensureTable(ctx context.Context, ref string, dims int) (string, error)
 	// vectors counts a vector table's entries; 0 for a table that does not exist.
 	vectors(ctx context.Context, table string) (int, error)
+	// hasVectors reports whether a vector table holds any entry; false for a
+	// table that does not exist.
+	hasVectors(ctx context.Context, table string) (bool, error)
 	retired(ctx context.Context) ([]retiredMemoryIndex, error)
 	recordRetired(ctx context.Context, r retiredMemoryIndex) error
 	dropTable(ctx context.Context, table string) error
@@ -411,18 +414,17 @@ func memorySearchSwitch(ctx context.Context, w memorySearchWorld, caller, provid
 		// The look before the lock saw nothing to start.
 		return errMemorySearchChanged
 	}
-	if flipped {
-		closed := cloneMemoryIndexRun(sw)
-		closed.State, closed.WaitingReason, closed.FinishedAt = memoryIndexStateDone, "", w.now()
-		if version, err = memorySearchWriteRun(ctx, w, closed, version); err != nil {
-			return err
-		}
-	}
+	// THE STEPS THAT CAN FAIL COME FIRST: the active table's name, whether it
+	// holds anything, the target's table. A failure among them leaves a flipped
+	// switch running as it was, rather than closed for a switch that never
+	// started. Whether the active index holds anything is an EXISTS, not a
+	// count: only empty or not decides, and a count of a large index would hold
+	// the binding lock for a scan of it.
 	activeTable, err := EmbeddingVectorTable(active.ProviderRef, active.Dimensions)
 	if err != nil {
 		return err
 	}
-	indexed, err := w.vectors(ctx, activeTable)
+	indexed, err := w.hasVectors(ctx, activeTable)
 	if err != nil {
 		return err
 	}
@@ -433,8 +435,20 @@ func memorySearchSwitch(ctx context.Context, w memorySearchWorld, caller, provid
 	run := MemoryIndexRun{Kind: memoryIndexKindSwitch, State: memoryIndexStateIndexing, TargetRef: provider,
 		TargetDimensions: dims, TargetTable: table, IndexedBy: indexer, StartedBy: caller, StartedAt: w.now(),
 		Cursor: map[string]string{}}
-	if indexed == 0 {
+	if !indexed {
 		run.State = memoryIndexStateSwitching
+	}
+	if flipped {
+		// Two writes of the one run row, the close and then the new switch,
+		// fenced to the version the close stored. Only the second can still
+		// fail after the first: another writer between them, or the database.
+		// The flipped switch is then closed, its remaining walk the backfill's,
+		// and choosing the model again starts the new switch.
+		closed := cloneMemoryIndexRun(sw)
+		closed.State, closed.WaitingReason, closed.FinishedAt = memoryIndexStateDone, "", w.now()
+		if version, err = memorySearchWriteRun(ctx, w, closed, version); err != nil {
+			return err
+		}
 	}
 	_, err = memorySearchWriteRun(ctx, w, run, version)
 	return err

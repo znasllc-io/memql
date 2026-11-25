@@ -37,8 +37,10 @@ type memorySearchFake struct {
 	vendors     []vendorEmbedderRecord
 	names       map[string]string
 
-	locked   bool
-	writeErr error
+	locked    bool
+	writeErr  error
+	ensureErr error
+	counted   int
 
 	events      []string
 	runAttempts int
@@ -134,11 +136,19 @@ func (f *memorySearchFake) probe(_ context.Context, provider, indexer string) (i
 }
 
 func (f *memorySearchFake) ensureTable(ctx context.Context, ref string, dims int) (string, error) {
+	if f.ensureErr != nil {
+		return "", f.ensureErr
+	}
 	return f.job.ensureTable(ctx, ref, dims)
 }
 
 func (f *memorySearchFake) vectors(_ context.Context, table string) (int, error) {
+	f.counted++
 	return len(f.job.tables[table]), nil
+}
+
+func (f *memorySearchFake) hasVectors(_ context.Context, table string) (bool, error) {
+	return len(f.job.tables[table]) > 0, nil
 }
 
 func (f *memorySearchFake) retired(context.Context) ([]retiredMemoryIndex, error) {
@@ -590,6 +600,29 @@ func TestSwitchingBackDuringTheWalkAfterTheFlipStartsANewSwitch(t *testing.T) {
 	require.NoError(t, runMemoryIndexTick(ctx, f.job, time.Hour))
 	require.Equal(t, memoryIndexStateDone, f.job.runs[memoryIndexKindSwitch].State)
 	require.Equal(t, fakeOldRef, f.job.active.ProviderRef, "switched back")
+}
+
+// A new switch starts only once the steps that can fail are done: choosing
+// another model during a flipped switch's walk leaves that switch as it was when
+// the new model's table cannot be made, rather than closing it for a switch that
+// never started. And the active index is only asked whether it holds anything
+// -- an EXISTS, never a count, under the binding lock.
+func TestASwitchStartsOnlyOnceItsTableIsReady(t *testing.T) {
+	ctx := context.Background()
+	f := newMemorySearchFake(4)
+	f.job.fill(fakeOldRef, 4)
+	tickUntil(t, f.job, memoryIndexStateFinishing)
+	before := cloneMemoryIndexRun(f.job.runs[memoryIndexKindSwitch])
+	f.ensureErr = errors.New("the table could not be created")
+
+	require.ErrorContains(t, memorySearchSwitch(ctx, f, fakeOwner, fakeOldRef), "the table could not be created")
+	require.Zero(t, f.runAttempts, "nothing is written")
+	require.Equal(t, before, cloneMemoryIndexRun(f.job.runs[memoryIndexKindSwitch]), "the flipped switch goes on as it was")
+
+	f.ensureErr = nil
+	require.NoError(t, memorySearchSwitch(ctx, f, fakeOwner, fakeOldRef))
+	require.Equal(t, []string{"lock", "unlock", "lock", "writeRun done locked=true", "writeRun indexing locked=true", "unlock"}, f.events)
+	require.Zero(t, f.counted, "the active index is not counted")
 }
 
 // Cancel stops the switch and keeps the partial index under the 30-day

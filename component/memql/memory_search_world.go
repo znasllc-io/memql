@@ -8,6 +8,7 @@ package memql
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -64,22 +65,42 @@ func (w engineMemorySearchWorld) ensureTable(ctx context.Context, ref string, di
 // vectors counts a vector table's entries. The name comes from
 // EmbeddingVectorTable and is checked again before it enters the statement.
 func (w engineMemorySearchWorld) vectors(ctx context.Context, table string) (int, error) {
-	db := w.e.database()
-	if db == nil || !embeddingTableName.MatchString(table) {
-		return 0, fmt.Errorf("memory search: cannot read vector table %q", table)
-	}
-	var exists bool
-	if err := db.DB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = current_schema() AND tablename = $1)`, table).Scan(&exists); err != nil {
+	db, exists, err := w.vectorTable(ctx, table)
+	if err != nil || !exists {
 		return 0, err
 	}
-	if !exists {
-		return 0, nil
-	}
 	var n int64
-	if err := db.DB.QueryRowContext(ctx, `SELECT count(*) FROM `+table).Scan(&n); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM `+table).Scan(&n); err != nil {
 		return 0, err
 	}
 	return num.ClampInt64(n), nil
+}
+
+// hasVectors reports whether a vector table holds any entry, by EXISTS: it
+// reads one row at most, where a count reads them all.
+func (w engineMemorySearchWorld) hasVectors(ctx context.Context, table string) (bool, error) {
+	db, exists, err := w.vectorTable(ctx, table)
+	if err != nil || !exists {
+		return false, err
+	}
+	var held bool
+	err = db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM `+table+`)`).Scan(&held)
+	return held, err
+}
+
+// vectorTable checks a vector table's name again -- it comes from
+// EmbeddingVectorTable -- before the name enters a statement, and says whether
+// the table exists.
+func (w engineMemorySearchWorld) vectorTable(ctx context.Context, table string) (*sql.DB, bool, error) {
+	db := w.e.database()
+	if db == nil || !embeddingTableName.MatchString(table) {
+		return nil, false, fmt.Errorf("memory search: cannot read vector table %q", table)
+	}
+	var exists bool
+	if err := db.DB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = current_schema() AND tablename = $1)`, table).Scan(&exists); err != nil {
+		return nil, false, err
+	}
+	return db.DB, exists, nil
 }
 
 // retiredEmbedderPayload is a retired model's row as stored.
