@@ -209,57 +209,6 @@ var ErrNoEmbedderBound = fmt.Errorf(
 	EmbedderBindingConceptID,
 )
 
-// ErrEmbedderWidthUnknown is what BINDING a model the catalog does not carry
-// returns.
-//
-// IT IS A REAL STATE, NOT A HYPOTHETICAL, and the cockpit session is the reason
-// this error exists separately from ErrNoEmbedderBound. A cockpit advertises
-// `embeddings=1` for any model whose runtime reports the capability, catalog row
-// or not -- so a machine can legitimately OFFER an embedding model that cannot
-// be BOUND as the cluster's embedder. An operator running `memql worker models`
-// sees it listed and offered, and a bare "cannot be bound" reads as a bug in
-// their machine.
-//
-// So the message names the model and says the missing thing is a CATALOG ROW,
-// not a capability. The model still serves embedding calls that name it
-// explicitly; what it cannot be is the cluster-wide binding, because the binding
-// creates `node_vectors_<dims>` before the first vector exists and a table at a
-// guessed width is a search space that silently returns wrong neighbours.
-func ErrEmbedderWidthUnknown(modelRef string) error {
-	return fmt.Errorf(
-		"cannot bind %q as the cluster embedder: the catalog does not record its vector width. "+
-			"This is not a problem with the machine offering it -- the model is real and serves "+
-			"embedding calls that name it. A BINDING needs the width before the first vector "+
-			"exists, because it creates the vector table, and a table at a guessed width returns "+
-			"wrong neighbours without ever erroring. Add a %s row for %q with its `dimensions`, "+
-			"or bind a curated entry (qwen3-embedding:0.6b is 1024, nomic-embed-text is 768)",
-		modelRef, "v1:models:modelProfile", modelRef,
-	)
-}
-
-// BindingFor builds a binding for a provider reference, resolving the width from
-// the catalog for a fleet model.
-//
-// A NON-FLEET reference carries its width on the provider record, which the
-// caller supplies; a `fleet:` one does not, because the machine serving it does
-// not know it either. That asymmetry is why this function exists rather than the
-// caller filling the struct: it is the one place the two ways of learning a
-// width meet, and putting them anywhere else would let one of them be forgotten.
-func BindingFor(providerRef string, declaredDimensions int) (EmbedderBinding, error) {
-	ref := strings.TrimSpace(providerRef)
-	if ref == "" {
-		return EmbedderBinding{}, ErrNoEmbedderBound
-	}
-	if declaredDimensions > 0 {
-		return EmbedderBinding{ProviderRef: ref, Dimensions: declaredDimensions}, nil
-	}
-	modelID := strings.TrimPrefix(ref, FleetReferencePrefix)
-	if dims, ok := catalogDimensionsFor(modelID); ok {
-		return EmbedderBinding{ProviderRef: ref, Dimensions: dims}, nil
-	}
-	return EmbedderBinding{}, ErrEmbedderWidthUnknown(ref)
-}
-
 // ResolveEmbedderProvider returns the provider name the active binding names.
 //
 // This is the ONE narrowing from "the cluster's embedder" to "a provider name",
@@ -274,17 +223,6 @@ func ResolveEmbedderProvider(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return b.ProviderRef, nil
-}
-
-// EmbedderDimensions returns the active binding's vector width, or 0 and false
-// when nothing is bound. Callers that need a table name use VectorTableFor on
-// the result rather than assuming 1536.
-func EmbedderDimensions() (int, bool) {
-	b, ok := ActiveEmbedderBinding()
-	if !ok {
-		return 0, false
-	}
-	return b.Dimensions, true
 }
 
 // catalogWidths holds the vector width the CATALOG records per model id, keyed

@@ -98,57 +98,6 @@ func TestNoEmbedderBoundSaysWhereAndWhoChooses(t *testing.T) {
 	require.NotContains(t, msg, "Fleet")
 }
 
-// TestBindingForRefusesAModelTheCatalogDoesNotKnow is the cockpit session's
-// case, and it is a real state rather than a hypothetical: a cockpit advertises
-// `embeddings=1` for any model whose runtime reports the capability, catalog row
-// or not. So a machine can legitimately OFFER an embedding model that cannot be
-// BOUND, and the refusal has to say which of those two things is missing.
-func TestBindingForRefusesAModelTheCatalogDoesNotKnow(t *testing.T) {
-	SetCatalogWidths(map[string]int{"qwen3-embedding:0.6b": 1024})
-	t.Cleanup(func() { SetCatalogWidths(map[string]int{}) })
-
-	if _, err := BindingFor("fleet:some-model-nobody-curated", 0); err == nil {
-		t.Fatal("binding a model with no catalog width must be refused rather than guessed")
-	} else {
-		msg := err.Error()
-		if !strings.Contains(msg, "some-model-nobody-curated") {
-			t.Errorf("the refusal must name the model; got %q", msg)
-		}
-		// An operator running `memql worker models` sees the model listed and
-		// offered. A bare "cannot be bound" reads as a fault in their machine.
-		if !strings.Contains(msg, "not a problem with the machine") {
-			t.Errorf("the refusal must say the machine is fine; got %q", msg)
-		}
-		if !strings.Contains(msg, "modelProfile") {
-			t.Errorf("the refusal must name what is missing -- a catalog row; got %q", msg)
-		}
-	}
-
-	b, err := BindingFor("fleet:qwen3-embedding:0.6b", 0)
-	if err != nil {
-		t.Fatalf("a curated model must bind: %v", err)
-	}
-	if b.Dimensions != 1024 {
-		t.Errorf("width = %d, want the catalog's 1024", b.Dimensions)
-	}
-}
-
-func TestADeclaredWidthWinsOverTheCatalog(t *testing.T) {
-	// A non-fleet provider carries its width on the provider record, and that
-	// is the authority for it -- the catalog describes models a machine might
-	// pull, not vendor records.
-	SetCatalogWidths(map[string]int{"embedding3Small": 999})
-	t.Cleanup(func() { SetCatalogWidths(map[string]int{}) })
-
-	b, err := BindingFor("embedding3Small", 1536)
-	if err != nil {
-		t.Fatalf("a declared width must bind: %v", err)
-	}
-	if b.Dimensions != 1536 {
-		t.Errorf("width = %d, want the declared 1536", b.Dimensions)
-	}
-}
-
 func TestCatalogWidthsMatchExactly(t *testing.T) {
 	// The model id is byte-identical from the cockpit's label through the
 	// catalog row to a policy naming fleet:<modelId>, precisely so this can be
@@ -179,8 +128,5 @@ func TestAnUnloadedCatalogReportsUnknownRatherThanZero(t *testing.T) {
 
 	if _, ok := catalogDimensionsFor("qwen3-embedding:0.6b"); ok {
 		t.Error("an unloaded catalog must report unknown for every model")
-	}
-	if _, err := BindingFor("fleet:qwen3-embedding:0.6b", 0); err == nil {
-		t.Error("binding against an unloaded catalog must refuse rather than bind at zero")
 	}
 }
