@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -62,18 +63,75 @@ func (w engineMemorySearchWorld) ensureTable(ctx context.Context, ref string, di
 	return EnsureEmbeddingVectorTable(ctx, db.DB, ref, dims)
 }
 
-// vectors counts a vector table's entries. The name comes from
-// EmbeddingVectorTable and is checked again before it enters the statement.
+// memorySearchIndexedTTL is how long a replica keeps a vector table's count for
+// the status's `indexed`, and so how far behind the table the figure may lag.
+const memorySearchIndexedTTL = 30 * time.Second
+
+// vectorCountCache keeps, per replica, the last count of each vector table the
+// status reported. TRIGGER: the count is a `count(*)` of the active index,
+// which grows with every item in the cluster, and every open Memory search
+// screen polls the status every 5 to 30 seconds (every replica answers its own
+// share). CHOSEN PATH: a poll inside memorySearchIndexedTTL of the last count
+// answers it again and reads no table, so `indexed` MAY LAG THE TABLE BY UP TO
+// THAT LONG -- a figure a person reads beside a backlog counted every ten
+// minutes, never one a decision is made on. A count that failed is not kept,
+// and nothing outlives the process: a restart counts afresh. REJECTED:
+// pg_class.reltuples, which needs no scan but is only as fresh as the last
+// ANALYZE and reads -1 for a table never analyzed. The walk's own counts (the
+// unsourced entries at a walk's end) are not served from here.
+type vectorCountCache struct {
+	mu      sync.Mutex
+	byTable map[string]vectorCount
+	now     func() time.Time // nil: time.Now; set by tests
+}
+
+type vectorCount struct {
+	n  int
+	at time.Time
+}
+
+// count answers table's count from the cache while it is younger than
+// memorySearchIndexedTTL, and otherwise counts with read and keeps the answer.
+// Two polls that miss at once both count: harmless, and rarer than a lock.
+func (c *vectorCountCache) count(ctx context.Context, table string, read func(context.Context) (int, error)) (int, error) {
+	now := time.Now()
+	if c.now != nil {
+		now = c.now()
+	}
+	c.mu.Lock()
+	kept, ok := c.byTable[table]
+	c.mu.Unlock()
+	if ok && now.Sub(kept.at) < memorySearchIndexedTTL {
+		return kept.n, nil
+	}
+	n, err := read(ctx)
+	if err != nil {
+		return 0, err
+	}
+	c.mu.Lock()
+	if c.byTable == nil {
+		c.byTable = map[string]vectorCount{}
+	}
+	c.byTable[table] = vectorCount{n: n, at: now}
+	c.mu.Unlock()
+	return n, nil
+}
+
+// vectors counts a vector table's entries, kept for memorySearchIndexedTTL on
+// this replica (vectorCountCache). The name comes from EmbeddingVectorTable and
+// is checked again before it enters the statement.
 func (w engineMemorySearchWorld) vectors(ctx context.Context, table string) (int, error) {
-	db, exists, err := w.vectorTable(ctx, table)
-	if err != nil || !exists {
-		return 0, err
-	}
-	var n int64
-	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM `+table).Scan(&n); err != nil {
-		return 0, err
-	}
-	return num.ClampInt64(n), nil
+	return w.e.memorySearchIndexed.count(ctx, table, func(ctx context.Context) (int, error) {
+		db, exists, err := w.vectorTable(ctx, table)
+		if err != nil || !exists {
+			return 0, err
+		}
+		var n int64
+		if err := db.QueryRowContext(ctx, `SELECT count(*) FROM `+table).Scan(&n); err != nil {
+			return 0, err
+		}
+		return num.ClampInt64(n), nil
+	})
 }
 
 // hasVectors reports whether a vector table holds any entry, by EXISTS: it

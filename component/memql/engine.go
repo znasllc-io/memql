@@ -76,6 +76,9 @@ type MemQLEngine struct {
 	// indexerOwners caches who the active owners are for the memory-search
 	// indexer re-check (IndexerIsActiveOwner), per replica.
 	indexerOwners ownerSetCache
+	// memorySearchIndexed keeps the count of a memory-search vector table the
+	// status reports (memory_search_world.go), per replica.
+	memorySearchIndexed vectorCountCache
 	// memoryIndexSources, when set, replaces the registered memory sources the
 	// index job walks (memory_index_job.go). Nil in production; a db-gated test
 	// sets it so its walk covers its own rows and not the shared database's.

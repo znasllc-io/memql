@@ -166,6 +166,23 @@ func TestTheStatusAsksAnActsOwnGatesWhetherTheCallerMayAct(t *testing.T) {
 	assert.Equal(t, false, mayAct(&auth.AccessContext{UserId: f.owner, Role: auth.RoleDeveloper}))
 }
 
+// The status's `indexed` comes from the replica's kept count of the active
+// table: an item written inside the window is not in it yet, and is once the
+// window has passed.
+func TestTheStatusCountsTheIndexAtMostOncePerWindow(t *testing.T) {
+	f := newMemoryIndexDBFixture(t)
+	f.bind(f.ref("counted", 3), f.owner)
+	f.write(f.a, f.addItems("one", "two")...)
+	clock := time.Now()
+	f.a.memorySearchIndexed.now = func() time.Time { return clock }
+	assert.Equal(t, float64(2), f.memorySearchStatus(f.a)["indexed"])
+	f.write(f.a, f.addItems("three")...)
+	assert.Equal(t, float64(2), f.memorySearchStatus(f.a)["indexed"], "inside the window: the kept count")
+	assert.Equal(t, float64(3), f.memorySearchStatus(f.b)["indexed"], "each replica keeps its own")
+	clock = clock.Add(memorySearchIndexedTTL)
+	assert.Equal(t, float64(3), f.memorySearchStatus(f.a)["indexed"], "past the window: counted again")
+}
+
 // Switching back within the 30 days reuses the kept index: the job embeds only
 // what was written since the switch away, and every item ends up in it.
 func TestSwitchingBackReusesTheKeptIndex(t *testing.T) {

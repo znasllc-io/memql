@@ -73,7 +73,9 @@ func memorySearchOffersTakeOver(ctx context.Context, w memorySearchWorld, caller
 //     its indexer (memorySearchOffersTakeOver; ruling R13). It is how the status
 //     says the binding's indexer cannot index the model, asked from the caller's
 //     side so that the screen offers the act only where it changes something.
-//   - indexed: the entries in its vector table.
+//   - indexed: the entries in its vector table, as this replica last counted
+//     them: kept for memorySearchIndexedTTL (vectorCountCache), so it may lag
+//     the table by up to that long.
 //   - backlog, backlogCountedAt and waitingReason, from the backfill run while
 //     it is about this model: backlog is the items its last count found absent
 //     from the index or older there than their row (MemoryIndexRun.Missing:

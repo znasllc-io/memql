@@ -267,6 +267,8 @@ anybody else.
 ## Limits
 
 - A switch's total is an estimate (above).
+- The index's size on the page may be up to 30 seconds behind the index: each
+  replica counts it at most that often.
 - The backlog is as fresh as its last count, up to ten minutes old, and is not
   counted again while a switch runs.
 - Memory-search embeddings write no router decision (`v1:router:call`), so the

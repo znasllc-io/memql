@@ -903,9 +903,9 @@ builtin bindEmbedder { provider string! }
 /// nobody chose); previousRef (the model it replaced, empty for the first); mayAct (whether the
 /// caller may act on memory search at all: an active cluster owner holding the part's execute);
 /// takeOver (its indexer cannot index it, and choosing it again would make the caller its indexer);
-/// indexed (the entries
-/// in its index); backlog (the items the backfill's last count found missing from it, counted even
-/// while indexing waits) with backlogCountedAt, and waitingReason; switch (state, targetRef,
+/// indexed (the entries in its index, counted at most every 30 s by each replica); backlog (the
+/// items the backfill's last count found missing from it, counted even while indexing waits) with
+/// backlogCountedAt, and waitingReason; switch (state, targetRef,
 /// targetLabel, counts, startedAt, startedBy, waitingReason, estimatedTotal, an ESTIMATE: the
 /// active index plus the backlog, indexedBy and indexedByName, whose machines the rebuild embeds
 /// on, and takeOver: before the flip, its indexer cannot index the target, and choosing the

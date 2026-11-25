@@ -2970,7 +2970,15 @@ the partial index, and the cleanup drops only dated ones. **Confirm** records th
 caller as the chooser of a VENDOR binding with none, once, under the lock; a
 machine model is never put to an owner this way.
 
-**The status is one row** (`current`). `indexed` counts the active table.
+**The status is one row** (`current`). `indexed` counts the active table, and
+each replica keeps that count for 30 s (`vectorCountCache`,
+`memorySearchIndexedTTL`): it is a `count(*)` of an index that grows with
+every item, and every open screen polls every 5 to 30 s, so a poll inside the
+window reads no table and the figure may lag the table by up to 30 s. A failed
+count is not kept. Rejected: `pg_class.reltuples`, as fresh only as the last
+ANALYZE and -1 for a table never analyzed
+(`TestTheIndexCountIsKeptForAShortWhile`,
+`TestTheStatusCountsTheIndexAtMostOncePerWindow`, db).
 `backlog` is the backfill's last count for the active model of the items
 missing from it (the run's `missing`: what its last completed walk left
 missing, or what a waiting backfill's counting walk found), with
@@ -3030,8 +3038,8 @@ lock that could not be taken fails it too, and says so.
 nothing between calls, so a retry or another replica decides from what is
 stored.
 
-**Limits.** Not run against a live cluster. `indexed` is a `count(*)` of the
-active table on every status read. The backlog is as fresh as its last count:
+**Limits.** Not run against a live cluster. `indexed` may lag the active table
+by up to 30 s (above). The backlog is as fresh as its last count:
 the backfill's cadence, ten minutes, and while a switch runs the backfill
 counts nothing. The probe and the store path in the db tests are stubs. The
 screen's vendor cost line ("about N items", `confirmationLine` in

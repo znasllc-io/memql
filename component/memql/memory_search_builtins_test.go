@@ -265,6 +265,45 @@ func TestOnlyTheOwnerHoldsTheMemorySearchParts(t *testing.T) {
 	require.ErrorContains(t, err, "daily cleanup")
 }
 
+// The status's `indexed` is a count of the active table, and every open screen
+// polls the status every 5 to 30 seconds. So each replica keeps the count for
+// memorySearchIndexedTTL: a poll inside it reads no table, the count may lag
+// the table by that much, and a count that failed is not kept.
+func TestTheIndexCountIsKeptForAShortWhile(t *testing.T) {
+	clock := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
+	c := vectorCountCache{now: func() time.Time { return clock }}
+	counts, n, fail := 0, 10, false
+	count := func(context.Context) (int, error) {
+		counts++
+		if fail {
+			return 0, errors.New("database unavailable")
+		}
+		return n, nil
+	}
+	ctx := context.Background()
+	got, err := c.count(ctx, "node_vectors_4_aa", count)
+	require.NoError(t, err)
+	require.Equal(t, 10, got)
+	n = 11
+	clock = clock.Add(memorySearchIndexedTTL - time.Second)
+	got, _ = c.count(ctx, "node_vectors_4_aa", count)
+	require.Equal(t, 10, got, "inside the window: the kept count, which may lag")
+	require.Equal(t, 1, counts)
+	got, _ = c.count(ctx, "node_vectors_4_bb", count)
+	require.Equal(t, 11, got, "another table is counted on its own")
+	require.Equal(t, 2, counts)
+
+	clock = clock.Add(2 * time.Second)
+	fail = true
+	_, err = c.count(ctx, "node_vectors_4_aa", count)
+	require.Error(t, err, "past the window the table is counted again")
+	fail = false
+	got, err = c.count(ctx, "node_vectors_4_aa", count)
+	require.NoError(t, err)
+	require.Equal(t, 11, got, "a failed count is not kept")
+	require.Equal(t, 4, counts)
+}
+
 // Every act is an ACTIVE CLUSTER OWNER's (design record, decision 2 and
 // sections 2 and 8: a vendor model is bound only by an owner choosing it, and
 // Memory search is owners only), on top of the part the builtin path checks. A
