@@ -280,8 +280,17 @@ func resolveActor(ctx context.Context) (actor, bool) {
 // the legacy console actions (Rollback / RolloutAction /
 // GetDeploymentStatus); the #1876 actions use the looser authorizeDeploy
 // (cut + deploy) or the stricter authorizeOwner (rollback_deployment).
+//
+// OWNER AND ADMIN BY NAME, not auth.AtLeastAdmin. That predicate is the
+// user-management capability, which the developer role holds from 2026-11-25
+// (design record, developer access); this gate was never about managing
+// people, and a deploy console that rolls back is not opened by that change.
+// Whether a developer should reach the legacy console is the owner's separate
+// decision (the record lists it as open).
 func (s *Service) authorize(ctx context.Context, verb string, detail map[string]any) (actor, error) {
-	return s.authorizeWith(ctx, verb, detail, auth.AtLeastAdmin, "owner or admin")
+	return s.authorizeWith(ctx, verb, detail, func(u auth.UserContext) bool {
+		return auth.IsOwner(u) || auth.IsAdmin(u)
+	}, "owner or admin")
 }
 
 // authorizeDeploy enforces the developer-or-above gate for the

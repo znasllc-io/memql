@@ -240,31 +240,33 @@ func TestAdmissionOperationsRefuseBelowDeveloper(t *testing.T) {
 	}
 }
 
-// THE TEN THAT DID NOT MOVE. A developer must still be refused every
-// user-management write, or the split leaked.
-func TestOwnerAdminOperationsStillRefuseADeveloper(t *testing.T) {
+// A DEVELOPER PASSES THE USER-MANAGEMENT GATE (the owner's direction,
+// 2026-11-25; design record, developer access). This test used to pin the
+// opposite -- "the ten that did not move" -- while a developer held admission
+// and nothing else. The role now holds the principal verbs, so the gate admits
+// it; WHOM it may then act on is the rank tree's question, pinned in
+// target_rank_guard_test.go (never an owner, never another developer).
+func TestOwnerAdminOperationsAdmitADeveloper(t *testing.T) {
 	for _, op := range ownerAdminOperations {
 		t.Run(op.name, func(t *testing.T) {
 			svc, _, audit := newTestService(t)
 
-			res := op.call(svc, ctxAs(auth.RoleDeveloper))
+			op.call(svc, ctxAs(auth.RoleDeveloper))
 
-			if res.Code != CodePermissionDenied {
-				t.Fatalf("a developer was permitted %s (code=%d) -- admission has leaked into "+
-					"the user-management gate", op.name, res.Code)
-			}
-			if len(audit.events) != 1 || audit.events[0].FailureReason != "role_not_admin" {
-				t.Errorf("want one role_not_admin event, got %+v", audit.events)
+			for _, ev := range audit.events {
+				if ev.Action == "admin_auth_forbidden" {
+					t.Fatalf("a developer was refused %s at the gate, audited as %q", op.name, ev.FailureReason)
+				}
 			}
 		})
 	}
 }
 
-// Every role below owner/admin is refused, at every operation, with
-// PERMISSION_DENIED and an audited `admin_auth_forbidden` -- and the engine is
-// never touched.
+// Every role below the user-management gate is refused, at every operation,
+// with PERMISSION_DENIED and an audited `admin_auth_forbidden` -- and the
+// engine is never touched.
 func TestEveryWriteRefusesBelowOwnerOrAdmin(t *testing.T) {
-	for _, role := range []auth.Role{"reader", "writer", "developer", ""} {
+	for _, role := range []auth.Role{"reader", "writer", ""} {
 		for _, op := range ownerAdminOperations {
 			t.Run(string(role)+"/"+op.name, func(t *testing.T) {
 				svc, eng, audit := newTestService(t)
@@ -335,7 +337,7 @@ func TestUnauthenticatedCallerIsRefusedAndAudited(t *testing.T) {
 // that refuses everyone, and the tests would keep passing if the gate were
 // replaced by `return false`.
 func TestOwnerAndAdminReachTheEngine(t *testing.T) {
-	for _, role := range []auth.Role{"owner", "admin"} {
+	for _, role := range []auth.Role{"owner", "developer", "admin"} {
 		for _, op := range allOperations {
 			t.Run(string(role)+"/"+op.name, func(t *testing.T) {
 				svc, eng, audit := newTestService(t)

@@ -182,8 +182,8 @@ type Function struct {
 	//
 	// THE SIBLING OF RequiresRank, NOT AN ALTERNATIVE TO IT (epic memql#5166,
 	// D11). A rank is a FLOOR on the ladder; a capability is a GRANT, and a
-	// cluster can hold one without the other -- developer ranks above admin
-	// and holds strictly fewer principal verbs. Both together require both.
+	// cluster can hold one without the other -- a role may rank above admin
+	// and hold fewer principal verbs. Both together require both.
 	RequiresCapability CapabilityRequirement
 
 	// CacheTTL is the cache duration for query results (queries only),

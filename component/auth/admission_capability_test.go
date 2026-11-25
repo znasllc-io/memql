@@ -12,9 +12,10 @@ import (
 // somebody a credential that lets them into this cluster, meaning a user
 // invitation or an enrolment link.
 //
-// It is deliberately NOT create-on-`principal`, which is the user-management
-// grant `AtLeastAdmin` tests and which answers for fourteen operations
-// including role changes, suspensions and recovery-key rotation.
+// It is its own resource rather than create-on-`principal`, the
+// user-management grant `AtLeastAdmin` tests, so a custom role can invite
+// people without managing them. The developer role itself holds both from
+// 2026-11-25 (design record 2026-11-25, developer access).
 
 func TestCanAdmitPeopleHoldsForOwnerAdminAndDeveloper(t *testing.T) {
 	for _, tc := range []struct {
@@ -35,38 +36,72 @@ func TestCanAdmitPeopleHoldsForOwnerAdminAndDeveloper(t *testing.T) {
 	}
 }
 
-// THE POINT OF A SEPARATE RESOURCE. If admission were expressed by widening
-// create-on-principal, a developer would gain the whole identity-admin
-// surface. This pins the two apart: developer admits, and manages nothing.
-func TestAdmissionDoesNotGrantDeveloperUserManagement(t *testing.T) {
+// A DEVELOPER MANAGES PEOPLE BELOW IT AND NEVER AN OWNER (the owner's
+// direction, 2026-11-25: "a developer should be able to do almost everything
+// an owner does", except the owner's own functions and information).
+//
+// This test used to pin the opposite -- developer admits, and manages nothing
+// -- and the verbs it refused are the ones the developer role now holds. What
+// it must keep pinning is the half that did not change: the verb is not what
+// protects an owner, the rank tree is. So both halves are asserted here, and a
+// change that seeds the verbs while loosening GovernPrincipal fails this test.
+func TestADeveloperManagesPeopleBelowItAndNeverAnOwner(t *testing.T) {
 	dev := UserContext{Role: RoleDeveloper}
 
-	if !CanAdmitPeople(dev) {
-		t.Fatal("developer cannot admit people, so the rest of this test proves nothing")
-	}
-	if AtLeastAdmin(dev) {
-		t.Error("developer passes AtLeastAdmin -- admission has leaked into the user-management gate")
+	if !CanAdmitPeople(dev) || !AtLeastAdmin(dev) {
+		t.Fatal("developer does not hold admission and user management")
 	}
 	for _, verb := range []string{VerbCreate, VerbUpdate, VerbDelete} {
-		if CapableFor(context.Background(), Subject{Role: RoleDeveloper}, verb, ResourcePrincipal) {
-			t.Errorf("developer holds %s on principal -- it may now edit accounts, not just admit them", verb)
+		if !CapableFor(context.Background(), Subject{Role: RoleDeveloper}, verb, ResourcePrincipal) {
+			t.Errorf("developer does not hold %s on principal", verb)
 		}
+	}
+
+	actor := Principal{UserId: "dev", Rank: RoleRank(RoleDeveloper)}
+	for _, tc := range []struct {
+		target Role
+		want   bool
+	}{
+		{RoleOwner, false},     // an owner is an owner's alone
+		{RoleDeveloper, false}, // peers do not outrank each other
+		{RoleAdmin, true},
+		{RoleWriter, true},
+		{RoleReader, true},
+	} {
+		target := Principal{UserId: "other", Rank: RoleRank(tc.target), IsOwner: tc.target == RoleOwner}
+		for _, verb := range []GovernVerb{GovernUpdate, GovernDelete} {
+			if got := GovernPrincipal(actor, target, verb); got != tc.want {
+				t.Errorf("GovernPrincipal(developer, %s, %s) = %v, want %v", tc.target, verb, got, tc.want)
+			}
+		}
+	}
+	// And a developer cannot name a role at or above its own, on either seam.
+	for _, slug := range []string{"owner", "developer"} {
+		if MayAssignRole(dev, AssignOnReRole, "other", "writer", slug, nil) == AssignAllowed {
+			t.Errorf("a developer may re-role somebody to %s", slug)
+		}
+		if MayAssignRole(dev, AssignOnInvitation, "", "", slug, nil) == AssignAllowed {
+			t.Errorf("a developer may invite somebody as %s", slug)
+		}
+	}
+	if refusal := MayAssignRole(dev, AssignOnReRole, "other", "writer", "admin", nil); refusal != AssignAllowed {
+		t.Errorf("a developer may not re-role a writer to admin: %s", refusal)
 	}
 }
 
-// RANK IS NOT AUTHORITY, AND THE ONE PAIR WHERE THEY DISAGREE IS THE DANGEROUS
-// ONE (code review of memql#4917).
+// RANK IS NOT AUTHORITY (code review of memql#4917).
 //
-// developer ranks 300 and admin 200, so "the actor strictly outranks the
-// target" admits developer -> admin. But the capability sets are NON-MONOTONIC
-// in rank at exactly that rung: admin holds create, update and delete on
-// `principal` and developer holds only read.
-//
-// That gap is a two-move path to owner. Mint a credential for an existing
-// admin (an enrolment link, which registers a passkey as them), sign in as
-// that admin, then use SetUserRole -- which caps nothing -- to make anybody an
-// owner. So a credential-minting gate cannot ask "do I outrank them"; it has
-// to ask "do they hold people-authority I do not".
+// Until 2026-11-25 the predefined roles carried the dangerous pair themselves:
+// developer ranked 300 above admin's 200 and held only read on `principal`,
+// so "the actor strictly outranks the target" admitted developer -> admin
+// while admin held the people-authority developer lacked -- a two-move path to
+// owner through a minted credential. The developer role now holds every
+// principal verb (design record 2026-11-25, developer access), so no
+// PREDEFINED pair disagrees any more and the developer rows below answer
+// false. The predicate stays for the roles an operator authors: a custom role
+// may rank above another and hold fewer principal verbs, and a
+// credential-minting gate still has to ask "do they hold people-authority I
+// do not" rather than "do I outrank them".
 //
 // It is scoped to `principal` rather than to every resource on purpose. Full
 // containment refuses developer -> writer (writer holds read:group, developer
@@ -78,8 +113,9 @@ func TestPrincipalAuthorityBeyondCatchesTheRankInversion(t *testing.T) {
 		want          bool
 		why           string
 	}{
-		{RoleDeveloper, RoleAdmin, true, "admin holds create/update/delete on principal; developer holds read"},
-		{RoleDeveloper, RoleOwner, true, "owner holds the full principal verbs"},
+		{RoleDeveloper, RoleAdmin, false, "both hold the same four principal verbs"},
+		{RoleDeveloper, RoleOwner, false, "both hold the same four; the owner carve-out is what refuses this"},
+		{RoleWriter, RoleAdmin, true, "admin holds the principal verbs; writer holds none"},
 		{RoleDeveloper, RoleWriter, false, "writer holds no principal verb at all"},
 		{RoleDeveloper, RoleReader, false, "reader holds no principal verb at all"},
 		{RoleAdmin, RoleReader, false, "reader holds no principal verb at all"},

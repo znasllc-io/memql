@@ -1,6 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { installSeededAccess } from "../seededAccess";
+import { installSeededAccess, seededAccessFor } from "../seededAccess";
+import { setEffectiveCapabilities, type EffectiveCapability } from "../../src/system/roles";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 
@@ -74,8 +75,9 @@ function seed(extra: Parameters<typeof fakeConnection>[0] = {}) {
   });
 }
 
-async function openAda(connection: Conn, role = "owner", showDeactivated = false) {
-  installSeededAccess(role);
+async function openAda(connection: Conn, role = "owner", showDeactivated = false, capabilities?: EffectiveCapability[]) {
+  if (capabilities) setEffectiveCapabilities(capabilities);
+  else installSeededAccess(role);
   h.connection = connection;
   const view = renderApp(
     withSession(
@@ -175,7 +177,12 @@ describe("the offered rungs", () => {
 describe("opening a person", () => {
   it("does not ask for sessions or offer management without the required capabilities", async () => {
     const connection = seed();
-    await openAda(connection, "developer");
+    // A custom role's set: it reads the list and manages nobody. The developer
+    // role did until 2026-11-25, when it was given the principal and group verbs.
+    const readOnly = seededAccessFor("developer").filter(
+      (c) => c.verb === "read" || (c.resource !== "principal" && c.resource !== "group"),
+    );
+    await openAda(connection, "developer", false, readOnly);
     expect(connection.query.sessionsForSubjectAdmin).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Deactivate" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Add to a group" })).toBeNull();
@@ -185,7 +192,7 @@ describe("opening a person", () => {
     expect(screen.queryByText("Joined")).toBeNull();
   });
 
-  it.each(["admin", "owner"])("%s can read sessions and manage lower-ranked people", async role => {
+  it.each(["admin", "developer", "owner"])("%s can read sessions and manage lower-ranked people", async role => {
     const connection = seed();
     await openAda(connection, role);
     await waitFor(() => expect(connection.query.sessionsForSubjectAdmin).toHaveBeenCalled());

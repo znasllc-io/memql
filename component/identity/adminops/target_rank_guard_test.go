@@ -114,8 +114,10 @@ func TestAWriteNamingAPersonRefusesATargetTheCallerDoesNotOutrank(t *testing.T) 
 	}{
 		// THE HOLE: nothing compared the two people, so an admin reached the owner.
 		{auth.RoleAdmin, "owner"},
+		{auth.RoleDeveloper, "owner"},
 		// Peers do not outrank each other.
 		{auth.RoleAdmin, "admin"},
+		{auth.RoleDeveloper, "developer"},
 		// Nor does a lower rung reach a higher one.
 		{auth.RoleAdmin, "developer"},
 	} {
@@ -144,7 +146,9 @@ func TestAWriteNamingAPersonRefusesATargetTheCallerDoesNotOutrank(t *testing.T) 
 	}
 }
 
-// Positive control: the guard refuses nobody the tree admits.
+// Positive control: the guard refuses nobody the tree admits. A developer is on
+// this table because the developer role holds the principal verbs (design
+// record 2026-11-25, developer access).
 func TestAWriteNamingAPersonAdmitsATargetBelowTheCaller(t *testing.T) {
 	for _, tc := range []struct {
 		caller     auth.Role
@@ -152,6 +156,8 @@ func TestAWriteNamingAPersonAdmitsATargetBelowTheCaller(t *testing.T) {
 	}{
 		{auth.RoleOwner, "owner"}, // an owner reaches everyone, another owner included
 		{auth.RoleOwner, "developer"},
+		{auth.RoleDeveloper, "admin"},
+		{auth.RoleDeveloper, "writer"},
 		{auth.RoleAdmin, "writer"},
 		{auth.RoleAdmin, "reader"},
 	} {

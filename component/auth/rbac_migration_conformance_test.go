@@ -12,8 +12,20 @@ var allSlugs = []Role{RoleOwner, RoleAdmin, RoleDeveloper, RoleWriter, RoleReade
 //     boolean result byte-for-byte. If a future edit to the model changes a
 //     result, this test fails with the offending (slug, helper) pair.
 
-func legacyIsPrivileged(r Role) bool { return r == RoleOwner || r == RoleAdmin }
-func legacyAtLeastAdmin(r Role) bool { return r == RoleOwner || r == RoleAdmin }
+//
+//     ONE DELIBERATE DEPARTURE, 2026-11-25 (design record, developer access):
+//     the owner directed that a developer does the people-work an owner does,
+//     on everybody ranked below it. So developer joins the user-management
+//     oracles below -- privileged, at-least-admin, agents, groups, and the
+//     view/manage/delete truth table at its own rung (never an owner, never a
+//     peer). Every other result is still the pre-E1.5 one.
+
+func legacyIsPrivileged(r Role) bool {
+	return r == RoleOwner || r == RoleAdmin || r == RoleDeveloper
+}
+func legacyAtLeastAdmin(r Role) bool {
+	return r == RoleOwner || r == RoleAdmin || r == RoleDeveloper
+}
 func legacyAtLeastDeveloper(r Role) bool {
 	return r == RoleOwner || r == RoleAdmin || r == RoleDeveloper
 }
@@ -52,7 +64,7 @@ func legacyCanViewUser(caller, target UserContext) bool {
 	switch caller.Role {
 	case RoleOwner:
 		return true
-	case RoleAdmin:
+	case RoleAdmin, RoleDeveloper:
 		return target.Role != RoleOwner
 	case RoleWriter, RoleReader:
 		return false
@@ -73,6 +85,8 @@ func legacyCanManageUser(caller, target UserContext) bool {
 		return true
 	case RoleAdmin:
 		return target.Role == RoleWriter || target.Role == RoleReader
+	case RoleDeveloper:
+		return target.Role == RoleAdmin || target.Role == RoleWriter || target.Role == RoleReader
 	case RoleWriter, RoleReader:
 		return false
 	default:

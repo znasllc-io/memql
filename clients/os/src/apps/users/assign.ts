@@ -24,8 +24,9 @@ import { roleHolds, type GrantRow, type RoleRow } from "./rows";
 //  1. the role must be one this cluster can assign: active, and known.
 //  2. the caller must hold the people-authority grant at all -- `update` on
 //     `principal` to re-role somebody, `create` on `admission` or `principal`
-//     to name a role on an INVITATION. That split is memql#4917's: a developer
-//     invites people and does not re-role them. Which one is asked is decided
+//     to name a role on an INVITATION. That split is memql#4917's: a role
+//     may invite people without re-roling them (the developer role did until
+//     2026-11-25, when it was given both). Which one is asked is decided
 //     by `kind`, NOT by whether `targetRole` is empty -- see AssignKind.
 //  3. the caller must govern the person as they stand today (strictly above
 //     them, or an owner).
@@ -35,8 +36,8 @@ import { roleHolds, type GrantRow, type RoleRow } from "./rows";
 //     the caller does not, whatever the ranks say. A re-role hands authority
 //     over immediately; an invitation opens a door the recipient must still
 //     walk through, and the inviter holds no verb on the principal that
-//     results. So a developer MAY invite an admin and may not re-role anybody
-//     into one. The escalation that buys -- inviting an address you control --
+//     results. So a role holding admission alone MAY invite an admin and may
+//     not re-role anybody into one. The escalation that buys -- inviting an address you control --
 //     is an accepted, recorded trade-off; see auth.MayAssignRole. DO NOT
 //     "restore" this to the invitation kind as a fix: that is the bug this
 //     rule caused, and it disables the rung the engine would accept.

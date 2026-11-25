@@ -123,7 +123,7 @@ describe("the settings-section contract", () => {
       expect(seededAccessFor(role).some((c) => c.verb === "execute" && c.resource === "app:settings/apikeys" && c.effect === "allow"), `${role} adds an API key`).toBe(true);
     }
     expect(settings?.sections?.find((s) => s.id === "pipelines")?.requires).toBe("app:settings/pipelines");
-    expect(rolesOpening("app:settings/pipelines")).toEqual(["owner"]);
+    expect(rolesOpening("app:settings/pipelines")).toEqual(["owner", "developer"]);
     expect(OS_REGISTRY.apps.find(app => app.id === "identity")?.sections?.find(s => s.id === "policy")?.requires).toBe("app:settings/cluster");
     expect(rolesOpening("app:settings/cluster")).toEqual(["owner", "developer", "admin"]);
     // Language (memql#5390): the same three roles, and the same name the

@@ -3564,8 +3564,8 @@ call is for (see below) -- and they answer different questions:
 ```
 
 **A rank is a floor and a capability is a grant, and a cluster can hold one
-without the other.** `developer` ranks 300 above `admin`'s 200 and holds
-strictly fewer verbs on `principal`, so the two have opposite answers on the
+without the other.** A custom role may rank above `admin`'s 200 and hold
+fewer verbs on `principal`, so the two can have opposite answers on the
 pair that matters most. Reach for the FLOOR when the admitted set is a
 contiguous top of the ladder ("who works on this cluster"); reach for the GRANT
 when what excludes somebody is a permission rather than a rung ("who edits

@@ -132,17 +132,17 @@ func requirementFromTree(t *testing.T, e *MemQLEngine, name, verb, resource stri
 // TestTheAccountGroupBuiltinsRequireAGroupCapability is the probe this gate was
 // built from: an ordinary authenticated person naming either builtin.
 //
-// `user` and `viewer` hold `read` on group and nothing else. `developer` RANKS
-// 300, above admin's 200, and holds no group grant at all -- which is the pair
-// that makes this a capability question rather than a rank one, since a floor
-// phrased "admin and above" would admit the developer.
+// `user` and `viewer` hold `read` on group and nothing else. It is a
+// capability question rather than a rank one: a custom role may rank above
+// admin and hold no group grant, as `developer` did until 2026-11-25 (design
+// record, developer access), when it was given both.
 func TestTheAccountGroupBuiltinsRequireAGroupCapability(t *testing.T) {
 	installSeededCatalog(t)
 	e, probe := groupBuiltinProbe(t)
 
 	for _, b := range groupAccountBuiltins {
 		requirementFromTree(t, e, b.name, b.verb, b.resource)
-		for _, role := range []string{"user", "viewer", "developer"} {
+		for _, role := range []string{"user", "viewer"} {
 			_, err := e.Execute(asCaller(role), groupBuiltinCall(b.name, "acme"))
 			if err == nil {
 				t.Fatalf("%s admitted a %s: an account's groups are not every signed-in person's to place or empty", b.name, role)
@@ -167,15 +167,15 @@ func TestTheAccountGroupBuiltinsRequireAGroupCapability(t *testing.T) {
 // TestTheAccountGroupBuiltinsAdmitTheRolesThatHoldTheCapability is the other
 // half, and without it the test above passes on a builtin nobody can call.
 //
-// owner and admin are the two roles the seeds give create and update on group
-// -- the same pair that may reach groupCreate and groupArchive by hand.
+// owner, developer and admin are the roles the seeds give create and update on
+// group -- the same three that may reach groupCreate and groupArchive by hand.
 func TestTheAccountGroupBuiltinsAdmitTheRolesThatHoldTheCapability(t *testing.T) {
 	installSeededCatalog(t)
 	e, probe := groupBuiltinProbe(t)
 
 	for _, b := range groupAccountBuiltins {
 		requirementFromTree(t, e, b.name, b.verb, b.resource)
-		for _, role := range []string{"owner", "admin"} {
+		for _, role := range []string{"owner", "developer", "admin"} {
 			before := probe.count(b.name)
 			if _, err := e.Execute(asCaller(role), groupBuiltinCall(b.name, "acme")); err != nil {
 				t.Fatalf("%s refused a %s, who holds %s on %s: %v", b.name, role, b.verb, b.resource, err)

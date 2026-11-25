@@ -111,10 +111,10 @@ func MayAssignRole(
 	// WHICH GRANT DEPENDS ON WHICH SEAM IS ASKING, and that is the model's own
 	// create-versus-update split rather than a convenience. Re-roling somebody
 	// is `update` on `principal` (D4). Naming the role on an INVITATION is not:
-	// there is no principal yet, and a developer holds create-on-admission and
-	// no update-on-principal precisely so it can invite people and cannot
-	// re-role them (memql#4917). Requiring update here would take invitations
-	// away from every developer in every cluster, through the one function whose
+	// there is no principal yet, and create-on-admission exists precisely so a
+	// role can invite people without re-roling them (memql#4917; the developer
+	// role held only that until 2026-11-25). Requiring update here would take
+	// invitations away from every such role, through the one function whose
 	// job is deciding which ROLE they may name.
 	//
 	// ROLE-LEVEL, DELIBERATELY (epic memql#5296). This is a statement about
@@ -160,11 +160,10 @@ func MayAssignRole(
 		return AssignAboveCaller
 	}
 
-	// RANK IS NOT AUTHORITY, and this is the clause that says so. developer
-	// ranks 300 above admin's 200 and holds strictly fewer principal verbs, so
-	// every "must strictly outrank" rule admits developer -> admin -- while
-	// admin can then do the user management the developer cannot, including
-	// calling this function to make anybody an owner.
+	// RANK IS NOT AUTHORITY, and this is the clause that says so. A role may
+	// rank above admin's 200 and hold fewer principal verbs -- developer did
+	// until 2026-11-25 -- so every "must strictly outrank" rule admits that
+	// role -> admin, while admin can then do the user management it cannot.
 	//
 	// RE-ROLING ONLY (memql#5236). Admitting somebody is not wielding their
 	// powers: a re-role hands over authority immediately, while an invitation

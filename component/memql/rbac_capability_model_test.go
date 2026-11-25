@@ -129,9 +129,11 @@ func TestRBACCapabilityModelExpressible(t *testing.T) {
 	mustHave("developer", "execute", "construct")  // CanRunInline
 	mustHave("developer", "execute", "deployment") // AtLeastDeveloper forward deploy
 	mustHave("developer", "create", "data")        // CanWrite
-	mustNotHave("developer", "create", "principal")
-	mustNotHave("developer", "update", "principal")
-	mustNotHave("developer", "delete", "principal")
+	// The owner's people-work, from 2026-11-25 (design record, developer
+	// access). An owner stays out of reach through auth.GovernPrincipal.
+	mustHave("developer", "create", "principal")
+	mustHave("developer", "update", "principal")
+	mustHave("developer", "delete", "principal")
 
 	// admin: user-management power (full principal verbs) but NOT authoring.
 	mustHave("admin", "create", "principal") // CanManageUser create half

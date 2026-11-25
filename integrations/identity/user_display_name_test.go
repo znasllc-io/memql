@@ -12,7 +12,7 @@ import (
 // Even direct integration invocation cannot borrow the internal origin used
 // by the underlying user mutation. Only the audit sink reaches the engine.
 func TestDisplayNameCapabilityRefusesUnprivilegedCallersAndAudits(t *testing.T) {
-	for _, role := range []auth.Role{"", auth.RoleReader, auth.RoleWriter, auth.RoleDeveloper} {
+	for _, role := range []auth.Role{"", auth.RoleReader, auth.RoleWriter} {
 		t.Run(string(role), func(t *testing.T) {
 			engine := &beginFakeEngine{}
 			integration := NewIdentityIntegrationWithEngine(engine, nil, nil)

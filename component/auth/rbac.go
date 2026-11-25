@@ -224,19 +224,19 @@ func IsReader(u UserContext) bool {
 	return u.Role == RoleReader
 }
 
-// IsPrivilegedUser returns true when the user has owner or admin role.
-// This is used to determine access to privileged features like the System
-// assistant. E1.5 (memql#2073): "privileged" == holds user-management
-// authority == the create-on-principal capability (owner + admin in the DSL
-// model). Developer is engineering power and is deliberately NOT privileged
-// here, exactly as before.
+// IsPrivilegedUser returns true when the user holds user-management
+// authority. This is used to determine access to privileged features like the
+// System assistant. E1.5 (memql#2073): "privileged" == the create-on-principal
+// capability: owner, admin and, from 2026-11-25, developer (design record
+// 2026-11-25, developer access).
 func IsPrivilegedUser(u UserContext) bool {
 	return roleHasCapability(u.Role, "create", "principal")
 }
 
-// AtLeastAdmin returns true if the user has owner or admin role. E1.5: this is
-// the user-management gate == the create-on-principal capability (owner +
-// admin), preserving the prior owner||admin result.
+// AtLeastAdmin is the user-management gate == the create-on-principal
+// capability: owner, developer and admin. Developer joined on 2026-11-25
+// (design record, developer access); who a caller may act ON is the rank
+// tree's question (GovernPrincipal), not this gate's.
 func AtLeastAdmin(u UserContext) bool {
 	return roleHasCapability(u.Role, "create", "principal")
 }
@@ -270,9 +270,9 @@ func CanAdmitPeople(u UserContext) bool {
 // AtLeastDeveloper returns true if the user has owner, admin, or developer
 // role. This is the deploy-action gate for cutting versions + deploying
 // (memql#1876): engineering power (developer) plus the two admin tiers can
-// ship, while writer/reader stay read-only. Rollback keeps the stricter
-// AtLeastAdmin gate -- developer can deploy forward but not roll back. E1.5:
-// the gate == the execute-on-deployment capability (owner/developer/admin).
+// ship, while writer/reader stay read-only. Rollback is owner-only
+// (component/deploycontrol authorizeOwner). E1.5: the gate == the
+// execute-on-deployment capability (owner/developer/admin).
 func AtLeastDeveloper(u UserContext) bool {
 	return roleHasCapability(u.Role, "execute", "deployment")
 }
@@ -305,21 +305,22 @@ func CanRead(u UserContext) bool {
 	return roleHasCapability(u.Role, "read", "data")
 }
 
-// CanCreateAgent returns true if the user can create agents (owner or admin
-// only). E1.5: == the create-on-agent capability.
+// CanCreateAgent returns true if the user can create agents (owner,
+// developer or admin). E1.5: == the create-on-agent capability.
 func CanCreateAgent(u UserContext) bool {
 	return roleHasCapability(u.Role, "create", "agent")
 }
 
-// CanManageGroup returns true if the user can manage groups (owner or admin
-// only). E1.5: == the create-on-group capability.
+// CanManageGroup returns true if the user can manage groups (owner,
+// developer or admin). E1.5: == the create-on-group capability.
 func CanManageGroup(u UserContext) bool {
 	return roleHasCapability(u.Role, "create", "group")
 }
 
 // CanViewUser returns true if the caller can view the target user.
-// Owner sees everyone. Admin sees everyone except other owners. Writers
-// and readers see only themselves (user management is not their concern).
+// Owner sees everyone. Admin and developer see everyone except owners.
+// Writers and readers see only themselves (user management is not their
+// concern).
 //
 // E1.5 (memql#2073): expressed via the model -- a caller may view a target if
 // they're the same user, OR they hold read-on-principal AND can reach the
@@ -335,10 +336,9 @@ func CanViewUser(caller, target UserContext) bool {
 		return true
 	}
 	if !roleHasCapability(caller.Role, "read", "principal") || !roleHasCapability(caller.Role, "create", "principal") {
-		// Only user-managers (owner/admin -- they hold read AND create on the
-		// principal resource) may view OTHER users. developer holds read on
-		// principal but not create, so it is not a cross-user viewer here --
-		// matching the prior behavior (writer/reader/developer: self only).
+		// Only user-managers (they hold read AND create on the principal
+		// resource: owner, developer, admin) may view OTHER users.
+		// writer/reader: self only.
 		return false
 	}
 	// owner sees everyone; admin sees everyone except other owners.
@@ -368,10 +368,10 @@ func CanManageUser(caller, target UserContext) bool {
 	}
 
 	if !roleHasCapability(caller.Role, "update", "principal") {
-		return false // not a user-manager (writer/reader/developer): self only.
+		return false // not a user-manager (writer/reader): self only.
 	}
 	// owner manages everyone (modulo the owner-owner lockout handled above);
-	// admin manages a VALID target it strictly out-ranks (writer/reader tier).
+	// developer and admin manage a VALID target they strictly out-rank.
 	// The IsValidRole guard preserves the prior behavior where admin manages
 	// only the writer/reader slugs -- an unknown/invalid target slug is not
 	// manageable (it isn't a real principal in the role model).

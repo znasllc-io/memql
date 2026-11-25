@@ -47,9 +47,16 @@ func (i *IdentityIntegration) handleCreateDelegation(ctx context.Context, args m
 		return nil, fmt.Errorf("identity.createDelegation: cannot resolve caller user context")
 	}
 
-	// Caller must be the identity owner or have at least admin role
+	// Caller must be the identity owner or have the owner or admin role.
+	//
+	// BY NAME, not componentAuth.AtLeastAdmin: that predicate is the
+	// user-management capability, which the developer role holds from
+	// 2026-11-25 (design record, developer access). Delegating ANOTHER
+	// person's identity compares no ranks -- an admin can name the owner's --
+	// so it is not opened to one more role until it does (listed as open in
+	// the record).
 	isOwner := caller.Subject == identitySubject
-	if !isOwner && !componentAuth.AtLeastAdmin(callerUser) {
+	if !isOwner && !componentAuth.IsOwner(callerUser) && !componentAuth.IsAdmin(callerUser) {
 		return nil, fmt.Errorf("identity.createDelegation: caller must be the identity owner or have admin role")
 	}
 

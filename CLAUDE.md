@@ -1413,8 +1413,9 @@ its mirror, not a stand-in.
 **`@requiresCapability("<verb>", "<resource>")` is its SIBLING** (epic
 memql#5166, D11): validated at LOAD against the five verbs and the seeded
 resource kinds, enforced on the direct call and on every plan that EXPANDS the
-construct. **A rank is a FLOOR and a capability is a GRANT**: developer ranks
-300 above admin's 200 and holds strictly fewer verbs on `principal`. Declared
+construct. **A rank is a FLOOR and a capability is a GRANT**: a role may rank
+above another and hold fewer verbs (developer did on `principal` until
+2026-11-25, design record developer access). Declared
 together, both must pass. `requiresAdmin`, `requiresOwnerOrAdmin` and
 `requiresDeveloperOrAbove` are DELETED. `@requiresCapability` is legal on a
 BUILTIN (epic memql#5288), whose executor asks itself; `@requiresRank` is not.

@@ -21,10 +21,17 @@
 //   developer -- ENGINEERING power: authors constructs (create/update/
 //                delete on `construct`) + runs inline DSL (execute on
 //                `construct`) + the full data plane + forward deploy
-//                (execute on `deployment`). Critically it has NO
-//                create/update/delete on `principal` -- a developer
-//                cannot manage users. Mirrors CanAuthor/CanRunInline/
-//                AtLeastDeveloper minus user management.
+//                (execute on `deployment`). And, by the owner's direction
+//                of 2026-11-25 (design record 2026-11-25, developer
+//                access), the people-work an owner does: every verb on
+//                `principal`, agents, groups and custom roles. "A developer
+//                should be able to do almost everything an owner does",
+//                except billing, the owner's own functions and
+//                information, and the owners' files. What keeps an owner
+//                out of a developer's reach is the RANK TREE, not a
+//                missing verb: auth.GovernPrincipal refuses any non-owner
+//                an owner-ranked target, and a developer acts only on
+//                people ranked strictly below 300.
 //   admin     -- USER-MANAGEMENT power: full verbs on `principal`
 //                (read/create/update/delete) + agent/group creation +
 //                the data plane + forward deploy. It does NOT author
@@ -38,7 +45,7 @@
 //                reader/writer split onto this rank + a viewer profile.)
 //
 // The create != update split is deliberately visible on `principal`:
-// admin holds BOTH create and update; a future custom role can hold
+// admin and developer hold BOTH create and update; a custom role can hold
 // `create` on `principal` WITHOUT `update` -- "mint users but don't edit
 // existing ones" -- which is exactly what E1.3's governance predicates
 // key on. The same split on `role` (admin/owner create/update/delete vs
@@ -58,12 +65,12 @@ seed role owner {
   predefined:  true
 }
 
-@description("developer: ENGINEERING power -- authors constructs, runs inline DSL, drives the data plane, forward-deploys. OUTRANKS admin (different power axis); does NOT manage principals.")
+@description("developer: ENGINEERING power -- authors constructs, runs inline DSL, drives the data plane, forward-deploys -- plus the people-work an owner does, on everybody ranked below it. OUTRANKS admin; never reaches an owner.")
 seed role developer {
   slug:        "developer"
   name:        "Developer"
   rank:        300
-  description: "Engineering authority: author DSL constructs, run inline DSL, full data plane, forward deploy. Cannot manage users."
+  description: "Engineering authority: author DSL constructs, run inline DSL, full data plane, forward deploy. Manages people, groups and roles ranked below it; never an owner."
   predefined:  true
 }
 
@@ -145,13 +152,36 @@ seed capability cap-owner-create-admission { roleSlug: "owner"  verb: "create"  
 
 // =============================================================================
 //   developer -- engineering power: authoring + inline + data + deploy,
-//   plus ADMISSION (invite a person, mint an enrolment link).
-//   NO principal management (cannot create/update/delete users): admission
-//   and principal are separate resources precisely so this line stays true.
+//   plus ADMISSION (invite a person, mint an enrolment link) and, from
+//   2026-11-25, the owner's people-work: principals, agents, groups, roles.
+//
+//   THE OWNER'S DIRECTION (call of 2026-11-25; design record 2026-11-25,
+//   developer access): "un developer debe poder hacer casi absolutamente todo
+//   lo que hace un owner", except billing information, owner functionality
+//   and information, and the owners' files -- "mantener ese tree". So the
+//   verbs below are the owner's, and what a developer may not do is decided
+//   where it is true:
+//     - an OWNER is out of reach through the rank tree (auth.GovernPrincipal:
+//       an owner-ranked target is an owner's alone; otherwise strictly
+//       outrank), which every write naming a person applies;
+//     - a role or a grant a developer authors is bounded by rank-below-creator
+//       and grants-a-subset-of-the-caller's, so it cannot hand out what the
+//       developer does not hold;
+//     - billing, budgets, the audit trail and the owner's own settings are
+//       resources this role is simply not seeded with (see the owner-only
+//       rows of the app block below).
+//   Admission stays its own resource: a custom role can still invite people
+//   without managing them.
 // =============================================================================
 
-@description("developer: read principals (see the user list; no management).")
+@description("developer: read principals (see the user list).")
 seed capability cap-developer-read-principal { roleSlug: "developer"  verb: "read"    resourceType: "principal"  predefined: true }
+@description("developer: create principals -- add users ranked below developer (owner's direction 2026-11-25).")
+seed capability cap-developer-create-principal { roleSlug: "developer"  verb: "create"  resourceType: "principal"  predefined: true }
+@description("developer: update principals -- edit, re-role and suspend people ranked strictly below developer, and write app grants (grantSet's first guard). Never an owner, never another developer: the rank tree refuses both (owner's direction 2026-11-25).")
+seed capability cap-developer-update-principal { roleSlug: "developer"  verb: "update"  resourceType: "principal"  predefined: true }
+@description("developer: delete principals -- remove people ranked strictly below developer (owner's direction 2026-11-25).")
+seed capability cap-developer-delete-principal { roleSlug: "developer"  verb: "delete"  resourceType: "principal"  predefined: true }
 @description("developer: author constructs (CanAuthor).")
 seed capability cap-developer-create-construct { roleSlug: "developer"  verb: "create"  resourceType: "construct"  predefined: true }
 @description("developer: edit constructs.")
@@ -172,9 +202,21 @@ seed capability cap-developer-delete-data { roleSlug: "developer"  verb: "delete
 seed capability cap-developer-execute-deployment { roleSlug: "developer"  verb: "execute"  resourceType: "deployment"  predefined: true }
 @description("developer: read agents.")
 seed capability cap-developer-read-agent { roleSlug: "developer"  verb: "read"    resourceType: "agent"  predefined: true }
+@description("developer: create agents (owner's direction 2026-11-25).")
+seed capability cap-developer-create-agent { roleSlug: "developer"  verb: "create"  resourceType: "agent"  predefined: true }
+@description("developer: manage groups (create), groupEnsureForAccount included (owner's direction 2026-11-25).")
+seed capability cap-developer-create-group { roleSlug: "developer"  verb: "create"  resourceType: "group"  predefined: true }
+@description("developer: edit groups -- rename, archive, place or remove a member ranked strictly below developer (owner's direction 2026-11-25).")
+seed capability cap-developer-update-group { roleSlug: "developer"  verb: "update"  resourceType: "group"  predefined: true }
 @description("developer: read the RBAC role catalog.")
 seed capability cap-developer-read-role { roleSlug: "developer"  verb: "read"    resourceType: "role"  predefined: true }
-@description("developer: admit people -- issue and revoke user invitations and enrolment links (auth.CanAdmitPeople). A developer standing a cluster up alongside the owner can get colleagues in. Deliberately NOT create-on-principal, the user-management authority gating role changes, suspensions and recovery keys: a developer holds no update or delete on a principal, so it cannot edit, re-role or suspend anybody who accepts.")
+@description("developer: create custom roles, ranked below developer and granting a subset of what developer holds (owner's direction 2026-11-25).")
+seed capability cap-developer-create-role { roleSlug: "developer"  verb: "create"  resourceType: "role"  predefined: true }
+@description("developer: edit custom roles within the same bounds.")
+seed capability cap-developer-update-role { roleSlug: "developer"  verb: "update"  resourceType: "role"  predefined: true }
+@description("developer: delete custom roles within the same bounds.")
+seed capability cap-developer-delete-role { roleSlug: "developer"  verb: "delete"  resourceType: "role"  predefined: true }
+@description("developer: admit people -- issue and revoke user invitations and enrolment links (auth.CanAdmitPeople). Its own resource rather than create-on-principal, so a custom role can invite people without managing them.")
 seed capability cap-developer-create-admission { roleSlug: "developer"  verb: "create"  resourceType: "admission"  predefined: true }
 
 // =============================================================================
@@ -650,10 +692,10 @@ seed capability cap-admin-read-app-settings-logs { roleSlug: "admin"  verb: "rea
 // Settings -> Access (epic memql#5289, task memql#5307): the screen where a
 // grant to a person or a group is written and read back. Seeded on the roles
 // the grant READS admit -- grantsForSubject and grantsForResource are floored
-// at admin, so admin, developer and owner -- rather than on the roles that
-// may WRITE one (update on principal: owner and admin). A developer opens the
-// screen and reads it; the writes go read-only in the shell and are refused
-// in Go (grant_caller_not_permitted) for anybody below that grant.
+// at admin, so admin, developer and owner. The same three WRITE one (update
+// on principal; developer from 2026-11-25). A role holding the read without
+// that verb -- a custom one -- opens the screen read-only, and its writes are
+// refused in Go (grant_caller_not_permitted).
 @description("owner: open the access section of the settings app -- the grant reads' admin floor (memql#5307).")
 seed capability cap-owner-read-app-settings-access { roleSlug: "owner"  verb: "read"  resourceType: "app:settings/access"  predefined: true }
 @description("developer: open the access section of the settings app -- the grant reads' admin floor (memql#5307).")
@@ -664,12 +706,16 @@ seed capability cap-admin-read-app-settings-access { roleSlug: "admin"  verb: "r
 // Settings -> Pipelines (epic memql#5479, task memql#5498; pipelines program
 // design record, D15): the cluster's optional Pipelines readiness item -- the
 // GitHub App, a connected repository, compute -- and the marker under the
-// gear while it is neither done nor dismissed. OWNER ONLY, by decision: what
-// the item asks for is the cluster's GitHub App and its installations, which
-// only an owner registers, and the marker is a nudge meant for the person who
-// decides whether this cluster runs anybody's CI at all.
+// gear while it is neither done nor dismissed. OWNER AND DEVELOPER. It was
+// the owner's alone, because what the item asks for is the cluster's GitHub
+// App and its installations, which only an owner registers. Registering
+// stays an owner's; READING the item is how a developer who connects and
+// re-runs pipelines sees why one cannot start (owner's direction 2026-11-25:
+// a developer reads how the pipeline works and why a deployment failed).
 @description("owner: open the pipelines section of the settings app -- the optional Pipelines readiness item and its marker (memql#5498, D15).")
 seed capability cap-owner-read-app-settings-pipelines { roleSlug: "owner"  verb: "read"  resourceType: "app:settings/pipelines"  predefined: true }
+@description("developer: open the pipelines section of the settings app -- read the Pipelines readiness item (owner's direction 2026-11-25).")
+seed capability cap-developer-read-app-settings-pipelines { roleSlug: "developer"  verb: "read"  resourceType: "app:settings/pipelines"  predefined: true }
 
 // ---- app:settings/apikeys -- add an API key of one's own (design record 2026-11-21-vendor-accounts-and-api-keys, K4 as amended 2026-11-22) ----
 // A named part, because adding a key puts a credential that spends a person's money on the

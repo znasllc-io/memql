@@ -219,12 +219,13 @@ the only way in, and the seed materializer reaches them under internal origin.
 `auth.MayAssignRole` is the ONE rule, called by `SetUserRole` and by invitation
 issue. The caller must hold `update` on `principal` (an INVITATION needs
 `create` on `admission` or on `principal` instead -- there is no principal yet,
-and the create-versus-update split is what lets a developer invite people
+and the create-versus-update split is what lets a role invite people
 without being able to re-role them), must outrank the target's current rung, and
 must outrank the new one. An owner may name another owner; nobody else may name
 a peer. A role holding a principal verb the caller lacks is refused whatever the
-ranks say -- developer outranks admin and holds fewer principal verbs, so rank
-alone would let a developer mint an admin.
+ranks say -- a custom role may outrank admin and hold fewer principal verbs, so
+rank alone would let it mint an admin. The developer role holds every principal
+verb from 2026-11-25 and manages people ranked below it, never an owner.
 
 ## What the role actually decides
 

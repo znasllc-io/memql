@@ -487,7 +487,8 @@ func TestMigrateRole(t *testing.T) {
 }
 
 // TestDeveloperRoleCapabilities pins the #1532 capability matrix: developer is
-// engineering power (author / inline / write) but NOT user-management power.
+// engineering power (author / inline / write) and, from 2026-11-25 (design
+// record, developer access), user-management power over people ranked below it.
 func TestDeveloperRoleCapabilities(t *testing.T) {
 	cases := []struct {
 		role                   Role
@@ -495,8 +496,8 @@ func TestDeveloperRoleCapabilities(t *testing.T) {
 		canWrite, atLeastAdmin bool
 	}{
 		{RoleOwner, true, true, true, true},
-		{RoleDeveloper, true, true, true, false}, // the new role
-		{RoleAdmin, false, false, true, true},    // admin: NO authoring/inline
+		{RoleDeveloper, true, true, true, true},
+		{RoleAdmin, false, false, true, true}, // admin: NO authoring/inline
 		{RoleWriter, false, false, true, false},
 		{RoleReader, false, false, false, false},
 	}

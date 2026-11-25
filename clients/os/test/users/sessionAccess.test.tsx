@@ -12,7 +12,8 @@ describe("session reads follow changing effective access", () => {
   it("starts reading after permission arrives and clears both views when it is revoked", async () => {
     const connection = fakeConnection({ sessionsForSubjectAdmin: [{ id: "session", clientLabel: "Browser" }] });
     h.connection = connection;
-    let role = "developer";
+    // A writer holds no update on principal; a developer does from 2026-11-25.
+    let role = "writer";
     installSeededAccess(role);
     const view = renderHook(() => ({ sessions: useSessions("person"), count: useSessionsCount("person") }), {
       wrapper: ({ children }: { children: ReactNode }) => withSession(children, { role }),
@@ -24,7 +25,7 @@ describe("session reads follow changing effective access", () => {
     await waitFor(() => expect(view.result.current.count.count).toBe(1));
     expect(view.result.current.sessions.live).toHaveLength(1);
 
-    role = "developer";
+    role = "writer";
     installSeededAccess(role);
     view.rerender();
     expect(view.result.current.sessions.live).toEqual([]);
@@ -44,7 +45,7 @@ describe("session reads follow changing effective access", () => {
       wrapper: ({ children }: { children: ReactNode }) => withSession(children, { role }),
     });
     expect(connection.query.sessionsForSubjectAdmin).toHaveBeenCalledOnce();
-    role = "developer";
+    role = "writer";
     installSeededAccess(role);
     view.rerender();
     await act(async () => finish(rowsResult([{ id: "session", clientLabel: "Browser" }])));

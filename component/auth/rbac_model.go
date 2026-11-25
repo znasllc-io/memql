@@ -121,35 +121,29 @@ var capabilitySets = map[Role]map[verbResource]bool{
 		// `update` on group is what every group builtin but groupCreate
 		// checks (epic memql#5165, D7). Placing somebody into a client's
 		// group is an edit OF THE GROUP -- the person's own row is
-		// untouched -- so it is not `update` on principal, which a
-		// developer deliberately does not hold.
+		// untouched -- so it is not `update` on principal.
 		vr("create", "group"), vr("update", "group"),
 		vr("read", "role"), vr("create", "role"), vr("update", "role"), vr("delete", "role"),
 		vr("create", "admission"),
 	),
 	RoleDeveloper: setOf(
-		// engineering: authoring + inline + data + forward deploy. NO principal mgmt.
-		vr("read", "principal"),
+		// engineering: authoring + inline + data + forward deploy -- and, from
+		// 2026-11-25, the owner's people-work (design record 2026-11-25,
+		// developer access): every principal verb, agents, groups, roles. An
+		// owner stays out of reach through GovernPrincipal, not a missing verb.
+		vr("read", "principal"), vr("create", "principal"), vr("update", "principal"), vr("delete", "principal"),
 		vr("create", "construct"), vr("update", "construct"), vr("delete", "construct"), vr("execute", "construct"),
 		vr("read", "data"), vr("create", "data"), vr("update", "data"), vr("delete", "data"),
 		vr("execute", "deployment"),
-		vr("read", "agent"),
-		vr("read", "role"),
+		vr("read", "agent"), vr("create", "agent"),
+		vr("create", "group"), vr("update", "group"),
+		vr("read", "role"), vr("create", "role"), vr("update", "role"), vr("delete", "role"),
 		// ADMISSION: may hand somebody a credential that lets them into this
-		// cluster -- a user invitation or an enrolment link.
-		//
-		// This is the one piece of people-work a developer holds, and it is
-		// deliberately NOT `create` on `principal`: that is the
-		// user-management authority AtLeastAdmin tests, gating fourteen
-		// operations including role changes, suspensions and recovery-key
-		// rotation. Admission is its own resource because the resource
-		// vocabulary is open by design -- v1:rbac:capability documents
-		// resourceType as "an open string (not a closed enum) so product
-		// layers can introduce their own resource kinds without an engine
-		// change".
-		//
-		// A developer still holds NO update or delete on `principal`, so they
-		// cannot edit, suspend or re-role anybody who accepts.
+		// cluster -- a user invitation or an enrolment link. Its own resource
+		// rather than `create` on `principal`, so a custom role can invite
+		// people without managing them (the resource vocabulary is open by
+		// design: v1:rbac:capability documents resourceType as "an open
+		// string (not a closed enum)").
 		vr("create", "admission"),
 	),
 	RoleAdmin: setOf(
@@ -243,7 +237,7 @@ var appReadFloors = map[string][]Role{
 	"app:settings/tokens":        {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:settings/keys":          {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:settings/logs":          {RoleOwner, RoleDeveloper, RoleAdmin},
-	"app:settings/pipelines":     {RoleOwner},
+	"app:settings/pipelines":     {RoleOwner, RoleDeveloper},
 	"app:profile":                {RoleOwner, RoleDeveloper, RoleAdmin, RoleWriter, RoleReader},
 	"app:profile/logs":           {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:identity":               {RoleOwner, RoleDeveloper, RoleAdmin, RoleWriter, RoleReader},
@@ -461,10 +455,11 @@ const (
 // GrantsPrincipalAuthorityBeyond reports whether `target` holds any verb on
 // the `principal` resource that `actor` does not.
 //
-// RANK IS NOT AUTHORITY, and this exists because of the one pair where they
-// disagree. developer ranks 300 and admin 200, so every "must strictly
-// outrank" rule admits developer -> admin -- while admin holds create, update
-// and delete on `principal` and developer holds only read. A gate that mints a
+// RANK IS NOT AUTHORITY, and this exists because of the pairs where they
+// disagree. Until 2026-11-25 the predefined roles carried one: developer
+// ranked 300 and admin 200 while admin held create, update and delete on
+// `principal` and developer only read. A custom role can still be authored
+// that way, so every "must strictly outrank" rule may admit it. A gate that mints a
 // credential FOR an account (an enrolment link registers a passkey as that
 // person; an invitation creates one at a chosen role) therefore cannot ask
 // "do I outrank them". It has to ask this.

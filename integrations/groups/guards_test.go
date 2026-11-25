@@ -79,8 +79,10 @@ func TestCapabilityGuardFollowsTheSeededGrants(t *testing.T) {
 		{auth.RoleAdmin, auth.VerbUpdate, true},
 		{auth.RoleOwner, auth.VerbCreate, true},
 		{auth.RoleAdmin, auth.VerbCreate, true},
-		// A developer manages code, not people: no group grant at all.
-		{auth.RoleDeveloper, auth.VerbUpdate, false},
+		// A developer holds both from 2026-11-25 (design record, developer
+		// access): the people-work an owner does, on everybody ranked below it.
+		{auth.RoleDeveloper, auth.VerbUpdate, true},
+		{auth.RoleDeveloper, auth.VerbCreate, true},
 		{auth.RoleWriter, auth.VerbUpdate, false},
 		{auth.RoleReader, auth.VerbUpdate, false},
 		{auth.RoleWriter, auth.VerbCreate, false},

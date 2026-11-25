@@ -81,13 +81,15 @@ func TestEnrolmentLinkRefusesATargetTheCallerDoesNotOutrank(t *testing.T) {
 		{"developer cannot mint for the owner", auth.RoleDeveloper, "owner", true},
 		{"admin cannot mint for the owner", auth.RoleAdmin, "owner", true},
 
-		// THE RANK INVERSION. developer (300) outranks admin (200), so a rank
-		// rule alone admits this -- while admin holds the principal verbs
-		// developer lacks, making the link a two-move path to owner.
-		{"developer cannot mint for an admin", auth.RoleDeveloper, "admin", true},
-
-		// Below the principal-holding tiers, rank is the whole question again.
+		// This row was THE RANK INVERSION, and refused: developer (300)
+		// outranks admin (200) and held only read on `principal`, so a link
+		// for an admin handed the minter people-authority it lacked. The
+		// developer role holds every principal verb from 2026-11-25 (design
+		// record, developer access), so the link hands over nothing new and
+		// rank is the whole question.
+		{"developer may mint for an admin", auth.RoleDeveloper, "admin", false},
 		{"developer may mint for a writer", auth.RoleDeveloper, "writer", false},
+		{"developer cannot mint for another developer", auth.RoleDeveloper, "developer", true},
 
 		// Peers do not outrank each other, which is what auth.CanManageUser
 		// already refuses for a role change on the same account.

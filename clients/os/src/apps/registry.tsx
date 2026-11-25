@@ -277,13 +277,10 @@ const logs: OsAppManifest = {
 // still right for Settings > Integrations, which leaves a rung out of the
 // MIDDLE.
 //
-// A DEVELOPER DOES NOT GET THE WHOLE APP, and this floor is not claiming
-// otherwise. They read the people list, issue and revoke invitations, and mint
-// enrolment links. Changing a role stays owner/admin -- and the person page's
-// ladder offers a developer no rung at all, which is `apps/users/assign.ts`
-// mirroring `auth.MayAssignRole`: developer holds read-on-principal and
-// create-on-admission, and no update, so every assignment it could offer would
-// be refused server-side.
+// A DEVELOPER GETS THE APP FOR EVERYBODY RANKED BELOW IT (owner's direction,
+// 2026-11-25). The role holds every `principal` verb, so the person page's
+// ladder (`apps/users/assign.ts`, mirroring `auth.MayAssignRole`) offers it
+// the rungs below developer, and the engine refuses it an owner or a peer.
 const users: OsAppManifest = {
   id: "users",
   name: "Users",

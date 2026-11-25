@@ -21,9 +21,9 @@ import { OS_REGISTRY } from "../../src/apps/registry";
 import { SessionProvider } from "../../src/chrome/access";
 import { OsProvider } from "../../src/chrome/state";
 import { UNKNOWN_RUNTIME_CONFIG } from "../../src/cluster/config";
-import { onGrantWritten } from "../../src/system/roles";
+import { onGrantWritten, setEffectiveCapabilities, type EffectiveCapability } from "../../src/system/roles";
 import { LocalDesktopStore } from "../../src/system/store";
-import { installSeededAccess, SEEDED_CAPABILITIES } from "../seededAccess";
+import { installSeededAccess, seededAccessFor, SEEDED_CAPABILITIES } from "../seededAccess";
 import { chooseOption } from "../selectControl";
 import { SEEDED_LADDER } from "../seededLadder";
 
@@ -195,8 +195,9 @@ function memStorage(): Pick<Storage, "getItem" | "setItem"> {
   return { getItem: (k) => data.get(k) ?? null, setItem: (k, v) => void data.set(k, v) };
 }
 
-function mount(state: State, role = "owner", userId = "u-me") {
-  installSeededAccess(role);
+function mount(state: State, role = "owner", userId = "u-me", capabilities?: EffectiveCapability[]) {
+  if (capabilities) setEffectiveCapabilities(capabilities);
+  else installSeededAccess(role);
   h.connection = fakeConnection(state);
   return render(
     <SessionProvider
@@ -742,7 +743,11 @@ describe("by person: the acts", () => {
         ],
       },
     });
-    mount(state, "developer", "u-dev");
+    // No predefined role reads this screen without writing it any more (the
+    // developer role holds update on principal from 2026-11-25), so this is a
+    // custom role's set: the developer's, minus that one verb.
+    const readOnly = seededAccessFor("developer").filter((c) => !(c.verb === "update" && c.resource === "principal"));
+    mount(state, "developer", "u-dev", readOnly);
     await pickSubject("Ada Lovelace");
     await waitFor(() => expect(answersOf("app:deployables")).toEqual(["Can open, from the role Developer"]));
     expect(answersOf("app:cluster/audit")).toEqual(["Can't open, nothing grants it"]);

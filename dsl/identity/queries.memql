@@ -1364,10 +1364,11 @@ query magicLinkRequest magicLinkRequestById {
 // the surface should not be handed.
 //
 // `update` ON `principal` rather than `read`, and that is what preserves the
-// exclusion the old spec produced: a developer holds read-on-principal and no
-// update, so it keeps reaching the user list and stays out of the
+// exclusion the old spec produced: a role holding read-on-principal and no
+// update keeps reaching the user list and stays out of the
 // credential-adjacent reads. The old spec said "owner or admin" and happened to
-// mean this; the annotation says it.
+// mean this; the annotation says it. The developer role holds update from
+// 2026-11-25 (design record, developer access) and so reaches these reads.
 //
 // Both resolve `actor.role` from the AccessContext -- NOT from the claims map.
 // The two operator surfaces stamped claims only, so this gate would have denied
@@ -2579,9 +2580,9 @@ query identity nodeTokenIdentities {
 //
 //      It was `requiresOwnerOrAdmin` as a top-level conjunct until epic
 //      memql#5166. `update` on `principal` is what those two slugs were
-//      standing for: a developer holds read-on-principal and no update, so the
-//      exclusion is preserved by a rule that says why rather than by a list of
-//      names.
+//      standing for: a role holding read-on-principal and no update is
+//      excluded by a rule that says why rather than by a list of names. The
+//      developer role holds update from 2026-11-25.
 //   2. nodeTokenSummary rather than identityFull. identityFull projects the
 //      whole `credentials` object, keyHash included; a read a browser can
 //      issue must not carry a credential whatever the caller's role. The

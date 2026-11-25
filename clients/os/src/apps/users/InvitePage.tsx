@@ -114,7 +114,7 @@ export function InvitePage({
     // EMPTY, and that is the invitation's whole difference: there is no
     // principal yet, so there is no current rung to outrank -- and the
     // capability asked for is create-on-admission rather than
-    // update-on-principal, which is what keeps invitations with developers.
+    // update-on-principal, so a role may invite people without managing them.
     targetRole: "",
     targetRank: 0,
     targetIsOwner: false,
