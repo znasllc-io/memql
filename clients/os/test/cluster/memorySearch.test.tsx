@@ -654,6 +654,42 @@ describe("Cluster > Settings > Memory search", () => {
     expect(document.activeElement).not.toBe(screen.getByRole("button", { name: "Cancel" }));
   });
 
+  it("a read that takes a control away gives focus back only if it was still in the page", async () => {
+    const advance = fakeClock();
+    const flipped = statusRow({ providerRef: NOMIC, label: "nomic-embed-text", switch: switchRun({ state: "finishing" }) });
+    const elsewhere = document.createElement("button");
+    try {
+      // Focus on Cancel when the switch flips and Cancel goes: kept in the section.
+      let query = memorySearchQuery(statusRow({ switch: switchRun() }));
+      mount("memorysearch", query);
+      await advance(0);
+      screen.getByRole("button", { name: "Cancel" }).focus();
+      query.becomes(flipped);
+      await advance(5_000);
+      expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+      expect(screen.getByRole("region", { name: "Change model" }).contains(document.activeElement)).toBe(true);
+      cleanup();
+
+      // Focus that left for another window, and then for nothing, is not
+      // pulled back into this one when the flip takes Cancel away.
+      query = memorySearchQuery(statusRow({ switch: switchRun() }));
+      mount("memorysearch", query);
+      await advance(0);
+      screen.getByRole("button", { name: "Cancel" }).focus();
+      document.body.appendChild(elsewhere);
+      elsewhere.focus();
+      elsewhere.blur();
+      expect(document.activeElement).toBe(document.body);
+      query.becomes(flipped);
+      await advance(5_000);
+      expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+      expect(document.activeElement).toBe(document.body);
+    } finally {
+      elsewhere.remove();
+      vi.useRealTimers();
+    }
+  });
+
   it("Change model is one place: a refusal is said there whichever of its states it arrives in", async () => {
     const advance = fakeClock();
     try {

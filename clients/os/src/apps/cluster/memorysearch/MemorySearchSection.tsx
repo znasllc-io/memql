@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState, type FocusEvent } from "react";
 import { useSession } from "../../../chrome/access";
 import { useConnectionStatus } from "../../../chrome/connection";
 import { useOsConnection } from "../../../live/connection";
@@ -181,6 +181,15 @@ export function MemorySearchPage({ query, connected, visible, me }: {
   // focused control, with focus left on nothing, focus goes where
   // focusAfterLoss says; focus somebody moved elsewhere stays there. Only while
   // the page is shown: a hidden pane takes nobody's focus.
+  //
+  // ONLY FOCUS THAT WAS STILL IN THE PAGE. Focus the reader took elsewhere --
+  // another window, then nowhere -- left lastFocused naming a control here,
+  // and a read that later took that control away (a switch flipping in a
+  // background Cluster window) pulled focus back into this window. So focus
+  // leaving the page forgets it. A control that loses focus because the page
+  // is removing it was not left by the reader: it is the case above, and is
+  // told apart by still being in the document once the blur is over (checked
+  // after it, as some browsers blur a control they remove).
   const root = useRef<HTMLDivElement>(null);
   const lastFocused = useRef<HTMLElement | null>(null);
   useLayoutEffect(() => {
@@ -189,7 +198,15 @@ export function MemorySearchPage({ query, connected, visible, me }: {
     lastFocused.current = null;
     if (document.activeElement === null || document.activeElement === document.body) focusAfterLoss(root.current)?.focus();
   });
-  return <div className="os-cluster os-memory-search" ref={root} onFocus={(event) => { lastFocused.current = event.target as HTMLElement; }}>
+  const focusLeft = (event: FocusEvent<HTMLDivElement>) => {
+    const next = event.relatedTarget;
+    if (next instanceof Node && event.currentTarget.contains(next)) return;
+    const left = event.target as HTMLElement;
+    queueMicrotask(() => {
+      if (left.isConnected && lastFocused.current === left) lastFocused.current = null;
+    });
+  };
+  return <div className="os-cluster os-memory-search" ref={root} onFocus={(event) => { lastFocused.current = event.target as HTMLElement; }} onBlur={focusLeft}>
     <Head title="Memory search" note={search.readError && status ? <HeadNote sentence="Memory search could not be refreshed." next="Showing the last reading." detail={search.readError} /> : null} />
     {status === null ? !connected ? <Notice sentence="Memory search loads when the cluster reconnects." />
       : search.readError ? <ReadRefused sentence="Memory search could not be read." reason={search.readError} retry={search.retry} />

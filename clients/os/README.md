@@ -2968,7 +2968,9 @@ job).
   closes, an act that succeeds or a read that moves the section removes the
   control that had focus; focus then goes to the model the choices hold checked
   (as Fleet's board does after Clear), else the first that can be chosen, else
-  the Change model section itself, and never to an act such as Cancel.
+  the Change model section itself, and never to an act such as Cancel. Only
+  focus that was still in the page is given back: focus the reader took to
+  another window is not pulled into this one when a read swaps a section.
 - **SWITCH BACK NAMES THE MODEL THE BINDING REPLACED** (`previousRef`), never a
   cancelled switch's partial index, which `retained` also lists; it is offered only
   while that model can be chosen.
