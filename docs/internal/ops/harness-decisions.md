@@ -2561,7 +2561,11 @@ wait from its beginning (an empty cursor) counts from zero: a `switching` run
 parked before its flip resumes as a catch-up walk, and carrying the ended
 walk's counts read progress above the estimated total and held the flip for
 failures the owner had already answered with Switch anyway
-(`TestAResumedWalkThatStartsFromTheBeginningCountsFromZero`).
+(`TestAResumedWalkThatStartsFromTheBeginningCountsFromZero`). A page of a row
+source reads only the columns the walk uses, `id`, `createdAt` and `payload`
+(`memorySourceRowsQuery`): the full row's schema, metadata and provenance
+crossed the wire for every item of every walk, and the backfill walks the
+whole corpus every ten minutes (`TestTheSourceWalkReadsOnlyTheColumnsItUses`).
 
 **What counts as missing (ruling R7).** An item is missing from the target when
 its vector is absent OR older than its row's newest version

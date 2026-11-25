@@ -2,14 +2,36 @@ package memql
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/pgdialect"
+	"github.com/uptrace/bun/driver/pgdriver"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
+
+// A page of a Rows source's walk reads only what the walk uses: the id, the
+// version and the payload. The full row carries schema and metadata as well,
+// which nothing in the walk reads and which would cross the wire for every
+// item of every walk, and the backfill walks the whole corpus every ten
+// minutes. Pinned on the statement itself, which needs no database to build.
+func TestTheSourceWalkReadsOnlyTheColumnsItUses(t *testing.T) {
+	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN("postgres://memql@127.0.0.1:1/none?sslmode=disable"))), pgdialect.New())
+	t.Cleanup(func() { _ = db.Close() })
+	var nodes []memorynodes.MemoryNode
+	statement := memorySourceRowsQuery(db, &nodes, "v1:test:item", "v1:test:item:007", 32).String()
+	selected, _, found := strings.Cut(strings.TrimPrefix(statement, "SELECT "), " FROM ")
+	require.True(t, found, statement)
+	require.Equal(t, `DISTINCT ON (id) "mn"."id", "mn"."createdAt", "mn"."payload"`, selected)
+	require.Contains(t, statement, `WHERE (concept = 'v1:test:item') AND (id > 'v1:test:item:007')`)
+	require.Contains(t, statement, `ORDER BY id ASC, "createdAt" DESC LIMIT 32`)
+}
 
 func sourceByName(t *testing.T, name string) MemorySource {
 	t.Helper()

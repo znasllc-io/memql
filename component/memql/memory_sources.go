@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/uptrace/bun"
+
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
@@ -214,6 +216,18 @@ func init() {
 	}
 }
 
+// memorySourceRowsQuery is one page of a Rows source's walk: the newest version
+// of each row of concept after cursor, in id order, reading ONLY the columns
+// the walk uses -- id, createdAt (the item's Version) and payload. A full row
+// also carries schema, metadata and provenance, which nothing in the walk
+// reads, and every batch of every walk would carry them: the backfill walks
+// the whole corpus every ten minutes.
+func memorySourceRowsQuery(db *bun.DB, nodes *[]memorynodes.MemoryNode, concept, cursor string, limit int) *bun.SelectQuery {
+	return db.NewSelect().Model(nodes).Column("id", "createdAt", "payload").DistinctOn("id").
+		Where("concept = ?", concept).Where("id > ?", cursor).
+		OrderExpr(`id ASC, "createdAt" DESC`).Limit(int64(limit))
+}
+
 // memorySourceItems returns up to limit items of a source with id > after, in
 // id order, and the id to resume after ("" when the source is exhausted).
 //
@@ -246,9 +260,7 @@ func (e *MemQLEngine) memorySourceItems(ctx context.Context, s MemorySource, aft
 	cursor := after
 	for {
 		var nodes []memorynodes.MemoryNode
-		err := db.NewSelect().Model(&nodes).DistinctOn("id").
-			Where("concept = ?", s.Concept).Where("id > ?", cursor).
-			OrderExpr(`id ASC, "createdAt" DESC`).Limit(int64(limit)).Scan(ctx)
+		err := memorySourceRowsQuery(db, &nodes, s.Concept, cursor, limit).Scan(ctx)
 		if err != nil {
 			return nil, "", fmt.Errorf("memory source %q: %w", s.Name, err)
 		}
