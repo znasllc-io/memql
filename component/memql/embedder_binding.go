@@ -89,9 +89,10 @@ type EmbedderBinding struct {
 	// which runs on no one's machines, and on a fleet binding made before
 	// indexers existed, whose embeddings then resolve for their caller.
 	IndexedBy string
-	// ChosenBy is the owner who chose this model. Empty when it was bound
-	// automatically, which is what lets an owner be asked once to confirm a
-	// vendor model nobody chose.
+	// ChosenBy is the person who chose this model: an owner, or, for a vendor
+	// model, somebody granted Memory search's part (memorySearchSwitch). Empty
+	// when it was bound automatically, which is what lets an owner be asked
+	// once to confirm a vendor model nobody chose.
 	ChosenBy string
 	// RetireAt is set on a RETIRED model's row (RetiredEmbedderBindingID): its
 	// index is kept until then, so switching back is quick, and dropped after.
@@ -290,9 +291,9 @@ func EmbedderDimensions() (int, bool) {
 // is on the embedding hot path and cannot run a query per call.
 //
 // A model absent from it reports 0, which callers read as "unknown". That is the
-// right answer for an operator's own pull that the catalog has never heard of,
-// and it is why a binding to such a model is refused rather than guessed: the
-// binding's whole job is to know the width before the first vector exists.
+// right answer for an operator's own pull that the catalog has never heard of;
+// binding such a model takes the width its own vector has (probeEmbedder embeds
+// one sentence before the table exists), never a guess.
 var catalogWidths struct {
 	mu     sync.RWMutex
 	byID   map[string]int

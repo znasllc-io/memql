@@ -2580,7 +2580,10 @@ is keyed by `seedChunkId`, the recipe version, the domain and the index, and the
 seed workflow writes every chunk each time it runs, so a re-run at the same
 recipe version writes new text under the old ids; a Trainer chunk's id is its
 caller's. Those are versioned, so the new text is embedded again, at the cost of
-one embedding per rewrite (a review stamp included). Tests:
+one embedding per rewrite (a review stamp included). The first backfill after
+this lands re-embeds, once, every LLM-seeded, bridge and Trainer chunk whose row
+was stamped after its vector: that catch-up is a one-time jump in the backlog,
+not a fault. Tests:
 `TestOnlyAChunkWhoseIdHashesItsTextIsPresenceOnly`, and
 `TestCanonicalKnowledgeDB/MemorySearchKnowsAContentAddressedChunkFromItsStoredRow`
 on the rows as the writers store them.
@@ -2673,7 +2676,13 @@ cache is wired before any model is bound, and works once one is. Until then
 every lookup and store of an enabled namespace fails open the same way, so the
 log says it once when the cache enters that state and once when an embedding
 works again, not at every call; each failure is still counted, and any other
-embedding failure is logged as it happens (`logEmbedFailure`). Tests:
+embedding failure is logged as it happens (`logEmbedFailure`). LIMIT: the
+table's `embedding` column is `vector(1536)` (migration 20260622000000), so it
+holds only a model 1536 wide, as `embedding3Small` is; under any other width
+(`qwen3-embedding:0.6b` is 1024), every lookup and store of an enabled
+namespace fails at the column, is counted and falls through to a fresh call. Nothing is enabled by default, so this costs nothing until an
+operator enables a namespace; a column per width, as the vector tables have, is
+not built. Tests:
 `TestTheSemanticCacheFollowsTheBinding`,
 `TestTheSemanticCacheIsWiredBeforeAModelIsBound`,
 `TestTheSemanticCacheSaysOnceThatNoModelIsBound`.
@@ -2909,7 +2918,13 @@ stored.
 **Limits.** Not run against a live cluster. `indexed` is a `count(*)` of the
 active table on every status read. The backlog is as fresh as its last count:
 the backfill's cadence, ten minutes, and while a switch runs the backfill
-counts nothing. The probe and the store path in the db tests are stubs. Tests:
+counts nothing. The probe and the store path in the db tests are stubs. The
+screen's vendor cost line ("about N items", `confirmationLine` in
+`clients/os/src/apps/cluster/memorysearch/MemorySearchSection.tsx`) is the
+estimate `indexed + backlog`, the whole index, so switching to a vendor model
+whose index is still kept (Switch back within its 30 days, or a cancelled
+switch chosen again) states more items than the cluster's account pays for:
+the walk embeds only what is missing there. Tests:
 `component/memql/memory_search_builtins_test.go` (the decisions, over the job's
 map world, the job's tick included) and
 `component/memql/memory_search_builtins_db_test.go` (two engines over one

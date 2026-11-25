@@ -756,9 +756,10 @@ concept providerAuthStatus {
 ///
 /// SWITCHING IS NOT AN EDIT: the index is rebuilt first (design record 2026-11-23, section 6). The
 /// memory index job fills the new model's own table while every read follows the binding that is
-/// still active, and flips this row in one write (flipEmbedderBinding) only when every item is in
-/// it, so a switch interrupted half way leaves a cluster that still works rather than one whose
-/// vectors half mean one thing and half another. The model it replaced is kept as a RETIRED row
+/// still active, and flips this row in one write (flipEmbedderBinding) by itself only once every
+/// item is in it, or when an owner chooses Switch anyway over the items that are not, so a switch
+/// interrupted half way leaves a cluster that still works rather than one whose vectors half mean
+/// one thing and half another. The model it replaced is kept as a RETIRED row
 /// at `retired-<16 hex>` (recordRetiredEmbedder), whose index survives until `retireAt` so that
 /// switching back is quick.
 ///
@@ -775,9 +776,11 @@ concept providerAuthStatus {
 /// everyone but the owner would make that unanswerable for the people most likely to ask.
 ///
 /// The fields memory search's switch added keep that answer. previousRef is a model id, as
-/// providerRef is. indexedBy and chosenBy name a cluster owner by id, which any signed-in person can
-/// already resolve to a name (userDisplayById), and indexedBy answers a question every person has a
-/// stake in: whose machines receive their memory text to embed. retireAt and droppedAt are dates on
+/// providerRef is. indexedBy names a cluster owner by id, and chosenBy the person who chose the
+/// model -- an owner, or for a vendor model somebody granted Memory search's part -- and any
+/// signed-in person can already resolve either id to a name (userDisplayById). indexedBy answers a
+/// question every person has a stake in: whose machines receive their memory text to embed.
+/// retireAt and droppedAt are dates on
 /// the retired rows, which share this concept and so its tier: when a replaced model's index is kept
 /// until, and when it was dropped.
 ///
@@ -789,7 +792,7 @@ concept providerAuthStatus {
 @belongsTo(cluster)
 concept embedderBinding {
   providerRef   string!  @description("A provider record name (embedding3Small) or a fleet reference (fleet:qwen3-embedding:0.6b). Resolved through the same registry path every other provider name takes, except that a fleet embedder is resolved against its INDEXER's machines (indexedBy) rather than the acting person's: memory search is one index for the whole cluster.")
-  dimensions    int!     @description("The vector width this provider produces, and therefore which node_vectors_<dims> table its vectors live in. NEVER ZERO on a valid binding: a width of zero cannot have a table and cannot have an index, and pgvector refuses both rather than accepting them quietly. For a fleet model the width comes from the catalog row, because the machine serving it does not know it either.")
+  dimensions    int!     @description("The vector width this provider produces, and therefore which node_vectors_<dims>_<16 hex> table its vectors live in. NEVER ZERO on a valid binding: a width of zero cannot have a table and cannot have an index, and pgvector refuses both rather than accepting them quietly. It is MEASURED when the model is bound or switched to: one sentence is embedded and the width is the vector's length, which must agree with the width a vendor record, or the catalog row of a fleet model, declares where one does.")
   activatedAt   datetime @description("When this binding became active. Empty on a row written by an activation that has not completed -- the re-embed is still filling the new table, and until it does this row is a plan rather than a state.")
   reembedRunId  string   @description("The v1:work:run that filled this binding's table, when an activation named one. Empty for the FIRST binding a cluster activates, which has nothing to re-embed FROM, and written empty by every switch (flipEmbedderBinding): the memory index job fills a new model's table and keeps its progress on v1:platform:memoryIndexRun, not on a work run. An absence means 'no work run filled it', never 'the run is missing'.")
   previousRef   string   @description("The providerRef this binding replaced, kept so an operator reading the row can see what the search space used to be. A vector corpus is not reversible from the vectors, so the only record of what produced them is this.")
@@ -798,8 +801,9 @@ concept embedderBinding {
   /// it. Empty for a vendor model, which runs on no one's machines and is paid by the cluster's
   /// account, and on a fleet binding made before indexers existed.
   indexedBy     string
-  /// The owner who chose this model. Empty when it was bound automatically, so a vendor model
-  /// nobody chose can be put to an owner once to confirm.
+  /// The person who chose this model: an owner, or, for a vendor model, somebody granted Memory
+  /// search's part. Empty when it was bound automatically, so a vendor model nobody chose can be
+  /// put to an owner once to confirm.
   chosenBy      string
   /// On a retired model's row (id `retired-<16 hex>`, after its vector table): its index is kept
   /// until this time, so switching back reuses it, and is dropped after. Empty on the active row.

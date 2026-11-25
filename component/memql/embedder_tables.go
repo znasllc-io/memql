@@ -24,10 +24,11 @@ import (
 // corrupt one: half the rows answer in the old model's geometry and half in the
 // new one's, and cosine distance between them is a number with no meaning. It
 // does not error, it ranks. So a switch fills the new model's own table and
-// flips the binding only when every item is in it (the memory index job,
-// memory_index_job.go) -- until then every read follows the old binding and the
-// old table, and a switch interrupted half way leaves a cluster that still
-// works.
+// flips the binding automatically only when every item is in it, or when an
+// owner chooses Switch anyway over the items that are not (the memory index
+// job, memory_index_job.go) -- until then every read follows the old binding
+// and the old table, and a switch interrupted half way leaves a cluster that
+// still works.
 
 // createVectorTableSQL builds the DDL for one width.
 //
