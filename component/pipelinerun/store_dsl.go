@@ -31,6 +31,7 @@ const (
 	qPipelineRunsForOwner     = "pipelineRunsForOwner"     // (pipelineId?)
 	qPipelineRunForOwner      = "pipelineRunForOwner"      // (runId)
 	qPipelineChannelsForOwner = "pipelineChannelsForOwner" // ()
+	qPipelineRunView          = "pipelineRunView"          // (runId) -- developer rank, any owner
 
 	// The notify stage's reads of one owner's rows, person-facing like the
 	// ones above but made UNDER THAT OWNER'S BORROWED AUTHORITY: the driver
@@ -38,6 +39,8 @@ const (
 	// filter is what decides the rows.
 	qPipelineChannelForOwnerByName = "pipelineChannelForOwnerByName" // (name)
 	qLibraryFileByID               = "libraryFileById"               // (fileId) -- dsl/library
+	qWorkStepsForOwnerRun          = "workStepsForOwnerRun"          // (runId) -- dsl/work
+	qArtifactsForRun               = "artifactsForRun"               // (runId) -- dsl/library
 
 	// Server-only reads, every owner's rows, cluster-owner conjunct.
 	qPipelinesForRepository      = "pipelinesForRepository"      // (repository)
@@ -341,6 +344,27 @@ func (s *dslStore) PipelinesForOwner(ctx context.Context) ([]Pipeline, error) {
 
 func (s *dslStore) RunForOwner(ctx context.Context, runID string) (*Run, error) {
 	return oneRun(s.callerRead(ctx, qPipelineRunForOwner, map[string]any{"runId": bareID(runID)}))
+}
+
+func (s *dslStore) RunView(ctx context.Context, runID string) (*Run, error) {
+	return oneRun(s.callerRead(ctx, qPipelineRunView, map[string]any{"runId": bareID(runID)}))
+}
+
+func (s *dslStore) RunDetailRows(ctx context.Context, owner, workRunID string) ([]WorkStep, []map[string]any, error) {
+	id := bareID(workRunID)
+	if id == "" {
+		return nil, nil, nil
+	}
+	rows, err := s.ownerRead(ctx, owner, qWorkStepsForOwnerRun, map[string]any{"runId": id})
+	if err != nil {
+		return nil, nil, err
+	}
+	steps := make([]WorkStep, 0, len(rows))
+	for _, row := range rows {
+		steps = append(steps, workStepFromRow(row))
+	}
+	files, err := s.ownerRead(ctx, owner, qArtifactsForRun, map[string]any{"runId": id})
+	return steps, files, err
 }
 
 func (s *dslStore) RunsForOwner(ctx context.Context, pipelineID string) ([]Run, error) {

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/znasllc-io/memql/component/auth"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
@@ -128,9 +129,9 @@ func TestAPlainTierGetsNoExtraTerm(t *testing.T) {
 	if got := orReadFloor(base, plain); got != ExpressionNode(base) {
 		t.Fatalf("orReadFloor wrapped a tier with no floor: %T", got)
 	}
-	owned := &langparser.RowAuthzDecl{Tier: langparser.RowAuthzOwned, Owner: "ownerUserId", RankFloor: "admin"}
-	if got := orReadFloor(base, owned); got != ExpressionNode(base) {
-		t.Fatal("orReadFloor acted on a non-clusterOwner tier; the formatter refuses that " +
+	granted := &langparser.RowAuthzDecl{Tier: langparser.RowAuthzGranted, Spec: "s", RankFloor: "admin"}
+	if got := orReadFloor(base, granted); got != ExpressionNode(base) {
+		t.Fatal("orReadFloor acted on the granted tier; the formatter refuses that " +
 			"declaration, and the injector must not honour one that slipped through")
 	}
 }
@@ -217,11 +218,9 @@ func TestABareReadFloorIsRefused(t *testing.T) {
 
 func TestTheFloorIsRefusedOnEveryOtherTier(t *testing.T) {
 	// Refused rather than dropped, for FormatRowAuthz's standing round-trip
-	// reason. On the OWNED tier especially: there is already a rank vocabulary
-	// there (rankVisible / unowned), and accepting a third spelling would give
-	// one behaviour two names.
+	// reason. The owned tier takes it too since design record 2026-11-24, so
+	// only the public and granted tiers are left to refuse it.
 	for _, d := range []langparser.RowAuthzDecl{
-		{Tier: langparser.RowAuthzOwned, Owner: "ownerUserId", RankFloor: "admin"},
 		{Tier: langparser.RowAuthzPublic, RankFloor: "admin"},
 		{Tier: langparser.RowAuthzGranted, Spec: "s", RankFloor: "admin"},
 	} {
@@ -243,5 +242,43 @@ func TestTheCompositeTierStillReachesItsOwnParser(t *testing.T) {
 	}
 	if decl.Tier != langparser.RowAuthzOwned || decl.Owner != "ownerUserId" || !decl.ClusterOwnerBypass {
 		t.Fatalf("the composite parsed to %+v, want the owned tier with the bypass", *decl)
+	}
+}
+
+// THE OWNER TIER'S READ FLOOR (design record 2026-11-24), through the row gate
+// of a planted concept: a developer reads a row somebody else owns, an admin
+// does not, a role scoped to one organization does not however high its rank,
+// and nobody WRITES through the floor.
+func TestTheOwnerTierFloorAdmitsReadsFromItsRungAndNoWrite(t *testing.T) {
+	const concept = "v1:rowauthzfixture:ownerfloor"
+	decl := &langparser.RowAuthzDecl{Tier: langparser.RowAuthzOwned, Owner: "ownerUserId", ClusterOwnerBypass: true, RankFloor: "developer"}
+	before := memorynodes.All()
+	memorynodes.MergeAll(map[string]*memorynodes.Concept{concept: {Name: concept, NodeType: "ownerfloor", RowAuthz: decl}})
+	t.Cleanup(func() { memorynodes.ReplaceAll(before) })
+	// staffCatalog (rowauthz_account_test.go) scopes "client-lead-350" to one
+	// organization and ranks it above developer.
+	auth.SetCapabilityCatalog(staffCatalog{})
+	t.Cleanup(func() { auth.SetCapabilityCatalog(nil) })
+
+	e := &MemQLEngine{}
+	someoneElses := []byte(`{"ownerUserId":"someone-else"}`)
+	for _, c := range []struct {
+		role auth.Role
+		read bool
+	}{
+		{auth.RoleDeveloper, true},
+		{auth.RoleAdmin, false},
+		{auth.Role("client-lead-350"), false},
+	} {
+		ctx := floorCtx(t, e, c.role)
+		if got := rowAuthzAdmits(ctx, concept, "row-1", someoneElses) == rowAuthzAdmit; got != c.read {
+			t.Errorf("%s reading somebody else's row: admitted=%v, want %v", c.role, got, c.read)
+		}
+		if rowAuthzAdmitsWrite(ctx, concept, "row-1", someoneElses) == rowAuthzAdmit {
+			t.Errorf("%s was admitted to WRITE somebody else's row; the floor relaxes reads only", c.role)
+		}
+	}
+	if _, ored := orReadFloor(&ComparisonExpression{}, decl).(*LogicalExpression); !ored {
+		t.Error("the owner tier's floor is not OR-ed into the read predicate, so SQL and the row gate would disagree")
 	}
 }

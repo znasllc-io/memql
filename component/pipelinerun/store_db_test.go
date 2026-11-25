@@ -852,6 +852,7 @@ func TestEveryPipelinesBuiltinResolvesToACapability(t *testing.T) {
 	// independent pull-request review, and exact pull-request preview/qualification.
 	// Forty-one before release trains went (2026-11-05) with their tick, express
 	// departure, status, standing word, Deploy button and Resume.
+	// Plus pipelinesRunDetail, the developer's view of a run (2026-11-24).
 	// An empty registry must not pass this audit.
 	executors := 0
 	for _, fn := range eng.Functions().Snapshot() {
@@ -859,8 +860,8 @@ func TestEveryPipelinesBuiltinResolvesToACapability(t *testing.T) {
 			executors++
 		}
 	}
-	if executors != 40 {
-		t.Fatalf("dsl/pipelines declares %d integration.pipelines builtins on this engine, want 40", executors)
+	if executors != 41 {
+		t.Fatalf("dsl/pipelines declares %d integration.pipelines builtins on this engine, want 41", executors)
 	}
 	if err := eng.AuditIntegrationExecutors(); err != nil {
 		t.Fatalf("the shipped DSL names a pipelines capability this integration does not offer: %v", err)

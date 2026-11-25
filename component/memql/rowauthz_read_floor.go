@@ -1,6 +1,6 @@
 package memql
 
-// THE CLUSTER-OWNER TIER'S READ FLOOR (memql#5216).
+// THE READ FLOOR of the cluster-owner tier and the owner tier (reads only; memql#5216).
 //
 // ===========================================================================
 // WHAT WAS MISSING, AND WHY IT SHOWED UP AS A LIE RATHER THAN AS A REFUSAL
@@ -60,6 +60,16 @@ package memql
 // That is NOT true of the public tier, which injects nothing; a read floor
 // there would have needed its own plan-level refusal ahead of the cache lookup.
 
+// ===========================================================================
+// AND THE OWNED TIER'S (design record 2026-11-24)
+// ===========================================================================
+// `v1:pipelines:run` is owned, cluster-owner-bypassed and account-tied, and a
+// developer must read every run: memQL's own pipeline is tied to no account,
+// so the account arm never reached it. Same floor, same rule (readFloorAdmits),
+// same asymmetry: the owned arm of rowAuthzAdmitsMode consults it for reads
+// only. The cache note above holds unchanged, since an owned tier injects a
+// predicate too.
+
 import (
 	"context"
 	"strings"
@@ -68,7 +78,7 @@ import (
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
-// ReadFloorExpression is the injected placeholder for a cluster-owner tier's
+// ReadFloorExpression is the injected placeholder for a cluster-owner or owner tier's
 // read floor.
 //
 // SYMBOLIC on purpose, exactly as RankScopeExpression is. The floor is a
@@ -83,16 +93,19 @@ type ReadFloorExpression struct {
 
 func (*ReadFloorExpression) isExpressionNode() {}
 
+// readFloorDeclared reports whether decl carries a read floor on a tier that
+// takes one: the cluster-owner tier (memql#5216) or the owned tier.
+func readFloorDeclared(decl *langparser.RowAuthzDecl) bool {
+	return decl != nil && strings.TrimSpace(decl.RankFloor) != "" &&
+		(decl.Tier == langparser.RowAuthzClusterOwner || decl.Tier == langparser.RowAuthzOwned)
+}
+
 // orReadFloor ORs the read floor onto a rendered tier predicate.
 func orReadFloor(base ExpressionNode, decl *langparser.RowAuthzDecl) ExpressionNode {
-	if decl == nil || decl.Tier != langparser.RowAuthzClusterOwner {
+	if !readFloorDeclared(decl) {
 		return base
 	}
-	floor := strings.TrimSpace(decl.RankFloor)
-	if floor == "" {
-		return base
-	}
-	node := &ReadFloorExpression{Floor: floor}
+	node := &ReadFloorExpression{Floor: strings.TrimSpace(decl.RankFloor)}
 	if base == nil {
 		return node
 	}
@@ -156,12 +169,9 @@ func (e *MemQLEngine) readFloorAdmits(ctx context.Context, floor string) bool {
 //
 // A context no entry point stamped therefore DENIES. That is the correct
 // direction for a term that is OR-ed onto a gate: declining leaves exactly the
-// pre-floor behaviour, which is the cluster-owner tier alone.
+// pre-floor behaviour, which is the cluster-owner tier alone (the owner tier takes it too, for reads only).
 func readFloorAdmitsRow(ctx context.Context, decl *langparser.RowAuthzDecl) bool {
-	if decl == nil || decl.Tier != langparser.RowAuthzClusterOwner {
-		return false
-	}
-	if strings.TrimSpace(decl.RankFloor) == "" {
+	if !readFloorDeclared(decl) {
 		return false
 	}
 	memo, _ := ctx.Value(rankScopeMemoKey{}).(*rankScopeMemo)

@@ -243,7 +243,7 @@ var (
 		{Name: "rankStrict", Type: "flag", Doc: "Beside owner= and rankVisible: writes widen to rows owned strictly below the caller's rank, and the cluster-owner write escape is withdrawn."},
 		{Name: "unowned", Type: "string", Doc: "Beside owner= and rankVisible: the actor rank from which a row with an empty owner is readable."},
 		{Name: "requiresIdentity", Type: "flag", Doc: "Beside public: readable by authenticated callers only (memql#4809)."},
-		{Name: "rankFloor", Type: "string", Doc: "Beside clusterOwner: relaxes the READ to a rank floor while the write stays cluster-owner (memql#5216)."},
+		{Name: "rankFloor", Type: "string", Doc: "Beside clusterOwner or owner=: relaxes the READ to a rank floor; writes are unchanged (memql#5216; owner tier: design record 2026-11-24)."},
 	}
 	belongsToKeys = []ArgSpec{
 		{Name: "account", Type: "flag", Doc: "The concept's rows belong to an account, recorded in the `accountId` field."},

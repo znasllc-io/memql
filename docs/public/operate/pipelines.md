@@ -50,8 +50,9 @@ checks to another source, disconnect the pipeline it has first
 A run compiles into one `v1:work:goal` with one `v1:work:step` per step, so the
 work spine's journal and the Nexus drawing show it like any other work. Every
 row is readable by its owner, by a cluster owner, and by members of the account
-its source belongs to -- exactly the people who read the source. None holds a
-token, a secret value or a log line.
+its source belongs to -- exactly the people who read the source -- and every
+run is also readable, never writable, by anyone at developer rank or above with a cluster-wide role.
+None holds a token, a secret value or a log line.
 
 ---
 
@@ -705,7 +706,7 @@ release publication or installation authority.
   fleet code at Compute, a secret code at Confirm, everything else at
   Repository. Nothing is written until Connect, and leaving keeps the answers.
 - **Runs** is a Pipelines section (`read app:pipelines/runs`):
-  every run of every source you connected, newest first, grouped by day,
+  every run of every source you connected -- at developer rank or above with a cluster-wide role, every run on the cluster -- newest first, grouped by day,
   Refine for the source, branch and outcome. A run rings once, when it has an
   answer.
 - **A run’s page** draws the stages down the left, or across a narrow window,
@@ -719,7 +720,7 @@ release publication or installation authority.
   artifacts open in Files. One bar carries the state and the acts the run
   allows: **Open on GitHub**, **Re-run**, **Re-run failed**, or **Cancel** while
   it runs. The check run's details link, `https://os.<domain>/?pipelineRun=<run
-  id>`, opens it.
+  id>`, opens it. A run somebody else owns opens view only: its steps, artifacts and failed-step log are shown, and Re-run, Cancel and opening files in Files are not offered.
 - **Pipelines → Settings → Infrastructure** (`read app:settings/pipelines`,
   the cluster owner) holds the [readiness](#readiness) report. Connections and
   notification channels are under **Settings → Connections**.

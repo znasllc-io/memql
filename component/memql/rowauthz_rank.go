@@ -551,7 +551,7 @@ func (e *MemQLEngine) lowerRankScope(ctx context.Context, expr ExpressionNode) E
 	case *RankScopeExpression:
 		return e.rankScopeComparison(ctx, n)
 	case *ReadFloorExpression:
-		// The cluster-owner tier's read floor (memql#5216) rides this SAME
+		// The read floor (memql#5216; cluster-owner and owner tiers, reads only) rides this SAME
 		// walk rather than a second one. Two walks would be two places to
 		// forget a node, and the symptom of forgetting is a symbolic
 		// placeholder reaching the SQL compiler -- which is the one failure a

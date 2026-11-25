@@ -37,6 +37,7 @@ export function tailOf(text: string, cut: boolean, maxLines = TAIL_LINES): LogTa
 
 export async function fetchLogTail(input: {
   artifactId: string;
+  pipelineRun?: string;
   bearer: () => Promise<string | null>;
   signal?: AbortSignal;
   baseUrl?: string;
@@ -46,7 +47,11 @@ export async function fetchLogTail(input: {
   const token = await input.bearer();
   const headers: Record<string, string> = { Range: `bytes=-${TAIL_BYTES}` };
   if (token) headers["Authorization"] = `Bearer ${token}`;
-  const response = await fetchImpl(artifactContentPath(input.baseUrl ?? import.meta.env.BASE_URL, input.artifactId), {
+  // A run somebody else owns names itself, so the route can serve its owner's
+  // log to a developer (design record 2026-11-24).
+  const path = artifactContentPath(input.baseUrl ?? import.meta.env.BASE_URL, input.artifactId);
+  const url = input.pipelineRun ? `${path}?pipelineRun=${encodeURIComponent(input.pipelineRun)}` : path;
+  const response = await fetchImpl(url, {
     method: "GET",
     credentials: "same-origin",
     headers,

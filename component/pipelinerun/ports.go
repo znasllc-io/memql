@@ -79,6 +79,10 @@ type Store interface {
 	PipelinesForOwner(ctx context.Context) ([]Pipeline, error)
 	RunForOwner(ctx context.Context, runID string) (*Run, error)
 	RunsForOwner(ctx context.Context, pipelineID string) ([]Run, error)
+	// RunView is one run by id whoever owns it, under the caller
+	// (pipelineRunView): the developer read, which the engine refuses below
+	// developer rank. Never a basis for an act; every act uses RunForOwner.
+	RunView(ctx context.Context, runID string) (*Run, error)
 	// ChannelsForOwner is the caller's notification channels, by name
 	// (pipelineChannelsForOwner).
 	ChannelsForOwner(ctx context.Context) ([]Channel, error)
@@ -98,6 +102,11 @@ type Store interface {
 	// surrounding space; a blank id asks nothing. A file the owner cannot read,
 	// or that is not there, is simply absent from the map.
 	LibraryFileNames(ctx context.Context, owner string, ids []string) (map[string]string, error)
+	// RunDetailRows is one work run's steps and Library index rows under the
+	// run owner's borrowed authority (workStepsForOwnerRun, artifactsForRun):
+	// what pipelinesRunDetail projects for a caller who may read the run and
+	// not its owner's rows. A blank work run reads nothing.
+	RunDetailRows(ctx context.Context, owner, workRunID string) ([]WorkStep, []map[string]any, error)
 
 	// Server-only, under the pipelines system actor.
 	//

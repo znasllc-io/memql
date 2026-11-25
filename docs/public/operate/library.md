@@ -472,7 +472,9 @@ is not a person deciding to share.
 ### Every access re-checks the share
 
 `GET /artifacts/{id}/content` falls back to the shared path when the caller's
-own read finds nothing, and `librarySaveSharedCopy` uses the same resolver,
+own read finds nothing (with `?pipelineRun=` the fallback is instead the pipeline-run
+path, `PipelineRunFile`: a developer reading a run's pipeline log, not the share
+lookup), and `librarySaveSharedCopy` uses the same resolver,
 `EngineLibraryStore.SharedFile` (`component/server/artifact_handler.go`):
 
 1. The caller's own notice for the artifact names the share and the sharer.

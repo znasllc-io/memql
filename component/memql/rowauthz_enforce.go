@@ -586,6 +586,13 @@ func rowAuthzAdmitsMode(ctx context.Context, conceptName string, id string, payl
 		if sameRowAuthzOwner(owner, caller) {
 			return rowAuthzAdmit
 		}
+		// THE READ FLOOR on the owned tier (design record 2026-11-24), the
+		// row-gate twin of the term orReadFloor ORs into SQL. Reads only: a
+		// write never consults it, so the owner, the cluster-owner escape and
+		// the account arm stay the only ways to change a row.
+		if !write && readFloorAdmitsRow(ctx, decl) {
+			return rowAuthzAdmit
+		}
 		// THE RANK BRANCH (epic memql#4832, D2), checked after the owner
 		// comparison and never before it: "your own row" must not depend
 		// on this caller being resolvable in the principal table.

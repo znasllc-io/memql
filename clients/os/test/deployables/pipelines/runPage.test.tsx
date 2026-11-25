@@ -12,10 +12,10 @@ vi.mock("../../../src/live/connection", () => ({
 import { DeployablesApp } from "../../../src/apps/deployables/DeployablesApp";
 import { useOs } from "../../../src/chrome/state";
 import { LocalDeployablesSettingsStore } from "../../../src/apps/deployables/settings";
-import { LIBRARY_ARTIFACT_CONCEPT, WORK_STEP_CONCEPT } from "../../../src/apps/deployables/pipelines/rows";
+import { LIBRARY_ARTIFACT_CONCEPT, RUN_CONCEPT, WORK_STEP_CONCEPT } from "../../../src/apps/deployables/pipelines/rows";
 import { MachinesProvider } from "../../../src/live/machines";
 import { click, emit, fakeConnection, rowsResult, withSession, type FakeConnection, type FakeSeed } from "../harness";
-import { UNCERTAIN_MESSAGE, VIEWER, minutesAgo, packageRow, pipelineRow, runRow, stepRow, uncertainRunRow, uncertainStepRows } from "./fixtures";
+import { OWNER, UNCERTAIN_MESSAGE, VIEWER, minutesAgo, packageRow, pipelineRow, runRow, stepRow, uncertainRunRow, uncertainStepRows } from "./fixtures";
 
 // The run page, layout A (epic memql#5479, issue memql#5500), opened the way a
 // check run's details link opens it: an intent naming the run.
@@ -31,12 +31,12 @@ function FileDestinationProbe() {
   return <output aria-label="Files destination">{JSON.stringify(window?.intent?.payload ?? null)}</output>;
 }
 
-function mount(connection: FakeConnection, runId = "r-1", role = "owner") {
+function mount(connection: FakeConnection, runId = "r-1", role = "owner", everyAccount?: boolean) {
   h.connection = connection;
   return render(
     withSession(
       <><DeployablesApp surface="pipelines" sectionId="runs" navigate={vi.fn()} askContext={vi.fn()} store={memStore()} intent={{ id: `open-${runId}`, payload: { runId } }} consumeIntent={vi.fn()} /><FileDestinationProbe /></>,
-      { role, userId: VIEWER },
+      { role, userId: VIEWER, ...(everyAccount === undefined ? {} : { everyAccount }) },
     ),
   );
 }
@@ -442,5 +442,47 @@ describe("a step's attempts on the run page", () => {
     mountWithMachines({ packages: [packageRow()], pipelines: [pipelineRow()], pipelineRuns: [passedRun()], workSteps: { "wr-1": stepsOf(stranger) }, runArtifacts: { "wr-1": LOGS } });
     await screen.findByText("Attempt 2 on your fleet: Passed.");
     expect(document.body.textContent).not.toContain("m-removed");
+  });
+});
+
+describe("a run somebody else owns", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("FAIL\n", { status: 206, headers: { "Content-Range": "bytes 0-4/5" } })));
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("is read through the developer reads, view only", async () => {
+    const connection = fakeConnection(seed({ pipelineRuns: [runRow({ id: "r-1", ownerUserId: OWNER, queuedAt: minutesAgo(10) })] }));
+    mount(connection, "r-1", "developer");
+    const log = await screen.findByLabelText("The last lines of tests.unit's log");
+    expect(log.textContent).toContain("FAIL");
+    expect(connection.callsNamed("pipelinesRunDetail").length).toBeGreaterThan(0);
+    expect(connection.callsNamed("workStepsForOwnerRun")).toHaveLength(0);
+    expect(connection.callsNamed("artifactsForRun")).toHaveLength(0);
+    // The owner's acts are absent, not disabled; navigation stays.
+    await waitFor(() => expect(barActs()).toEqual(["Open on GitHub"]));
+    expect(screen.queryByRole("button", { name: "Open the full log" })).toBeNull();
+    expect(screen.queryByText(/Saved to/)).toBeNull();
+    expect(document.querySelector(".pipeline-log-acts")).toBeNull();
+    const [url] = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(String(url)).toContain("/_memql/artifacts/artifact-log/content?pipelineRun=r-1");
+  });
+
+  it("reads the detail again when the run row moves", async () => {
+    const row = runRow({ id: "r-1", ownerUserId: OWNER, queuedAt: minutesAgo(10) });
+    const connection = fakeConnection(seed({ pipelineRuns: [row] }));
+    mount(connection, "r-1", "developer");
+    await screen.findByLabelText("The last lines of tests.unit's log");
+    const before = connection.callsNamed("pipelinesRunDetail").length;
+    await emit(connection, RUN_CONCEPT, { ...row, status: "failed" }, "NODE_UPDATED");
+    await waitFor(() => expect(connection.callsNamed("pipelinesRunDetail").length).toBeGreaterThan(before));
+  });
+
+  it.each([["writer", undefined], ["developer", false]])("a %s who cannot use the developer reads keeps the owner's", async (role, everyAccount) => {
+    const connection = fakeConnection(seed());
+    mount(connection, "r-1", role, everyAccount);
+    await screen.findByLabelText("The last lines of tests.unit's log");
+    expect(connection.callsNamed("pipelineRunForOwner").length).toBeGreaterThan(0);
+    expect(connection.callsNamed("pipelineRunView")).toHaveLength(0);
   });
 });

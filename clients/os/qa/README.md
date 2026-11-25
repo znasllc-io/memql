@@ -42,6 +42,10 @@ palette with `mode=light` or `mode=dark`. The harness uses the production theme
 registry; Graphite is the default. `view=routing-routes` includes the shared
 local tabs used by Fleet machine views and other app pages.
 
+`view=pipeline-runs-everyone` is a developer's Runs list with other people's runs in it, and
+`view=pipeline-run-not-owned` opens another owner's failed run: steps and log tail, no Re-run,
+Cancel, Open in Files, follow-up or Library caption. `pipeline-run-failed` is the owner's own, for comparison.
+
 `view=pipeline-security-off`, `-on`, `-unavailable`, and `-refused` exercise
 Pipelines' security setting. Add `click=Security` to open its tab; the switch
 changes only the fixture's in-memory configuration. Verify an enable followed

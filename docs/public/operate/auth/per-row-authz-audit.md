@@ -152,6 +152,21 @@ owners read every store; everyone below reads **zero rows, not an error**.
 `TestADeveloperCannotChangeAStoreThatExists`
 (`component/memql/store_read_floor_db_test.go`) hold all three halves.
 
+### The pipeline run concept (design record 2026-11-24)
+
+`v1:pipelines:run` declares `@rowAuthz(owner="ownerUserId", clusterOwner,
+account="accountId", rankFloor="developer")`. The owner, cluster-owner and
+account arms decide writes and the person-facing reads as before; the floor
+adds READS for every caller at developer rank or above (never an
+organization-scoped role), so a developer reads every run, memQL's own and a
+client's, and changes none. Every act resolves a run through
+`pipelineRunForOwner`, whose filter is the owner. The developer reads
+`pipelineRunsBrowseAll` and `pipelineRunView` carry `@requiresRank("developer")`
+and no owner conjunct (`tierDecidesTheRead`). A run's steps and files stay
+owner-only rows: `pipelinesRunDetail` projects them, and a log is served
+through the content route's `pipelineRun` pointer. Test:
+`TestDevelopersReadEveryPipelineRunAndWriteNone`.
+
 ### The two secret concepts
 
 `v1:platform:globalSecret` and `v1:platform:partitionSecret` -- the
@@ -305,6 +320,11 @@ the owner conjunct.
   This names the actor rank from which such a row is readable. An
   **absent** owner key stays denied, which is what the owned tier has
   always done with one.
+- **`rankFloor="<role>"`** (design record 2026-11-24) — reads admit every
+  row to a caller at or above that rung; an organization-scoped role never
+  passes, and writes are untouched. Also legal beside a bare `clusterOwner`.
+  A read that relies on it carries `@requiresRank` at the same rung and no
+  owner conjunct, adjudicated in `tierDecidesTheRead`.
 
 Two properties an operator reading a refusal should know:
 

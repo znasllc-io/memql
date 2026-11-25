@@ -133,6 +133,12 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			ArgsSchema:  map[string]string{"runId": "string (required) -- the caller's v1:pipelines:run"},
 		},
 		{
+			Name:        "runDetail",
+			Description: "One run's steps and pipeline files for a caller who may read the run: their own, or any at developer rank (pipelineRunView). Read under the run owner's borrowed authority and answered as a projection {steps, files}; acts on nothing.",
+			Handler:     i.handleRunDetail,
+			ArgsSchema:  map[string]string{"runId": "string (required) -- a v1:pipelines:run the caller may read"},
+		},
+		{
 			Name:        "installations",
 			Description: "The installations of the cluster's GitHub App whose accepted permissions lag what the app asks for (epic memql#5479, D15): an app whose permissions grew keeps every existing installation on the old set until its account approves, and until then every check-run write there answers 403. Asked of GitHub as the app itself. A cluster with no app has none. Answers {installations [{installationId, account, accountType, htmlUrl, missingPermissions, suspended}]}.",
 			Handler:     i.handleInstallations,
