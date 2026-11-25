@@ -372,11 +372,13 @@ describe("Cluster > Settings > Memory search", () => {
     expect(screen.queryByRole("button", { name: "Keep" })).toBeNull();
     cleanup();
 
-    // A switch, with its progress and its take-over's reason in view, and no act.
+    // A switch, with its progress in view and no act: neither Cancel nor the
+    // take-over, whose reason is drawn only with its button.
     mount("memorysearch", memorySearchQuery(statusRow({ ...mayNot, switch: switchRun({ indexedBy: "bo", indexedByName: "Bo Owner", takeOver: true }) })));
     expect(await screen.findByRole("progressbar")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Re-index on my machines" })).toBeNull();
+    expect(screen.queryByText("Bo Owner can no longer index nomic-embed-text, so the switch waits.")).toBeNull();
     cleanup();
 
     mount("memorysearch", memorySearchQuery(statusRow({ ...mayNot, switch: switchRun({ state: "needsDecision", counts: { total: 8310, done: 8305, skipped: 0, unsourced: 2, failed: 3 } }) })));
