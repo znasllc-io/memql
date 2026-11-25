@@ -2991,7 +2991,10 @@ The switch's `counts.total` is what the current walk has visited and restarts
 with each walk, so the summary's `estimatedTotal` gives the screen a
 denominator: an ESTIMATE, `indexed + backlog`, with no walk of the corpus per
 poll. `retained` lists the retired indexes still kept, leaving out any row that
-names the active model or a running switch's target. `previousRef` is the model
+names the active model or a running switch's target, and any past its
+`retireAt`, which the daily cleanup drops at its next run: listed, it read as
+kept until a day already gone, with Switch back offered over it
+(`TestAKeptIndexPastItsDateIsNotListed`). `previousRef` is the model
 the binding replaced, which is the kept index Switch back names: `retained` also
 holds a cancelled switch's partial index, a model that was never in use.
 `mayAct` is above, and so are `takeOver` (R13) and the switch summary's (R14).

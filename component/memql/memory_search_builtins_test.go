@@ -1198,6 +1198,23 @@ func TestStatusReportsTheBacklogAndWhyItWaits(t *testing.T) {
 	require.Equal(t, false, row["takeOver"])
 }
 
+// A kept index past its date is left out of the status. The daily cleanup
+// drops it at its next run; until then the screen said it was kept until a day
+// already gone, and offered Switch back over an index about to go.
+func TestAKeptIndexPastItsDateIsNotListed(t *testing.T) {
+	ctx := context.Background()
+	f := newMemorySearchFake(2).noSwitch()
+	kept := f.job.clock.Add(29 * 24 * time.Hour)
+	f.retiredRows[RetiredEmbedderBindingID("fleet:kept-embedder", 4)] = retiredMemoryIndex{ProviderRef: "fleet:kept-embedder", Dimensions: 4, RetireAt: kept}
+	f.retiredRows[RetiredEmbedderBindingID("fleet:past-embedder", 4)] = retiredMemoryIndex{ProviderRef: "fleet:past-embedder", Dimensions: 4,
+		RetireAt: f.job.clock.Add(-time.Hour)}
+	f.retiredRows[RetiredEmbedderBindingID("fleet:due-embedder", 4)] = retiredMemoryIndex{ProviderRef: "fleet:due-embedder", Dimensions: 4,
+		RetireAt: f.job.clock}
+	row, err := memorySearchStatus(ctx, f, fakeOwner)
+	require.NoError(t, err)
+	require.Equal(t, []any{map[string]any{"providerRef": "fleet:kept-embedder", "retireAt": kept.Format(time.RFC3339Nano)}}, row["retained"])
+}
+
 // The status says when the binding's indexer cannot index the model in use and
 // choosing it again would make the caller its indexer (ruling R13): `takeOver`.
 // It is the take-over rule itself (memorySearchTakesOver) asked for the caller,

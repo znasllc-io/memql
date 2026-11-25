@@ -99,7 +99,8 @@ func memorySearchOffersTakeOver(ctx context.Context, w memorySearchWorld, caller
 //     once the switch is over.
 //   - retained: the retired indexes still kept, {providerRef, retireAt}, by
 //     date. A row naming the active model or a running switch's target is not
-//     one: that table is in use.
+//     one: that table is in use. Nor is one past its date, which the daily
+//     cleanup drops at its next run: listed, it read as kept until a day gone.
 func memorySearchStatus(ctx context.Context, w memorySearchWorld, caller string) (map[string]any, error) {
 	mayAct := memorySearchMayAct(ctx, w, caller)
 	row := map[string]any{"providerRef": "", "kind": "", "label": "", "indexedBy": "", "indexedByName": "", "chosenBy": "",
@@ -181,9 +182,13 @@ func memorySearchStatus(ctx context.Context, w memorySearchWorld, caller string)
 	sort.SliceStable(retired, func(i, j int) bool { return retired[i].RetireAt.Before(retired[j].RetireAt) })
 	inUse := memorySearchTablesInUse(active, sw, hasSwitch)
 	retained := []any{}
+	now := w.now()
 	for _, r := range retired {
 		table, err := EmbeddingVectorTable(r.ProviderRef, r.Dimensions)
-		if err != nil || !r.DroppedAt.IsZero() || r.RetireAt.IsZero() || inUse[table] {
+		// Past its date (the cleanup's own test, memoryIndexRetire) it is
+		// about to be dropped: not offered as kept, though the daily cleanup
+		// may not have run yet.
+		if err != nil || !r.DroppedAt.IsZero() || r.RetireAt.IsZero() || !now.Before(r.RetireAt) || inUse[table] {
 			continue
 		}
 		retained = append(retained, map[string]any{"providerRef": r.ProviderRef, "retireAt": r.RetireAt.UTC().Format(time.RFC3339Nano)})

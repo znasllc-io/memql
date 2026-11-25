@@ -197,8 +197,9 @@ as its last walk, and is not taken again while a switch runs.
 A replaced model's index is kept for 30 days after the flip, and a cancelled
 switch's partial index for 30 days after the cancel. Once a day a cleanup drops
 each kept index past its date, unless it belongs to the current model or to a
-running switch's target. After that, choosing the model again rebuilds its
-index from nothing.
+running switch's target. Memory search stops listing an index as kept once its
+date has passed, even before the cleanup drops it. After that, choosing the
+model again rebuilds its index from nothing.
 
 ## Switch back
 
