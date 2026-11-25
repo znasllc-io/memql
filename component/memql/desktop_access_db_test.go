@@ -50,6 +50,6 @@ func TestAnAppOutOfUsageOnARegistrationCountsAsSetUp(t *testing.T) {
 			apps = append(apps, s)
 		}
 	}
-	require.Equal(t, []AccessSource{{Kind: AccessSourceApp, State: AccessOutOfUsage, Own: true, Label: "codex on Desk"}}, apps)
+	require.Equal(t, []AccessSource{{Kind: AccessSourceApp, App: "codex", State: AccessOutOfUsage, Own: true, Label: "codex on Desk"}}, apps)
 	require.NotContains(t, reasons, "no app on their machines is allowed and signed in")
 }

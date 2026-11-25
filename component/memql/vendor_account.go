@@ -131,6 +131,11 @@ type VendorAccountQuery struct {
 const (
 	// VendorKeyPausedReason: the owner paused lending a key to this person.
 	VendorKeyPausedReason = "an API key's owner has paused lending it"
+	// VendorKeysUnreadableReason: the read of a person's keys failed. It is the
+	// answer VendorKeysAt gives in place of an error (a call that could have
+	// been served by the cluster's account must not be refused for it), and a
+	// reader that must tell "no key" from "could not look" compares it whole.
+	VendorKeysUnreadableReason = "API keys could not be read"
 	// VendorKeyOwnerInactiveReason: the key's owner is no longer an active user.
 	VendorKeyOwnerInactiveReason = "an API key's owner is no longer an active user"
 )
@@ -306,7 +311,7 @@ func (r *ProviderRegistry) VendorKeysAt(ctx context.Context, q VendorAccountQuer
 	if err != nil {
 		answer.PassedOver = []VendorAccountPassedOver{{
 			Account: VendorAccount{Kind: VendorAccountKey, Vendor: q.Vendor},
-			Reason:  "API keys could not be read",
+			Reason:  VendorKeysUnreadableReason,
 		}}
 		return answer
 	}

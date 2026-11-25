@@ -189,6 +189,7 @@ func Project(machines []Candidate, now time.Time) []memqlengine.FleetModel {
 				ModelSetup:     m.ModelSetup,
 				Name:           m.Name,
 				DisplayName:    m.DisplayName,
+				Revoked:        !m.RevokedAt.IsZero(),
 				OwnerUserId:    m.OwnerUserId,
 				Runtimes:       runtimes,
 				Online:         online,

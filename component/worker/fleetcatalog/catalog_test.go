@@ -106,6 +106,9 @@ func TestOfflineRevokedAndInvalidActiveCountsKeepProjectionSemantics(t *testing.
 	if Project([]Candidate{c}, now)[0].Online() {
 		t.Fatal("revoked machine reported online")
 	}
+	if got := Project([]Candidate{c}, now)[0].Machines[0]; !got.Revoked {
+		t.Fatal("a revoked machine must carry Revoked, so a reader can skip it")
+	}
 }
 
 func TestAPersonsCatalogIncludesMachinesSharedWithThem(t *testing.T) {

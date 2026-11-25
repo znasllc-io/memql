@@ -33,8 +33,11 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	langparser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/core/airoute"
 )
 
 // The kinds of source a person can have set up.
@@ -58,7 +61,10 @@ const (
 // only for something lent to them; Own is true for their own machines, apps
 // and keys.
 type AccessSource struct {
-	Kind         string `json:"kind"`
+	Kind string `json:"kind"`
+	// App is the app id (claude-code, codex) of an app source and empty for
+	// any other kind, so a message can name the app.
+	App          string `json:"app,omitempty"`
 	State        string `json:"state"`
 	LenderUserId string `json:"lenderUserId,omitempty"`
 	Label        string `json:"label,omitempty"`
@@ -72,7 +78,9 @@ type AccessSource struct {
 // have nothing set up".
 func (e *MemQLEngine) desktopAccessSources(ctx context.Context, actingUserId string) (sources []AccessSource, reasons []string, err error) {
 	if e == nil || e.providers == nil {
-		return nil, nil, nil
+		// Nothing to ask is not "nothing set up": answering empty would hold
+		// a person for a node that was never wired.
+		return nil, nil, errors.New("desktop access: no provider registry on this engine")
 	}
 	actingUserId = strings.TrimSpace(actingUserId)
 	add := func(s AccessSource) { sources = append(sources, s) }
@@ -98,12 +106,14 @@ func (e *MemQLEngine) desktopAccessSources(ctx context.Context, actingUserId str
 			continue
 		}
 		for _, machine := range m.Machines {
-			if seen[machine.RegistrationId] {
+			// A revoked registration stays in the catalog, marked offline; it is
+			// not a machine the person has set up.
+			if machine.Revoked || seen[machine.RegistrationId] {
 				continue
 			}
 			seen[machine.RegistrationId] = true
 			own := strings.TrimSpace(machine.OwnerUserId) == "" || sameUserId(machine.OwnerUserId, actingUserId)
-			s := AccessSource{Kind: AccessSourceMachine, State: AccessReady, Own: own, Label: accessMachineLabel(machine)}
+			s := AccessSource{Kind: AccessSourceMachine, State: AccessReady, Own: own, Label: accessLabel(machine.DisplayName, machine.Name, machine.RegistrationId)}
 			if !machine.Online {
 				s.State = AccessAsleep
 			}
@@ -118,39 +128,19 @@ func (e *MemQLEngine) desktopAccessSources(ctx context.Context, actingUserId str
 		why("no machine of theirs or lent to them offers a chat model")
 	}
 
-	// Apps: AppDoors keeps own machines only and keeps them offline, but it
-	// leaves out an app measured out of usage, because routing must never pick
-	// one (TestAnAppTheMachineMeasuredAsOutOfUsageGetsNoDoor). Those come from
-	// the person's own registrations below, read separately (ruling R-D4).
-	have := map[string]bool{}
-	doors, err := e.providers.AppDoors(ctx, actingUserId)
+	// Apps: one read of the person's own registrations, through the same row
+	// predicates routing uses, with the "is it ready right now" tests dropped.
+	// It does not go through AppDoors because routing's door must leave an app
+	// out of usage out (TestAnAppTheMachineMeasuredAsOutOfUsageGetsNoDoor) and
+	// desktop access counts it (ruling R-D6).
+	apps, err := e.accessAppSources(ctx, actingUserId)
 	if err != nil {
 		return nil, nil, err
 	}
-	apps := 0
-	for _, door := range doors {
-		for _, machine := range door.Machines {
-			state := AccessReady
-			if !machine.Online {
-				state = AccessAsleep
-			}
-			have[door.AppId+"@"+machine.RegistrationId] = true
-			add(AccessSource{Kind: AccessSourceApp, State: state, Own: true,
-				Label: door.AppId + " on " + accessAppMachineLabel(machine)})
-			apps++
-		}
+	for _, s := range apps {
+		add(s)
 	}
-	empty, err := e.appsOutOfUsage(ctx, actingUserId)
-	if err != nil {
-		return nil, nil, err
-	}
-	for _, s := range empty {
-		if !have[s.key] {
-			add(s.AccessSource)
-			apps++
-		}
-	}
-	if apps == 0 {
+	if len(apps) == 0 {
 		why("no app on their machines is allowed and signed in")
 	}
 
@@ -163,6 +153,13 @@ func (e *MemQLEngine) desktopAccessSources(ctx context.Context, actingUserId str
 		for _, passed := range answer.PassedOver {
 			if passed.Account.Kind != VendorAccountKey {
 				continue
+			}
+			if passed.Reason == VendorKeysUnreadableReason {
+				// VendorKeysAt reports a failed read as a passed-over key so a
+				// call can still go to the cluster's account. Here it would read
+				// as "no key", and a person whose keys could not be looked at
+				// would be held. A check that fails is unknown, not held.
+				return nil, nil, fmt.Errorf("desktop access: the keys of %s could not be read", actingUserId)
 			}
 			account := passed.Account
 			if account.Vendor == "" {
@@ -194,60 +191,107 @@ func (e *MemQLEngine) desktopAccessSources(ctx context.Context, actingUserId str
 	return sources, reasons, nil
 }
 
-type outOfUsageApp struct {
-	AccessSource
-	key string
+// accessAppReads are the two reads app sources need, so a test can answer them
+// without a database. A nil seam reads the real ones.
+type accessAppReads struct {
+	// Rows are the person's own worker registrations.
+	Rows func(ctx context.Context, actingUserId string) ([]map[string]any, error)
+	// Block is appBlock for one machine and app.
+	Block func(ctx context.Context, registration, app string, measures bool, readyAt time.Time) (until time.Time, signedOut bool, err error)
 }
 
-// appsOutOfUsage reads the person's OWN worker registrations (the rows
-// AppDoors projects from) for apps allowed and signed in on a machine that
-// measured them as out of usage. It exists because that state counts as set
-// up here and must never be a routing door: AppDoors, projectAppDoors and the
-// selection code are untouched, so no call can be placed on one of these.
-// The same row tests the routing side applies are applied: the machine is not
-// revoked, its owner has not switched apps off, and the person's own app
-// routing allows the app. "Signed out" and "unknown" are not set up and are
-// left out. Regression test: TestAnAppOutOfUsageOnARegistrationCountsAsSetUp.
-func (e *MemQLEngine) appsOutOfUsage(ctx context.Context, actingUserId string) ([]outOfUsageApp, error) {
-	if strings.TrimSpace(actingUserId) == "" {
-		return nil, nil
+func (e *MemQLEngine) accessReads() accessAppReads {
+	if e.accessAppReadsForTest != nil {
+		return *e.accessAppReadsForTest
 	}
-	res, err := e.Execute(ContextWithFreshRead(ctx), "workersForUser(ownerUserId: "+langparser.QuoteString(actingUserId)+")")
-	if errors.Is(err, ErrEngineNotInitialized) {
-		// An engine with no store has no registrations to read; this is the
-		// unit-test engine and a node that never booted one, not a failed read.
-		return nil, nil
+	var (
+		once   sync.Once
+		recent []map[string]any
+		recErr error
+	)
+	return accessAppReads{
+		Rows: func(ctx context.Context, actingUserId string) ([]map[string]any, error) {
+			res, err := e.Execute(ContextWithFreshRead(ctx), "workersForUser(ownerUserId: "+langparser.QuoteString(actingUserId)+")")
+			if err != nil {
+				return nil, err
+			}
+			return modelPullRows(res.OutputPayload()), nil
+		},
+		Block: func(ctx context.Context, registration, app string, measures bool, readyAt time.Time) (time.Time, bool, error) {
+			once.Do(func() {
+				res, err := e.Execute(ContextWithFreshRead(ctx), "query appRoutingEvidence()")
+				if err != nil {
+					recErr = err
+					return
+				}
+				recent = MaterializeRows(res)
+			})
+			if recErr != nil {
+				return time.Time{}, false, recErr
+			}
+			return e.appBlock(ctx, registration, app, recent, measures, readyAt)
+		},
 	}
+}
+
+// accessAppSources lists the apps on the person's own machines that count as
+// set up (ruling R-D6). An app counts when all hold: the registration is not
+// revoked and apps are on for it (appRegistrationAllowsApps, routing's own
+// row test), the person's app routing allows it, and airoute.AppIsSetUp says
+// its id is runnable, allowed and signed in and not measured signed out. A
+// session that was refused as signed out also excludes it, and one refused on
+// a usage limit makes it outOfUsage, as does a machine measuring it out of
+// usage. "ready" and "unknown" (not checked yet, or a Cockpit that never
+// measures) are ready when the machine holds a stream and asleep when not.
+//
+// Routing is not touched: AppDoors still leaves an app out of usage out.
+// Tests: desktop_access_test.go (every state and exclusion) and
+// TestAnAppOutOfUsageOnARegistrationCountsAsSetUp (a real row).
+func (e *MemQLEngine) accessAppSources(ctx context.Context, actingUserId string) ([]AccessSource, error) {
+	reads := e.accessReads()
+	rows, err := reads.Rows(ctx, actingUserId)
 	if err != nil {
 		return nil, err
 	}
-	var out []outOfUsageApp
-	for _, row := range modelPullRows(res.OutputPayload()) {
-		if !sameRowAuthzOwner(mapString(row, "ownerUserId"), actingUserId) || mapString(row, "revokedAt") != "" {
+	var out []AccessSource
+	seen := map[string]bool{}
+	for _, row := range rows {
+		if !sameRowAuthzOwner(mapString(row, "ownerUserId"), actingUserId) || !appRegistrationAllowsApps(row) {
 			continue
 		}
-		if features, _ := row["ownerFeatures"].(map[string]any); features["apps"] == false {
-			continue
-		}
+		registration := trimConceptPrefix(mapString(row, "id"))
 		policy := AppRoutingPolicyFrom(row["appRouting"])
+		online := strings.TrimSpace(mapString(row, "connectedNodeId")) != ""
 		entries, _ := row["apps"].([]any)
 		for _, raw := range entries {
 			entry, _ := raw.(map[string]any)
-			id := mapString(entry, "id")
-			// The closed runnable set (docs/public/operate/local-apps.md): an id
-			// outside it is stored and never driven.
-			if (id != "claude-code" && id != "codex") || !policy.allows(id) ||
-				entry["allowed"] != true || entry["signedIn"] != true || mapString(entry, "readiness") != "out_of_usage" {
+			id := strings.TrimSpace(mapString(entry, "id"))
+			readiness := mapString(entry, "readiness")
+			if !airoute.AppIsSetUp(id, entry["allowed"] == true, entry["signedIn"] == true, readiness) || !policy.allows(id) {
 				continue
 			}
-			label := mapString(row, "displayName")
-			if label == "" {
-				label = mapString(row, "name")
+			if key := id + "@" + registration; seen[key] {
+				continue
+			} else {
+				seen[key] = true
 			}
-			out = append(out, outOfUsageApp{
-				AccessSource: AccessSource{Kind: AccessSourceApp, State: AccessOutOfUsage, Own: true, Label: id + " on " + label},
-				key:          id + "@" + trimConceptPrefix(mapString(row, "id")),
-			})
+			until, signedOut, err := reads.Block(ctx, mapString(row, "id"), id, readiness != "", appMeasuredReadyAt(row, id))
+			if err != nil {
+				return nil, err
+			}
+			blocked := time.Now().Before(until)
+			if blocked && signedOut {
+				continue
+			}
+			state := AccessReady
+			switch {
+			case readiness == airoute.AppReadinessOutOfUsage || blocked:
+				state = AccessOutOfUsage
+			case !online:
+				state = AccessAsleep
+			}
+			out = append(out, AccessSource{Kind: AccessSourceApp, App: id, State: state, Own: true,
+				Label: id + " on " + accessLabel(mapString(row, "displayName"), mapString(row, "name"), registration)})
 		}
 	}
 	return out, nil
@@ -269,9 +313,6 @@ func keySource(a VendorAccount, state, actingUserId string) AccessSource {
 // does not know still produces a sentence, so a held person is never left
 // with no reason for a key.
 func keyReason(a VendorAccount, reason, actingUserId string) string {
-	if a.KeyId == "" {
-		return "their API keys could not be read"
-	}
 	vendor := vendorDisplayName(a.Vendor)
 	own := sameUserId(a.OwnerUserId, actingUserId)
 	switch {
@@ -312,24 +353,15 @@ func (r *ProviderRegistry) textVendors() []string {
 	return out
 }
 
-func accessMachineLabel(m FleetMachine) string {
-	switch {
-	case strings.TrimSpace(m.DisplayName) != "":
-		return m.DisplayName
-	case strings.TrimSpace(m.Name) != "":
-		return m.Name
+// accessLabel is what a person calls a machine: the name they gave it, then
+// what the cockpit reported, then its registration id.
+func accessLabel(displayName, name, registrationId string) string {
+	for _, candidate := range []string{displayName, name} {
+		if strings.TrimSpace(candidate) != "" {
+			return candidate
+		}
 	}
-	return m.RegistrationId
-}
-
-func accessAppMachineLabel(m AppMachine) string {
-	switch {
-	case strings.TrimSpace(m.DisplayName) != "":
-		return m.DisplayName
-	case strings.TrimSpace(m.Name) != "":
-		return m.Name
-	}
-	return m.RegistrationId
+	return registrationId
 }
 
 // sortAccessSources fixes an order so the same setup always reads the same.

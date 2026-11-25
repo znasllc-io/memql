@@ -26,6 +26,10 @@ import (
 
 // MemQLEngine is the default implementation of the MemQLEngine interface.
 type MemQLEngine struct {
+	// accessAppReadsForTest answers desktop access's app reads without a
+	// database (desktop_access.go). Nil in production.
+	accessAppReadsForTest *accessAppReads
+
 	// appSignInRelay reaches the replica holding a machine's stream, for Fleet's
 	// Sign in action (fleet_app_signin.go). Nil on a node with no route to one.
 	appSignInRelay AppSignInRelay

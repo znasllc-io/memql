@@ -197,13 +197,23 @@ func appSignals(rows []map[string]any, now time.Time) map[string]appSignal {
 	return out
 }
 
+// appRegistrationAllowsApps is the row-level half of "this machine may run an
+// app": the registration is not revoked and its owner has not switched apps
+// off for it. Routing (CheckMachineAppRouting, SelectAppForCall) and desktop
+// access both call it, so the two cannot disagree about which machines are in;
+// each then adds its own per-app tests (AppRoutingPolicy.allows, and
+// airoute.AppRuns or airoute.AppIsSetUp).
+func appRegistrationAllowsApps(row map[string]any) bool {
+	features, _ := row["ownerFeatures"].(map[string]any)
+	return mapString(row, "revokedAt") == "" && features["apps"] != false
+}
+
 func (e *MemQLEngine) CheckMachineAppRouting(ctx context.Context, registration, app string) error {
 	row, err := e.modelSetupRow(ContextWithFreshRead(ctx), registration)
 	if err != nil {
 		return err
 	}
-	features, _ := row["ownerFeatures"].(map[string]any)
-	if mapString(row, "revokedAt") != "" || features["apps"] == false || !AppRoutingPolicyFrom(row["appRouting"]).allows(app) {
+	if !appRegistrationAllowsApps(row) || !AppRoutingPolicyFrom(row["appRouting"]).allows(app) {
 		return fmt.Errorf("this machine's app settings do not allow %s", app)
 	}
 	if appMeasuredNotReady(row, app) {
@@ -350,8 +360,7 @@ func (e *MemQLEngine) SelectAppForCall(ctx context.Context, req AppCallRequest, 
 				if err != nil {
 					return AppSelection{}, err
 				}
-				features, _ := row["ownerFeatures"].(map[string]any)
-				if mapString(row, "revokedAt") != "" || features["apps"] == false || appMeasuredNotReady(row, door.AppId) {
+				if !appRegistrationAllowsApps(row) || appMeasuredNotReady(row, door.AppId) {
 					continue
 				}
 				settings, _ := row["appRouting"].(map[string]any)
