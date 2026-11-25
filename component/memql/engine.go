@@ -73,9 +73,23 @@ type MemQLEngine struct {
 	seeds                   *SeedRegistry
 	seedMaterializer        *SeedMaterializer
 	providers               *ProviderRegistry
-	voiceTransport          audio.RoomTransport
-	askCoordinationPool     func() *sql.DB
-	policies                *PolicyRegistry
+	// indexerOwners caches who the active owners are for the memory-search
+	// indexer re-check (IndexerIsActiveOwner), per replica.
+	indexerOwners ownerSetCache
+	// memorySearchIndexed keeps the count of a memory-search vector table the
+	// status reports (memory_search_world.go), per replica.
+	memorySearchIndexed vectorCountCache
+	// memoryIndexSources, when set, replaces the registered memory sources the
+	// index job walks (memory_index_job.go). Nil in production; a db-gated test
+	// sets it so its walk covers its own rows and not the shared database's.
+	memoryIndexSources func() []MemorySource
+	// memoryIndexAfterRunWrite, when set, is called right after the index job
+	// writes one of its run rows. Nil in production; a db-gated test uses it to
+	// land another replica's write at exactly that moment.
+	memoryIndexAfterRunWrite func(MemoryIndexRun)
+	voiceTransport           audio.RoomTransport
+	askCoordinationPool      func() *sql.DB
+	policies                 *PolicyRegistry
 	// rules is the routing-rule corpus (epic memql#5127). Unpopulated until
 	// the rule loader lands: every reader is nil-safe, and a nil registry
 	// reports NOTHING rather than an empty set, so nobody can read "no rules

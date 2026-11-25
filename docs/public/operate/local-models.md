@@ -680,9 +680,11 @@ preferences and model pins remain available. See [AI routing](ai-routing.md).
 The catalog keeps other models available for manual pulls, including
 `gemma4:26b`, `qwen3.6:35b`, `qwen3.5:122b` and `gpt-oss:120b`.
 The defaults are a curated starting point, not a claim that one benchmark
-predicts every task. `qwen3-embedding:0.6b` remains the cluster's active
-embedding binding at every class; change that binding before choosing a
-different embedder for cluster work.
+predicts every task. `qwen3-embedding:0.6b` is the embedder the catalog
+recommends at every class. Memory search uses one embedding model for the whole
+cluster, which an owner chooses in Cluster > Settings > Memory search
+([Memory search](memory-search.md)); once one is bound, installing another
+embedder on a machine does not change it.
 
 A machine that has not reported its memory blocks nothing: unknown is not small,
 and telling somebody with an unreported 64 GB laptop that they have no machine
@@ -711,28 +713,36 @@ wrong width — which is not an error anywhere. It is a search space that quietl
 returns the wrong neighbours.
 
 One row now says which embedder is active
-(`v1:platform:embedderBinding` at the id `active`), and the width belongs to the
-provider: a provider record declares it, and a fleet model's comes from its
-catalog row. Vectors live in one table per width, `node_vectors_<dims>`.
+(`v1:platform:embedderBinding` at the id `active`), and the width is measured,
+never assumed: binding a model, or switching to one, embeds one sentence and
+takes the length of the vector it returns. Where a vendor record declares a
+width, or the catalog records one for a model on a machine, the vector must
+have it. Each model's vectors live in a table of their own, named by the width
+and the model: `node_vectors_<dims>_<16 hex>`.
 
-**Switching is not an edit.** It creates the new width's table, records the
-binding as a plan, re-embeds the corpus, and flips `active` only when the counts
-match. Until then every read follows the binding that is still active — so a
-switch interrupted half way leaves a cluster that still works, rather than one
-whose vectors half mean one thing and half another.
+**Switching is not an edit.** A cluster owner changes the model in
+Cluster > Settings > Memory search (`memorySearchSwitch`). The memory index job
+rebuilds the whole index into the new model's table in the background while
+every search keeps reading the model still active, and flips the binding by
+itself once every item is in. So a switch interrupted half way leaves a cluster
+that still works, rather than one whose vectors half mean one thing and half
+another. If some items fail, or no source can rebuild them, the switch waits
+for the owner to switch anyway or cancel. The replaced model's index is kept
+for 30 days, so switching back only fills in what was written since, and is
+dropped after. [Memory search](memory-search.md) is the whole account: whose
+machines embed, the automatic first choice, the backlog and Switch back.
 
 Two consequences worth knowing:
 
 - **Same width is not same meaning.** `bge-m3` and `qwen3-embedding:0.6b` are
   both 1024 dimensions and share nothing else. Switching between them still
   rebuilds the whole corpus.
-- **A model the catalog does not know cannot be bound**, even when a machine
-  offers it. This is a real state rather than a hypothetical: a cockpit
-  advertises the embedding capability for any model whose runtime reports it. The
-  model still serves embedding calls that name it; what it cannot be is the
-  cluster-wide binding, because a binding creates its table before the first
-  vector exists and a table at a guessed width returns wrong neighbours without
-  ever erroring. The refusal says so, and says the machine is fine.
+- **A model the catalog does not know can still be chosen.** A cockpit
+  advertises the embedding capability for any model whose runtime reports it,
+  catalog row or not, and Memory search offers it like any other. Its table is
+  made at the width its own vector has, so nothing is guessed. What is refused
+  is a catalogued model whose vector disagrees with its row's width: a table at
+  the wrong width returns wrong neighbours without ever erroring.
 
 ---
 

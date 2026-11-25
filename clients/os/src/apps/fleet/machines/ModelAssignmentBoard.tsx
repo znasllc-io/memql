@@ -4,7 +4,7 @@ import { Button, Notice, Subhead } from "../../../kit";
 import { IconButton } from "../../../kit/IconButton";
 import { formatBytes } from "../../../kit/format";
 import { InPlaceAsk } from "../../../kit/pressHold";
-import { MODEL_PURPOSES, assignmentProposal, sameModelChoices, setupCapacity, type ModelChoices, type ModelSetupView } from "./modelSetup";
+import { MODEL_PURPOSES, assignmentProposal, memorySearchKeeps, sameModelChoices, setupCapacity, type ModelChoices, type ModelSetupView } from "./modelSetup";
 
 const taskIcons = { conversation: MessageCircle, structured: Braces, tools: Wrench, vision: ScanEye, embeddings: Search, audioIn: Mic, audioOut: Volume2, imageGen: Image };
 const dragType = "text/plain";
@@ -155,7 +155,7 @@ export function ModelAssignmentBoard({ view, choices, onChange, onSave, onDiscar
           </div>;
         })}</div>
         <p id={helpId} className="os-caption fleet-assignment-hint">Select a model, then a task. Or drag it into place.</p>
-        {view.boundEmbeddingModel ? <p className="os-caption">Memory search keeps {view.boundEmbeddingModel}. Switching requires a reindex.</p> : null}
+        {view.boundEmbeddingModel ? <p className="os-caption">{memorySearchKeeps(view.boundEmbeddingModel)}</p> : null}
         <span className="os-sr-only" role="status">{message}</span>
       </section>
     </div>

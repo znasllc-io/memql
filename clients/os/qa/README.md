@@ -219,6 +219,25 @@ budget, an account with no personal limit, passkey-only sign-in and computer
 use switched off. `&click=fill:Last%20name=Byron` shows Save appearing on a
 change.
 
+The `memory-search*` views are Cluster > Settings > Memory search
+(`memorySearchScenes.tsx`; design record 2026-11-23, section 8). `memory-search`
+is the control: the model on your machines, a backlog, the choices (one with no
+machine online, one wider than the index holds) and the previous model's kept
+index; `&click=nomic-embed-text` opens the confirmation and
+`&click=text-embedding-3-small` its vendor cost line. `-readonly` is a switch and
+a backlog read by somebody granted the part who is not an owner: everything
+shown, no act offered.
+`-switching`, `-waiting` and `-decision` are a switch re-indexing, waiting for
+one of your machines and held for Switch anyway; `-switch-takeover` a switch
+whose own indexer, another owner, cannot index its target (Re-index on my
+machines, held with Cancel); `-vendor` a vendor model nobody chose; `-takeover`
+another owner who can no longer index the model in use; `-unbound`, `-loading`
+and `-error` the first read's other answers; `-settings` the Settings link row,
+and `-settings-offline` that row while the cluster is away before its first
+read (a sentence, never a skeleton). `&click=Switch back` on the control opens
+its question, with Switch back withdrawn while it is open. Fixtures only: no
+act reaches a cluster.
+
 The `fleet-equipment-*` views open the whole Fleet app on Machines; add
 `section=models`, `routing`, `apps`, `workbenches`, `logs` or `settings` to open
 another Fleet section instead, for checks that span the app (such as the space

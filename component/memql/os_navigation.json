@@ -206,6 +206,11 @@
       {
         "id": "settings",
         "name": "Settings"
+      },
+      {
+        "id": "memorysearch",
+        "name": "Memory search",
+        "requires": "app:cluster/memorysearch"
       }
     ],
     "records": []

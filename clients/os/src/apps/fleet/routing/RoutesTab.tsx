@@ -63,7 +63,6 @@ export function RoutesTab({
   composes,
   request,
   onAddMachine,
-  onOpenModels,
 }: {
   header: (actions: ReactNode, meta?: ReactNode) => ReactNode;
   facts: RoutingFacts;
@@ -72,7 +71,6 @@ export function RoutesTab({
   /** Another surface asking for a route's page (Ask's "Manage routes"). */
   request?: { id: string; n: number } | null;
   onAddMachine?: () => void;
-  onOpenModels?: () => void;
 }) {
   const modes = useRouteModes(true);
   const writes = useRouteWrites();
@@ -121,7 +119,6 @@ export function RoutesTab({
         }}
         onRefused={modes.reread}
         onAddMachine={onAddMachine}
-        onOpenModels={onOpenModels}
       />
     );
   }
@@ -181,7 +178,6 @@ export function RoutesTab({
           setPage({ kind: "list" });
         }}
         onAddMachine={onAddMachine}
-        onOpenModels={onOpenModels}
       />
     );
   }

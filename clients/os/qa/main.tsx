@@ -14,6 +14,7 @@ import { nexusApprovalScenes, NEXUS_APPROVAL_CLICKS } from "./nexusApprovalScene
 import { fleetEquipmentScenes } from "./fleetEquipmentScenes";
 import { setupWizardScenes } from "./setupWizardScenes";
 import { profileScenes } from "./profileScenes";
+import { memorySearchScenes } from "./memorySearchScenes";
 import { fleetDeviceScenes } from "./fleetDeviceScenes";
 import { mapScenes } from "./mapScenes";
 import { deployableStatisticsScenes } from "./deployableStatisticsScenes";
@@ -1076,6 +1077,8 @@ const VIEWS: Record<
   ...setupWizardScenes(WindowBody),
   // Your profile (memql#6220): `profile`, `profile-photo`, `profile-quiet`.
   ...profileScenes(WindowBody),
+  // Cluster > Settings > Memory search: `memory-search` and its states (memorySearchScenes.tsx).
+  ...memorySearchScenes(WindowBody),
   ...fleetDeviceScenes(WindowBody),
   "users-groups": usersWizardView("groups"),
   "users-roles": usersWizardView("roles"),
@@ -1372,7 +1375,7 @@ const VIEWS: Record<
   "routing-route-local-member": { connect: () => routingQa(), wrap: routingWrap, role: "writer", render: () => <RoutingSection intent={{ id: "qa", payload: { routingRoute: "local" } }} /> },
   "routing-route-mine": { connect: () => routingQa(), wrap: routingWrap, render: () => <RoutingSection intent={{ id: "qa", payload: { routingRoute: "r3" } }} /> },
   "routing-route-busy": { connect: () => routingQa({ busy: true }), wrap: routingWrap, render: () => <RoutingSection intent={{ id: "qa", payload: { routingRoute: "local" } }} /> },
-  "routing-route-no-embedder": { connect: () => routingQa({ embedder: "" }), wrap: routingWrap, render: () => <RoutingSection intent={{ id: "qa", payload: { routingRoute: "apps" } }} onOpenModels={() => undefined} /> },
+  "routing-route-no-embedder": { connect: () => routingQa({ embedder: "" }), wrap: routingWrap, render: () => <RoutingSection intent={{ id: "qa", payload: { routingRoute: "apps" } }} /> },
   "routing-auto": { connect: () => routingQa({ busy: true }), wrap: routingWrap, render: () => <RoutingSection intent={{ id: "qa", payload: { routingRoute: "auto" } }} /> },
   "routing-auto-member": { connect: () => routingQa(), wrap: routingWrap, role: "writer", render: () => <RoutingSection intent={{ id: "qa", payload: { routingRoute: "auto" } }} /> },
   "routing-new-route": { connect: () => routingQa(), wrap: routingWrap, render: () => <RoutingSection /> },

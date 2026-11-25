@@ -144,7 +144,9 @@ A route decides which source serves each of four jobs:
 - **Search and memory is the cluster's embedding model, the same in every
   route.** The index holds vectors from one model, and another embedder answers
   in a different vector space, so no route chooses one. The job names the bound
-  model; when there is none, it links to Fleet > Models.
+  model and where it is changed, or with none bound where one is chosen:
+  [Memory search](memory-search.md), in Cluster > Settings, to whoever can open
+  it, and that a cluster owner can change it to anybody else.
 - Images and voice follow Auto.
 - The bar carries the acts, each only where it is legal: Discard changes and
   Save route while there are changes, Restore default on a changed Local or

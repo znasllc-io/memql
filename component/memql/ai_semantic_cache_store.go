@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/znasllc-io/memql/core/airoute"
 )
 
 // Production wiring for the semantic AI cache: an embedder that wraps the
@@ -37,6 +39,62 @@ func (e *providerEmbedder) Embed(ctx context.Context, text string) ([]float32, e
 		return nil, fmt.Errorf("semantic cache: embedding provider not configured")
 	}
 	return e.provider.Embed(ctx, text)
+}
+
+// boundSemanticEmbedder embeds with the model memory search is bound to AT THE
+// MOMENT OF THE CALL, and says which. The cache was wired once at
+// boot with whatever model was bound then, so after a switch every running
+// replica went on embedding cache keys and lookups with the replaced model and
+// refilled the cache in its vector space; a replica restarted later then
+// compared new-model lookups with those rows. Reading the binding per call
+// (fresh, as every memory-search embedding does) makes a lookup and a write
+// use the bound model, and naming the model scopes the cached rows to it
+// (semanticModelEmbedder). With nothing bound, every call fails open to a
+// fresh LLM call, and the cache starts working when a model is bound.
+type boundSemanticEmbedder struct{ e *MemQLEngine }
+
+func (b boundSemanticEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
+	vec, _, err := b.EmbedWithModel(ctx, text)
+	return vec, err
+}
+
+func (b boundSemanticEmbedder) EmbedWithModel(ctx context.Context, text string) ([]float32, string, error) {
+	binding, err := CurrentEmbedderBinding(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	provider, err := b.e.memorySearchEmbedder(ctx, binding)
+	if err != nil {
+		return nil, "", err
+	}
+	vec, err := provider.Embed(ctx, text)
+	if err != nil {
+		return nil, "", err
+	}
+	if len(vec) != binding.Dimensions {
+		return nil, "", fmt.Errorf("semantic cache: %s answered %d dimensions where its binding records %d", binding.ProviderRef, len(vec), binding.Dimensions)
+	}
+	return vec, fmt.Sprintf("%s@%d", binding.ProviderRef, binding.Dimensions), nil
+}
+
+// memorySearchEmbedder resolves a binding's model the way every memory-search
+// embedding is resolved: as the binding's indexer, re-checked as an active
+// owner, through the router seam, and carrying the indexer's assertion across
+// a replica hop (embedder_indexer.go).
+func (e *MemQLEngine) memorySearchEmbedder(ctx context.Context, b EmbedderBinding) (EmbeddingAIProvider, error) {
+	named, _ := IndexerFor(b)
+	ctx = ContextWithEmbeddingIndexer(ctx, named)
+	indexer, err := EmbeddingIndexerForCall(ctx, b.ProviderRef)
+	if err != nil {
+		return nil, err
+	}
+	provider, _, err := ResolveAITyped[EmbeddingAIProvider](ctx, e, airoute.ResolveRequest{
+		Level: airoute.LevelEmbeddings, Modality: airoute.ModalityEmbedding, ExplicitProvider: b.ProviderRef, UserId: indexer,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return EmbedAsIndexer(provider, indexer), nil
 }
 
 // pgSemanticStore implements SemanticVectorStore over the semantic_ai_cache

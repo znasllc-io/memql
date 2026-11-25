@@ -3301,18 +3301,27 @@ mutation moduleReadiness recordModuleReadiness {
 // (epic memql#5137, D6). A cluster owner may certainly CHOOSE the embedder --
 // that is the point of the feature. What they may not do is write this row
 // directly, because activating a binding is not a write: it is create the
-// vector table for the new width, run reembedLibrary to fill it, compare the
-// counts, and only then flip `active`. A mutation reachable from a client would
-// let somebody perform step four on its own, and the cluster would then read
-// every vector in the old table through the new model's geometry -- half a
-// search space, ranked confidently, with no error anywhere.
+// vector table for the new model, fill it (the memory index job, design record
+// 2026-11-23 section 4), and only then flip `active`. A mutation reachable from
+// a client would let somebody perform the last step on its own, and the
+// cluster would then read every vector in the old table through the new
+// model's geometry -- half a search space, ranked confidently, with no error
+// anywhere.
 //
-// The act an operator performs is the BUILTIN that runs all four steps. These
-// are what it writes with.
+// The act an operator performs is the BUILTIN that runs the steps. These are
+// what it writes with.
+//
+// Every write below takes a REQUIRED `versionTime`, written as the row's
+// version: every caller stamps it after the newest version it read
+// (memql.VersionTimeAfter; memql#5431's third part), so a replica
+// whose clock lags the last writer's still writes the newest version instead
+// of an older one every reader passes over.
 
-/// Record a binding that is being activated. Written before the re-embed starts, with
-/// `activatedAt` deliberately absent -- until the counts match this row is a PLAN, and a reader
-/// seeing a timestamp on it would read a switch that has not happened as one that has.
+/// Record the cluster's FIRST binding as a PLAN. bindEmbedder writes it once a probe has learned
+/// the model's width and the model's table exists, with `activatedAt` deliberately absent: a reader
+/// that sees the row before activateEmbedderBinding stamps it reads "no embedder is bound", never a
+/// model that is not active yet. A change of model never writes here; it is a switch, which the
+/// memory index job carries out and flipEmbedderBinding finishes.
 ///
 /// @serverOnly, AND actor.userId SCOPING IS NOT THE FIX, because there is no actor to scope to.
 /// The embedder is a property of the DEPLOYMENT: one binding, one vector space, everybody's rows in
@@ -3333,34 +3342,208 @@ mutation embedderBinding recordEmbedderBindingPlan {
     dimensions    int!     @minimum(1)
     previousRef   string
     reembedRunId  string
+    versionTime   datetime!
   }
   insert {
     accept { providerRef, dimensions, previousRef, reembedRunId }
     stamp {
-      id: args.bindingId
+      id:         args.bindingId
+      createdAt:  args.versionTime
     }
   }
 }
 
-/// Flip the binding to active. Called only when the new width's vector count matches the old one's;
-/// `activatedAt` is what makes this row a state rather than a plan.
+/// Make the cluster's FIRST binding active: bindEmbedder stamps `activatedAt` on the plan it has
+/// just written, and the stamp is what makes the row a state rather than a plan. A first model has
+/// nothing to re-embed, because no item is indexed under another model.
 ///
 /// @serverOnly, AND actor.userId SCOPING IS NOT THE FIX -- same reason as the plan write above (no
-/// actor owns a deployment-wide vector space) plus one this write has on its own. Flipping the
-/// binding is the LAST of four steps: create the new width's table, fill it, compare the counts,
-/// flip. A caller-reachable mutation would let somebody perform step four alone, and the cluster
-/// would then read every vector in the old table through the new model's geometry -- half a search
-/// space, ranked confidently, with no error anywhere. The guard is that only the builtin that ran
-/// steps one to three can call this.
+/// actor owns a deployment-wide vector space) plus one this write has on its own. Activating is the
+/// LAST step of a first binding -- probe the model for its width, create its table, record the
+/// plan, activate -- and a caller-reachable mutation would let somebody take it alone: every search
+/// and every writer would then follow a model nobody checked, into a table that may not exist. The
+/// guard is that only the builtin that ran the steps before it can call this.
 @serverOnly
 mutation embedderBinding activateEmbedderBinding {
   args {
     bindingId    string!
     activatedAt  datetime!
+    versionTime  datetime!
   }
   update {
     id:           args.bindingId
     activatedAt:  args.activatedAt
+    createdAt:    args.versionTime
+  }
+}
+
+/// Switch the binding to another model in ONE write: the index job calls this, under the binding's
+/// lock, once every item is in the new model's table (design record 2026-11-23, section 6).
+///
+/// NOT @createOnly, unlike recordEmbedderBindingPlan: a switch is exactly the write that changes
+/// the model and its width on a row that exists. And it states the WHOLE new model: an omitted
+/// previousRef, indexedBy or chosenBy is written empty rather than inherited, because a flip that
+/// kept the previous model's indexer would embed the new model on machines nobody chose for it --
+/// and reembedRunId is always written empty, because a run that filled the previous model's table
+/// filled nothing of this one (the index job fills it, and records its run on memoryIndexRun).
+///
+/// @serverOnly, AND actor.userId SCOPING IS NOT THE FIX: no actor owns the deployment's one vector
+/// space, and a caller-reachable flip would let somebody perform the switch's last step alone --
+/// every search would then read a half-built index through the new model's geometry.
+@serverOnly
+mutation embedderBinding flipEmbedderBinding {
+  args {
+    bindingId    string!
+    providerRef  string!
+    dimensions   int!      @minimum(1)
+    activatedAt  datetime!
+    previousRef  string
+    indexedBy    string
+    chosenBy     string
+    versionTime  datetime!
+  }
+  update {
+    accept { providerRef, dimensions, activatedAt }
+    stamp {
+      id:            args.bindingId
+      previousRef:   args.previousRef ?? ""
+      indexedBy:     args.indexedBy ?? ""
+      chosenBy:      args.chosenBy ?? ""
+      reembedRunId:  ""
+      createdAt:     args.versionTime
+    }
+  }
+}
+
+/// Record whose machines index the active model and who chose it, without touching the model.
+/// Each writer names only its own field and the read-merge keeps the other: adopting an owner as
+/// the indexer of a binding made before indexers existed leaves its chooser empty, and an owner
+/// confirming a vendor model leaves its indexer alone.
+///
+/// @serverOnly, AND actor.userId SCOPING IS NOT THE FIX: the indexer decides whose machines embed
+/// EVERY person's items and searches, so a caller-reachable write would let somebody route the
+/// whole cluster's memory text to machines of their choosing. Only the owner's choice, made through
+/// the engine, writes it.
+///
+/// EVERY CALLER HOLDS THE BINDING LOCK (`lockAskConversationKind(ctx, "active", "embedder-binding")`)
+/// around its read and this write. The update read-merges the `active` row, so a flip on another
+/// replica between the caller's read and this write would be silently reverted (memql#5431: lock,
+/// fresh read, newer version). Every caller goes through writeEmbedderChoice
+/// (component/memql/embedder_runtime.go): bindEmbedder and adoptEmbedderIndexer there, and the
+/// owner's memorySearchKeep (choosing the model in use again, the take-over) and memorySearchConfirm
+/// in memory_search_builtins.go.
+@serverOnly
+mutation embedderBinding setEmbedderBindingChoice {
+  args {
+    bindingId    string!
+    indexedBy    string
+    chosenBy     string
+    versionTime  datetime!
+  }
+  update {
+    accept { indexedBy, chosenBy }
+    stamp {
+      id:         args.bindingId
+      createdAt:  args.versionTime
+    }
+  }
+}
+
+/// Record a model whose index is no longer the active one, at `retired-<16 hex>` -- the hex of its
+/// vector table's name (RetiredEmbedderBindingID in component/memql). Written when a switch flips
+/// away from a model, when a switch is cancelled, and again when the retained index is dropped.
+///
+/// AN INSERT ON A DERIVED ID, so a model retired twice is one row with one timeline. It states the
+/// whole row each time: an omitted retireAt or droppedAt is written empty rather than inherited, so
+/// a model retired again after its old index was dropped does not read as dropped while its new
+/// table exists. The id must have the retired shape, so this can never write the active binding.
+///
+/// @serverOnly, AND actor.userId SCOPING IS NOT THE FIX: the retained list decides which vector
+/// tables the daily cleanup may drop, and no actor owns the deployment's indexes. A caller-reachable
+/// write could date somebody's whole search index for deletion.
+@serverOnly
+mutation embedderBinding recordRetiredEmbedder {
+  args {
+    bindingId    string!   @pattern("^retired-[0-9a-f]{16}$")
+    providerRef  string!
+    dimensions   int!      @minimum(1)
+    indexedBy    string
+    retireAt     datetime
+    droppedAt    datetime
+    versionTime  datetime!
+  }
+  insert {
+    accept { providerRef, dimensions }
+    stamp {
+      id:         args.bindingId
+      indexedBy:  args.indexedBy ?? ""
+      retireAt:   args.retireAt ?? ""
+      droppedAt:  args.droppedAt ?? ""
+      createdAt:  args.versionTime
+    }
+  }
+}
+
+/// Write one run of the memory index job, WHOLE, at its literal id -- `switch` or `backfill`, the
+/// run's kind (component/memql memory_index_job.go, design record 2026-11-23 sections 4 and 6).
+///
+/// AN INSERT THAT STATES THE WHOLE ROW: every omitted field is written empty rather than
+/// inherited, so a new switch never carries the last one's cursor, counts or waiting reason, and a
+/// cursor that left a source does not keep naming it.
+///
+/// EVERY CALLER FENCES THE WRITE to the version it read (memql.ContextWithRowVersionFence, through
+/// writeMemoryIndexRun): the job writes after every batch, and an owner's Cancel or Switch anyway
+/// lands between two of them on another replica. Unfenced, the job's next batch would write the
+/// cancelled run back to `indexing`. After writing, a caller's next write is fenced to the version
+/// ITS OWN write stored, never to one read afterwards, which may be the other replica's. And the
+/// write's `versionTime` is stamped after the version it was fenced to.
+///
+/// @serverOnly, AND actor.userId SCOPING IS NOT THE FIX: no actor owns the cluster's one index, and a
+/// caller-reachable write could start a switch on nobody's decision, name an indexer whose machines
+/// would then receive every person's memory text, or mark an unfinished rebuild ready to flip.
+@serverOnly
+mutation memoryIndexRun recordMemoryIndexRun {
+  args {
+    kind              enum("switch", "backfill")!
+    state             enum("indexing", "catchingUp", "needsDecision", "switching", "finishing", "done", "cancelled", "waiting")!
+    targetRef         string
+    targetDimensions  int      @minimum(0)
+    targetTable       string
+    previousRef       string
+    indexedBy         string
+    startedBy         string
+    startedAt         datetime
+    finishedAt        datetime
+    cursor            object
+    counts            object
+    waitingReason     string
+    lastPassAt        datetime
+    missing           int      @minimum(0)
+    missingAt         datetime
+    counting          object
+    versionTime       datetime!
+  }
+  insert {
+    accept { kind, state }
+    stamp {
+      id:                args.kind
+      targetRef:         args.targetRef ?? ""
+      targetDimensions:  args.targetDimensions ?? 0
+      targetTable:       args.targetTable ?? ""
+      previousRef:       args.previousRef ?? ""
+      indexedBy:         args.indexedBy ?? ""
+      startedBy:         args.startedBy ?? ""
+      startedAt:         args.startedAt ?? ""
+      finishedAt:        args.finishedAt ?? ""
+      cursor:            args.cursor ?? {}
+      counts:            args.counts ?? {}
+      waitingReason:     args.waitingReason ?? ""
+      lastPassAt:        args.lastPassAt ?? ""
+      missing:           args.missing ?? 0
+      missingAt:         args.missingAt ?? ""
+      counting:          args.counting ?? {}
+      createdAt:         args.versionTime
+    }
   }
 }
 

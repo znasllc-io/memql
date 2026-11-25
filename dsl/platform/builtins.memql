@@ -877,11 +877,120 @@ builtin packageCampaigns {
 }
 
 /// Choose the cluster's first embedding model, after verifying its output.
-/// Existing bindings are idempotent; changing the model requires a reindex.
+/// Existing bindings are idempotent; changing the model is a switch that rebuilds the
+/// index first (memorySearchSwitch).
 @sdk
 @executor("bindEmbedder")
 @args(profile="object")
 builtin bindEmbedder { provider string! }
+
+// ---- Memory search's model, the owner's (design record 2026-11-23, sections 3, 6, 7, 8) ----
+//
+// The reads and acts behind MemQL OS's Cluster > Settings > Memory search
+// (component/memql memory_search_builtins.go). @requiresCapability rather than
+// @requiresRank because a BUILTIN's annotation set carries no rank floor; both
+// parts are seeded on the owner role only (dsl/rbac/seeds.memql), so the engine
+// refuses everybody else before a handler runs. Every act also requires an
+// active cluster owner, whatever was granted (design record, decision 2 and
+// section 8), so a person granted the parts sees memory search and acts on
+// nothing; the status's mayAct says which. None of them flips the model:
+// they write the memory index job's switch row, and the job's tick rebuilds the
+// index and flips (memory_index_job.go). Every act answers the status row.
+
+/// Memory search's model and index, as ONE row (id `current`): providerRef, kind (machine or
+/// vendor), label; indexedBy and indexedByName (whose machines embed for it; empty for a vendor
+/// model, which the cluster's account pays for), chosenBy, and needsConfirmation (a vendor model
+/// nobody chose); previousRef (the model it replaced, empty for the first); mayAct (whether the
+/// caller may act on memory search at all: an active cluster owner holding the part's execute);
+/// takeOver (its indexer cannot index it, and choosing it again would make the caller its indexer);
+/// indexed (the entries in its index, counted at most every 30 s by each replica); backlog (the
+/// items the backfill's last count found missing from it, counted even while indexing waits) with
+/// backlogCountedAt, and waitingReason; switch (state, targetRef,
+/// targetLabel, counts, startedAt, startedBy, waitingReason, estimatedTotal, an ESTIMATE: the
+/// active index plus the backlog, indexedBy and indexedByName, whose machines the rebuild embeds
+/// on, and takeOver: before the flip, its indexer cannot index the target, and choosing the
+/// target again would make the caller its indexer), or null; retained, the kept indexes as
+/// {providerRef, retireAt}.
+@sdk
+@executor("memorySearchStatus")
+@requiresCapability("read", "app:cluster/memorysearch")
+builtin memorySearchStatus { }
+
+/// The models the caller may choose for memory search, one row each: {providerRef, kind, label,
+/// machines, paidByCluster, available, hint}. Machine models are the embedding models of the
+/// caller's own machines and the ones lent to them, counted by the machines that offer them;
+/// vendor embedding models appear only where the cluster's vendor account is set up, and each is
+/// paid by it. A model whose vectors are wider than the index holds (2000) is listed unavailable,
+/// its hint saying so.
+@sdk
+@executor("memorySearchChoices")
+@requiresCapability("read", "app:cluster/memorysearch")
+builtin memorySearchChoices { }
+
+/// Choose memory search's model. With none bound it is bound at once. Choosing the model in use
+/// (or a running switch's own target) moves nothing, and takes over indexing it when its indexer
+/// is no longer an owner, has no machine offering it, or has none of those online while one of
+/// the caller's is. Otherwise the whole index is rebuilt with
+/// the new model in the background while search keeps the current one, and search switches over by
+/// itself when the rebuild is complete; a machine model is indexed on the chooser's machines and
+/// the ones lent to them, a vendor model is paid by the cluster's vendor account. Refused while
+/// another switch runs, except once it has switched over: choosing another model then starts it.
+/// A model whose declared width is more than the index holds (2000) is refused before anything is
+/// embedded. Only an active cluster owner chooses.
+@sdk
+@executor("memorySearchSwitch")
+@args(profile="object")
+@requiresCapability("execute", "app:cluster/memorysearch")
+builtin memorySearchSwitch { provider string! }
+
+/// Cancel the switch in progress. Search keeps the current model, and the partly built index is
+/// kept for 30 days, so choosing the same model again resumes it. Refused once the switch has
+/// happened: switching back is a new switch. An active cluster owner only.
+@sdk
+@executor("memorySearchCancel")
+@requiresCapability("execute", "app:cluster/memorysearch")
+builtin memorySearchCancel { }
+
+/// Switch over although some items failed or no source rebuilds them (a switch waiting for the
+/// owner's decision only). Those items drop out of search until they are written again or a later
+/// pass picks them up. The flip itself happens at the index job's next tick. An active cluster
+/// owner only.
+@sdk
+@executor("memorySearchSwitchAnyway")
+@requiresCapability("execute", "app:cluster/memorysearch")
+builtin memorySearchSwitchAnyway { }
+
+/// Confirm a vendor model memory search was bound to without anybody choosing it: records the
+/// caller as its chooser, once. An active cluster owner only.
+@sdk
+@executor("memorySearchConfirm")
+@requiresCapability("execute", "app:cluster/memorysearch")
+builtin memorySearchConfirm { }
+
+/// The daily cleanup of memory search's retired indexes (component/memql
+/// memory_search_builtins.go): drops each retired model's vector table past its 30 days that is
+/// neither the active model's nor a running switch's target, and records when.
+///
+/// NO @sdk, and that keeps nothing out on its own (memoryIndexStep's reason): the handler refuses a
+/// call without internal origin. Its schedule is memoryIndexRetentionSweep.
+@executor("memoryIndexRetire")
+builtin memoryIndexRetire { }
+
+/// One bounded tick of the memory index job (design record 2026-11-23, section 4;
+/// component/memql memory_index_job.go): rebuild a switch's new index, flip it, or
+/// backfill what the active index is missing, on one replica at a time, for at most
+/// budgetSeconds (1 to 50) before the next tick carries on from the saved cursor.
+///
+/// NO @sdk, which keeps it off the client wire, and that keeps nothing out on its own:
+/// a builtin takes no @serverOnly and a signed-in client's query can name one. So the
+/// gate is in the HANDLER: a call without internal origin -- which the automation
+/// executor stamps on a tree-loaded automation's step and on nothing a client sends --
+/// is refused before anything is read. Its schedule is memoryIndexTick.
+@executor("memoryIndexStep")
+@args(profile="object")
+builtin memoryIndexStep {
+  budgetSeconds  integer
+}
 
 /// Reconcile one binding from the authorized sweep snapshot. DNS ownership and TLS readiness remain mandatory.
 @executor("integration.customDomain.customDomainReconcileBinding")

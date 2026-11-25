@@ -608,8 +608,8 @@ Decided by the owner after landing (2026-11-22):
     transcription opened on the speech node and an agent turn on a direct
     stream (each takes its stream's caller); the command-safety check,
     resolved once at start for nobody (a named job now, at the resolution
-    and on every call, so the cluster keeps paying for it as it did; whether
-    it should is a separate question still open with the owner), and the
+    and on every call, so the cluster keeps paying for it as it did, which
+    the owner confirmed in the next decision), and the
     healer, written the same way though nothing wires it today; and a request
     built outside the engine inside a run (the router, and its cache-hit
     record, now read the run's owner, as the engine seam did).
@@ -622,6 +622,26 @@ Decided by the owner after landing (2026-11-22):
   - A job's name rather than the system actor, because the fleet reads the
     acting id to choose machines: the system actor's `system:` id would have
     taken the job off the machines lent to cluster work.
+
+- **The cluster pays for its own machinery, even when a person's action
+  starts it.** An automation an event or a schedule runs as itself, the
+  command-safety check screening a person's command, and repair are the
+  cluster's own work, so the cluster's account pays when they reach a vendor
+  and the person's key is not used. Asked with "charge the person who set it
+  off" as the alternative, the owner kept it (2026-11-23): these are what an
+  owner or admin switched on, they behave the same for everybody, and a
+  person without a key would otherwise see them fail. Nothing changed in the
+  code: an automation runs as its own actor unless it inherits a person's,
+  and the safety check and the healer are named cluster jobs.
+
+- **A visitor's call is judged by the site's publisher.** A shopper form, an
+  access-code call and a deployed workflow run under the borrowed authority
+  of the person who published the site or deployed the workflow; no key ever
+  pays for them (K8 line 2), and the cluster's account pays only when that
+  person may use it. Asked with "always pay for visitors" and "never pay for
+  visitors" as the alternatives, the owner kept it (2026-11-23): otherwise
+  anyone who can publish a site could spend the cluster's account through a
+  public form. No code changed.
 
 Left open by the independent review, for the owner:
 

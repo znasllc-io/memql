@@ -130,7 +130,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			// Useful for iterating on the recipe before paying for the
 			// full-catalog run.
 			Name:        "seedDomainContent",
-			Description: "Generate ~30 retrievable chunks for a single domain via the seedDomainContent prompt + embed + write. Tier-A domains seed normally; Tier-B prepends a disclaimer chunk; Tier-C writes a placeholder ('upload your own authoritative content'). Idempotent at a given recipeVersion -- re-runs are no-ops; bump the version to invalidate.",
+			Description: "Generate ~30 retrievable chunks for a single domain via the seedDomainContent prompt + embed + write. Tier-A domains seed normally; Tier-B prepends a disclaimer chunk; Tier-C writes a placeholder ('upload your own authoritative content'). Chunk ids are keyed by recipeVersion, domain and index, so a re-run at the same recipeVersion generates the chunks again and writes them over the same ids, with the new text; bump the version to write a set of its own.",
 			Handler:     i.seedDomainContentHandler,
 			ArgsSchema: map[string]string{
 				"domainId":      "string (required) - shipped-catalog domain id, e.g. 'physics_quantum_mechanics'.",

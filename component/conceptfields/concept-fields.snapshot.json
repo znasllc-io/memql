@@ -5341,10 +5341,14 @@
       "file": "platform/concepts.memql",
       "fields": [
         "activatedAt",
+        "chosenBy",
         "dimensions",
+        "droppedAt",
+        "indexedBy",
         "previousRef",
         "providerRef",
-        "reembedRunId"
+        "reembedRunId",
+        "retireAt"
       ],
       "required": [
         "dimensions",
@@ -5511,6 +5515,45 @@
         "localModelCount",
         "minimumContextWindow"
       ]
+    },
+    {
+      "concept": "v1:platform:memoryIndexRun",
+      "file": "platform/concepts.memql",
+      "fields": [
+        "counting",
+        "counts",
+        "cursor",
+        "finishedAt",
+        "indexedBy",
+        "kind",
+        "lastPassAt",
+        "missing",
+        "missingAt",
+        "previousRef",
+        "startedAt",
+        "startedBy",
+        "state",
+        "targetDimensions",
+        "targetRef",
+        "targetTable",
+        "waitingReason"
+      ],
+      "enums": {
+        "kind": [
+          "backfill",
+          "switch"
+        ],
+        "state": [
+          "cancelled",
+          "catchingUp",
+          "done",
+          "finishing",
+          "indexing",
+          "needsDecision",
+          "switching",
+          "waiting"
+        ]
+      }
     },
     {
       "concept": "v1:platform:missingCapability",

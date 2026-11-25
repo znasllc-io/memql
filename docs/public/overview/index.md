@@ -42,7 +42,7 @@ Follow [first-run setup](../operate/first-run.md) and
 [configuration readiness](../operate/configuration-readiness.md). Then choose
 the guide for the job:
 
-- [Fleet and local models](../operate/local-models.md), [shared machines](../operate/shared-machines.md), [workbenches](../operate/workbench-runbook.md).
+- [Fleet and local models](../operate/local-models.md), [memory search](../operate/memory-search.md), [shared machines](../operate/shared-machines.md), [workbenches](../operate/workbench-runbook.md).
 - [Files and Library](../operate/library.md), [Deployables](../operate/deployables.md), [campaign sending](../operate/campaign-sending.md).
 - [Identity and access](../operate/auth/access-model.md), [logs](../operate/logs.md), [local runtime](../operate/reproduce-the-cloud-locally.md).
 - [Installation requirements](../operate/minimum-requirements.md), [database platform](../operate/database-platform.md), [upgrade barriers](../operate/upgrade-barriers.md).

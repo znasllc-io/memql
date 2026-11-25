@@ -149,9 +149,15 @@ type PluginContext struct {
 	// ceiling and the ledger.
 	//
 	// It takes the CALLER'S CONTEXT because a `fleet:<modelId>` name
-	// resolves against the acting user's own machines (epic memql#5096):
-	// resolved without one it would answer against the shared-inference
-	// set, which reports a live laptop as absent.
+	// resolves against a person's own machines and the ones lent to them
+	// (epic memql#5096): resolved without one it would answer against the
+	// shared-inference set, which reports a live laptop as absent. For
+	// memory search's own model that person is the binding's INDEXER, not the
+	// caller -- or the indexer the context names (ContextWithEmbeddingIndexer)
+	// -- and the provider handed back carries the indexer's assertion on each
+	// call, so an item or a query is embedded on the indexer's machines
+	// whoever asks (embedder_indexer.go; app/ai_call_sites.go
+	// resolveEmbeddingProvider).
 	ResolveEmbeddingProvider func(ctx context.Context, name string) (EmbeddingAIProvider, error)
 
 	// ResolvePartitionFromContext returns the active partition for the

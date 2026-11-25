@@ -263,13 +263,28 @@ describe("a route's page", () => {
     expect(within(embeddings).queryByRole("button", { name: /^Add / })).toBeNull();
   });
 
-  it("offers the way to an embedding model when the cluster has none", async () => {
+  it("says where the embedding model is chosen, to whoever can open it, and who can to anybody else", async () => {
+    // Memory search's model is chosen in Cluster > Settings > Memory search,
+    // which needs read on app:cluster/memorysearch (the owner's): Fleet's Models
+    // page is where a model is pulled onto a machine, not where it is chosen.
+    use();
+    await renderRouting("owner", openRoute("apps"));
+    expect(within(job("Search and memory")).getByText("The same in every route. Change it in Cluster > Settings > Memory search.")).toBeTruthy();
+    cleanup();
+    use();
+    await renderRouting("writer", openRoute("local"));
+    expect(within(job("Search and memory")).getByText("The same in every route. A cluster owner can change it.")).toBeTruthy();
+    cleanup();
+
     use({ embedder: "" });
-    const onOpenModels = vi.fn();
-    await renderRouting("owner", { ...openRoute("apps"), onOpenModels });
+    await renderRouting("owner", openRoute("apps"));
     expect(within(job("Search and memory")).getByText("No embedding model yet")).toBeTruthy();
-    fireEvent.click(within(job("Search and memory")).getByRole("button", { name: "Add one in Models" }));
-    expect(onOpenModels).toHaveBeenCalled();
+    expect(within(job("Search and memory")).getByText("The same in every route. Choose one in Cluster > Settings > Memory search.")).toBeTruthy();
+    expect(within(job("Search and memory")).queryByRole("button")).toBeNull();
+    cleanup();
+    use({ embedder: "" });
+    await renderRouting("writer", openRoute("local"));
+    expect(within(job("Search and memory")).getByText("The same in every route. A cluster owner chooses one.")).toBeTruthy();
   });
 
   it("says when routing changed under the page, and keeps the change to save again", async () => {

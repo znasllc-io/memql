@@ -1349,20 +1349,18 @@ func (p *fleetProvider) EmbedBatch(ctx context.Context, texts []string) ([][]flo
 
 // Dimensions implements EmbeddingAIProvider.
 //
-// IT ASKS THE CATALOG NOW (epic memql#5137, D6), where before it returned 0 and
-// said zero was the honest answer. That was true and is no longer the whole
-// story: a runtime still reports its vector length only by producing one, but
-// the CATALOG records it -- `dimensions` on the `v1:models:modelProfile` row for
-// this exact model id -- because the embedder binding cannot create its
-// `node_vectors_<dims>` table without knowing the width before the first vector
-// exists.
+// IT ASKS THE CATALOG (epic memql#5137, D6): a runtime reports its vector length
+// only by producing one, while the CATALOG records it -- `dimensions` on the
+// `v1:models:modelProfile` row for this exact model id. Zero is what an unknown
+// model gets, and callers read zero as "unknown" rather than as a dimensionality.
 //
-// Zero is still what an unknown model gets, and callers still read zero as
-// "unknown" rather than as a dimensionality. The difference is that a model the
-// catalog knows can now be BOUND, and one it does not cannot -- which is a
-// better failure than a table created at the wrong width, because a mismatched
-// vector column is not an error anywhere. It is a search space that quietly
-// returns the wrong neighbours.
+// A BINDING DOES NOT TAKE THIS ON TRUST: binding a model, or switching to one,
+// embeds one sentence and takes the vector's length as the width
+// (probeEmbedder), which must equal this answer where it is not zero
+// (ValidateEmbeddingVector). A mismatched vector column is not an error
+// anywhere -- it is a search space that quietly returns the wrong neighbours --
+// so a model whose vectors disagree with its catalog row is refused, and a
+// model the catalog does not know is bound at the width it returns.
 func (p *fleetProvider) Dimensions() int {
 	if p == nil {
 		return 0

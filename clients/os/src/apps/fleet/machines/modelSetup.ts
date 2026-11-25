@@ -1,5 +1,34 @@
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { flatten } from "../../../kit/rows";
+import { holds } from "../../../system/roles";
+
+/**
+ * Where memory search's model is changed, said to the reader (design record
+ * 2026-11-23, section 8: Fleet says where to change it). WHERE is a page only
+ * to somebody who can open it: Cluster > Settings > Memory search needs `read`
+ * on app:cluster/memorysearch (MEMORY_SEARCH_RESOURCE, seeded on the owner
+ * alone), so anybody else is told who can change it instead. Every Fleet
+ * pointer to it says it through here: the board's caption, its refusal, the
+ * Models page's help and the Routes job board's Search and memory job.
+ */
+function mayOpenMemorySearch(): boolean {
+  return holds("read", "app:cluster/memorysearch");
+}
+
+/** Where the model in use is changed. */
+export function memorySearchWhere(): string {
+  return mayOpenMemorySearch() ? "Change it in Cluster > Settings > Memory search." : "A cluster owner can change it.";
+}
+
+/** Where a first model is chosen, while there is none. */
+export function memorySearchChooses(): string {
+  return mayOpenMemorySearch() ? "Choose one in Cluster > Settings > Memory search." : "A cluster owner chooses one.";
+}
+
+/** What a machine's board says about the embeddings task it keeps locked. */
+export function memorySearchKeeps(model: string): string {
+  return `Memory search keeps ${model}. ${memorySearchWhere()}`;
+}
 
 export const MODEL_PURPOSES = [
   ["conversation", "Conversation"], ["structured", "Structured output"],
@@ -57,7 +86,7 @@ export function assignmentProposal(choices: ModelChoices, modelId: string, purpo
   const model = view.catalog.find(m => m.modelId === modelId);
   for (const purpose of purposes) {
     if (!MODEL_PURPOSES.some(([id]) => id === purpose)) return { choices, refusal: "That task is unavailable." };
-    if (purpose === "embeddings" && view.boundEmbeddingModel && modelId !== view.boundEmbeddingModel) return { choices, refusal: `Memory search keeps ${view.boundEmbeddingModel}. Switching requires a reindex.` };
+    if (purpose === "embeddings" && view.boundEmbeddingModel && modelId !== view.boundEmbeddingModel) return { choices, refusal: memorySearchKeeps(view.boundEmbeddingModel) };
     if (modelId) {
       if (!model?.installed) return { choices, refusal: "Install this model before assigning it." };
       if (model.blocked) return { choices, refusal: model.blocked };

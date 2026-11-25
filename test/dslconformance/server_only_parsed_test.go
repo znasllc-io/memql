@@ -1257,14 +1257,30 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// narrower version of this feature but an incoherent one, two users
 		// embedding into two geometries with `similarTo` comparing across them.
 		//
-		// activateEmbedderBinding carries a second argument of its own. Flipping
-		// the binding is the LAST of four steps -- create the new width's table,
-		// fill it, compare the counts, flip -- and a caller-reachable mutation
-		// would let somebody perform step four alone. The cluster would then
-		// read every vector in the old table through the new model's geometry:
-		// half a search space, ranked confidently, with no error anywhere.
+		// activateEmbedderBinding carries a second argument of its own. It is
+		// the LAST step of a cluster's first binding -- probe the model for its
+		// width, create its table, record the plan, activate -- and a
+		// caller-reachable mutation would let somebody take it alone: every
+		// search and every writer would then follow a model nobody checked,
+		// into a table that may not exist. A change of model is a switch, and
+		// only the memory index job finishes one (flipEmbedderBinding, below).
 		{Path: "platform/mutations.memql", Name: "recordEmbedderBindingPlan"}: true,
 		{Path: "platform/mutations.memql", Name: "activateEmbedderBinding"}:   true,
+		// The memory-search switch's writes (design record 2026-11-23), for the
+		// same reason and three of their own. flipEmbedderBinding is a switch's
+		// last step and would, reachable alone, put every search on a half-built
+		// index. setEmbedderBindingChoice names the INDEXER, whose machines embed
+		// every person's items and searches: a caller-reachable write would route
+		// the whole cluster's memory text to machines of the caller's choosing.
+		// recordRetiredEmbedder dates an index for the daily cleanup to drop.
+		{Path: "platform/mutations.memql", Name: "flipEmbedderBinding"}:      true,
+		{Path: "platform/mutations.memql", Name: "setEmbedderBindingChoice"}: true,
+		{Path: "platform/mutations.memql", Name: "recordRetiredEmbedder"}:    true,
+		// The memory index job's run rows. A caller-reachable write could start
+		// a switch nobody chose, name an indexer whose machines would then
+		// receive every person's memory text, or mark an unfinished rebuild
+		// ready to flip; only the job and the owner's builtins write it.
+		{Path: "platform/mutations.memql", Name: "recordMemoryIndexRun"}: true,
 		// memql#4270 / memql#4606 / memql#4601. The four writes of the
 		// user-invitation lifecycle, and none is caller-scopable for the same
 		// underlying reason: the row is not the caller's.

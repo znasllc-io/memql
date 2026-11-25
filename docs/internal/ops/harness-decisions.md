@@ -2233,7 +2233,13 @@ transcription and images, and any record whose client takes no key, so the
 rule does not depend on what kind of client a record has
 (`clusterAccountGated`). Embeddings are never asked: the memory space is the
 cluster's, one model for everybody. A visitor's call is judged by the person
-whose authority it borrows.
+whose authority it borrows: the person who published the site (a shopper
+form, an access code) or deployed the workflow. Owner decision, 2026-11-23,
+asked against paying for every visitor whoever published the site and against
+paying for none: kept, because a publisher the owner has not allowed could
+otherwise spend his account by putting a public form in front of it. Cost:
+such a site's visitors get no vendor model until the owner allows its
+publisher; machines the publisher owns or was lent still serve them.
 
 Two paths reached a vendor without being walked, and each now asks. A PLAIN
 record name resolved at the call (`accountAtCall`,
@@ -2252,6 +2258,22 @@ vendor account unless its owner said so, embeddings aside. Known limit: an
 operator who sets `MEMQL_STT_PROVIDER` to a direct OpenAI transcription path
 dials OpenAI with the cluster's bearer outside the router, for every caller;
 that variable is the operator's own choice and is not gated.
+A vendor passed over at the call for this reason leaves no line of its own:
+the person sees the error of the source that failed in front of it. Not
+verified against a real vendor. Tests: `vendor_account_cluster_test.go`,
+`cluster_account_gate_db_test.go`, in `component/router/accounts_test.go`
+`TestTheClustersAccountDoesNotPayForAPersonItIsClosedTo`,
+`TestTheVendorSurfacesWithNoKeyAskTheSameGate`,
+`TestEmbeddingsStayOnTheClustersAccountForEverybody` and
+`TestAPlainRecordNameResolvedAtTheCallAsksWhoTheClustersAccountPaysFor`; in
+`app/vision_for_caller_test.go`
+`TestAPictureIsDescribedByTheModelResolvedForItsCaller`; and across two
+replicas over one database, in `integrations/vendorkeys/hop_db_test.go`,
+`TestWhoTheClustersAccountPaysForIsReadOnTheOtherReplica` (granted and taken
+back through one replica, read on the other, a resolved call included) and
+`TestAKeyRemovedOnOneReplicaIsRefusedOnTheOther`. A fixture outside those
+packages that calls a vendor record for a person says who the account pays
+for (`SetClusterAccountGate`), because a registry a test builds has no gate.
 
 **A call that names nobody is not the cluster's work (owner decision,
 2026-11-23).** The rule above defined the cluster's own work by the ABSENCE of
@@ -2322,22 +2344,20 @@ that declares no capability (the `ai` builtin among them) checks no actor, so
 an anonymous caller may reach a model call; the cluster's account no longer
 pays for it, and whether it should be reachable at all is not settled here.
 Not run against a real vendor.
-A vendor passed over at the call for this reason leaves no line of its own:
-the person sees the error of the source that failed in front of it. Not
-verified against a real vendor. Tests: `vendor_account_cluster_test.go`,
-`cluster_account_gate_db_test.go`, in `component/router/accounts_test.go`
-`TestTheClustersAccountDoesNotPayForAPersonItIsClosedTo`,
-`TestTheVendorSurfacesWithNoKeyAskTheSameGate`,
-`TestEmbeddingsStayOnTheClustersAccountForEverybody` and
-`TestAPlainRecordNameResolvedAtTheCallAsksWhoTheClustersAccountPaysFor`; in
-`app/vision_for_caller_test.go`
-`TestAPictureIsDescribedByTheModelResolvedForItsCaller`; and across two
-replicas over one database, in `integrations/vendorkeys/hop_db_test.go`,
-`TestWhoTheClustersAccountPaysForIsReadOnTheOtherReplica` (granted and taken
-back through one replica, read on the other, a resolved call included) and
-`TestAKeyRemovedOnOneReplicaIsRefusedOnTheOther`. A fixture outside those
-packages that calls a vendor record for a person says who the account pays
-for (`SetClusterAccountGate`), because a registry a test builds has no gate.
+
+**The cluster pays for its own machinery, even when a person's action starts
+it (owner decision, 2026-11-23).** Trigger: a model call made by work the
+cluster runs as itself after somebody's action: an automation an event or a
+schedule starts (it runs as its own actor unless it inherits a person's,
+`component/automations` `installRunActor`), the command-safety check screening
+a person's command, repair. Path: such a call says it is the cluster's (its
+actor, or its named job), so the cluster's account pays when it reaches a
+vendor, and the person whose action set it off pays nothing and is not asked.
+Alternative offered and declined: charging the person who set it off (their
+key, or nothing for somebody without one). Why: these are what an owner or an
+admin switched on, they behave the same for everybody, and per-person payment
+would make them fail for anybody without a key. No code changed with the
+decision; the paths and tests are the section above's.
 
 **The record of a key-paid call that failed keeps the router's words, not the
 vendor's (owner decision, 2026-11-22).** `v1:router:call` is readable by every
@@ -2377,6 +2397,673 @@ key's activity counts only the rows the router wrote (`row.createdBy`), and a
 call record a person wrote naming somebody's key changes no figure. The owner
 notice is at-least-once: a mail that went, and whose record then failed to
 write, goes again.
+
+## Memory search embeds as its indexer (2026-11-24)
+
+From the [memory-search design record](../../superpowers/specs/2026-11-23-memory-search-model-switch-design.md),
+section 1 (the owner's decision 7): memory search is one index for the whole
+cluster, and the owner provides it.
+
+**Every memory-search embedding resolves as the binding's indexer**
+(`EmbeddingIndexerForCall`, `component/memql/embedder_indexer.go`;
+`resolveEmbeddingProvider`, `app/ai_call_sites.go`). Trigger: a `fleet:` model
+was resolved for whoever asked, so an item was embedded on its writer's
+machines, and an item written, or a search run, by somebody with no machine
+offering the bound model was never embedded. The binding now records
+`indexedBy` and `chosenBy`. For a fleet reference the request's `UserId`
+becomes, in order: the indexer the context names (`ContextWithEmbeddingIndexer`:
+the index job, or a caller already holding the binding); the active binding's
+`indexedBy` when the name is its reference; else nobody, and the call is its
+caller's as before. A vendor reference is unchanged: it runs on no one's
+machines and the cluster's account already pays for embeddings. The engine's
+attribution fills `UserId` only when a request left it empty
+(`ai_attribution.go`), so the decision names the indexer. The binding is read
+at most once per call, not at all when the context names the indexer, and a
+failed read borrows nobody.
+
+**The hop carries the indexer's assertion, and nothing else** (`EmbedAsIndexer`).
+Trigger, reproduced in process: the bff embeds memory and holds no stream, so
+every fleet embedding it makes is forwarded, and the receiving replica checks
+the machine against the forwarded assertion's subject (`owner_mismatch`,
+`integrations/agent/worker/model_forward.go`). A call resolved for the indexer
+and carrying the writer's own assertion is refused before start. Chosen path:
+for each call, the indexer's writer-scoped assertion
+(`auth.ForwardedAuthorityForUser`, the model pull runner's and the deployer
+fleet's form) is bound as the call's forwarded authority only; the actor stays
+the caller, and the caller's context is unchanged after the call.
+Alternatives: binding the indexer's whole context, as `deployer_fleet.go`
+does, would run the call as the indexer, and a work run's provider admission
+requires the actor to be the run's owner (`integrations/work/provider_admission.go`),
+so every embedding inside another person's run would be refused; binding
+nothing keeps the refusal. Invariant: the subject comes off the binding row or
+the index job's run, never a caller's argument; it reaches only the embedding
+call of a provider the router resolved for that subject; a test persona never
+borrows, and its call fails closed.
+
+**Release knowledge seeds stop waiting for an owned turn when the binding names
+its indexer** (`integrations/knowledge/release_seeds.go`). The deferral existed
+because the lifecycle actor is the cluster, which has no machines. A fleet
+binding with no indexer, bound before indexers existed, still defers
+(`fleet-authority-unavailable`) rather than manufacturing a person; an offline
+indexer defers as `embedder-unavailable`, as before.
+
+**The binding's writes** (`dsl/platform/mutations.memql`, all `@serverOnly`).
+`flipEmbedderBinding` states the whole new model: an omitted previous
+reference, indexer or chooser is written empty, and `reembedRunId` always is,
+so a flip never inherits the previous model's indexer or the run that filled
+the previous model's table. `setEmbedderBindingChoice` writes only the fields it
+is given. `recordRetiredEmbedder` writes a retired model's row at
+`retired-<16 hex>` (`RetiredEmbedderBindingID`, the hex of its vector table's
+name), states the whole row each time so a stale `droppedAt` does not survive
+a new retirement, and refuses any other id. All of it is binding rows in
+Postgres; a replica holds none of it and reads the binding fresh on each call,
+so a retry, a restart or another replica sees the same indexer.
+
+**The indexer must still be an owner.** Trigger: every resolution that names
+an indexer. Evidence: the engine's read of active users whose stored role is
+`owner` (`IndexerIsActiveOwner`, cached 60 s per replica, so a demotion reaches
+every replica within a minute and the hot path costs no read). Path: when the
+indexer is not an active owner the embedding is REFUSED with a plain reason
+(`ErrEmbeddingIndexerNotOwner`); writers log their usual "until backfilled"
+line and a later backfill catches up once an owner chooses the model again.
+Rejected: falling back to the caller, which would send memory text to a
+writer's machine and mix two machines' vectors in one index. Stop: an owner
+chooses the model. An EMPTY indexer is not refused: it is a binding made
+before indexers existed, resolved as its caller until `adoptEmbedderIndexer`
+names the first active owner whose catalog offers the model (boot readiness,
+`WriteModuleReadiness`). A lookup that fails and has no earlier answer refuses.
+One that panics clears the cache's reading mark on its way out, so the next
+call reads again rather than the replica never reading the owners again
+(`TestAnOwnerReadThatPanicsDoesNotStopLaterReads`).
+
+**The automatic first choice** (`autoBindEmbedder`) binds only an ONLINE
+embedding model of an active owner's catalog (their machines and the ones lent
+to them), indexed by that owner, chosen by nobody. It never binds a vendor model
+and never one only a non-owner's machine offers; with no candidate it binds
+nothing and the next readiness pass retries. `setEmbedderBindingChoice`
+read-merges the row, so every caller holds the binding lock
+(`lockAskConversationKind(ctx, "active", "embedder-binding")`) around its read
+and write (memql#5431). Tests: `component/memql/embedder_autobind_test.go`.
+
+**Limits.** Embedding
+resolutions write no `v1:router:call` row (`resolveDirect` has no observer),
+so the indexer is named on the request and the resolution, not in a ledger
+row. A test persona's memory-search embedding fails rather than running on its
+own machines. Not verified on a live cluster. Tests:
+`component/memql/embedder_indexer_test.go`; `app/embedding_indexer_test.go`,
+through the real router; `integrations/agent/worker/memory_search_hop_test.go`,
+across the hop in process (`-tags agent`);
+`TestOwnedReleaseIndexing/ScheduledEmbedsAsTheIndexer` and
+`.../ScheduledDefersWithoutInventingFleetAuthority` in
+`integrations/knowledge/release_work_db_test.go`.
+
+## One job rebuilds, backfills and flips memory search (2026-11-24)
+
+From the same [design record](../../superpowers/specs/2026-11-23-memory-search-model-switch-design.md),
+sections 4, 6 and 9. The index stores vectors and no text, so a missing vector
+is made again from its row by the writer's own recipe (`memory_sources.go`).
+One scheduled job does all of it (`component/memql/memory_index_job.go`,
+automation `memoryIndexTick`, builtin `memoryIndexStep`): a switch's rebuild
+into the new model's table while search keeps the active one, the flip, and
+the backfill of what the active table is missing.
+
+**Where it runs.** Every minute, for a 45 s budget plus a 10 s grace, PLACED on
+the agent (`node="agent", lease="memory-index"`). Trigger: an embedding with a
+machine model needs fleet inference, which an identity, workbench or edge
+replica lacks (`app/cluster_worker*.go`); on the general cron leader the job
+would have waited forever whenever the lease landed there. Inside a tick, the
+job takes `pg_try_advisory_xact_lock(hashtextextended('memql:memory-index', 0))`
+on a write-gate connection and returns at once when another replica holds it.
+The transaction-scoped form on the gate pool, not a session lock on the request
+pool: a session lock does not survive a transaction pooler, and the request
+pool ends an idle transaction after 60 s. A replica that dies drops the lock.
+The cost is recorded in the connection budget
+([db-connection-budget.md](../../public/operate/db-connection-budget.md)): the
+replica running the job holds one of its four gate connections for up to 55 s
+of every minute, within the pool's cap.
+
+**State lives in Postgres, and every write is fenced.** Two run rows,
+`v1:platform:memoryIndexRun` at `switch` and `backfill`, carry the state, the
+target, the indexer, the cursor and the counts. Every write states the whole
+row (`recordMemoryIndexRun`) and is fenced to the version its writer read
+(`writeMemoryIndexRun`, `ContextWithRowVersionFence`): an owner's Cancel on the
+bff lands between two of the job's batches, and unfenced the job's next write
+would put the run back to `indexing`. A refused write stops the tick; the next
+one reads again. After a write, the witness for the writer's NEXT write is the
+version its own write stored, as the mutation's result names it
+(`TestARunWriteAnswersTheVersionItStored`). A plain re-read can return another
+writer's version, which would then let the job's next batch pass the fence and
+write over it (`TestAnotherReplicasWriteBetweenTwoBatchesSurvives`); a re-read is
+only the fallback for a result that names no version, and is accepted only when
+the row it reads is the row just written.
+The job and the owner's builtins (`memorySearchSwitch`, `memorySearchCancel`
+and `memorySearchSwitchAnyway`, `component/memql/memory_search_builtins.go`)
+are the only writers and all go through `writeMemoryIndexRun`. A doubled tick (a lost lock) costs
+duplicate embeddings, never a wrong row. No graph routing rule for the run
+rows: nothing subscribes to their graph events (the OS polls the status), and
+forwarding one would wake every node's graph subscribers per 32 items. Only
+that rule is left out: like every graph write, each run-row write still emits
+`cache.invalidate.v1:platform:memoryIndexRun`, which the `cache.invalidate.*`
+rule carries to every node for its result-cache evictor, one small mesh event
+per write.
+
+**The cursor and the counts.** The cursor names one source and the last item
+done in it; earlier sources in name order are done. A batch (32 items) that
+embedded or failed anything is saved before the next batch, so a restart or
+another replica resumes after the last item embedded and embeds nothing twice.
+A batch of items already present is saved with the tick's end instead: losing
+it costs presence checks, never an embedding, and the backfill walks every item
+every ten minutes. Rows keep only their newest version past a day
+(`@retention`). Counts are per walk: total = done + skipped + failed; unsourced,
+set at a walk's end, counts the active table's entries no source rebuilds;
+missing counts the items found absent or stale and left so (below). An
+item its source cannot rebuild (a payload that does not decode, a lesson event
+that does not read as a lesson, a lesson head with no receipt) arrives as a
+`MemoryItem` with `Failure` and is counted failed and logged; a source that
+cannot be read counts once. Nothing drops out silently. A walk resumed after a
+wait from its beginning (an empty cursor) counts from zero: a `switching` run
+parked before its flip resumes as a catch-up walk, and carrying the ended
+walk's counts read progress above the estimated total and held the flip for
+failures the owner had already answered with Switch anyway
+(`TestAResumedWalkThatStartsFromTheBeginningCountsFromZero`). A page of a row
+source reads only the columns the walk uses, `id`, `createdAt` and `payload`
+(`memorySourceRowsQuery`): the full row's schema, metadata and provenance
+crossed the wire for every item of every walk, and the backfill walks the
+whole corpus every ten minutes (`TestTheSourceWalkReadsOnlyTheColumnsItUses`).
+
+**What counts as missing.** An item is missing from the target when
+its vector is absent OR older than its row's newest version
+(`memoryIndexCurrent`): a vector is keyed by `(id, vector_field)` and carries no
+text, so presence alone cannot see a row rewritten after it was embedded.
+During a switch the writers write only the active table, so without this a row
+the first walk embedded and someone then rewrote would answer from its old text
+after the flip, and the backfill could never repair an edit whose live re-embed
+failed. The rule runs in every walk: switch, catch-up, after the flip, backfill.
+GUARD: every registered writer writes the row version first and the vector
+after (the observation, conversation evidence, acknowledgement, catalog and
+Library chunk writers), so a row embedded when it was written is never
+embedded again; the version is the writer's clock and `updated_at` the
+database's, so a vector within `memoryIndexClockSlack` (2 s) still counts as its
+row's (`TestARowRewrittenAfterItsVectorIsEmbeddedAgain`,
+`TestARowRewrittenDuringTheSwitchIsEmbeddedAgain`). A row whose id hashes its
+own text is exempt: its text never changes under the id, and it is rewritten by
+review stamps and every boot's re-seed. `MemorySource.ContentAddressed` asks
+that of EACH row, never of a source, because one source holds both kinds. A
+knowledge chunk is exempt only when its id recomputes as `chunkIdFor` of its own
+domain, sourceRef, seq and text (`knowledgeChunkHashesItsText`): ingest, the
+seed corpora and the canonical and release seeds. An LLM-seeded or bridge chunk
+is keyed by `seedChunkId`, the recipe version, the domain and the index, and the
+seed workflow writes every chunk each time it runs, so a re-run at the same
+recipe version writes new text under the old ids; a Trainer chunk's id is its
+caller's. Those are versioned, so the new text is embedded again, at the cost of
+one embedding per rewrite (a review stamp included). The first backfill after
+this lands re-embeds, once, every LLM-seeded, bridge and Trainer chunk whose row
+was stamped after its vector: that catch-up is a one-time jump in the backlog,
+not a fault. Tests:
+`TestOnlyAChunkWhoseIdHashesItsTextIsPresenceOnly`, and
+`TestCanonicalKnowledgeDB/MemorySearchKnowsAContentAddressedChunkFromItsStoredRow`
+on the rows as the writers store them.
+
+**Waiting is not failing.** An item is tried three times, then counted failed,
+and the walk goes on; the next walk tries it again. When the model cannot be
+reached at all (`memoryIndexWaitReason`: every door shut, no machine offering
+it online, `ErrFleetUnavailable`, the indexer not an owner, no embedding
+writer on the replica), the run goes to `waiting` with a plain reason, keeps
+its cursor and counts nothing; the next tick tries again. A vendor refusal
+waits too: counting every item failed during an outage would offer the owner
+"Switch anyway" over an empty index. The indexer is re-checked before a
+tick's first step that embeds or moves the binding (`indexerOwnerAnswer`);
+a fleet model with no indexer waits, since it would resolve as the job and
+reach nobody's machines. A check this replica could not make (no owner set
+read yet) waits too, since an unconfirmed indexer is not trusted, but in
+neutral words ("the cluster could not confirm who its owners are; the next
+tick asks again"), never as the demotion it may not be, which would send an
+owner to choose the model again for nothing
+(`TestAnOwnerCheckThatCouldNotBeMadeWaitsWithoutSayingDemoted`).
+
+**An item nobody answers is counted, and two in a row are a wait.** Trigger:
+a machine that takes a call and never answers it says nothing a refusal would.
+Each attempt was capped at 30 s (`memoryIndexItemTimeout`) and attempts
+stopped at the tick's hard limit (the 45 s budget plus 10 s grace), so an item
+over 30 s got at most two attempts a tick and then stopped the walk BEFORE
+itself: never counted failed, the cursor never past it, retried first by every
+tick for ever, with no wait reason, so no backfill counting walk ran either.
+Chosen path: an attempt that runs out the WHOLE per-item timeout is not
+retried in the walk, and an item whose every attempt did so is unanswered:
+counted failed, the walk goes on, the next walk tries it again. The second
+unanswered item in a row (`memoryIndexUnansweredInARow`) makes the run wait,
+"the indexer's machines offering <model> are not answering" (a vendor model:
+"<ref> is not answering"), that item not counted, as for a machine that is
+offline; a waiting backfill then counts its backlog, and each tick tries the
+item once more. The streak is `counts.unanswered` on the run row, so it
+survives the tick between the two (a timed-out item takes most of a tick);
+any answer, written or refused, ends it, and every new walk starts it at zero.
+An attempt the tick cut short, given less than the whole timeout, is the
+tick's time running out, and the item is tried again, first, next tick.
+Rejected: keeping the retry (it is what stalled the walk), and a per-tick
+streak, which never sees two 30 s items in one 55 s tick. Cost: a hung
+machine's first unanswered item is counted failed. Tests:
+`TestAnItemThatNeverAnswersIsCountedFailedAndTheWalkGoesOn`,
+`TestTwoItemsInARowThatNeverAnswerMakeTheRunWait`, and the streak's round trip
+in `TestARunWriteAnswersTheVersionItStored` (db).
+
+**The backlog is counted, waiting or not.** Trigger: design
+section 8's "37 items waiting: none of your machines offering ... is online",
+which no count the job kept could say. A waiting walk stops at its first
+missing item, and `counts.failed` is often 0 while it waits. Every walk that
+ends now records what it left missing on the run: `missing`, the items found
+absent or stale whose embedding failed (`counts.missing`), with `missingAt`. A
+waiting BACKFILL also takes a counting walk at the backfill's cadence
+(`count`): every source from the first, presence and staleness reads only,
+nothing embedded, on its own cursor and tally (`counting`), so the embed
+walk's cursor and counts stay put. It is saved with the wait at the tick's end
+(losing it costs a re-read of presence), resumes on the next tick on any
+replica, and its end records `missing` and `missingAt`. A fresh walk of the
+same model keeps the last count until its own end. A switch's waits count
+nothing: the screen's backlog is the active index's. Rejected: counting with
+SQL, because a source's recipe and its lesson items are Go, and a count on
+every status poll, which would walk the corpus each time. Tests:
+`TestAWaitingBackfillStillCountsWhatIsMissing`,
+`TestACountingWalkResumesFromItsOwnCursor`.
+
+**The flip.** Automatic only when the catch-up walk left nothing failed and
+nothing unsourced; otherwise `needsDecision`, the owner's move. A catch-up
+walk that embedded what arrived meanwhile still flips (rejected: walking again
+until a walk finds nothing, which never ends on a busy cluster); what is
+written after it goes to the active table and the walk after the flip catches
+it. `flipMemoryIndex` holds the binding lock around its fresh reads and writes
+and fences the binding write to the version read under it (memql#5431).
+
+**The flip is ordered steps, and every prefix is finished.** It is
+not one transaction: the engine writes only through its mutations, each its own
+statement, and the lock is on another connection. `switching` is saved first,
+and the next tick finishes whatever prefix a crash left. What each prefix
+leaves:
+
+1. `switching` saved, nothing else: search reads the active model; the next tick
+   runs the whole flip.
+2. The active model recorded retired (`retireAt` = now + 30 days, its id derived
+   by `RetiredEmbedderBindingID`), the binding not moved: its index is dated
+   though still in use, which the daily cleanup never drops while it is active;
+   the next tick records it again with a later date and goes on.
+3. The binding moved (one row version, stating `reembedRunId` empty): search
+   reads the new model; the semantic answer cache may hold the old model's
+   answers, which no lookup matches (below); the run still says `switching`
+   with no previous model. The next tick writes no binding, empties
+   `semantic_ai_cache`, and records `finishing` with the previous model taken
+   from the binding. It does so even when the indexer is no longer an owner:
+   nothing in those steps embeds or chooses a machine, so the run is not
+   parked; only the walk after the flip waits. A run that WAS parked here, as
+   `waiting` with no previous model (a tick that had lost the job lock wrote
+   its wait between another tick's binding write and its `finishing`, which
+   the fence then refused), resumes to `switching` rather than `finishing`
+   (`memoryIndexResumeState`), and takes the same steps without the indexer
+   check: resumed as `finishing`, the cache delete and the previous model
+   would never come. Only a binding the flip wrote counts, which records the
+   model it replaced (`previousRef`); a binding naming the target that was
+   written otherwise (a first binding, or by hand) left no flip part done,
+   and its run resumes as `finishing`, where it once re-ran these steps every
+   tick its indexer could not index.
+4. The cache emptied, `finishing` not yet recorded: as 3, and the DELETE runs
+   again.
+5. `finishing` recorded: the flip is over, and the walk after it follows.
+
+Only a `switching` run flips: `flipMemoryIndex` refuses `needsDecision`, which
+Switch anyway leaves by writing `switching` for the tick to flip. Tests:
+`TestAResumedFlipFinishesFromTheBinding` (another replica; the indexer no
+longer an owner; parked as waiting after the binding moved),
+`TestAWaitingRunResumesTheWalkItWasIn`, `TestOnlyASwitchingRunFlips`.
+
+**The semantic answer cache follows the binding.** It was wired once
+at boot with the model bound then (`WireSemanticCache`), so after a flip every
+running replica went on embedding its keys and lookups with the replaced model,
+refilling `semantic_ai_cache` in that model's space, and a replica restarted
+later compared new-model lookups with those rows. Now each lookup and write reads
+the binding (fresh, like every memory-search embedding), embeds with its model as
+its indexer (`boundSemanticEmbedder`), and keys the row by the model as well as
+the namespace (`semanticModelNamespace`), so a lookup never compares two models'
+vectors, including a row a lagging replica writes after the flip's DELETE. The
+cache is wired before any model is bound, and works once one is. Until then
+every lookup and store of an enabled namespace fails open the same way, so the
+log says it once when the cache enters that state and once when an embedding
+works again, not at every call; each failure is still counted, and any other
+embedding failure is logged as it happens (`logEmbedFailure`). LIMIT: the
+table's `embedding` column is `vector(1536)` (migration 20260622000000), so it
+holds only a model 1536 wide, as `embedding3Small` is; under any other width
+(`qwen3-embedding:0.6b` is 1024), every lookup and store of an enabled
+namespace fails at the column, is counted and falls through to a fresh call.
+Nothing is enabled by default, so this costs nothing until an operator enables
+a namespace; a column per width, as the vector tables have, is not built.
+Tests:
+`TestTheSemanticCacheFollowsTheBinding`,
+`TestTheSemanticCacheIsWiredBeforeAModelIsBound`,
+`TestTheSemanticCacheSaysOnceThatNoModelIsBound`.
+
+**Limits.** Not run against a live cluster. The store path in the db tests is a
+stub of `integrations/embedding`'s contract (this package cannot import it);
+that integration's own tests hold the real one. A walk's `total` counts what it
+has visited, so a progress figure for a running switch needs the active
+index's count as its denominator. A row rewritten within the clock slack after
+the job embedded it keeps the older vector until its next write. So does a row
+rewritten between a batch's read and that item's embed: the job embeds the text
+it read, and its vector, stamped after the rewrite, then counts as current. In a
+backfill or a walk after the flip the target is the active table, which the
+writers write too, so the job's late write can also replace the vector the
+writer had just embedded from the new text. The window is one batch's
+embedding time; closing it would mean reading each batch's newest versions
+again after it embeds. A counting walk cut off when the model comes back keeps
+its cursor and tally, and finishes at the next wait, stamping `missingAt` with
+its end: the backlog then reads as counted later than some of it was, and may
+count items the embed walk filled meanwhile, until the next count.
+Tests: `component/memql/memory_index_job_test.go`
+(the decisions); `component/memql/memory_index_job_db_test.go` (two engines over
+one database: the lock, the resume on another replica, the flip, the width
+change, the backfill, the waits); `TestTheLessonSourceReadsItsEventsFromPostgres`
+in `integrations/library`.
+
+## The owner chooses memory search's model; old indexes are kept 30 days (2026-11-24)
+
+From the same [design record](../../superpowers/specs/2026-11-23-memory-search-model-switch-design.md),
+sections 3, 6, 7 and 8. Six `@sdk` builtins behind Cluster > Settings > Memory
+search, and one daily cleanup (`component/memql/memory_search_builtins.go`).
+
+**Owner only, as parts.** `memorySearchStatus` and `memorySearchChoices` need
+`read` on `app:cluster/memorysearch`; `memorySearchSwitch`, `memorySearchCancel`,
+`memorySearchSwitchAnyway` and `memorySearchConfirm` need `execute` on it. Both
+are seeded on `owner` alone (`dsl/rbac/seeds.memql`, mirrored in
+`component/auth/rbac_model.go`): the model decides whose machines receive every
+person's memory text, or which vendor account pays for all of it. An act is
+recorded as a person (who started, who chose, who indexes), so the cluster
+acting is refused.
+
+**Every act is an active owner's, on top of the part** (`memorySearchOwnerGate`).
+Trigger: Settings > Access can grant the parts to anybody, and the first cut
+checked for an owner only when a machine model was chosen, because its chooser
+becomes its indexer. A grantee could then bind a vendor model, start a vendor
+re-index or confirm a vendor model nobody chose, and the flip recorded the
+grantee as its chooser, so no owner was ever asked -- against design decision
+2 and sections 2 and 8 (a vendor model is bound only by an owner choosing it;
+owners only). Chosen path: the part stays the gate the builtin path checks, and
+every act -- a switch to any model, a take-over, Keep (Confirm), Cancel and
+Switch anyway -- first asks the per-replica owner set the resolver and the job
+ask, before it reads or writes anything else; a caller who is not an active
+owner is refused in plain words ("only an active cluster owner can change
+memory search, and you are not one"). A person granted the part sees the page
+and its state and acts on nothing: the status answers `mayAct` from the
+caller's side (`execute` on the part through the builtin path's own capability
+check, AND an active owner), both take-overs are offered only where it is true,
+and the screen draws no act where it is false. Rejected: keeping the grantee's
+vendor choice and documenting it, which made the docs match the engine instead
+of the design. The cost, if an owner wanted a deputy: the deputy can only watch,
+and relaxing it is one check. A replica that has not read the owner set yet
+(its reads failed, or the first is still running) reports that failure
+(`indexerOwnerAnswer`) instead of "you are not an active cluster owner", which
+would be a guess. Tests: `TestEveryActIsAnActiveOwners`,
+`TestStatusSaysWhetherTheCallerMayAct`,
+`TestTheStatusAsksAnActsOwnGatesWhetherTheCallerMayAct` (db),
+`TestAnOwnerCheckThatFailedIsReportedAsAFailure`,
+`TestAnOwnerCheckWithNoSetToAnswerFromSaysWhy`.
+
+**No builtin flips.** The binding moves inside a builtin only for a cluster's
+FIRST model (`bindEmbedder`): nothing is indexed under another. Every other
+change of model is a `switch` run row that the job's tick carries out. Trigger
+for the rule: the flip is ordered steps that the next tick finishes from
+`switching`, every prefix of it, and a builtin that died after moving the
+binding would leave a run the tick never resumes. So `memorySearchSwitchAnyway`
+(from `needsDecision` only) writes `switching`, and a switch over an active
+index that holds no vector is written `switching` directly; either way the tick
+flips within a minute.
+
+**`memorySearchSwitch`.** No model bound: bound at once. A binding that lands
+between that read and `bindEmbedder`'s own, under its lock, makes
+`bindEmbedder` refuse with directions to Memory search, where the owner already
+is; that refusal (`errEmbedderBindingActive`) is answered "changed meanwhile,
+try again" instead (`TestABindingThatLandsMeanwhileIsAChangeNotADirection`),
+and `bindEmbedder`'s own lock held elsewhere is said as the binding lock's is
+(below). Otherwise a look before the lock says only whether a new switch
+starts, so the new model can be probed as its indexer OUTSIDE the lock (a
+machine call takes seconds); everything is then decided again under the binding
+lock, from the run and the binding read there (a state that moved meanwhile is
+"changed meanwhile, try again"):
+
+- A switch before the flip refuses another model, before anything is probed.
+  One held in `needsDecision` names Switch anyway and Cancel; any other says to
+  cancel it or let it finish. Its own target chosen again is the take-over of
+  the RUN's indexer (below), or nothing. The model in use chosen again is the
+  take-over of the BINDING's indexer, the switch left as it is (below).
+- A FLIPPED switch (the binding names its target; `finishing` or `waiting`) is
+  the way out. Trigger: its walk after the flip embeds as the
+  run's indexer, and with that indexer demoted or without the model every act
+  was refused, while search refused queries and the previous model's kept index
+  neared its drop. The model in use chosen again takes over the binding and
+  sets the run's indexer to the binding's, so the walk resumes. Another model,
+  switching back included, closes it `done` (its remaining walk is the
+  backfill's, over the model it made active) and starts the new switch,
+  fenced to the version the close stored. Cancel stays refused after the flip.
+- No switch in progress: the model in use is the take-over or nothing; another
+  model ensures the target's table and writes the run `indexing`. A table kept
+  from earlier is reused: the walk embeds only what it is missing
+  (`TestSwitchingBackReusesTheKeptIndex`).
+
+A new switch starts only after the steps that can fail: the target's table
+ensured, and the active index asked whether it holds anything at all, with
+EXISTS (`hasVectors`) rather than a count, which would hold the binding lock
+for a scan of a large index. A failure among them writes nothing, so a flipped
+switch is never closed for a switch that did not start. Closing it and writing
+the new switch are still two writes of one row: if the second is refused (a
+writer between them) or fails, the flipped switch is closed, its walk is the
+backfill's, and choosing the model again starts the new one
+(`TestASwitchStartsOnlyOnceItsTableIsReady`,
+`TestTheSwitchAsksTheActiveIndexOnlyWhetherItHoldsAnything`).
+
+`bindEmbedder` still refuses to change an active binding, and now names
+Cluster > Settings > Memory search. **An unfinished first binding is named.**
+Trigger: a replica that dies between `bindEmbedder`'s two writes leaves a plan
+that was recorded and never activated, and every other first model was then
+refused as a binding that landed meanwhile, "changed meanwhile, try again",
+for ever, with nothing saying what would clear it. The plan write is
+`@createOnly` on the model and its width, which is what keeps a plan from ever
+re-pointing a row that is active, so another model's plan cannot replace the
+stuck one. Chosen path: the refusal names the plan's model
+(`errEmbedderPlanUnfinished`, "an unfinished binding of <model> is in the way;
+choose <model> to finish it"), which `memorySearchSwitch` passes on, and
+choosing that model finishes the binding. Rejected: lifting `@createOnly`, which
+would let a plan write move an active binding's model while its `activatedAt`
+survived the read-merge. Limit: if the plan's model is never offered again,
+the row has to be removed by hand. Test:
+`TestAnUnfinishedPlanIsNamedSoItCanBeFinished` (db).
+
+**The take-over (design section 1; `memorySearchTakesOver`).**
+Choosing a machine model again makes the caller its indexer and chooser when
+the indexer is empty, is no longer an active owner, or has no machine, own or
+lent, offering the model for embeddings (online or not, as adoption reads it)
+while one of the caller's does. Both catalogs are read as the cluster
+(`readinessEvaluateContext`), so the answer does not depend on whose session
+asks. A healthy indexer keeps it, and only an empty chooser is filled; a vendor
+model has no indexer and only an empty chooser is filled (which also confirms
+it). Rejected: replacing a healthy indexer, which would move every person's
+text to another owner's machines for nothing, and taking over when neither
+catalog offers the model, which would leave nobody able to index.
+**It applies too when the indexer's machines are only offline**: none of the
+indexer's machines offering the model is online while one of the caller's is.
+Trigger: with catalog presence alone, an indexer whose laptop slept kept every
+other owner from taking over while search by meaning failed for everybody,
+against design section 1's pause and section 8's example ("none of your
+machines offering ... is online"). Evidence: the fleet catalog's own online
+flag on a machine that embeds with the model (`FleetMachine.Online`, which
+`fleetcatalog.Project` sets while a replica holds the machine's stream, the
+flag the router and the choices read; `memorySearchOffering`). Cost: an owner
+whose machine merely slept finds another owner indexing when it wakes, after an
+explicit act on the same model that re-indexes nothing. Tests:
+`TestChoosingTheModelInUseTakesOverAnIndexerWhoCannotIndex`,
+`TestAFlippedSwitchWhoseIndexerCannotIndexIsTakenOverByChoosingItAgain`,
+`TestChoosingTheRunningSwitchsTargetAgainTakesItOver`,
+`TestSwitchingBackDuringTheWalkAfterTheFlipStartsANewSwitch`.
+
+**The take-over while a switch runs.** Design section 1 lets an
+owner take over by choosing again at any time. Trigger: before the flip,
+`memorySearchSwitch` refused the model in use as "another model", yet search
+queries and every writer embed as the BINDING's indexer for the whole rebuild,
+so with that indexer demoted or without the model, search stayed refused until
+the flip. Chosen path: the model in use chosen before the flip runs the same
+take-over as with no switch (`memorySearchKeep`, under the binding lock), and
+the running switch is not written: its own indexer is the run's, taken over by
+choosing its target (above), and the flip names that one. Rejected: moving the
+run's indexer too, which would replace a run indexer who can index, and
+leaving the refusal, which keeps search down for hours on a large corpus.
+**The status says when it applies** (`takeOver`): whether the caller, choosing
+the model in use again, would become its indexer -- the take-over rule asked
+from the caller's side (`memorySearchOffersTakeOver`), false for the indexer
+themself, a caller who may not act (`mayAct`, above), a vendor model, or no
+caller. So Memory search offers the act only where it changes something. A
+catalog or an owner check that cannot be read answers false, logged, and the
+next read asks again; the status itself still answers. Tests:
+`TestChoosingTheModelInUseDuringASwitchTakesOverTheBindingsIndexer`,
+`TestStatusSaysWhenChoosingTheModelInUseTakesOver`.
+
+**The switch says it too.** A running switch whose OWN indexer
+cannot index was told only by its `waitingReason`, though choosing its target
+again is the take-over of the run's indexer (above), and design section 1 lets
+an owner take over at any time. So the switch summary carries `takeOver`, the
+same rule asked for the caller, the RUN's indexer and the switch's target, and
+`indexedBy` and `indexedByName` for the run's indexer, so the Switching row can
+offer the act and say the waiting reason from the viewer's side. It is false
+once the switch has flipped, when the target is the model in use and the row's
+`takeOver` already answers for the one act there is, and once the switch is
+over. The run's indexer's name is the binding's when they are the same person,
+so a poll reads it once. Test: `TestTheSwitchSaysWhenChoosingItsTargetAgainTakesOver`.
+
+**Fenced, answered, never retried.** Every run-row write goes through
+`writeMemoryIndexRun`, fenced to the version the builtin read. A refused fence
+reaches the owner as "memory search changed meanwhile, try again": the state the
+act was decided on is gone, and deciding again is the owner's call. Switch,
+cancel, confirm and the cleanup hold the binding lock around the reads they
+decide on and their writes, which is what the flip holds. It is a try-lock: held
+by another request, the act answers that the model is being changed elsewhere,
+try again, rather than waiting. Any other failure to take it (no gate pool
+wired, every gate connection busy, the database) is reported as the failure it
+is, never as somebody else's change, and the lock's own words ("MemQL is already
+working in this conversation", which are Ask's) never reach an owner
+(`errAskConversationHeld`, `memorySearchLock`;
+`TestOnlyALockHeldElsewhereReadsAsBeingChangedElsewhere`).
+
+**A version stamped after the one read (memql#5431's third part).**
+Trigger: a fence checks that a row did not change; it does not make the new
+version later, and a replica whose clock lags the last writer's would stamp an
+OLDER version, which every reader passes over as superseded. Every write of
+these rows now carries a REQUIRED `versionTime`, stamped as its version:
+`VersionTimeAfter(<newest version read>, now)` (`latestRowVersion`, read under
+the binding lock where one is held). The writers: `writeMemoryIndexRun` (every
+run row, after the version it is fenced to), the flip (the binding after the
+version it fenced, the retired row after its own), `bindEmbedder`'s plan and
+activation of a cluster's first model (each after the newest version, read
+under its lock), `writeEmbedderChoice` (adoption, `bindEmbedder`, the take-over
+and Confirm), and the retired rows Cancel and the cleanup write. The run rows
+were already safe through the fence's own clock (`fenceWriteClock`); the
+binding choice, the first binding's two writes and the retired rows were not.
+Tests: `TestEveryWriteIsStampedAfterTheVersionItRead`,
+`TestAFirstBindingIsStampedAfterTheVersionItRead` (the last versions stamped
+an hour ahead).
+
+**Cancel** holds the binding lock and is refused once the binding names the
+switch's target (the switch happened; going back is a new switch). Otherwise the
+target is recorded retired with `retireAt` = now + 30 days FIRST, then the run is
+written `cancelled`: once the run says cancelled nothing else would ever date
+the partial index, and the cleanup drops only dated ones. **Confirm** records the
+caller as the chooser of a VENDOR binding with none, once, under the lock; a
+machine model is never put to an owner this way.
+
+**The status is one row** (`current`). `indexed` counts the active table, and
+each replica keeps that count for 30 s (`vectorCountCache`,
+`memorySearchIndexedTTL`): it is a `count(*)` of an index that grows with
+every item, and every open screen polls every 5 to 30 s, so a poll inside the
+window reads no table and the figure may lag the table by up to 30 s. A failed
+count is not kept. Rejected: `pg_class.reltuples`, as fresh only as the last
+ANALYZE and -1 for a table never analyzed
+(`TestTheIndexCountIsKeptForAShortWhile`,
+`TestTheStatusCountsTheIndexAtMostOncePerWindow`, db).
+`backlog` is the backfill's last count for the active model of the items
+missing from it (the run's `missing`: what its last completed walk left
+missing, or what a waiting backfill's counting walk found), with
+`backlogCountedAt`; `waitingReason` says why the backfill waits, if it does.
+The switch's `counts.total` is what the current walk has visited and restarts
+with each walk, so the summary's `estimatedTotal` gives the screen a
+denominator: an ESTIMATE, `indexed + backlog`, with no walk of the corpus per
+poll. `retained` lists the retired indexes still kept, leaving out any row that
+names the active model or a running switch's target, and any past its
+`retireAt`, which the daily cleanup drops at its next run: listed, it read as
+kept until a day already gone, with Switch back offered over it
+(`TestAKeptIndexPastItsDateIsNotListed`). `previousRef` is the model
+the binding replaced, which is the kept index Switch back names: `retained` also
+holds a cancelled switch's partial index, a model that was never in use.
+`mayAct` is above, and so are `takeOver` and the switch summary's.
+
+**The choices** are the embedding models of the caller's own catalog (their
+machines and the ones lent to them), counted by the machines that embed with
+them, and the vendor embedding records the cluster's own account is set up for,
+each `paidByCluster`. "Set up" is the vendor-account predicate itself
+(`federationReadiness`, `VendorDoorFor`'s `ClusterSetUp`: an available record
+whose credential came through federation), applied to embedding records by
+`federationEmbedderRecords`, which `federationEmbedders` now reads too. Who the
+account pays for is not asked: an embedding is the cluster's work.
+
+**A model too wide for the index is refused before anything is spent**
+(`embeddingWidthRefusal`, `maxEmbeddingIndexDimensions`). Trigger: every
+model's table carries an HNSW index, which pgvector builds only for a column of
+at most 2000 dimensions, so `EmbeddingVectorTable` refuses a wider width. The
+choices listed every federated embedding record, `embedding3Large` (3072)
+among them: an owner confirmed, a paid probe ran, and then the table was
+refused, on a switch and on a first binding alike. Evidence: the width a model
+declares before it is called -- a vendor record's client (`Dimensions`, carried
+on `vendorEmbedderRecord`) and a machine model's catalog row
+(`catalogDimensionsFor`, which a fleet provider's `Dimensions` answers too).
+Chosen path: the choices keep such a model listed, unavailable, with its hint,
+as other unavailable models are; `memorySearchSwitch` refuses it before
+`bindEmbedder` or the probe runs; and `probeEmbedder` refuses it after the
+resolution, which calls nothing, and before the one embedding, so the
+`bindEmbedder` builtin and the automatic choice are covered too. A width nothing
+declares is measured by the probe (on the owner's machine, unpaid) and refused
+by `EmbeddingVectorTable` before any table exists. Tests:
+`TestAModelTooWideForTheIndexIsRefusedBeforeAnythingIsSpent`,
+`TestTheProbeRefusesAModelTooWideForTheIndexBeforeEmbedding`,
+`TestChoicesMarkVendorModelsAsPaidByTheCluster`.
+
+**The cleanup** (`memoryIndexRetentionSweep`, daily at 03:25 UTC on the general
+cron leader, five minutes after `logsRetentionSweep`'s 03:20 so the two nightly
+cleanups do not start in the same minute; builtin `memoryIndexRetire`, refused
+without internal origin) runs under
+the binding lock, so it never reads the protected set and then drops a table a
+switch or a flip made active meanwhile. It drops each retired table past its
+`retireAt` and records `droppedAt`, except the active model's table and a
+running switch's target, protected by NAME whatever a retired row says: a flip
+that stopped part way dates the active model before the binding moves, and a
+cancelled target can be chosen again (`TestTheActiveAndTargetTablesAreNeverDropped`,
+`TestARetiredIndexIsDroppedAfterItsDate`). A held lock fails that run;
+tomorrow's tries again, a day late costing disk and never an index in use. A
+lock that could not be taken fails it too, and says so.
+
+**What survives.** Everything is rows and tables in Postgres; a builtin keeps
+nothing between calls, so a retry or another replica decides from what is
+stored.
+
+**Limits.** Not run against a live cluster. `indexed` may lag the active table
+by up to 30 s (above). The backlog is as fresh as its last count:
+the backfill's cadence, ten minutes, and while a switch runs the backfill
+counts nothing. The probe and the store path in the db tests are stubs. The
+screen's vendor cost line ("about N items", `confirmationLine` in
+`clients/os/src/apps/cluster/memorysearch/MemorySearchSection.tsx`) is the
+estimate `indexed + backlog`, the whole index, so switching to a vendor model
+whose index is still kept (Switch back within its 30 days, or a cancelled
+switch chosen again) states more items than the cluster's account pays for:
+the walk embeds only what is missing there. A machine that holds its stream
+but never answers leaves the run waiting "not answering", and no other owner
+can take over, because the take-over reads a held stream as online. Search
+embeds on that machine until it answers, or until an owner cancels a switch or
+switches to another model. Tests:
+`component/memql/memory_search_builtins_test.go` (the decisions, over the job's
+map world, the job's tick included) and
+`component/memql/memory_search_builtins_db_test.go` (two engines over one
+database).
 
 ## A vendor model is chosen for a job, and API is a route of them (2026-11-22)
 

@@ -75,42 +75,41 @@ func (e *MemQLEngine) RegisterIntegration(provider IntegrationProvider) error {
 // the runtime exact-hash-only (a clean degrade -- the primitive becomes a
 // no-op and every AI call behaves exactly as pre-5.9).
 //
-// embeddingProviderName selects the embedding model. EMPTY NOW MEANS "ask the
-// cluster's embedder binding" rather than "embedding3Small" (epic memql#5137,
-// D6): that literal was one of five copies of the same paid pin, and it also
-// encoded node_vectors' 1536-dim schema as a fact about the whole cluster. A
-// cluster with no binding wires no semantic cache, which is the honest degrade
-// -- the alternative is embedding into a space nobody chose. The namespace
-// enablement registry is loaded from defaults + env here, so an operator can
-// enable a vetted namespace without a rebuild.
+// embeddingProviderName selects the embedding model. EMPTY MEANS "the model
+// memory search is bound to, AT EACH CALL" (boundSemanticEmbedder),
+// not "embedding3Small" (epic memql#5137, D6: that literal was one of five
+// copies of the same paid pin) and no longer "the model bound at boot": a
+// cache wired with the boot binding went on embedding with the replaced model
+// after a switch, on every running replica. Each lookup and write reads the
+// binding, embeds with its model, and keys its rows by it, so nothing ever
+// embeds into a space nobody chose and no lookup compares two models'
+// vectors. With nothing bound, every call fails open to a fresh LLM call. A
+// non-empty name pins one model, for a caller that wants exactly that. The
+// namespace enablement registry is loaded from defaults + env here, so an
+// operator can enable a vetted namespace without a rebuild.
 func (e *MemQLEngine) WireSemanticCache(embeddingProviderName string, dbGetter func() *sql.DB) {
 	if e == nil || e.aiRuntime == nil {
 		return
 	}
+	var embedder SemanticEmbedder
+	label := embeddingProviderName
 	if strings.TrimSpace(embeddingProviderName) == "" {
-		bound, err := ResolveEmbedderProvider(context.Background())
-		if err != nil {
+		embedder = boundSemanticEmbedder{e: e}
+		label = "the memory-search binding, read at each call"
+	} else {
+		if e.providers == nil {
+			return
+		}
+		provider, err := e.providers.EmbeddingProvider(context.Background(), embeddingProviderName)
+		if err != nil || provider == nil {
 			if e.Component != nil && e.Logger != nil {
-				e.Logger.Info("semantic AI cache not wired: no embedder is bound",
-					"component", ComponentName)
+				e.Logger.Info("semantic AI cache not wired: embedding provider unavailable",
+					"provider", embeddingProviderName, "err", err)
 			}
 			return
 		}
-		embeddingProviderName = bound
+		embedder = newProviderEmbedder(provider)
 	}
-	if e.providers == nil {
-		return
-	}
-	provider, err := e.providers.EmbeddingProvider(context.Background(), embeddingProviderName)
-	if err != nil || provider == nil {
-		if e.Component != nil && e.Logger != nil {
-			e.Logger.Info("semantic AI cache not wired: embedding provider unavailable",
-				"provider", embeddingProviderName, "err", err)
-		}
-		return
-	}
-
-	embedder := newProviderEmbedder(provider)
 	store := newPGSemanticStore(dbGetter)
 	if embedder == nil || store == nil {
 		return
@@ -143,7 +142,7 @@ func (e *MemQLEngine) WireSemanticCache(embeddingProviderName string, dbGetter f
 	}
 	if e.Component != nil && e.Logger != nil {
 		e.Logger.Info("semantic AI cache wired",
-			"embeddingProvider", embeddingProviderName,
+			"embeddingProvider", label,
 			"enabledNamespaces", enabledCount)
 	}
 }

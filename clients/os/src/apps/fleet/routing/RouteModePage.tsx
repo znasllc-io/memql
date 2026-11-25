@@ -60,7 +60,6 @@ export function RouteModePage({
   onChanged,
   onDeleted,
   onAddMachine,
-  onOpenModels,
 }: {
   route: RouteMode;
   facts: RoutingFacts;
@@ -81,7 +80,6 @@ export function RouteModePage({
   onChanged: () => void;
   onDeleted: () => void;
   onAddMachine?: () => void;
-  onOpenModels?: () => void;
 }) {
   const saved: RouteModeDraft = { jobs: jobSourcesOf(route), name: route.name };
   const shown = draft ?? saved;
@@ -236,7 +234,6 @@ export function RouteModePage({
             }))}
             onAnnounce={setAnnouncement}
             onAddMachine={onAddMachine}
-            onOpenModels={onOpenModels}
           />
           <p role="status" className="os-sr-only">{announcement}</p>
         </ActivityTarget>

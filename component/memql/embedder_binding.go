@@ -20,9 +20,11 @@ import (
 //
 // Runtime activation probes the chosen model and records one active binding.
 // Vectors are separated by provider identity AND width. Every replica reads the
-// durable binding; switching an existing corpus is refused until its reindex
-// workflow exists. Legacy vectors remain stored, but are not mixed into a new
-// model space whose provenance cannot be established.
+// durable binding; switching an existing corpus rebuilds it into the new
+// model's own table first (memorySearchSwitch and the memory index job,
+// memory_search_builtins.go and memory_index_job.go). Legacy vectors remain
+// stored, but are not mixed into a new model space whose provenance cannot be
+// established.
 //
 // WHY A LITERAL ID. The same reason v1:cluster:database is at `primary`
 // (memql#4766): a re-write is then a new VERSION of one logical row rather than
@@ -34,12 +36,32 @@ const EmbedderBindingConceptID = "v1:platform:embedderBinding"
 // ActiveEmbedderBindingID is the literal row id of the active binding.
 const ActiveEmbedderBindingID = "active"
 
+// retiredEmbedderBindingPrefix marks a binding row that records a model no
+// longer active, whose index is kept for a while (recordRetiredEmbedder).
+const retiredEmbedderBindingPrefix = "retired-"
+
+// RetiredEmbedderBindingID is the row id that records a retired model's index:
+// "retired-" and the 16 hex characters of its vector table's name
+// (EmbeddingVectorTable), so the row and the table it keeps cannot name two
+// different models. The width is not part of the id because a model produces
+// one width; the row carries it. Empty for a reference or width that has no
+// table.
+func RetiredEmbedderBindingID(providerRef string, dims int) string {
+	table, err := EmbeddingVectorTable(providerRef, dims)
+	if err != nil {
+		return ""
+	}
+	return retiredEmbedderBindingPrefix + table[strings.LastIndexByte(table, '_')+1:]
+}
+
 // EmbedderBinding is the cluster's active embedding configuration.
 type EmbedderBinding struct {
 	// ProviderRef is a provider record name (embedding3Small) or a fleet
 	// reference (fleet:qwen3-embedding:0.6b). It is resolved through the same
-	// registry path every other provider name takes, so a fleet embedder is
-	// resolved against the ACTING USER's machines like any other fleet call.
+	// registry path every other provider name takes, but a fleet embedder is
+	// resolved against its INDEXER's machines rather than the acting person's
+	// (IndexedBy, embedder_indexer.go): memory search is one index for the
+	// whole cluster, and the owner provides it.
 	ProviderRef string
 	// Dimensions is the vector width this provider produces, and therefore
 	// which model-specific vector table its vectors live in. Never zero on a
@@ -49,8 +71,10 @@ type EmbedderBinding struct {
 	// ActivatedAt is when this binding became active, RFC3339.
 	ActivatedAt string
 	// ReembedRunId names the work run that filled this binding's table, when
-	// the binding replaced another. Empty for the first binding a cluster ever
-	// activates, which has nothing to re-embed FROM.
+	// an activation named one. Empty for the first binding a cluster ever
+	// activates, which has nothing to re-embed FROM, and written empty by every
+	// switch: the memory index job fills the new model's table and keeps its
+	// progress on v1:platform:memoryIndexRun (memory_index_job.go).
 	ReembedRunId string
 	// PreviousRef is the ProviderRef this binding replaced.
 	//
@@ -59,6 +83,21 @@ type EmbedderBinding struct {
 	// only record of what a search space used to mean is gone the moment it is
 	// replaced.
 	PreviousRef string
+	// IndexedBy is the cluster owner whose machines (and the ones lent to them)
+	// embed everything for memory search under a fleet binding, whoever wrote
+	// the item or runs the search (IndexerFor). Empty for a vendor binding,
+	// which runs on no one's machines, and on a fleet binding made before
+	// indexers existed, whose embeddings then resolve for their caller.
+	IndexedBy string
+	// ChosenBy is the cluster owner who chose this model: only an active owner
+	// chooses, whatever the model (memorySearchOwnerGate). Empty when it was
+	// bound automatically, which is what lets an owner be asked once to confirm
+	// a vendor model nobody chose.
+	ChosenBy string
+	// RetireAt is set on a RETIRED model's row (RetiredEmbedderBindingID): its
+	// index is kept until then, so switching back is quick, and dropped after.
+	// RFC3339, like ActivatedAt. Empty on the active binding.
+	RetireAt string
 }
 
 // Valid reports whether the binding can actually be used. A binding with no
@@ -156,65 +195,19 @@ func ActiveEmbedderBinding() (EmbedderBinding, bool) {
 // IT NAMES THE FIX, because the alternative reads as a bug. "embedding provider
 // unavailable" sends an operator looking at credentials; what is actually true
 // is that nobody has chosen an embedder, and the place to choose one is a
-// screen they have probably not opened.
+// screen they have probably not opened. It says WHO as well as where, as
+// Fleet's model board does (memorySearchKeeps in MemQL OS): the reader of an
+// error may be anybody, and only a cluster owner can open Memory search and
+// choose. An embedding model on an owner's machine is also bound by itself
+// (autoBindEmbedder).
 var ErrNoEmbedderBound = fmt.Errorf(
 	"no embedder is bound: this cluster has no active %s row, so nothing can be embedded. "+
-		"Bind one from Fleet -> Models, or pull a catalog embeddings model onto a machine "+
-		"(qwen3-embedding:0.6b is the 16 GB default). There is deliberately no fallback: an "+
-		"embedder chosen for you would write vectors into a search space you did not pick",
+		"A cluster owner chooses one in Cluster > Settings > Memory search, or pulls an embeddings "+
+		"model onto one of their machines (qwen3-embedding:0.6b is the 16 GB default), which the "+
+		"cluster then binds by itself. There is deliberately no fallback: an embedder chosen for "+
+		"you would write vectors into a search space you did not pick",
 	EmbedderBindingConceptID,
 )
-
-// ErrEmbedderWidthUnknown is what BINDING a model the catalog does not carry
-// returns.
-//
-// IT IS A REAL STATE, NOT A HYPOTHETICAL, and the cockpit session is the reason
-// this error exists separately from ErrNoEmbedderBound. A cockpit advertises
-// `embeddings=1` for any model whose runtime reports the capability, catalog row
-// or not -- so a machine can legitimately OFFER an embedding model that cannot
-// be BOUND as the cluster's embedder. An operator running `memql worker models`
-// sees it listed and offered, and a bare "cannot be bound" reads as a bug in
-// their machine.
-//
-// So the message names the model and says the missing thing is a CATALOG ROW,
-// not a capability. The model still serves embedding calls that name it
-// explicitly; what it cannot be is the cluster-wide binding, because the binding
-// creates `node_vectors_<dims>` before the first vector exists and a table at a
-// guessed width is a search space that silently returns wrong neighbours.
-func ErrEmbedderWidthUnknown(modelRef string) error {
-	return fmt.Errorf(
-		"cannot bind %q as the cluster embedder: the catalog does not record its vector width. "+
-			"This is not a problem with the machine offering it -- the model is real and serves "+
-			"embedding calls that name it. A BINDING needs the width before the first vector "+
-			"exists, because it creates the vector table, and a table at a guessed width returns "+
-			"wrong neighbours without ever erroring. Add a %s row for %q with its `dimensions`, "+
-			"or bind a curated entry (qwen3-embedding:0.6b is 1024, nomic-embed-text is 768)",
-		modelRef, "v1:models:modelProfile", modelRef,
-	)
-}
-
-// BindingFor builds a binding for a provider reference, resolving the width from
-// the catalog for a fleet model.
-//
-// A NON-FLEET reference carries its width on the provider record, which the
-// caller supplies; a `fleet:` one does not, because the machine serving it does
-// not know it either. That asymmetry is why this function exists rather than the
-// caller filling the struct: it is the one place the two ways of learning a
-// width meet, and putting them anywhere else would let one of them be forgotten.
-func BindingFor(providerRef string, declaredDimensions int) (EmbedderBinding, error) {
-	ref := strings.TrimSpace(providerRef)
-	if ref == "" {
-		return EmbedderBinding{}, ErrNoEmbedderBound
-	}
-	if declaredDimensions > 0 {
-		return EmbedderBinding{ProviderRef: ref, Dimensions: declaredDimensions}, nil
-	}
-	modelID := strings.TrimPrefix(ref, FleetReferencePrefix)
-	if dims, ok := catalogDimensionsFor(modelID); ok {
-		return EmbedderBinding{ProviderRef: ref, Dimensions: dims}, nil
-	}
-	return EmbedderBinding{}, ErrEmbedderWidthUnknown(ref)
-}
 
 // ResolveEmbedderProvider returns the provider name the active binding names.
 //
@@ -232,17 +225,6 @@ func ResolveEmbedderProvider(ctx context.Context) (string, error) {
 	return b.ProviderRef, nil
 }
 
-// EmbedderDimensions returns the active binding's vector width, or 0 and false
-// when nothing is bound. Callers that need a table name use VectorTableFor on
-// the result rather than assuming 1536.
-func EmbedderDimensions() (int, bool) {
-	b, ok := ActiveEmbedderBinding()
-	if !ok {
-		return 0, false
-	}
-	return b.Dimensions, true
-}
-
 // catalogWidths holds the vector width the CATALOG records per model id, keyed
 // by the runtime's own model id exactly as a machine advertises it.
 //
@@ -252,9 +234,9 @@ func EmbedderDimensions() (int, bool) {
 // is on the embedding hot path and cannot run a query per call.
 //
 // A model absent from it reports 0, which callers read as "unknown". That is the
-// right answer for an operator's own pull that the catalog has never heard of,
-// and it is why a binding to such a model is refused rather than guessed: the
-// binding's whole job is to know the width before the first vector exists.
+// right answer for an operator's own pull that the catalog has never heard of;
+// binding such a model takes the width its own vector has (probeEmbedder embeds
+// one sentence before the table exists), never a guess.
 var catalogWidths struct {
 	mu     sync.RWMutex
 	byID   map[string]int

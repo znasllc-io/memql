@@ -2925,6 +2925,67 @@ Installation proposals use the same separate confirmation when operator configur
 selects `landingMode: "owner_push"`. A landed pin becomes a reviewed installation
 choice; it does not apply a plan. Reconnecting and status refreshes never land changes.
 
+### Memory search
+
+Cluster > Settings > **Memory search** (`src/apps/cluster/memorysearch/`; design
+record `docs/superpowers/specs/2026-11-23-memory-search-model-switch-design.md`,
+section 8; operator's guide `docs/public/operate/memory-search.md`) is where an
+owner sees which model memory search uses, whose machines
+index it, how many items the index holds and what waits, and changes it. Settings
+links to it with a row showing the model in use. Fleet's model board keeps the
+bound model locked and says where to change it, to whoever can open Memory
+search; anybody else reads that a cluster owner can change it, since a page they
+cannot open is no answer to where (`memorySearchWhere`, `memorySearchChooses`
+and `memorySearchKeeps`, `src/apps/fleet/machines/modelSetup.ts`, say it for the
+board's caption, its refusal, the Models page's help and the Routes job board's
+Search and memory job).
+
+- **THE PART IS THE GATE, AND ONLY AN OWNER ACTS.** The section and the link
+  row require `app:cluster/memorysearch`, seeded on the owner alone, which the
+  engine's builtin path checks before any of the six `memorySearch*` builtins
+  runs; a person without it reads nothing and is offered nothing. Every act is
+  also an active cluster owner's, whatever was granted: the status's `mayAct`
+  says from the reader's side whether they may act, and the page draws no act
+  where it is false, so somebody granted the part sees the page and its state
+  and acts on nothing. The Start page does not offer the section: it is a page
+  of Settings.
+- **POLLED, NEVER SUBSCRIBED.** The status is a row the engine computes per call
+  and the index job's run rows have no graph routing rule, so the page reads it
+  every 5 s while a switch runs and every 30 s otherwise, only while visible and
+  connected (`useReleaseRead`). Every act answers the status after it, shown at
+  once; a refusal is the engine's sentence beside the act, and the status is read
+  again. No act is repeated.
+- **EVERY CHANGE ASKS FIRST**, in place (`InPlaceAsk`), saying what happens: the
+  whole index rebuilt in the background on your machines and the ones lent to
+  you (which receive everyone's memory text too), or on the cluster's vendor
+  account with the estimated item count, search keeping the current model
+  until the rebuild finishes, and the current index kept for 30 days. While a
+  switch runs before its flip, no other model and no Switch back is offered (one
+  switch at a time); its progress shows the items done, clamped to the ESTIMATED
+  total (the index plus its backlog), with Cancel. A switch held for failed or
+  unrebuildable items offers Switch anyway and Cancel.
+- **WHAT THE PAGE TAKES AWAY DOES NOT TAKE FOCUS WITH IT.** A question that
+  closes, an act that succeeds or a read that moves the section removes the
+  control that had focus; focus then goes to the model the choices hold checked
+  (as Fleet's board does after Clear), else the first that can be chosen, else
+  the Change model section itself, and never to an act such as Cancel. Only
+  focus that was still in the page is given back: focus the reader took to
+  another window is not pulled into this one when a read swaps a section.
+- **SWITCH BACK NAMES THE MODEL THE BINDING REPLACED** (`previousRef`), never a
+  cancelled switch's partial index, which `retained` also lists; it is offered only
+  while that model can be chosen.
+- **THE TAKE-OVER IS OFFERED ONLY WHERE IT CHANGES SOMETHING**: when the status's
+  `takeOver` says choosing the model in use again would make you its indexer,
+  as "Index on my machines", during a switch too (search and new items embed as
+  the binding's indexer until the flip); and when a running switch's own
+  `takeOver` says choosing its target again would make you the RUN's indexer,
+  as "Re-index on my machines" on the Switching row, held with Cancel. A wait is
+  said from the reader's side: "your machines", or the indexer's by name -- the
+  binding's for the backlog, the run's for a switch, which need not be the same
+  person.
+- QA views: `memory-search*` (`qa/README.md`). Tests:
+  `test/cluster/memorySearch.test.tsx`.
+
 ### Mesh (epic memql#5338)
 
 `src/apps/cluster/mesh/` answers the question an operator arrives with -- is

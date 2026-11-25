@@ -668,21 +668,44 @@ func (r *ProviderRegistry) federationEmbedderAvailable() bool {
 // federationEmbedders names the federated vendor records here that can embed,
 // in name order.
 func (r *ProviderRegistry) federationEmbedders() []string {
+	var out []string
+	for _, record := range r.federationEmbedderRecords() {
+		out = append(out, record.Name)
+	}
+	return out
+}
+
+// vendorEmbedderRecord is one vendor embedding record the cluster's own account
+// can pay for: its name and the vendor's model.
+type vendorEmbedderRecord struct {
+	Name, Model string
+	// Dimensions is the width the record declares (its client's), known
+	// before it is called; 0 when it declares none.
+	Dimensions int
+}
+
+// federationEmbedderRecords is federationEmbedders with each record's model, in
+// name order: the vendor embedding models Memory search offers
+// (memory_search_builtins.go). ONE predicate for both: "the cluster's account
+// is set up" is the vendor-account work's own (federationReadiness, the
+// ClusterSetUp of VendorDoorFor) -- an available record whose credential came
+// through federation -- applied to the records that embed.
+func (r *ProviderRegistry) federationEmbedderRecords() []vendorEmbedderRecord {
 	if r == nil {
 		return nil
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	var out []string
+	var out []vendorEmbedderRecord
 	for name, entry := range r.byName {
 		if entry == nil || !entry.Available || providerAuthSourceOf(entry) != AuthSourceFederation {
 			continue
 		}
-		if _, ok := entry.Client.(EmbeddingAIProvider); ok {
-			out = append(out, name)
+		if emb, ok := entry.Client.(EmbeddingAIProvider); ok {
+			out = append(out, vendorEmbedderRecord{Name: name, Model: entry.Config.Model, Dimensions: emb.Dimensions()})
 		}
 	}
-	sort.Strings(out)
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
 

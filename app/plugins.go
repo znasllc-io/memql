@@ -26,6 +26,7 @@ import (
 // instead, so the app still boots.
 func (a *App) materializePlugins() {
 	memql.SetEmbedderBindingReader(a.engine.ReadEmbedderBinding)
+	memql.SetEmbeddingIndexerOwnerCheck(a.engine.IndexerIsActiveOwner)
 	plugins := memql.RegisteredPlugins()
 	if len(plugins) == 0 {
 		return
@@ -132,10 +133,10 @@ func (a *App) pluginContext() memql.PluginContext {
 			// accounts may pay for it (callerVision, ai_call_sites.go).
 			return a.visionForCaller()
 		},
-		ResolveEmbeddingProvider: func(ctx context.Context, name string) (memql.EmbeddingAIProvider, error) {
-			provider, _, err := memql.ResolveAITyped[memql.EmbeddingAIProvider](ctx, a.engine, embeddingResolveRequest(name))
-			return provider, err
-		},
+		// Memory search embeds as its indexer, whoever asks: every embedding a
+		// plug-in makes is decided there (resolveEmbeddingProvider,
+		// ai_call_sites.go).
+		ResolveEmbeddingProvider: a.resolveEmbeddingProvider,
 		ResolvePartitionFromContext: func(ctx context.Context) string {
 			return a.engine.ResolvePartitionFromContext(ctx)
 		},

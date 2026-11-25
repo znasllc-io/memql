@@ -313,7 +313,13 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // 2026-11-22). One added, none removed; measured by the strict loader.
 // 212 -> 213: endSharesOnArtifactArchive, which ends every share of a Library
 // file its owner archived (file sharing, 2026-11-18). One added, none removed.
-const shippedAutomationCount = 213
+// 213 -> 214: memoryIndexTick, the memory index job's minute tick that
+// rebuilds, backfills and flips memory search (memory-search switch,
+// 2026-11-24). One added, none removed; measured by the strict loader.
+// 214 -> 215: memoryIndexRetentionSweep, the daily drop of the retired
+// models' indexes past their 30 days (memory-search switch, 2026-11-24). One
+// added, none removed; measured by the strict loader.
+const shippedAutomationCount = 215
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

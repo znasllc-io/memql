@@ -1,10 +1,14 @@
 package memql
 
 import (
+	"bytes"
 	"context"
+	"database/sql"
+	"log/slog"
 	"math"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -254,4 +258,177 @@ func TestSemanticCacheThresholdTunable(t *testing.T) {
 	cDiff.Store(ctx, ns, "delete it", "LABEL:delete")
 	_, hit := cDiff.Lookup(ctx, ns, "keep it")
 	require.False(t, hit, "opposite intents must miss even at a permissive 0.5 threshold")
+}
+
+// boundCacheProbe is an embedding model the test binds memory search to. Both
+// models answer the SAME vector for the same text, so only the cache scoping
+// its rows by model can stop one model's row answering the other's lookup.
+type boundCacheProbe struct {
+	name  string
+	calls *[]string
+}
+
+var boundCacheVectors = map[string][]float32{"classify: hello": {1, 0, 0, 0}, "classify: other": {0, 1, 0, 0}}
+
+func (p boundCacheProbe) Call(context.Context, string) (any, error) { return nil, nil }
+func (p boundCacheProbe) Embed(_ context.Context, text string) ([]float32, error) {
+	*p.calls = append(*p.calls, p.name)
+	if v, ok := boundCacheVectors[text]; ok {
+		return v, nil
+	}
+	return []float32{0, 0, 1, 0}, nil
+}
+func (p boundCacheProbe) EmbedBatch(ctx context.Context, texts []string) ([][]float32, error) {
+	var out [][]float32
+	for _, t := range texts {
+		v, _ := p.Embed(ctx, t)
+		out = append(out, v)
+	}
+	return out, nil
+}
+func (boundCacheProbe) Dimensions() int { return 4 }
+
+// lateReplicaEmbedder answers as a replica that read the binding a moment
+// before the flip and wrote after it: the replaced model's vector and name.
+type lateReplicaEmbedder struct{ model string }
+
+func (lateReplicaEmbedder) Embed(_ context.Context, text string) ([]float32, error) {
+	return boundCacheVectors[text], nil
+}
+func (l lateReplicaEmbedder) EmbedWithModel(_ context.Context, text string) ([]float32, string, error) {
+	return boundCacheVectors[text], l.model, nil
+}
+
+// semanticCacheOnBinding wires the semantic answer cache on an engine whose
+// memory-search binding the returned function sets (nil: nothing bound), over
+// an in-memory store, with one namespace enabled.
+func semanticCacheOnBinding(t *testing.T, calls *[]string, binding *EmbedderBinding) (*semanticAICache, *memVectorStore) {
+	t.Helper()
+	providers := NewProviderRegistryForTest()
+	providers.RegisterForTest("semanticEmbedA", "openai", "embed-a", boundCacheProbe{name: "a", calls: calls})
+	providers.RegisterForTest("semanticEmbedB", "openai", "embed-b", boundCacheProbe{name: "b", calls: calls})
+	e := auditTestEngine(t)
+	e.providers = providers
+	e.aiRuntime = newAIRuntime(nil, nil, providers, aiCacheConfig{})
+	wireTestResolver(e, providers)
+	SetEmbedderBindingReader(func(context.Context) (EmbedderBinding, error) {
+		if binding.ProviderRef == "" {
+			return EmbedderBinding{}, ErrNoEmbedderBound
+		}
+		return *binding, nil
+	})
+	t.Cleanup(func() { SetEmbedderBindingReader(nil) })
+	e.WireSemanticCache("", func() *sql.DB { return nil })
+	cache := e.aiRuntime.semantic
+	require.NotNil(t, cache)
+	store := newMemVectorStore()
+	cache.store = store
+	cache.SetNamespace("test.ns", SemanticNamespaceConfig{Enabled: true})
+	return cache, store
+}
+
+// THE SEMANTIC ANSWER CACHE FOLLOWS THE BINDING. It embeds every
+// lookup and every write with the model memory search is bound to at that
+// moment, so after a switch it neither keeps embedding with the replaced model
+// nor compares vectors of two models: a row is a hit only for the model that
+// wrote it, including a row a lagging replica writes after the flip's DELETE.
+func TestTheSemanticCacheFollowsTheBinding(t *testing.T) {
+	var calls []string
+	binding := EmbedderBinding{ProviderRef: "semanticEmbedA", Dimensions: 4, ActivatedAt: "2026-11-01T00:00:00Z"}
+	cache, store := semanticCacheOnBinding(t, &calls, &binding)
+	ctx := context.Background()
+	cache.Store(ctx, "test.ns", "classify: hello", "label-a")
+	value, hit := cache.Lookup(ctx, "test.ns", "classify: hello")
+	require.True(t, hit)
+	require.Equal(t, "label-a", value)
+
+	// The switch: memory search now names model B.
+	binding = EmbedderBinding{ProviderRef: "semanticEmbedB", Dimensions: 4, ActivatedAt: "2026-11-24T00:00:00Z"}
+	calls = nil
+	_, hit = cache.Lookup(ctx, "test.ns", "classify: hello")
+	require.False(t, hit, "model A's row is not an answer for model B")
+	require.Equal(t, []string{"b"}, calls, "the lookup embeds with the bound model")
+	cache.Store(ctx, "test.ns", "classify: hello", "label-b")
+	value, hit = cache.Lookup(ctx, "test.ns", "classify: hello")
+	require.True(t, hit)
+	require.Equal(t, "label-b", value)
+
+	// A replica still embedding with model A writes after the flip.
+	late := newSemanticAICache(lateReplicaEmbedder{model: "semanticEmbedA@4"}, store, nil, time.Hour,
+		map[string]SemanticNamespaceConfig{"test.ns": {Enabled: true}})
+	late.Store(ctx, "test.ns", "classify: other", "label-late")
+	_, hit = cache.Lookup(ctx, "test.ns", "classify: other")
+	require.False(t, hit, "a late write in the replaced model's space is never a hit")
+}
+
+// The cache is wired even before any model is bound -- a clean miss until then
+// -- and works once one is, without a restart.
+func TestTheSemanticCacheIsWiredBeforeAModelIsBound(t *testing.T) {
+	var calls []string
+	var binding EmbedderBinding
+	providers := NewProviderRegistryForTest()
+	providers.RegisterForTest("semanticEmbedA", "openai", "embed-a", boundCacheProbe{name: "a", calls: &calls})
+	e := auditTestEngine(t)
+	e.providers = providers
+	e.aiRuntime = newAIRuntime(nil, nil, providers, aiCacheConfig{})
+	wireTestResolver(e, providers)
+	SetEmbedderBindingReader(func(context.Context) (EmbedderBinding, error) {
+		if binding.ProviderRef == "" {
+			return EmbedderBinding{}, ErrNoEmbedderBound
+		}
+		return binding, nil
+	})
+	t.Cleanup(func() { SetEmbedderBindingReader(nil) })
+	e.WireSemanticCache("", func() *sql.DB { return nil })
+	cache := e.aiRuntime.semantic
+	require.NotNil(t, cache, "wired before any model is bound")
+	cache.store = newMemVectorStore()
+	cache.SetNamespace("test.ns", SemanticNamespaceConfig{Enabled: true})
+	ctx := context.Background()
+	_, hit := cache.Lookup(ctx, "test.ns", "classify: hello")
+	require.False(t, hit, "nothing bound: a clean miss")
+
+	binding = EmbedderBinding{ProviderRef: "semanticEmbedA", Dimensions: 4, ActivatedAt: "2026-11-24T00:00:00Z"}
+	cache.Store(ctx, "test.ns", "classify: hello", "label-a")
+	value, hit := cache.Lookup(ctx, "test.ns", "classify: hello")
+	require.True(t, hit)
+	require.Equal(t, "label-a", value)
+}
+
+// With an operator-enabled namespace and no memory-search model bound, every
+// lookup and store fails the same way until an owner binds one. The cache says
+// so once when that starts and once when it ends, rather than at every call;
+// each failure is still counted, and any other failure is logged as it happens.
+func TestTheSemanticCacheSaysOnceThatNoModelIsBound(t *testing.T) {
+	var calls []string
+	var binding EmbedderBinding
+	cache, _ := semanticCacheOnBinding(t, &calls, &binding)
+	var logs bytes.Buffer
+	cache.logger = slog.New(slog.NewTextHandler(&logs, nil))
+	warnings := func() int { return strings.Count(logs.String(), "level=WARN") }
+	ctx := context.Background()
+	for range 3 {
+		_, hit := cache.Lookup(ctx, "test.ns", "classify: hello")
+		require.False(t, hit)
+		cache.Store(ctx, "test.ns", "classify: hello", "label")
+	}
+	require.Equal(t, 1, warnings(), logs.String())
+	require.EqualValues(t, 6, cache.Stats().Errors, "each failure is still counted")
+
+	binding = EmbedderBinding{ProviderRef: "semanticEmbedA", Dimensions: 4, ActivatedAt: "2026-11-24T00:00:00Z"}
+	cache.Store(ctx, "test.ns", "classify: hello", "label-a")
+	cache.Store(ctx, "test.ns", "classify: other", "label-b")
+	require.Equal(t, 1, strings.Count(logs.String(), "level=INFO"), "a model is bound again: said once")
+
+	binding = EmbedderBinding{}
+	for range 2 {
+		cache.Lookup(ctx, "test.ns", "classify: hello")
+	}
+	require.Equal(t, 2, warnings(), "unbound again: said once more")
+
+	binding = EmbedderBinding{ProviderRef: "semanticEmbedMissing", Dimensions: 4, ActivatedAt: "2026-11-24T00:00:00Z"}
+	for range 2 {
+		cache.Lookup(ctx, "test.ns", "classify: hello")
+	}
+	require.Equal(t, 4, warnings(), "any other failure is logged as it happens")
 }

@@ -1,0 +1,45 @@
+{
+  "automation": "platform/automations.memql memoryIndexTick",
+  "runs": {
+    "no event | 0 rows": {
+      "input": {
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "budgetSeconds": 45
+            },
+            "kind": "builtin",
+            "name": "memoryIndexStep"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "no event | 2 rows": {
+      "input": {
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "budgetSeconds": 45
+            },
+            "kind": "builtin",
+            "name": "memoryIndexStep"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -90,6 +91,8 @@ func TestOwnedReleaseIndexing(t *testing.T) {
 	t.Run("FreshScopeAcrossReplicas", func(t *testing.T) { testOwnedReleaseIndexingFreshScopeAcrossReplicas(t, f) })
 	t.Run("KeepsCancellationAndStorageFailures", func(t *testing.T) { testOwnedReleaseIndexingKeepsCancellationAndStorageFailures(t, f) })
 	t.Run("ScheduledDefersWithoutInventingFleetAuthority", func(t *testing.T) { testScheduledReleaseIndexingDefersWithoutInventingFleetAuthority(t, f) })
+	t.Run("ScheduledWaitsWhenTheIndexerIsNoLongerAnOwner", func(t *testing.T) { testScheduledReleaseIndexingWaitsForADemotedIndexer(t, f) })
+	t.Run("ScheduledEmbedsAsTheIndexer", func(t *testing.T) { testScheduledReleaseIndexingEmbedsAsTheIndexer(t, f) })
 }
 
 func testOwnedReleaseIndexingFreshScopeAcrossReplicas(t *testing.T, shared *seedFixture) {
@@ -218,4 +221,67 @@ func testScheduledReleaseIndexingDefersWithoutInventingFleetAuthority(t *testing
 	require.Len(t, rows, 1)
 	require.Contains(t, string(rows[0].Payload), "fleet-authority-unavailable")
 	require.Zero(t, calls.Load())
+}
+
+// A FLEET BINDING THAT NAMES ITS INDEXER DOES NOT WAIT (design record
+// 2026-11-23, section 1). The case above defers because nobody's machines are
+// the index's; once the binding names the owner who provides the index, the
+// lifecycle pass embeds on that owner's machines like every other memory-search
+// embedding, and says so to the resolver through the context rather than
+// having it read the binding a second time.
+func testScheduledReleaseIndexingEmbedsAsTheIndexer(t *testing.T, shared *seedFixture) {
+	f, _, _ := releaseWorkFixture(t, shared)
+	provider := "fleet:" + f.domain
+	memql.SetActiveEmbedderBinding(memql.EmbedderBinding{ProviderRef: provider, Dimensions: 1024, IndexedBy: "owner-indexer"})
+	t.Cleanup(func() {
+		table, err := memql.EmbeddingVectorTable(provider, 1024)
+		require.NoError(t, err)
+		_, err = f.db.ExecContext(context.Background(), `DROP TABLE IF EXISTS `+table)
+		require.NoError(t, err)
+	})
+	var mu sync.Mutex
+	var asked []string
+	f.a.SetEmbeddingProvider(func(call context.Context, name string) (memql.EmbeddingAIProvider, error) {
+		indexer, _ := memql.EmbeddingIndexerFromContext(call)
+		mu.Lock()
+		asked = append(asked, name+" as "+indexer)
+		mu.Unlock()
+		return seedTestProvider{}, nil
+	})
+	require.NoError(t, f.a.ReconcileReleaseSeeds(auth.ContextWithInternalOrigin(context.Background()), true))
+	mu.Lock()
+	defer mu.Unlock()
+	require.NotEmpty(t, asked, "a fleet binding with an indexer must not wait for an owned turn")
+	for _, got := range asked {
+		require.Equal(t, provider+" as owner-indexer", got)
+	}
+	table, err := memql.EmbeddingVectorTable(provider, 1024)
+	require.NoError(t, err)
+	var indexed int
+	require.NoError(t, f.db.QueryRowContext(context.Background(), `SELECT count(*) FROM `+table).Scan(&indexed))
+	require.Equal(t, len(asked), indexed, "every seed embedded is indexed in the bound model's table")
+}
+
+// A demoted indexer is a WAIT, not a failure: the release indexer defers and
+// indexes nothing until an owner chooses the model again.
+func testScheduledReleaseIndexingWaitsForADemotedIndexer(t *testing.T, shared *seedFixture) {
+	f, _, _ := releaseWorkFixture(t, shared)
+	provider := "fleet:" + f.domain
+	memql.SetActiveEmbedderBinding(memql.EmbedderBinding{ProviderRef: provider, Dimensions: 1024, IndexedBy: "owner-demoted"})
+	t.Cleanup(func() {
+		table, err := memql.EmbeddingVectorTable(provider, 1024)
+		require.NoError(t, err)
+		_, _ = f.db.ExecContext(context.Background(), `DROP TABLE IF EXISTS `+table)
+	})
+	f.a.SetEmbeddingProvider(func(context.Context, string) (memql.EmbeddingAIProvider, error) {
+		return nil, memql.ErrEmbeddingIndexerNotOwner
+	})
+	require.NoError(t, f.a.ReconcileReleaseSeeds(auth.ContextWithInternalOrigin(context.Background()), true))
+	table, err := memql.EmbeddingVectorTable(provider, 1024)
+	require.NoError(t, err)
+	var indexed int
+	err = f.db.QueryRowContext(context.Background(), `SELECT count(*) FROM `+table).Scan(&indexed)
+	if err == nil {
+		require.Zero(t, indexed)
+	}
 }

@@ -49,7 +49,6 @@ export function NewRouteModeWizard({
   onCreated,
   onRefused,
   onAddMachine,
-  onOpenModels,
 }: {
   routes: readonly RouteMode[];
   facts: RoutingFacts;
@@ -60,7 +59,6 @@ export function NewRouteModeWizard({
   /** Read the routes again after a refused save. */
   onRefused?: () => void;
   onAddMachine?: () => void;
-  onOpenModels?: () => void;
 }) {
   const [step, setStep] = useState<Step>("name");
   const [name, setName] = useState("");
@@ -142,7 +140,7 @@ export function NewRouteModeWizard({
       state: stateOf("jobs"),
       answer: step === "jobs" ? undefined : `${filled} of ${EDITABLE_JOBS.length} jobs`,
       body: (
-        <JobBoard jobs={jobs} onChange={setJobs} facts={facts} embedder={embedder} onAnnounce={setAnnouncement} onAddMachine={onAddMachine} onOpenModels={onOpenModels} />
+        <JobBoard jobs={jobs} onChange={setJobs} facts={facts} embedder={embedder} onAnnounce={setAnnouncement} onAddMachine={onAddMachine} />
       ),
     },
   ];

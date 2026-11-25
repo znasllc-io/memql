@@ -230,7 +230,10 @@ it is deliberately narrow. It pays for:
 
 - **the cluster's own work**, when the call says it is the cluster's: an
   automation, a sweep, a seed, a connector, the operator's stream, or one of
-  the cluster's jobs, such as the command-safety check;
+  the cluster's jobs, such as the command-safety check. That holds when a
+  person's action set the work off (an automation an event starts, the safety
+  check screening somebody's command): it is still the cluster's, and that
+  person's key is not used;
 - **a person's calls, only when that person may use it.**
 
 **A call that names nobody is refused.** A call has to say whom it is for, or
@@ -255,8 +258,11 @@ the cluster's account does not pay for this person's calls.
   about them now: their role, their groups and their grants. Work continued on
   a person's behalf (a run, an agent, an app session) is judged by that
   person, never by the stand-in role such work runs under. A visitor's call is
-  judged by the person whose authority it borrows. A person who is no longer
-  an active user holds nothing.
+  judged by the person whose authority it borrows, the one who published the
+  site or deployed the workflow: a site published by somebody who may not use
+  the cluster's account gets no vendor model for its visitors until the
+  cluster owner allows that person. A person who is no longer an active user
+  holds nothing.
 - **It is asked again when the call is made.** A permission taken away between
   choosing a model and calling it is not spent.
 - **It covers every kind of vendor call MemQL routes for a person**, not only
@@ -265,10 +271,21 @@ the cluster's account does not pay for this person's calls.
   local model or not at all. That includes a picture described when a file is
   uploaded to the Library, and a vendor reached only because a local model or
   an app failed when it was called.
-- **Embeddings are the exception.** The memory space is the cluster's, one
-  model for everybody, and a person whose writes were not embedded would be
-  missing from everybody's search. Embeddings are paid by the cluster's
-  account for every caller.
+- **Embeddings are the exception.** Memory search compares vectors, and
+  vectors from two models cannot be compared, so the cluster indexes
+  everything with ONE embedding model, which an owner chooses for the whole
+  cluster in Cluster > Settings > Memory search. That model is all that is
+  shared; what each person may see in a result is still their own. When the
+  chosen model is a vendor's, the cluster's account pays for every caller's
+  embeddings, because a person whose writes were not embedded would be
+  missing from everybody's search; only an active owner's choice binds one,
+  never the automatic choice, and someone granted Memory search who is not
+  an owner can see it and change nothing. When it is a model on a machine
+  (the usual case, and the only kind the cluster picks by itself), no vendor
+  account pays at all: everything is embedded by the indexer, on the
+  machines of the cluster owner named for it and the machines lent to them,
+  whoever wrote the item or runs the search.
+  [Memory search](memory-search.md) has the rest.
 - **Not covered:** a cluster whose operator set `MEMQL_STT_PROVIDER` to one of
   the direct OpenAI transcription paths sends everybody's live transcription
   to OpenAI on the cluster's account. That variable is the operator's own

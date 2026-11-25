@@ -19,6 +19,7 @@ import (
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/integrations/similarity"
 )
 
@@ -156,10 +157,37 @@ func (f *seedFixture) decide(t *testing.T, seed canonicalSeedChunk, status strin
 
 func TestCanonicalKnowledgeDB(t *testing.T) {
 	f := newSeedReplicas(t)
+	t.Run("MemorySearchKnowsAContentAddressedChunkFromItsStoredRow", func(t *testing.T) { testMemorySearchKnowsAContentAddressedChunkFromItsStoredRow(t, f) })
 	t.Run("CanonicalSeedRepairPreservesReviewAndOnlyPublishesExactRegisteredContent", func(t *testing.T) { testCanonicalSeedRepairPreservesReviewAndOnlyPublishesExactRegisteredContent(t, f) })
 	t.Run("CanonicalSeedRepairCannotOverwriteAnotherReplicasDecision", func(t *testing.T) { testCanonicalSeedRepairCannotOverwriteAnotherReplicasDecision(t, f) })
 	t.Run("CanonicalIngestPublishesOnlyServerSelectedCorpusAndPreservesRejection", func(t *testing.T) { testCanonicalIngestPublishesOnlyServerSelectedCorpusAndPreservesRejection(t, f) })
 	t.Run("TrainerRefreshUsesOnlyFreshPublishedKnowledge", func(t *testing.T) { testTrainerRefreshUsesOnlyFreshPublishedKnowledge(t, f) })
+}
+
+// Memory search tells a chunk whose id hashes its text from one that does not
+// by the row as stored (knowledgeChunkHashesItsText): a corpus chunk written
+// the way ingest writes it is recognised, and an LLM-seeded chunk written by
+// storeSeedChunk under seedChunkId is not, so its rewritten text is embedded
+// again. Whatever the engine stores in place of what the writer passed, this
+// is the check that would see it.
+func testMemorySearchKnowsAContentAddressedChunkFromItsStoredRow(t *testing.T, shared *seedFixture) {
+	f := seedFixtureForCase(t, shared)
+	s := knowledgeSource(t)
+	seed := f.seeds[0]
+	f.write(t, seed, "appStructure")
+	row, err := f.b.seedChunkSnapshot(f.ctx, seed.ID)
+	require.NoError(t, err)
+	require.NotNil(t, row)
+	require.True(t, s.ContentAddressed(id.BuildNodeId(conceptKnowledgeDocumentChunk, seed.ID), row.Payload), "a corpus chunk")
+
+	domain := StandardDomain{ID: f.domain, Name: "Seed check", Tier: "A"}
+	require.NoError(t, f.a.storeSeedChunk(f.ctx, domain, "v1", 0, seedChunk{Kind: "fact", Title: "Capitals", Body: "Paris is the capital of France."},
+		"llm-generated", "llmSeeded", f.provider, seedTestProvider{}))
+	seeded := seedChunkId("v1", f.domain, 0)
+	row, err = f.b.seedChunkSnapshot(f.ctx, seeded)
+	require.NoError(t, err)
+	require.NotNil(t, row)
+	require.False(t, s.ContentAddressed(id.BuildNodeId(conceptKnowledgeDocumentChunk, seeded), row.Payload), "an LLM-seeded chunk")
 }
 
 func testCanonicalSeedRepairPreservesReviewAndOnlyPublishesExactRegisteredContent(t *testing.T, shared *seedFixture) {

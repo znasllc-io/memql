@@ -754,10 +754,19 @@ concept providerAuthStatus {
 /// then a new VERSION of one logical row rather than a second row, so "which embedder is active" has
 /// exactly one answer to read -- and a query that returned two would have no way to choose.
 ///
-/// SWITCHING IS NOT AN EDIT. Activating a different embedder opens the `reembedLibrary` work goal,
-/// which fills a new node_vectors_<dims> table and flips this row only when the counts match. Until
-/// then every read follows the binding that is still active, so a switch interrupted half way leaves
-/// a cluster that still works rather than one whose vectors half mean one thing and half another.
+/// SWITCHING IS NOT AN EDIT: the index is rebuilt first (design record 2026-11-23, section 6). The
+/// memory index job fills the new model's own table while every read follows the binding that is
+/// still active, and flips this row in one write (flipEmbedderBinding) by itself only once every
+/// item is in it, or when an owner chooses Switch anyway over the items that are not, so a switch
+/// interrupted half way leaves a cluster that still works rather than one whose vectors half mean
+/// one thing and half another. The model it replaced is kept as a RETIRED row
+/// at `retired-<16 hex>` (recordRetiredEmbedder), whose index survives until `retireAt` so that
+/// switching back is quick.
+///
+/// THE OWNER PROVIDES THE INDEX (section 1). One index for the whole cluster means one set of
+/// machines embeds for it: `indexedBy`'s, and the ones lent to them, whoever wrote an item or runs
+/// a search. Only the embedding step changes hands; reading and writing the item keep their usual
+/// authority.
 ///
 /// TIER: public, requiresIdentity, and the row-authz land gate is what settled it. The first cut said
 /// clusterOwner, on the reasoning that the embedder is a property of the DEPLOYMENT rather than of a
@@ -766,23 +775,127 @@ concept providerAuthStatus {
 /// their search results changed shape has exactly one row that explains it, and hiding it from
 /// everyone but the owner would make that unanswerable for the people most likely to ask.
 ///
+/// The fields memory search's switch added keep that answer. previousRef is a model id, as
+/// providerRef is. indexedBy and chosenBy each name a cluster owner by id -- whose machines index
+/// the model, and who chose it -- and any signed-in person can already resolve either id to a
+/// name (userDisplayById). indexedBy answers a question every person has a stake in: whose
+/// machines receive their memory text to embed. retireAt and droppedAt are dates on the retired
+/// rows, which share this concept and so its tier: when a replaced model's index is kept until,
+/// and when it was dropped.
+///
 /// v1:platform:inferenceStatus and v1:models:modelProfile carry the same tier for the same reason.
-/// WRITING is a different question and is settled separately: both mutations are @serverOnly,
-/// because activating a binding is four ordered steps and not a write.
+/// WRITING is a different question and is settled separately: every mutation is @serverOnly,
+/// because activating, flipping or retiring a binding is a step of ordered work and not a write.
 @rowAuthz(public, requiresIdentity)
 @displayCard(primary="providerRef", secondary="dimensions", tertiary="activatedAt")
 @belongsTo(cluster)
 concept embedderBinding {
-  providerRef   string!  @description("A provider record name (embedding3Small) or a fleet reference (fleet:qwen3-embedding:0.6b). Resolved through the same registry path every other provider name takes, so a fleet embedder is resolved against the ACTING USER's machines exactly like any other fleet call.")
-  dimensions    int!     @description("The vector width this provider produces, and therefore which node_vectors_<dims> table its vectors live in. NEVER ZERO on a valid binding: a width of zero cannot have a table and cannot have an index, and pgvector refuses both rather than accepting them quietly. For a fleet model the width comes from the catalog row, because the machine serving it does not know it either.")
+  providerRef   string!  @description("A provider record name (embedding3Small) or a fleet reference (fleet:qwen3-embedding:0.6b). Resolved through the same registry path every other provider name takes, except that a fleet embedder is resolved against its INDEXER's machines (indexedBy) rather than the acting person's: memory search is one index for the whole cluster.")
+  dimensions    int!     @description("The vector width this provider produces, and therefore which node_vectors_<dims>_<16 hex> table its vectors live in. NEVER ZERO on a valid binding: a width of zero cannot have a table and cannot have an index, and pgvector refuses both rather than accepting them quietly. It is MEASURED when the model is bound or switched to: one sentence is embedded and the width is the vector's length, which must agree with the width a vendor record, or the catalog row of a fleet model, declares where one does.")
   activatedAt   datetime @description("When this binding became active. Empty on a row written by an activation that has not completed -- the re-embed is still filling the new table, and until it does this row is a plan rather than a state.")
-  reembedRunId  string   @description("The v1:work:run that filled this binding's table. Empty for the FIRST binding a cluster activates, which has nothing to re-embed FROM -- an absence that means 'nothing to carry over', never 'the run is missing'.")
+  reembedRunId  string   @description("The v1:work:run that filled this binding's table, when an activation named one. Empty for the FIRST binding a cluster activates, which has nothing to re-embed FROM, and written empty by every switch (flipEmbedderBinding): the memory index job fills a new model's table and keeps its progress on v1:platform:memoryIndexRun, not on a work run. An absence means 'no work run filled it', never 'the run is missing'.")
   previousRef   string   @description("The providerRef this binding replaced, kept so an operator reading the row can see what the search space used to be. A vector corpus is not reversible from the vectors, so the only record of what produced them is this.")
+  /// The cluster owner whose machines, and the machines lent to them, embed everything for memory
+  /// search under a fleet model: an item indexed and a search query alike, whoever wrote or runs
+  /// it. Empty for a vendor model, which runs on no one's machines and is paid by the cluster's
+  /// account, and on a fleet binding made before indexers existed.
+  indexedBy     string
+  /// The cluster owner who chose this model: only an active owner chooses, whatever the model.
+  /// Empty when it was bound automatically, so a vendor model nobody chose can be put to an owner
+  /// once to confirm.
+  chosenBy      string
+  /// On a retired model's row (id `retired-<16 hex>`, after its vector table): its index is kept
+  /// until this time, so switching back reuses it, and is dropped after. Empty on the active row.
+  retireAt      datetime
+  /// On a retired model's row: when its index was dropped. Empty while the index is kept.
+  droppedAt     datetime
 
   // `as="filledBy"` is a DOMAIN verb, not a structural type: the run did not
   // create the binding and does not own it -- it filled the vector table the
   // binding names. `references` is what the engine does with the edge.
   @relationship(type="references", as="filledBy", field="reembedRunId", target=run, direction="outgoing")
+}
+
+/// One run of the MEMORY INDEX JOB (design record 2026-11-23, sections 4, 6 and 9), at the literal
+/// row ids `switch` and `backfill`: the one scheduled job that rebuilds the whole index into a new
+/// model's table during a switch while search keeps the active one, flips the binding when the
+/// rebuild is complete, and backfills what the active index is missing (component/memql
+/// memory_index_job.go).
+///
+/// THE STATE LIVES HERE, NOT ON A REPLICA: the cursor and the counts are written after every batch
+/// that embedded something, so a restart or another replica resumes where the last one stopped
+/// and embeds nothing twice. One replica works at a time, under an advisory lock; every write is
+/// fenced to the version it read, so an owner's act on another replica is never reverted.
+///
+/// TIER: clusterOwner. The rows name models, an indexer and counts of every person's items; the
+/// owner's Memory search page reads them through a builtin, and nobody else has a reason to.
+/// WRITING is @serverOnly (recordMemoryIndexRun): only the job and the owner's builtins write it.
+///
+/// NO GRAPH ROUTING RULE (2026-11-24). Nothing subscribes to these rows' graph events -- the OS
+/// polls the status builtin -- and forwarding one on every batch's write would wake every node's
+/// graph subscribers per 32 items. Add one only when a live subscriber exists. Only that rule is
+/// left out: like every graph write, each write of a run row still emits
+/// cache.invalidate.v1:platform:memoryIndexRun, which the cache.invalidate.* rule carries to every
+/// node for its result-cache evictor.
+///
+/// THE JOB'S BOOKKEEPING EXPIRES: a row is written after every batch and nothing reads a superseded
+/// version, so only the newest version of each run outlives a day, and nothing is archived (the
+/// v1:pipelines:run precedent).
+@rowAuthz(clusterOwner)
+@displayCard(primary="state", secondary="targetRef", tertiary="lastPassAt")
+@retention(ttl="1d", keepLatest=true, archive="none")
+@belongsTo(cluster)
+concept memoryIndexRun {
+  /// `switch` while an owner's switch rebuilds a new model's index; `backfill` for the walks that
+  /// fill what the active index is missing.
+  kind              enum("switch", "backfill")
+  /// indexing: the first walk fills the target. catchingUp: a second walk picks up what arrived
+  /// meanwhile. needsDecision: an item failed or no source rebuilds an entry of the active index,
+  /// and the owner decides. switching: the flip is under way. finishing: the walk after the flip.
+  /// done and cancelled are over. waiting: the indexer's machines are offline or not answering, or
+  /// the indexer is no longer an owner; nothing is counted failed, and the next tick tries again.
+  state             enum("indexing", "catchingUp", "needsDecision", "switching", "finishing", "done", "cancelled", "waiting")
+  /// The model this run fills: a switch's new model, or the active one for a backfill.
+  targetRef         string
+  /// The target model's vector width.
+  targetDimensions  int
+  /// The target's vector table (node_vectors_<width>_<16 hex>). Informational: the job derives the
+  /// table from the model and width, never from this field.
+  targetTable       string
+  /// The model a switch replaced, set when it flipped.
+  previousRef       string
+  /// The owner whose machines, and the machines lent to them, embed this run's items under a fleet
+  /// model. Empty for a vendor model.
+  indexedBy         string
+  /// The owner who started the switch. Empty for a backfill, which the job starts.
+  startedBy         string
+  /// When the switch was started, or when the backfill's current walk began.
+  startedAt         datetime
+  /// When the run reached done.
+  finishedAt        datetime
+  /// Where the walk stands: the source it is in, mapped to the last item id done in it. Sources
+  /// before it, in name order, are done for this walk. Empty is the walk's beginning.
+  cursor            object
+  /// This walk's {total, done, skipped, unsourced, failed, missing, unanswered}. total = done +
+  /// skipped + failed; unsourced counts the active index's entries no source rebuilds, set when a
+  /// walk ends; missing counts the items the walk found absent from the target, or older there
+  /// than their row, and left so; unanswered is a streak, the items in a row the model never
+  /// answered within the per-item timeout, and the run waits at the second.
+  counts            object
+  /// Why the run waits, in plain words. Empty unless state is waiting.
+  waitingReason     string
+  /// When the last full walk ended: the backfill walks again ten minutes after it.
+  lastPassAt        datetime
+  /// The items the last completed walk left missing, or that a counting walk found missing: the
+  /// backlog Memory search shows ("37 items waiting"). Kept across the walks of one model, so the
+  /// last count stands while the next is taken.
+  missing           int
+  /// When the walk that counted `missing` ended.
+  missingAt         datetime
+  /// A waiting backfill's counting walk in progress, {cursor, missing}: where it stands and what it
+  /// has found missing so far. It reads presence and staleness only and embeds nothing, so `cursor`
+  /// and `counts` stay where the wait left them. An empty cursor is none in progress.
+  counting          object
 }
 
 /// Virtual projection of ONE MODEL the caller's fleet can run right now (epic memql#4676). Never

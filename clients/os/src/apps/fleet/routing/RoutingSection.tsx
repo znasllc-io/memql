@@ -64,14 +64,11 @@ const TAB_NAMES: Record<RoutingTab, string> = { routes: "Routes", rules: "Rules"
 
 export function RoutingSection({
   onAddMachine,
-  onOpenModels,
   intent,
   consumeIntent,
 }: {
   /** Opens Fleet's add-a-machine flow; offered in the tray when no machine is connected. */
   onAddMachine?: () => void;
-  /** Opens Fleet's Models section, where an embedding model is pulled and bound. */
-  onOpenModels?: () => void;
   intent?: OsAppProps["intent"];
   consumeIntent?: OsAppProps["consumeIntent"];
 }) {
@@ -158,7 +155,7 @@ export function RoutingSection({
       {panes.map((id) => (
         <div key={id} className="fleet-routing-tab" data-routing-tab={id} hidden={id !== tab}>
           {id === "routes" ? (
-            <RoutesTab header={header} facts={facts} composes={canCompose} request={modeRequest} onAddMachine={onAddMachine} onOpenModels={onOpenModels} />
+            <RoutesTab header={header} facts={facts} composes={canCompose} request={modeRequest} onAddMachine={onAddMachine} />
           ) : id === "rules" ? (
             rulesView === "chains" ? (
               <ChainsTab

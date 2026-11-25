@@ -42,6 +42,9 @@ func TestEveryAppCallSiteCarriesTheExpectedLevelAndModality(t *testing.T) {
 		wantStructured   bool
 		wantVision       bool
 		explicitProvider string
+		// userId is a caller the request FIXES rather than leaves to the
+		// context: only memory search's indexer, for now.
+		userId string
 	}{
 		{
 			// plugins.go's ResolveVisionProvider closure and
@@ -57,16 +60,27 @@ func TestEveryAppCallSiteCarriesTheExpectedLevelAndModality(t *testing.T) {
 			// plugins.go's ResolveEmbeddingProvider closure, reached by the
 			// embedding, knowledge, similarity and harnessrecall packs.
 			site:             "embedding (a pinned model id)",
-			req:              embeddingResolveRequest("embedding3Small"),
+			req:              embeddingResolveRequest("embedding3Small", ""),
 			level:            airoute.LevelEmbeddings,
 			modality:         airoute.ModalityEmbedding,
 			explicitProvider: "embedding3Small",
 		},
 		{
 			site:     "embedding (no pin)",
-			req:      embeddingResolveRequest(""),
+			req:      embeddingResolveRequest("", ""),
 			level:    airoute.LevelEmbeddings,
 			modality: airoute.ModalityEmbedding,
+		},
+		{
+			// The same closure for memory search's own model: resolved as the
+			// owner who provides the index, whoever is asking
+			// (embedding_indexer_test.go).
+			site:             "embedding (memory search, as its indexer)",
+			req:              embeddingResolveRequest("fleet:qwen3-embedding:0.6b", "owner-1"),
+			level:            airoute.LevelEmbeddings,
+			modality:         airoute.ModalityEmbedding,
+			explicitProvider: "fleet:qwen3-embedding:0.6b",
+			userId:           "owner-1",
 		},
 		{
 			// safety_llm.go's classifier chain.
@@ -115,6 +129,10 @@ func TestEveryAppCallSiteCarriesTheExpectedLevelAndModality(t *testing.T) {
 				t.Errorf("ExplicitProvider is %q, expected %q -- a caller-named provider is a PIN and must ride this field, never a registry lookup",
 					c.req.ExplicitProvider, c.explicitProvider)
 			}
+			if c.req.UserId != c.userId {
+				t.Errorf("UserId is %q, expected %q -- a request fixes its caller only when the call is not the asker's own",
+					c.req.UserId, c.userId)
+			}
 		})
 	}
 }
@@ -130,7 +148,7 @@ func TestEveryAppCallSiteCarriesTheExpectedLevelAndModality(t *testing.T) {
 // `embeddings` is the only level with no next rung down, which is what makes
 // that unrepresentable rather than merely discouraged.
 func TestTheEmbeddingLevelNeverDegrades(t *testing.T) {
-	req := embeddingResolveRequest("embedding3Small")
+	req := embeddingResolveRequest("embedding3Small", "")
 	if _, canDegrade := req.Level.Degrade(); canDegrade {
 		t.Fatalf("the embedding site declares level %q, which degrades; an embedding call that falls back to "+
 			"another model writes vectors into an index they do not belong in, undetectably", req.Level)

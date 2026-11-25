@@ -295,6 +295,48 @@ automation accountDoorReconcileWorkflow {
  builtin customDomainRequireReservations()
 }
 
+/// The memory index job's tick (design record 2026-11-23, sections 4, 6 and 9; component/memql
+/// memory_index_job.go): rebuild a switch's new index while search keeps the active one, flip it
+/// when every item is in, and otherwise backfill what the active index is missing.
+///
+/// EVERY MINUTE, FOR AT MOST 45 SECONDS. A tick saves its cursor after every batch that embedded
+/// something and stops at its budget, so the next tick, on whichever replica, carries on from the
+/// cursor; budget plus the job's grace stays under the minute, and single keeps this process from
+/// starting a tick while one runs.
+///
+/// PLACED ON THE AGENT (node="agent", lease="memory-index"). Embedding with a machine model needs
+/// fleet inference, which an agent has and an identity, workbench or edge replica does not
+/// (app/cluster_worker*.go); left to the general cron leader, the job would wait forever whenever
+/// the leader landed on one of those. The agent also holds the machines' streams, so most calls
+/// need no hop. One replica works at a time whatever the lease says: the job takes its own advisory
+/// lock and fences every write of its run rows.
+///
+/// NOT A MAINTENANCE AUTOMATION: the step reads and writes as the job's own system actor, which the
+/// handler stamps after refusing any call without internal origin, and reads no person's rows
+/// through a tier.
+@trigger(schedule="0 * * * * *", node="agent", lease="memory-index")
+@mode(single)
+automation memoryIndexTick {
+  builtin memoryIndexStep(budgetSeconds: 45)
+}
+
+/// The daily cleanup of memory search's retired indexes (design record 2026-11-23, section 7;
+/// component/memql memory_search_builtins.go): a switch keeps the model it replaced for 30 days,
+/// and so does a cancelled switch's partly built index, so switching back is quick. Past that
+/// date the table is dropped and its row records when -- but never the active model's table or a
+/// running switch's target, whatever a retired row says.
+///
+/// ON THE GENERAL CRON LEADER: dropping a table needs the database and no machine. The handler
+/// refuses any call without internal origin and works under the embedder binding's lock, so it
+/// never drops a table a switch or a flip on another replica is making active.
+///
+/// AT 03:25 UTC, five minutes after logsRetentionSweep (03:20, dsl/observability), so the two
+/// nightly cleanups on the same leader do not start in the same minute.
+@trigger(schedule="0 25 3 * * *")
+automation memoryIndexRetentionSweep {
+  builtin memoryIndexRetire()
+}
+
 /// Resume declared retention from shared database cursors every hour.
 @trigger(schedule="0 40 * * * *")
 automation retireDeclaredConceptVersions {

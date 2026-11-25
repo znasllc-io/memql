@@ -5,6 +5,7 @@ import "../machines/machineModels.css";
 import { Subhead } from "../../../kit";
 import { InlineSkeleton } from "../../../kit/ContentSkeleton";
 import { IconButton } from "../../../kit/IconButton";
+import { memorySearchChooses, memorySearchWhere } from "../machines/modelSetup";
 import { RUNNABLE_APPS } from "../rows";
 import { EDITABLE_JOBS, JOB_MEANING, JOB_TITLES, MAX_JOB_SOURCES, type EditableJob, type EmbedderReading, type JobId, type JobSources, type RouteJob } from "./routeModes";
 import { ReadinessDot, SourceGlyph } from "./SourceGlyph";
@@ -136,7 +137,6 @@ export function JobBoard({
   reported,
   onAnnounce,
   onAddMachine,
-  onOpenModels,
 }: {
   jobs: JobSources;
   onChange: (next: JobSources) => void;
@@ -150,8 +150,6 @@ export function JobBoard({
   reported?: Partial<Record<EditableJob, ReportedJob>>;
   onAnnounce?: (sentence: string) => void;
   onAddMachine?: () => void;
-  /** Opens Fleet's Models, where an embedding model is pulled and bound. */
-  onOpenModels?: () => void;
 }) {
   const hint = useId();
   const [selected, setSelected] = useState<string | null>(null);
@@ -387,7 +385,7 @@ export function JobBoard({
                 </div>
               );
             })}
-            <EmbeddingsJob embedder={embedder} onOpenModels={onOpenModels} />
+            <EmbeddingsJob embedder={embedder} />
           </div>
           {readOnly ? null : <p className="os-caption fleet-assignment-hint">Select a source, then add it to a job. Or drag it into place.</p>}
           <p className="os-caption fleet-route-follows">Images and voice follow Auto.</p>
@@ -397,8 +395,13 @@ export function JobBoard({
   );
 }
 
-/** Search and memory: the cluster's bound embedder, the same in every route. */
-function EmbeddingsJob({ embedder, onOpenModels }: { embedder: EmbedderReading; onOpenModels?: () => void }) {
+/**
+ * Search and memory: the cluster's bound embedder, the same in every route, and
+ * where it is changed, or a first one chosen (memorySearchWhere and
+ * memorySearchChooses): Memory search, for whoever can open it. Fleet's Models
+ * is where a model is pulled onto a machine, not where it is chosen.
+ */
+function EmbeddingsJob({ embedder }: { embedder: EmbedderReading }) {
   return (
     <div className="fleet-route-job" role="group" aria-label={JOB_TITLES.embeddings} data-locked>
       <div className="fleet-assignment-task-name fleet-route-job-name">
@@ -412,10 +415,7 @@ function EmbeddingsJob({ embedder, onOpenModels }: { embedder: EmbedderReading; 
       ) : embedder.state === "unread" ? (
         <p className="fleet-route-job-empty">Not read{embedder.error ? `: ${embedder.error}` : ""}</p>
       ) : embedder.state === "none" ? (
-        <>
-          <p className="fleet-route-job-empty">No embedding model yet</p>
-          {onOpenModels ? <button type="button" className="os-link fleet-route-job-link" onClick={onOpenModels}>Add one in Models</button> : null}
-        </>
+        <p className="fleet-route-job-empty">No embedding model yet</p>
       ) : (
         <ol className="fleet-route-job-sources" aria-label="Search and memory model">
           <li className="fleet-route-chip" data-ready>
@@ -427,7 +427,7 @@ function EmbeddingsJob({ embedder, onOpenModels }: { embedder: EmbedderReading; 
           </li>
         </ol>
       )}
-      <p className="fleet-route-job-status">The same in every route</p>
+      <p className="fleet-route-job-status">{`The same in every route. ${embedder.state === "none" ? memorySearchChooses() : memorySearchWhere()}`}</p>
     </div>
   );
 }

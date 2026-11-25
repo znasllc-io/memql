@@ -239,12 +239,16 @@ Real-time streaming transcription over `MemqlService.Stream`
 `AiForwardRouter.ForwardContinuation`. Single-shot batch via `AiTranscribeMsg`
 is still supported, plus the DSL capability `integration.stt.transcribe`.
 
-Providers: **OpenAI Realtime** (default, true streaming WebSocket) or **OpenAI
-Whisper** (batch only; `whisper-1` transcribes verbatim and must be enabled for
-your OpenAI project).
+Providers: the **router** by default (`app/integrations_stt.go`): a machine's
+audio model first, then a vendor the cluster-account rule lets pay for the
+caller. Set explicitly, **OpenAI Realtime** (true streaming WebSocket) or
+**OpenAI Whisper** (batch only; `whisper-1` transcribes verbatim and must be
+enabled for your OpenAI project) dial OpenAI directly with the cluster's own
+credential, for every caller, outside that rule.
 
 Env:
-- `MEMQL_STT_PROVIDER` -- `openai-realtime` (default) or `openai-whisper`
+- `MEMQL_STT_PROVIDER` -- unset or `router` (default), `openai-realtime` or
+  `openai-whisper`
 - `MEMQL_STT_LANGUAGE` -- hard-pinned streaming language (default `en`).
   Overrides the client `language_hint`; prevents wrong/mixed-language drift and
   short-word hallucination on noisy audio.

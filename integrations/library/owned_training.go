@@ -46,6 +46,7 @@ func (i *Integration) setTrainingReader(p memql.PluginContext) error {
 	r.embed.SetDBGetter(r.db)
 	r.embed.SetEmbeddingProvider(p.ResolveEmbeddingProvider)
 	i.training = r
+	activeTrainingReader.Store(r)
 	return nil
 }
 

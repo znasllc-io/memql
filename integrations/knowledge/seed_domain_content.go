@@ -16,12 +16,13 @@ package knowledge
 //     skips Tier C (writes a single placeholder), generates Tier A/B
 //     chunks via the prompt, and writes them.
 //
-// Idempotency: chunk ids are sha256("seed:" + recipeVersion + ":" +
-// domainId + ":" + index). Re-running with the same recipeVersion is
-// a no-op (MemQL latest-wins with identical content). Bumping
-// recipeVersion invalidates all old chunks for that domain (MemQL
-// time-series; old rows still exist as historical versions but reads
-// return the latest).
+// Chunk ids are seedChunkId(recipeVersion, domainId, index): the recipe,
+// not the text. A re-run at the same recipeVersion is NOT a no-op: the
+// workflow generates the chunks again and writes every one over the same
+// ids (MemQL latest-wins), and the generated text may differ, so memory
+// search treats these rows as versioned and embeds a rewritten one again
+// (knowledgeChunkHashesItsText). Bumping recipeVersion writes a new set
+// of ids; the old chunks stay as they were.
 
 import (
 	"context"
@@ -262,14 +263,6 @@ func (i *Integration) storeSeedChunk(
 	chunkId := seedChunkId(recipeVersion, d.ID, chunkIndex)
 	sourceRef := fmt.Sprintf("seed:%s:%s:%d", recipeVersion, seedSource, chunkIndex)
 
-	// Body is the retrievable text. We embed body alone (title is
-	// retrieval metadata, not part of the chunk content the agent
-	// reads).
-	vec, err := provider.Embed(ctx, c.Body)
-	if err != nil {
-		return fmt.Errorf("embed: %w", err)
-	}
-
 	// The createDocumentChunk mutation only takes the core
 	// fields. To carry our seedSource / seedTier / recipeVersion /
 	// kind / title / keyTerms we encode them into sourceRef + a
@@ -290,16 +283,17 @@ func (i *Integration) storeSeedChunk(
 	// (pack PR #25); see SanitizeChunkTitle's doc-comment
 	// for the full rule set and pack#29 for the rationale.
 	cleanTitle := SanitizeChunkTitle(c.Title)
-	metadata := map[string]any{
-		"seedSource":    seedSource,
-		"seedTier":      d.Tier,
-		"recipeVersion": recipeVersion,
-		"chunkKind":     c.Kind,
-		"chunkTitle":    cleanTitle,
-		"keyTerms":      c.KeyTerms,
+	enrichedBody := seedChunkRowText(seedMetadata(seedSource, d.Tier, recipeVersion, c.Kind, cleanTitle, c.KeyTerms), cleanTitle, c.Body)
+
+	// Body is the retrievable text. We embed body alone (title is
+	// retrieval metadata, not part of the chunk content the agent
+	// reads). The text comes back out of the row text through
+	// KnowledgeChunkEmbedText, the same function a memory-search rebuild
+	// uses, so a rebuilt index embeds exactly what this wrote.
+	vec, err := provider.Embed(ctx, KnowledgeChunkEmbedText(enrichedBody))
+	if err != nil {
+		return fmt.Errorf("embed: %w", err)
 	}
-	metadataJSON, _ := json.Marshal(metadata)
-	enrichedBody := fmt.Sprintf("<!--seed:%s-->\n\n## %s\n\n%s", string(metadataJSON), cleanTitle, c.Body)
 
 	insertQuery := fmt.Sprintf(
 		`mutation createDocumentChunk(chunkId: %s, domainId: %s, text: %s, source: %s, sourceRef: %s, seq: %d, tokenCount: %d)`,
@@ -321,10 +315,12 @@ func (i *Integration) storeSeedChunk(
 }
 
 // seedChunkId derives a deterministic chunk id from
-// (recipeVersion, domainId, chunkIndex) so re-runs are no-ops at the
-// same recipe version and bumping the version invalidates the prior
-// run. The seed-vs-augment origin is captured in row provenance, not
-// in the id string.
+// (recipeVersion, domainId, chunkIndex), so a re-run at the same recipe
+// version writes over the same rows (with whatever text it generated)
+// and bumping the version writes a new set. The id does not hash the
+// text, which is why memory search versions these rows
+// (knowledgeChunkHashesItsText). The seed-vs-augment origin is captured
+// in row provenance, not in the id string.
 func seedChunkId(recipeVersion, domainId string, chunkIndex int) string {
 	return string(id.New().MustFromMap(map[string]any{
 		"kind":          "seed-chunk",
@@ -441,4 +437,22 @@ func (s *seedScope) resolveEmbedder(ctx context.Context) error {
 		s.providerName, s.provider = bound, provider
 	}
 	return nil
+}
+
+// seedMetadata is the header a seed chunk's row text carries.
+func seedMetadata(seedSource string, tier any, recipeVersion, kind, title string, keyTerms []string) map[string]any {
+	return map[string]any{
+		"seedSource":    seedSource,
+		"seedTier":      tier,
+		"recipeVersion": recipeVersion,
+		"chunkKind":     kind,
+		"chunkTitle":    title,
+		"keyTerms":      keyTerms,
+	}
+}
+
+// seedChunkRowText is `<!--seed:{json}-->\n\n## title\n\nbody`.
+func seedChunkRowText(metadata map[string]any, title, body string) string {
+	metadataJSON, _ := json.Marshal(metadata)
+	return fmt.Sprintf("<!--seed:%s-->\n\n## %s\n\n%s", string(metadataJSON), title, body)
 }
