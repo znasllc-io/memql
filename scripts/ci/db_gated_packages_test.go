@@ -142,7 +142,7 @@ func TestDBTestsLaneTakesItsSetFromThePlanner(t *testing.T) {
 		}
 	}
 	goStep := nativeRequiredStep(t, "go-tests")
-	if !strings.Contains(goStep.Run, "go test -count=1 -timeout=600s $MEMQL_PACKAGES\n") {
+	if !strings.Contains(goStep.Run, "go test -count=1 -timeout=900s $MEMQL_PACKAGES\n") {
 		t.Error("non-database tests no longer execute the native selected packages uncached")
 	}
 }
