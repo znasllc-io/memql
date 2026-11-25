@@ -5,7 +5,7 @@ status: stable
 area: operate
 sinceVersion: 0.31.41
 owner: znas
-description: The one embedding model memory search uses, whose machines embed for it, and how an owner chooses it, switches it and switches back.
+description: The one embedding model memory search uses, whose machines embed for it, and how it is chosen, switched and switched back.
 ---
 
 # Memory search
@@ -22,7 +22,8 @@ of that model's own (`node_vectors_<dims>_<16 hex>`), and never the item's text,
 which is rebuilt from the row whenever it has to be embedded again. What each
 person may see in a result is decided by the row, as everywhere else.
 
-Owners see and change it in **Cluster > Settings > Memory search**.
+Owners, and anyone they grant it to, see and change it in **Cluster > Settings >
+Memory search**.
 
 ## The model
 
@@ -34,7 +35,8 @@ id `active`). It is either:
   an owner's machines, and no vendor account pays; or
 - **a vendor model**, such as `embedding3Small` (OpenAI's
   text-embedding-3-small): the cluster's vendor account pays for every item and
-  every search, whoever wrote or runs it. Only an owner's choice binds one.
+  every search, whoever wrote or runs it. Only a person's choice binds one,
+  never the automatic choice: an owner, or someone granted Memory search.
 
 Every memory-search embedding names this model. It never falls back to another
 and never degrades ([AI routing](ai-routing.md)): a vector from another model
@@ -55,7 +57,7 @@ their memory text.
 
 **Where the text goes.** An item's text, and a search's words, go only to the
 indexer's machines and the machines lent to them or, for a vendor model, to the
-vendor an owner chose.
+vendor whose model the cluster uses.
 
 **The indexer must stay an active owner**: an active user whose role is
 `owner`, which each replica checks again within a minute. When they stop being
@@ -86,11 +88,12 @@ embeds nothing, the next pass tries again, and first-run setup says "Add an
 embedding model" ([What an owner sees first](first-run.md)).
 
 A cluster bound to a vendor model nobody chose -- by an earlier version's
-fallback, or by hand -- keeps working, and Memory search asks an owner once:
-"This cluster uses text-embedding-3-small, paid by the cluster's vendor
-account. Keep it, or choose a model on your machines." **Keep** records them as
-its chooser. A model on a machine that was bound before indexers existed is
-given one at boot: the first active owner, by id, whose machines offer it.
+fallback, or by hand -- keeps working, and Memory search asks once, of anyone
+who may change the model (an owner, or someone granted Memory search): "This
+cluster uses text-embedding-3-small, paid by the cluster's vendor account. Keep
+it, or choose a model on your machines." **Keep** records whoever answers as its
+chooser. A model on a machine that was bound before indexers existed is given
+one at boot: the first active owner, by id, whose machines offer it.
 
 ## Choosing and switching
 
@@ -222,7 +225,8 @@ can grant it to others.
 
 | Holds | Sees and does |
 |---|---|
-| `read` and `execute` | everything on this page |
+| `read` and `execute`, as an active owner | everything on this page |
+| `read` and `execute`, not an owner | everything but a model on a machine: choosing one is refused, and neither take-over is offered, because whoever chooses one becomes its indexer. A vendor model, Keep, Cancel and Switch anyway are theirs |
 | `read` only | the model, its indexer, the backlog and any switch; no act is offered |
 | neither | no Memory search in the Cluster app |
 
@@ -238,7 +242,7 @@ The page is six builtins, callable from the SDKs:
 |---|---|---|
 | `memorySearchStatus` | `read` | the one status row: the model, its indexer, `takeOver`, the index's size, the backlog and why it waits, any switch (with its own `takeOver`), the kept indexes |
 | `memorySearchChoices` | `read` | the models you may choose |
-| `memorySearchSwitch(provider)` | `execute` | choose a model: bind the first, start a switch, or take over |
+| `memorySearchSwitch(provider)` | `execute` | choose a model: bind the first, start a switch, or take over; a model on a machine needs an active owner |
 | `memorySearchCancel` | `execute` | cancel the switch before its flip |
 | `memorySearchSwitchAnyway` | `execute` | flip a held switch, at the job's next tick |
 | `memorySearchConfirm` | `execute` | keep a vendor model nobody chose |

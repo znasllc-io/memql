@@ -273,16 +273,17 @@ the cluster's account does not pay for this person's calls.
   an app failed when it was called.
 - **Embeddings are the exception.** Memory search compares vectors, and
   vectors from two models cannot be compared, so the cluster indexes
-  everything with ONE embedding model, which an owner chooses for the whole
-  cluster in Cluster > Settings > Memory search. That model is all that is
-  shared; what each person may see in a result is still their own. When the
-  chosen model is a vendor's, the cluster's account pays for every caller's
-  embeddings, because a person whose writes were not embedded would be
-  missing from everybody's search; only an owner's choice binds one. When it
-  is a model on a machine (the usual case, and the only kind the cluster
-  picks by itself), no vendor account pays at all: everything is embedded by
-  the indexer, on the machines of the cluster owner named for it and the
-  machines lent to them, whoever wrote the item or runs the search.
+  everything with ONE embedding model, chosen for the whole cluster in
+  Cluster > Settings > Memory search. That model is all that is shared; what
+  each person may see in a result is still their own. When the chosen model
+  is a vendor's, the cluster's account pays for every caller's embeddings,
+  because a person whose writes were not embedded would be missing from
+  everybody's search; only a person's choice binds one, never the automatic
+  choice: an owner, or someone granted Memory search. When it is a model on
+  a machine (the usual case, and the only kind the cluster picks by itself),
+  no vendor account pays at all: everything is embedded by the indexer, on
+  the machines of the cluster owner named for it and the machines lent to
+  them, whoever wrote the item or runs the search.
   [Memory search](memory-search.md) has the rest.
 - **Not covered:** a cluster whose operator set `MEMQL_STT_PROVIDER` to one of
   the direct OpenAI transcription paths sends everybody's live transcription
