@@ -19,16 +19,20 @@ import (
 // machine model is indexed only by an active owner, so a caller who is not one
 // takes over nothing; the cluster asking (no caller) takes over nothing either.
 //
-// A catalog that cannot be read answers false, logged, rather than failing the
-// status: the screen then withholds the act for that read and still shows what
-// is in use, and the next read asks again. An act offered on a guess would be
-// one the engine might answer by doing nothing.
+// A catalog or an owner check that cannot be read answers false, logged, rather
+// than failing the status: the screen then withholds the act for that read and
+// still shows what is in use, and the next read asks again. An act offered on a
+// guess would be one the engine might answer by doing nothing.
 func memorySearchOffersTakeOver(ctx context.Context, w memorySearchWorld, caller string, active EmbedderBinding) bool {
 	indexer, fleet := IndexerFor(active)
-	if !fleet || strings.TrimSpace(caller) == "" || !w.isActiveOwner(ctx, caller) {
+	if !fleet || strings.TrimSpace(caller) == "" {
 		return false
 	}
-	takeOver, err := memorySearchTakesOver(ctx, w, caller, indexer, active.ProviderRef)
+	owner, err := w.isActiveOwner(ctx, caller)
+	takeOver := false
+	if err == nil && owner {
+		takeOver, err = memorySearchTakesOver(ctx, w, caller, indexer, active.ProviderRef)
+	}
 	if err != nil {
 		w.logger().Warn("memory search: could not tell whether choosing the model in use again would take over its indexing", "provider", active.ProviderRef, "error", err)
 		return false

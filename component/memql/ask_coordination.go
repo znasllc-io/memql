@@ -45,6 +45,12 @@ type askConversationHold struct {
 	stopped   chan struct{}
 }
 
+// errAskConversationHeld is a conversation lock another request holds: the
+// try-lock found it taken, or another observer's lease is live. One sentinel
+// for that one meaning, so a caller can tell it from a lock that could not be
+// taken at all (memorySearchLock).
+var errAskConversationHeld = errors.New("MemQL is already working in this conversation")
+
 func (e *MemQLEngine) holdAskConversation(ctx context.Context, conversationID, kind string) (*askConversationHold, error) {
 	_, bareID, err := id.ParseNodeId(conversationID)
 	if err != nil {
@@ -109,7 +115,7 @@ func (e *MemQLEngine) holdAskWriter(ctx context.Context, key int64, wait bool) (
 		if err != nil {
 			return nil, gateWaitError(err, lockCtx, acquire)
 		}
-		return nil, fmt.Errorf("MemQL is already working in this conversation")
+		return nil, errAskConversationHeld
 	}
 	return hold, nil
 }
@@ -131,7 +137,7 @@ func (e *MemQLEngine) claimAskObserver(ctx context.Context, key int64) (*askConv
 		WHERE automation_execution_claims.expires_at <= clock_timestamp()
 		RETURNING claimed_by`, askObserverNamespace, strconv.FormatInt(key, 10), h.token, int(askObserverTTL/time.Second)).Scan(&token)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("MemQL is already working in this conversation")
+		return nil, errAskConversationHeld
 	}
 	if err != nil {
 		return nil, err

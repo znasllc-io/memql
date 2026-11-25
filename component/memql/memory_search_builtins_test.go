@@ -38,8 +38,11 @@ type memorySearchFake struct {
 	names       map[string]string
 
 	locked    bool
+	lockErr   error
 	writeErr  error
 	ensureErr error
+	bindErr   error
+	ownerErr  error
 	counted   int
 
 	events      []string
@@ -76,8 +79,11 @@ func (f *memorySearchFake) binding(context.Context) (EmbedderBinding, error) {
 }
 
 func (f *memorySearchFake) lockBinding(context.Context) (func(), error) {
+	if f.lockErr != nil {
+		return nil, f.lockErr
+	}
 	if f.locked {
-		return nil, errors.New("MemQL is already working in this conversation")
+		return nil, errAskConversationHeld
 	}
 	f.locked = true
 	f.events = append(f.events, "lock")
@@ -116,6 +122,9 @@ func (f *memorySearchFake) writeChoice(_ context.Context, c embedderChoice) erro
 
 func (f *memorySearchFake) bind(_ context.Context, provider string, c embedderChoice) error {
 	f.binds = append(f.binds, provider)
+	if f.bindErr != nil {
+		return f.bindErr
+	}
 	dims, err := f.probe(context.Background(), provider, c.IndexedBy)
 	if err != nil {
 		return err
@@ -171,8 +180,11 @@ func (f *memorySearchFake) dropTable(_ context.Context, table string) error {
 	return nil
 }
 
-func (f *memorySearchFake) isActiveOwner(_ context.Context, userId string) bool {
-	return f.job.owners[userId]
+func (f *memorySearchFake) isActiveOwner(_ context.Context, userId string) (bool, error) {
+	if f.ownerErr != nil {
+		return false, f.ownerErr
+	}
+	return f.job.owners[userId], nil
 }
 
 func (f *memorySearchFake) catalog(_ context.Context, userId string) ([]FleetModel, error) {
@@ -623,6 +635,119 @@ func TestASwitchStartsOnlyOnceItsTableIsReady(t *testing.T) {
 	require.NoError(t, memorySearchSwitch(ctx, f, fakeOwner, fakeOldRef))
 	require.Equal(t, []string{"lock", "unlock", "lock", "writeRun done locked=true", "writeRun indexing locked=true", "unlock"}, f.events)
 	require.Zero(t, f.counted, "the active index is not counted")
+}
+
+// Memory search says "being changed elsewhere, try again" only for a binding
+// lock another request holds, and never in the lock's own words, which are
+// Ask's ("MemQL is already working in this conversation"). Any other failure to
+// take the lock -- no gate pool wired, the pool busy, the database -- is
+// reported as the failure it is, the daily cleanup's included.
+func TestOnlyALockHeldElsewhereReadsAsBeingChangedElsewhere(t *testing.T) {
+	ctx := context.Background()
+	const third = "fleet:third-embedder"
+	failed := fmt.Errorf("Ask: %w: it was built without one", ErrWriteGatePoolMissing)
+	for name, act := range map[string]func(f *memorySearchFake) error{
+		"switch":  func(f *memorySearchFake) error { return memorySearchSwitch(ctx, f, fakeOwner, third) },
+		"cancel":  func(f *memorySearchFake) error { return memorySearchCancel(ctx, f) },
+		"confirm": func(f *memorySearchFake) error { return memorySearchConfirm(ctx, f, fakeOwner) },
+	} {
+		fake := func() *memorySearchFake {
+			f := newMemorySearchFake(3)
+			if name == "switch" {
+				f.noSwitch().job.fill(fakeOldRef, 4)
+				f.widths[third] = 4
+			}
+			return f
+		}
+		t.Run(name+", the lock held elsewhere", func(t *testing.T) {
+			f := fake()
+			f.locked = true
+			err := act(f)
+			require.ErrorIs(t, err, errMemorySearchBusy)
+			require.NotContains(t, err.Error(), "this conversation", "the lock's own words are Ask's")
+			require.Zero(t, f.runAttempts)
+		})
+		t.Run(name+", the lock failed", func(t *testing.T) {
+			f := fake()
+			f.lockErr = failed
+			err := act(f)
+			require.ErrorIs(t, err, ErrWriteGatePoolMissing)
+			require.NotContains(t, err.Error(), "elsewhere", "a failure is not somebody else's change")
+			require.Zero(t, f.runAttempts)
+		})
+	}
+
+	// A cluster's first model is bound under bindEmbedder's own lock.
+	f := newMemorySearchFake(3).noSwitch()
+	f.job.active = EmbedderBinding{}
+	f.bindErr = errAskConversationHeld
+	require.ErrorIs(t, memorySearchSwitch(ctx, f, fakeOwner, fakeNewRef), errMemorySearchBusy)
+	f.bindErr = failed
+	err := memorySearchSwitch(ctx, f, fakeOwner, fakeNewRef)
+	require.ErrorIs(t, err, ErrWriteGatePoolMissing)
+	require.NotContains(t, err.Error(), "elsewhere")
+
+	f = newMemorySearchFake(3)
+	f.locked = true
+	err = memoryIndexRetire(ctx, f)
+	require.ErrorContains(t, err, "being changed")
+	require.NotContains(t, err.Error(), "this conversation")
+	f = newMemorySearchFake(3)
+	f.lockErr = failed
+	err = memoryIndexRetire(ctx, f)
+	require.ErrorIs(t, err, ErrWriteGatePoolMissing)
+	require.NotContains(t, err.Error(), "being changed")
+}
+
+// A binding that lands between the switch's read and bindEmbedder's own, on
+// the no-binding path, is "changed meanwhile, try again": the owner is already
+// on the page bindEmbedder's refusal would send them to. Any other failure to
+// bind is reported as it is.
+func TestABindingThatLandsMeanwhileIsAChangeNotADirection(t *testing.T) {
+	ctx := context.Background()
+	f := newMemorySearchFake(3).noSwitch()
+	f.job.active = EmbedderBinding{}
+	f.bindErr = errEmbedderBindingActive
+	err := memorySearchSwitch(ctx, f, fakeOwner, fakeNewRef)
+	require.ErrorIs(t, err, errMemorySearchChanged)
+	require.NotContains(t, err.Error(), "Cluster > Settings")
+
+	f = newMemorySearchFake(3).noSwitch()
+	f.job.active = EmbedderBinding{}
+	f.bindErr = errors.New("no machine offering new-embedder is online")
+	require.EqualError(t, memorySearchSwitch(ctx, f, fakeOwner, fakeNewRef), "no machine offering new-embedder is online")
+}
+
+// An owner check that could not be made is reported, never read as "you are
+// not an active cluster owner"; the status withholds the take-over for that
+// read, as it does when a catalog cannot be read.
+func TestAnOwnerCheckThatFailedIsReportedAsAFailure(t *testing.T) {
+	ctx := context.Background()
+	const third = "fleet:third-embedder"
+	unread := errors.New("the cluster's owners could not be read: database unavailable")
+	f := newMemorySearchFake(3).noSwitch()
+	f.job.fill(fakeOldRef, 4)
+	f.widths[third] = 4
+	f.ownerErr = unread
+	err := memorySearchSwitch(ctx, f, fakeOwner, third)
+	require.ErrorIs(t, err, unread)
+	require.NotContains(t, err.Error(), "you are not an active cluster owner")
+	require.Empty(t, f.probes)
+	require.Zero(t, f.runAttempts)
+
+	// Choosing the model in use asks whether its indexer is still an owner.
+	f = newMemorySearchFake(3).noSwitch()
+	f.ownerErr = unread
+	require.ErrorIs(t, memorySearchSwitch(ctx, f, fakeOwner, fakeOldRef), unread)
+	require.Empty(t, f.choices)
+
+	f = newMemorySearchFake(3).noSwitch()
+	delete(f.job.owners, fakeOwner)
+	f.job.owners[memorySearchOtherOwner] = true
+	f.ownerErr = unread
+	row, err := memorySearchStatus(ctx, f, memorySearchOtherOwner)
+	require.NoError(t, err, "the status still answers")
+	require.Equal(t, false, row["takeOver"])
 }
 
 // Cancel stops the switch and keeps the partial index under the 30-day

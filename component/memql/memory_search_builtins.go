@@ -68,12 +68,16 @@ package memql
 // retried here: the state it was decided on is gone, and deciding again is the
 // owner's call. Every write of the run, binding and retired rows is stamped
 // after the version it read (VersionTimeAfter, ruling R12), so a replica whose
-// clock lags the last writer's still writes the newest version. The acts that read the binding and decide on it -- switch,
-// cancel, confirm, and the cleanup -- hold the binding lock
-// (lockAskConversationKind "active", "embedder-binding") around those reads and
-// their writes, which is what the flip holds, so neither can interleave with a
-// flip on another replica (memql#5431). The lock is a try-lock: held elsewhere,
-// the act says "try again" rather than waiting.
+// clock lags the last writer's still writes the newest version. The acts that
+// read the binding and decide on it -- switch, cancel, confirm, and the cleanup
+// -- hold the binding lock (lockAskConversationKind "active",
+// "embedder-binding") around those reads and their writes, which is what the
+// flip holds, so neither can interleave with a flip on another replica
+// (memql#5431). The lock is a try-lock: held by another request, the act says
+// the model is being changed elsewhere and to try again, rather than waiting;
+// a lock that could not be taken at all is reported as the failure it is
+// (memorySearchLock). So is an owner check that could not be made, which is
+// never read as "not an owner" (indexerOwnerAnswer).
 //
 // # The 30-day retention
 //
@@ -128,6 +132,11 @@ const memorySearchStateFailed = "failed"
 // another owner, another replica -- wrote the row since it was read.
 var errMemorySearchChanged = errors.New("memory search changed meanwhile, try again")
 
+// errMemorySearchBusy is the binding lock held by another request: the one
+// failure to take it that is somebody else's change, and the one an owner is
+// told to try again after (memorySearchLock).
+var errMemorySearchBusy = errors.New("memory search's model is being changed elsewhere right now; try again in a moment")
+
 // retiredMemoryIndex is one retired model's row (RetiredEmbedderBindingID): its
 // index is kept until RetireAt, and DroppedAt says when it was dropped.
 type retiredMemoryIndex struct {
@@ -166,7 +175,7 @@ type memorySearchWorld interface {
 	retired(ctx context.Context) ([]retiredMemoryIndex, error)
 	recordRetired(ctx context.Context, r retiredMemoryIndex) error
 	dropTable(ctx context.Context, table string) error
-	isActiveOwner(ctx context.Context, userId string) bool
+	isActiveOwner(ctx context.Context, userId string) (bool, error)
 	// catalog is a person's machine models: their own machines and the ones lent to them.
 	catalog(ctx context.Context, userId string) ([]FleetModel, error)
 	// vendorEmbedders are the vendor embedding records the cluster's own account pays for.
@@ -211,12 +220,19 @@ func memorySearchLabel(w memorySearchWorld, ref string) string {
 	return ref
 }
 
-// memorySearchLock takes the binding lock, or says plainly that another request
-// holds it.
+// memorySearchLock takes the binding lock. Held by another request, the act
+// says so plainly, and not in the lock's own words ("MemQL is already working
+// in this conversation", which are Ask's): errMemorySearchBusy. Any other
+// failure to take it -- no gate pool wired, every gate connection busy, the
+// database -- is reported as the failure it is, never as a change somebody
+// else is making.
 func memorySearchLock(ctx context.Context, w memorySearchWorld) (func(), error) {
 	unlock, err := w.lockBinding(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("memory search's model is being changed elsewhere right now; try again in a moment (%w)", err)
+	switch {
+	case errors.Is(err, errAskConversationHeld):
+		return nil, errMemorySearchBusy
+	case err != nil:
+		return nil, fmt.Errorf("memory search could not take its lock: %w", err)
 	}
 	return unlock, nil
 }
@@ -290,7 +306,14 @@ func memorySearchTakesOver(ctx context.Context, w memorySearchWorld, caller, ind
 	if !fleet || BareShortId(indexer) == BareShortId(caller) {
 		return false, nil
 	}
-	if strings.TrimSpace(indexer) == "" || !w.isActiveOwner(ctx, indexer) {
+	if strings.TrimSpace(indexer) == "" {
+		return true, nil
+	}
+	owner, err := w.isActiveOwner(ctx, indexer)
+	if err != nil {
+		return false, fmt.Errorf("checking whether %s's indexer is still an owner: %w", model, err)
+	}
+	if !owner {
 		return true, nil
 	}
 	theirs, err := w.catalog(ctx, indexer)
@@ -355,7 +378,11 @@ func memorySearchSwitch(ctx context.Context, w memorySearchWorld, caller, provid
 	_, fleet := IsFleetReference(provider)
 	indexer := ""
 	if fleet {
-		if !w.isActiveOwner(ctx, caller) {
+		owner, err := w.isActiveOwner(ctx, caller)
+		if err != nil {
+			return fmt.Errorf("memory search could not check that you are an active cluster owner: %w", err)
+		}
+		if !owner {
 			return fmt.Errorf("a machine model indexes memory search on a cluster owner's machines, and you are not an active cluster owner")
 		}
 		indexer = caller
@@ -369,7 +396,20 @@ func memorySearchSwitch(ctx context.Context, w memorySearchWorld, caller, provid
 		return err
 	}
 	if !bound && (!has || memorySearchSwitchOver(sw.State)) {
-		return w.bind(ctx, provider, embedderChoice{IndexedBy: indexer, ChosenBy: caller})
+		switch err := w.bind(ctx, provider, embedderChoice{IndexedBy: indexer, ChosenBy: caller}); {
+		case errors.Is(err, errEmbedderBindingActive):
+			// A binding landed between this read and bindEmbedder's own, under
+			// its lock. Its refusal sends the owner to Memory search, where they
+			// are: what happened is a change meanwhile, and deciding again is
+			// theirs.
+			return errMemorySearchChanged
+		case errors.Is(err, errAskConversationHeld):
+			// bindEmbedder's lock held by another request, said as
+			// memorySearchLock says it.
+			return errMemorySearchBusy
+		default:
+			return err
+		}
 	}
 	dims := 0
 	if memorySearchStartsASwitch(sw, has, active, bound, provider) {
@@ -624,8 +664,11 @@ func memorySearchConfirm(ctx context.Context, w memorySearchWorld, caller string
 // tries again: a day late costs disk, never an index in use.
 func memoryIndexRetire(ctx context.Context, w memorySearchWorld) error {
 	unlock, err := w.lockBinding(ctx)
-	if err != nil {
-		return fmt.Errorf("memory index cleanup: the memory-search model is being changed; tomorrow's run tries again: %w", err)
+	switch {
+	case errors.Is(err, errAskConversationHeld):
+		return fmt.Errorf("memory index cleanup: the memory-search model is being changed; tomorrow's run tries again")
+	case err != nil:
+		return fmt.Errorf("memory index cleanup: the binding lock could not be taken; tomorrow's run tries again: %w", err)
 	}
 	defer unlock()
 	keep := map[string]bool{}

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -185,6 +186,11 @@ func (e *MemQLEngine) bindEmbedderBuiltin(ctx context.Context, args map[string]a
 	return e.bindEmbedder(ctx, provider, choice)
 }
 
+// errEmbedderBindingActive is bindEmbedder refusing to change a binding that is
+// active. A sentinel, because memorySearchSwitch's no-binding path reads it as
+// a binding that landed meanwhile rather than passing its direction on.
+var errEmbedderBindingActive = errors.New("changing the active memory-search model rebuilds its whole index first; choose the model in Cluster > Settings > Memory search")
+
 // embedderChoice records, with a binding, whose machines index it and who
 // chose it (design record 2026-11-23, sections 1 and 2). ChosenBy is empty for
 // the automatic first choice: nobody chose it, so nobody is told they did.
@@ -204,7 +210,7 @@ func (e *MemQLEngine) bindEmbedder(ctx context.Context, provider string, choice 
 	current, readErr := e.readEmbedderPlan(ctx)
 	if readErr == nil {
 		if current.ProviderRef != provider {
-			return nil, fmt.Errorf("changing the active memory-search model rebuilds its whole index first; choose the model in Cluster > Settings > Memory search")
+			return nil, errEmbedderBindingActive
 		}
 		if current.ActivatedAt != "" {
 			raw, _ := json.Marshal(map[string]any{"provider": provider, "dimensions": current.Dimensions, "active": true})
@@ -490,6 +496,7 @@ type ownerSetCache struct {
 	at      time.Time  // when owners was read
 	retryAt time.Time  // no read before this, after a failed one
 	owners  map[string]bool
+	failed  error // the last read's failure; nil once a read succeeds
 	reading bool
 	read    func(context.Context) ([]string, error) // nil: activeOwnerIds; set by tests
 }
@@ -507,9 +514,25 @@ type ownerSetCache struct {
 // (false): an indexer that cannot be confirmed is not trusted, and the
 // writer's "until backfilled" path catches the item up later.
 func (e *MemQLEngine) IndexerIsActiveOwner(ctx context.Context, userId string) bool {
+	owner, _ := e.indexerOwnerAnswer(ctx, userId)
+	return owner
+}
+
+// errIndexerOwnersUnread is an owner check on a replica whose first read of the
+// owner set has not finished.
+var errIndexerOwnersUnread = errors.New("the cluster's owners have not been read yet; try again in a moment")
+
+// indexerOwnerAnswer is IndexerIsActiveOwner's answer and, when the replica has
+// none to give, why. It answers from the set it has, stale during an outage as
+// documented above; only while NO set has been read -- every read so far
+// failed, or the first is still running on another call -- does it answer false
+// with an error. IndexerIsActiveOwner reads that as false (an indexer that
+// cannot be confirmed is not trusted); an owner's act on Memory search reports
+// it, because "you are not an active cluster owner" would be a guess.
+func (e *MemQLEngine) indexerOwnerAnswer(ctx context.Context, userId string) (bool, error) {
 	userId = strings.TrimPrefix(strings.TrimSpace(userId), conceptIdentityUser+":")
 	if userId == "" {
-		return false
+		return false, nil
 	}
 	c := &e.indexerOwners
 	now := time.Now()
@@ -529,6 +552,7 @@ func (e *MemQLEngine) IndexerIsActiveOwner(ctx context.Context, userId string) b
 		c.reading = false
 		if err != nil {
 			c.retryAt = time.Now().Add(indexerOwnerRetry)
+			c.failed = err
 			c.mu.Unlock()
 			lg := e.safeLogger()
 			if lg == nil {
@@ -541,12 +565,24 @@ func (e *MemQLEngine) IndexerIsActiveOwner(ctx context.Context, userId string) b
 			for _, id := range ids {
 				c.owners[strings.TrimPrefix(id, conceptIdentityUser+":")] = true
 			}
-			c.at = time.Now()
+			c.at, c.failed = time.Now(), nil
 		}
 		defer c.mu.Unlock()
-		return c.owners[userId]
+		return c.answer(userId)
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.owners[userId]
+	return c.answer(userId)
+}
+
+// answer is the set's word on userId, or, with no set read yet, why not. The
+// caller holds mu.
+func (c *ownerSetCache) answer(userId string) (bool, error) {
+	switch {
+	case c.owners != nil:
+		return c.owners[userId], nil
+	case c.failed != nil:
+		return false, fmt.Errorf("the cluster's owners could not be read: %w", c.failed)
+	}
+	return false, errIndexerOwnersUnread
 }

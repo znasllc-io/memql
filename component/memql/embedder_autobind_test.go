@@ -263,3 +263,42 @@ func TestTheOwnerLookupSurvivesAFailedRead(t *testing.T) {
 	require.True(t, e.IndexerIsActiveOwner(ctx, "o1"))
 	require.Equal(t, 3, reads)
 }
+
+// With no set to answer from, the owner check says why rather than answering
+// no (indexerOwnerAnswer): an owner's act on Memory search then reports a check
+// that could not be made, where "you are not an active cluster owner" would be
+// a guess. IndexerIsActiveOwner still reads that state as false. Once a set is
+// read it answers, a no included, and a stale one keeps answering through an
+// outage, as the resolver's does.
+func TestAnOwnerCheckWithNoSetToAnswerFromSaysWhy(t *testing.T) {
+	e := &MemQLEngine{}
+	fail := true
+	e.indexerOwners.read = func(context.Context) ([]string, error) {
+		if fail {
+			return nil, errors.New("database unavailable")
+		}
+		return []string{"v1:identity:user:o1"}, nil
+	}
+	ctx := context.Background()
+	for range 2 { // the read, then the backoff after it
+		owner, err := e.indexerOwnerAnswer(ctx, "o1")
+		require.ErrorContains(t, err, "database unavailable")
+		require.False(t, owner)
+	}
+	require.False(t, e.IndexerIsActiveOwner(ctx, "o1"))
+
+	fail = false
+	e.indexerOwners.retryAt = time.Time{}
+	owner, err := e.indexerOwnerAnswer(ctx, "o1")
+	require.NoError(t, err)
+	require.True(t, owner)
+	owner, err = e.indexerOwnerAnswer(ctx, "o2")
+	require.NoError(t, err)
+	require.False(t, owner, "a set that was read says no without an error")
+
+	e.indexerOwners.at = time.Now().Add(-2 * indexerOwnerTTL)
+	fail = true
+	owner, err = e.indexerOwnerAnswer(ctx, "o1")
+	require.NoError(t, err)
+	require.True(t, owner)
+}

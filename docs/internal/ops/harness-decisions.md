@@ -2683,7 +2683,12 @@ person's memory text, or which vendor account pays for all of it. An act is
 recorded as a person (who started, who chose, who indexes), so the cluster
 acting is refused. A machine model must be chosen by an active owner, because
 the chooser becomes its indexer (R5); a person granted the part who is not an
-owner can still choose a vendor model.
+owner can still choose a vendor model. The check asks the per-replica owner set
+the resolver and the job ask, and a replica that has not read it yet (its reads
+failed, or the first is still running) reports that failure
+(`indexerOwnerAnswer`) instead of "you are not an active cluster owner", which
+would be a guess (`TestAnOwnerCheckThatFailedIsReportedAsAFailure`,
+`TestAnOwnerCheckWithNoSetToAnswerFromSaysWhy`).
 
 **No builtin flips.** The binding moves inside a builtin only for a cluster's
 FIRST model (`bindEmbedder`): nothing is indexed under another. Every other
@@ -2695,7 +2700,14 @@ only) writes `switching`, and a switch over an active index that holds no
 vector is written `switching` directly; either way the tick flips within a
 minute.
 
-**`memorySearchSwitch`.** No model bound: bound at once. Otherwise a look before
+**`memorySearchSwitch`.** No model bound: bound at once. A binding that lands
+between that read and `bindEmbedder`'s own, under its lock, makes
+`bindEmbedder` refuse with directions to Memory search, where the owner already
+is; that refusal (`errEmbedderBindingActive`) is answered "changed meanwhile,
+try again" instead (`TestABindingThatLandsMeanwhileIsAChangeNotADirection`),
+and `bindEmbedder`'s own lock held elsewhere is said as the binding lock's is
+(below).
+Otherwise a look before
 the lock says only whether a new switch starts, so the new model can be probed
 as its indexer OUTSIDE the lock (a machine call takes seconds); everything is
 then decided again under the binding lock, from the run and the binding read
@@ -2766,9 +2778,9 @@ leaving the refusal, which keeps search down for hours on a large corpus.
 the model in use again, would become its indexer -- the take-over rule asked
 from the caller's side (`memorySearchOffersTakeOver`), false for the indexer
 themself, a caller who is not an active owner, a vendor model, or no caller. So
-Memory search offers the act only where it changes something. A catalog that
-cannot be read answers false, logged, and the next read asks again; the status
-itself still answers. Tests:
+Memory search offers the act only where it changes something. A catalog or an
+owner check that cannot be read answers false, logged, and the next read asks
+again; the status itself still answers. Tests:
 `TestChoosingTheModelInUseDuringASwitchTakesOverTheBindingsIndexer`,
 `TestStatusSaysWhenChoosingTheModelInUseTakesOver`. Limit: a running switch
 whose RUN indexer cannot index is told only by its `waitingReason`; the status
@@ -2779,8 +2791,14 @@ has no take-over answer for the run.
 reaches the owner as "memory search changed meanwhile, try again": the state the
 act was decided on is gone, and deciding again is the owner's call. Switch,
 cancel, confirm and the cleanup hold the binding lock around the reads they
-decide on and their writes, which is what the flip holds; it is a try-lock, so a
-held lock answers "try again" rather than waiting.
+decide on and their writes, which is what the flip holds. It is a try-lock: held
+by another request, the act answers that the model is being changed elsewhere,
+try again, rather than waiting. Any other failure to take it (no gate pool
+wired, every gate connection busy, the database) is reported as the failure it
+is, never as somebody else's change, and the lock's own words ("MemQL is already
+working in this conversation", which are Ask's) never reach an owner
+(`errAskConversationHeld`, `memorySearchLock`;
+`TestOnlyALockHeldElsewhereReadsAsBeingChangedElsewhere`).
 
 **A version stamped after the one read (ruling R12; memql#5431's third part).**
 Trigger: a fence checks that a row did not change; it does not make the new
@@ -2837,7 +2855,8 @@ running switch's target, protected by NAME whatever a retired row says: a flip
 that stopped part way dates the active model before the binding moves, and a
 cancelled target can be chosen again (`TestTheActiveAndTargetTablesAreNeverDropped`,
 `TestARetiredIndexIsDroppedAfterItsDate`). A held lock fails that run;
-tomorrow's tries again, a day late costing disk and never an index in use.
+tomorrow's tries again, a day late costing disk and never an index in use. A
+lock that could not be taken fails it too, and says so.
 
 **What survives.** Everything is rows and tables in Postgres; a builtin keeps
 nothing between calls, so a retry or another replica decides from what is

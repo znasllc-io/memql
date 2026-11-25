@@ -188,8 +188,12 @@ func (w engineMemorySearchWorld) dropTable(ctx context.Context, table string) er
 	return err
 }
 
-func (w engineMemorySearchWorld) isActiveOwner(ctx context.Context, userId string) bool {
-	return w.e.IndexerIsActiveOwner(ctx, userId)
+// isActiveOwner asks the same per-replica owner set the resolver and the index
+// job ask (IndexerIsActiveOwner), so an act and the indexing it starts agree,
+// and reports an owner check that could not be made rather than reading it as
+// "not an owner" (indexerOwnerAnswer).
+func (w engineMemorySearchWorld) isActiveOwner(ctx context.Context, userId string) (bool, error) {
+	return w.e.indexerOwnerAnswer(ctx, userId)
 }
 
 // catalog reads one person's machine models -- their own machines and the ones
