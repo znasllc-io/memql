@@ -2563,11 +2563,22 @@ after (the observation, conversation evidence, acknowledgement, catalog and
 Library chunk writers), so a row embedded when it was written is never
 embedded again; the version is the writer's clock and `updated_at` the
 database's, so a vector within `memoryIndexClockSlack` (2 s) still counts as its
-row's. A content-addressed source (`MemorySource.ContentAddressed`: knowledge
-chunks, whose ids hash their text or name a seed's recipe version) is exempt:
-its rows are rewritten by review stamps and every boot's re-seed without the
-text changing (`TestARowRewrittenAfterItsVectorIsEmbeddedAgain`,
-`TestARowRewrittenDuringTheSwitchIsEmbeddedAgain`).
+row's (`TestARowRewrittenAfterItsVectorIsEmbeddedAgain`,
+`TestARowRewrittenDuringTheSwitchIsEmbeddedAgain`). A row whose id hashes its
+own text is exempt: its text never changes under the id, and it is rewritten by
+review stamps and every boot's re-seed. `MemorySource.ContentAddressed` asks
+that of EACH row, never of a source, because one source holds both kinds. A
+knowledge chunk is exempt only when its id recomputes as `chunkIdFor` of its own
+domain, sourceRef, seq and text (`knowledgeChunkHashesItsText`): ingest, the
+seed corpora and the canonical and release seeds. An LLM-seeded or bridge chunk
+is keyed by `seedChunkId`, the recipe version, the domain and the index, and the
+seed workflow writes every chunk each time it runs, so a re-run at the same
+recipe version writes new text under the old ids; a Trainer chunk's id is its
+caller's. Those are versioned, so the new text is embedded again, at the cost of
+one embedding per rewrite (a review stamp included). Tests:
+`TestOnlyAChunkWhoseIdHashesItsTextIsPresenceOnly`, and
+`TestCanonicalKnowledgeDB/MemorySearchKnowsAContentAddressedChunkFromItsStoredRow`
+on the rows as the writers store them.
 
 **Waiting is not failing.** An item is tried three times, then counted failed,
 and the walk goes on; the next walk tries it again. When the model cannot be

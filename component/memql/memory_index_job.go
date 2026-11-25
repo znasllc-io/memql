@@ -98,8 +98,9 @@ package memql
 // An item is missing from the target when its vector is absent OR older than
 // its row's newest version (memoryIndexCurrent, ruling R7): a rewritten row's
 // old vector no longer says what the row says, and presence alone cannot see
-// that. Content-addressed sources are exempt; their text never changes under
-// an id.
+// that. A row whose id hashes its own text is exempt
+// (MemorySource.ContentAddressed, asked of each row): its text never changes
+// under the id.
 //
 // # The flip: ordered steps, every prefix finished (ruling R6)
 //
@@ -228,8 +229,8 @@ var memoryIndexClockSlack = 2 * time.Second
 // a vector still counts as its row's: replicas drift by milliseconds, not
 // seconds. The cost of the slack is one rare miss: a row rewritten within it
 // after the job embedded the row keeps the older vector until its next write.
-// An item with no Version -- a content-addressed source, or one that pages its
-// own items -- is current whenever it is present.
+// An item with no Version -- a row whose id hashes its text, or an item of a
+// source that pages its own items -- is current whenever it is present.
 func memoryIndexCurrent(item MemoryItem, written map[string]time.Time) bool {
 	at, ok := written[item.Id]
 	if !ok {

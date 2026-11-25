@@ -49,9 +49,9 @@ import (
 //
 // Version is when the row version the text was rebuilt from was written. The
 // index job takes a vector older than it as missing: the row changed after it
-// was embedded (ruling R7). Zero for an item whose source keys its ids by
-// content (MemorySource.ContentAddressed) or pages its own items, where the text
-// under an id never changes.
+// was embedded (ruling R7). Zero for a row whose id is a hash of its own text
+// (MemorySource.ContentAddressed), and for an item of a source that pages its
+// own items, where the text under an id never changes.
 type MemoryItem struct {
 	Id, Text, Failure string
 	Version           time.Time
@@ -69,16 +69,19 @@ type MemoryItem struct {
 // after ("" once exhausted). The Training lessons need it, because only the
 // current head of each lesson is indexed, which no single row can say.
 //
-// ContentAddressed says the text under a row's id never changes: a knowledge
-// chunk's id hashes its text, and a seed chunk's names its recipe version. Such
-// rows are written again without their text changing -- a review stamp, every
-// boot's re-seed -- so a newer row version is NOT a reason to embed the item
-// again, and the walk gives it no Version.
+// ContentAddressed, when set, says of one row -- its canonical id and latest
+// payload -- whether the id is a hash of the row's own text, so the text under
+// it never changes. Such a row is written again without its text changing (a
+// review stamp, a boot's re-seed), so a newer row version is NOT a reason to
+// embed the item again, and the walk gives it no Version. It is asked of each
+// row, never assumed of a source: a knowledge chunk ingested or seeded from a
+// corpus hashes its text, while an LLM-seeded chunk's id names its recipe
+// version and index, and a re-seed writes new text under it. Nil: no row is.
 type MemorySource struct {
 	Name, Concept, VectorField string
 	Rows                       func(payload map[string]any) (text string, ok bool)
 	Items                      func(ctx context.Context, after string, limit int) (items []MemoryItem, next string, err error)
-	ContentAddressed           bool
+	ContentAddressed           func(id string, payload map[string]any) bool
 }
 
 var memorySources = struct {
@@ -265,7 +268,7 @@ func (e *MemQLEngine) memorySourceItems(ctx context.Context, s MemorySource, aft
 			}
 			if text, ok := s.Rows(payload); ok {
 				item := MemoryItem{Id: n.ID, Text: text}
-				if !s.ContentAddressed {
+				if s.ContentAddressed == nil || !s.ContentAddressed(n.ID, payload) {
 					item.Version = n.CreatedAt.UTC()
 				}
 				items = append(items, item)

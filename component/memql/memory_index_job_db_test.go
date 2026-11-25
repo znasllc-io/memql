@@ -524,14 +524,16 @@ func TestTheRowSourceWalkReadsTheLatestVersionOnPostgres(t *testing.T) {
 	require.Len(t, items, 2)
 	require.Equal(t, []string{concept + ":e", "e", concept + ":f", "f"}, []string{items[0].Id, items[0].Text, items[1].Id, items[1].Text})
 
-	// A content-addressed source's items carry no version: their text never
-	// changes under an id, so a newer row version is no reason to embed again.
-	source.ContentAddressed = true
+	// A row whose id hashes its text carries no version: its text never
+	// changes under the id, so a newer row version is no reason to embed again.
+	// The source answers that of each row, never of the whole concept.
+	source.ContentAddressed = func(id string, payload map[string]any) bool { return id == concept+":e" && payload["text"] == "e" }
 	items, _, err = eng.memorySourceItems(ctx, source, concept+":d", 2)
 	require.NoError(t, err)
 	require.Len(t, items, 2)
-	require.True(t, items[0].Version.IsZero() && items[1].Version.IsZero())
-	source.ContentAddressed = false
+	require.True(t, items[0].Version.IsZero(), "e's id hashes its text")
+	require.False(t, items[1].Version.IsZero(), "f's does not")
+	source.ContentAddressed = nil
 	items, next, err = eng.memorySourceItems(ctx, source, next, 2)
 	require.NoError(t, err)
 	require.Empty(t, items)

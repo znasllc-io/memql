@@ -16,12 +16,13 @@ package knowledge
 //     skips Tier C (writes a single placeholder), generates Tier A/B
 //     chunks via the prompt, and writes them.
 //
-// Idempotency: chunk ids are sha256("seed:" + recipeVersion + ":" +
-// domainId + ":" + index). Re-running with the same recipeVersion is
-// a no-op (MemQL latest-wins with identical content). Bumping
-// recipeVersion invalidates all old chunks for that domain (MemQL
-// time-series; old rows still exist as historical versions but reads
-// return the latest).
+// Chunk ids are seedChunkId(recipeVersion, domainId, index): the recipe,
+// not the text. A re-run at the same recipeVersion is NOT a no-op: the
+// workflow generates the chunks again and writes every one over the same
+// ids (MemQL latest-wins), and the generated text may differ, so memory
+// search treats these rows as versioned and embeds a rewritten one again
+// (knowledgeChunkHashesItsText). Bumping recipeVersion writes a new set
+// of ids; the old chunks stay as they were.
 
 import (
 	"context"
@@ -314,10 +315,12 @@ func (i *Integration) storeSeedChunk(
 }
 
 // seedChunkId derives a deterministic chunk id from
-// (recipeVersion, domainId, chunkIndex) so re-runs are no-ops at the
-// same recipe version and bumping the version invalidates the prior
-// run. The seed-vs-augment origin is captured in row provenance, not
-// in the id string.
+// (recipeVersion, domainId, chunkIndex), so a re-run at the same recipe
+// version writes over the same rows (with whatever text it generated)
+// and bumping the version writes a new set. The id does not hash the
+// text, which is why memory search versions these rows
+// (knowledgeChunkHashesItsText). The seed-vs-augment origin is captured
+// in row provenance, not in the id string.
 func seedChunkId(recipeVersion, domainId string, chunkIndex int) string {
 	return string(id.New().MustFromMap(map[string]any{
 		"kind":          "seed-chunk",

@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/id"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // The knowledge chunk's memory-search source (the rebuild recipe a model switch
@@ -58,11 +60,38 @@ func init() {
 			text = KnowledgeChunkEmbedText(text)
 			return text, strings.TrimSpace(text) != ""
 		},
-		// A chunk's id is a hash of its text (chunkIdFor) or names a seed's
-		// recipe version (seedChunkId, the canonical seeds), so the text under
-		// an id never changes. Its row IS written again without its text
-		// changing -- a validation stamp, every boot's re-seed -- and a newer
-		// version must not send every chunk to be embedded again.
-		ContentAddressed: true,
+		ContentAddressed: knowledgeChunkHashesItsText,
 	})
+}
+
+// knowledgeChunkHashesItsText reports whether a chunk row's id is chunkIdFor of
+// the row's own domain, sourceRef, seq and text: the ids ingest, the seed
+// corpora and the canonical and release seeds write, under which the text never
+// changes, though the row is written again (a review stamp, a boot's re-seed).
+// Memory search then takes such a row as current whenever its vector is
+// present (ruling R7).
+//
+// RECOMPUTED FROM THE ROW, not inferred from its source or provenance, so any
+// other way of keying a chunk is versioned by construction, and new text under
+// its id is embedded again. storeSeedChunk keys the LLM-seeded domains and the
+// cross-domain bridges by seedChunkId -- the recipe version, the domain and the
+// index, not the text -- and the seed workflow writes every chunk each time it
+// runs, so a re-run at the same recipe version writes new text under the same
+// ids. The Trainer's writeKnowledgeChunk takes whatever id its caller chose. A
+// row missing a field its id hashes is versioned too: the cost of a wrong
+// "versioned" is one more embedding, of a wrong "content-addressed" a vector
+// that no longer says what its row says.
+func knowledgeChunkHashesItsText(rowId string, p map[string]any) bool {
+	domainId, okDomain := p["domainId"].(string)
+	sourceRef, okRef := p["sourceRef"].(string)
+	text, okText := p["text"].(string)
+	seq, okSeq := p["seq"].(float64)
+	if !okDomain || !okRef || !okText || !okSeq {
+		return false
+	}
+	whole, ok := num.WholeInt64(seq)
+	if !ok {
+		return false
+	}
+	return rowId == id.BuildNodeId(conceptKnowledgeDocumentChunk, chunkIdFor(domainId, sourceRef, num.ClampInt64(whole), text))
 }
