@@ -222,6 +222,11 @@ func init() {
 // also carries schema, metadata and provenance, which nothing in the walk
 // reads, and every batch of every walk would carry them: the backfill walks
 // the whole corpus every ten minutes.
+//
+// staged-data: MUST-NOT-GATE -- memorySourceItems' read, which feeds the WRITE
+// side of the index: the live writers embed a row the moment it is written,
+// staged or not, so a staged row hidden here would be missing from the rebuilt
+// index and unretrievable once its concept goes live.
 func memorySourceRowsQuery(db *bun.DB, nodes *[]memorynodes.MemoryNode, concept, cursor string, limit int) *bun.SelectQuery {
 	return db.NewSelect().Model(nodes).Column("id", "createdAt", "payload").DistinctOn("id").
 		Where("concept = ?", concept).Where("id > ?", cursor).

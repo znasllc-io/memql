@@ -22,7 +22,8 @@ import (
 // item of every walk, and the backfill walks the whole corpus every ten
 // minutes. Pinned on the statement itself, which needs no database to build.
 func TestTheSourceWalkReadsOnlyTheColumnsItUses(t *testing.T) {
-	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN("postgres://memql@127.0.0.1:1/none?sslmode=disable"))), pgdialect.New())
+	// Never dialled: the statement is built and read, not run.
+	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector()), pgdialect.New())
 	t.Cleanup(func() { _ = db.Close() })
 	var nodes []memorynodes.MemoryNode
 	statement := memorySourceRowsQuery(db, &nodes, "v1:test:item", "v1:test:item:007", 32).String()
