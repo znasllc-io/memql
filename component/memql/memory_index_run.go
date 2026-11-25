@@ -65,12 +65,13 @@ type memoryIndexRunPayload struct {
 	FinishedAt       string            `json:"finishedAt"`
 	Cursor           map[string]string `json:"cursor"`
 	Counts           struct {
-		Total     int `json:"total"`
-		Done      int `json:"done"`
-		Skipped   int `json:"skipped"`
-		Unsourced int `json:"unsourced"`
-		Failed    int `json:"failed"`
-		Missing   int `json:"missing"`
+		Total      int `json:"total"`
+		Done       int `json:"done"`
+		Skipped    int `json:"skipped"`
+		Unsourced  int `json:"unsourced"`
+		Failed     int `json:"failed"`
+		Missing    int `json:"missing"`
+		Unanswered int `json:"unanswered"`
 	} `json:"counts"`
 	WaitingReason string `json:"waitingReason"`
 	LastPassAt    string `json:"lastPassAt"`
@@ -129,7 +130,7 @@ func (e *MemQLEngine) readMemoryIndexRun(ctx context.Context, kind string) (Memo
 		WaitingReason: p.WaitingReason, StartedAt: memoryIndexTime(p.StartedAt), FinishedAt: memoryIndexTime(p.FinishedAt),
 		LastPassAt: memoryIndexTime(p.LastPassAt), Cursor: p.Cursor,
 		Counts: MemoryIndexCounts{Total: p.Counts.Total, Done: p.Counts.Done, Skipped: p.Counts.Skipped,
-			Unsourced: p.Counts.Unsourced, Failed: p.Counts.Failed, Missing: p.Counts.Missing},
+			Unsourced: p.Counts.Unsourced, Failed: p.Counts.Failed, Missing: p.Counts.Missing, Unanswered: p.Counts.Unanswered},
 		Missing: p.Missing, MissingAt: memoryIndexTime(p.MissingAt),
 		Counting: memoryIndexCounting{Cursor: p.Counting.Cursor, Missing: p.Counting.Missing},
 	}
@@ -193,7 +194,8 @@ func (e *MemQLEngine) writeMemoryIndexRun(ctx context.Context, run MemoryIndexRu
 // stamps it blank: every write states the row.
 func memoryIndexRunArgs(run MemoryIndexRun, versionTime time.Time) map[string]any {
 	counts := map[string]any{"total": run.Counts.Total, "done": run.Counts.Done, "skipped": run.Counts.Skipped,
-		"unsourced": run.Counts.Unsourced, "failed": run.Counts.Failed, "missing": run.Counts.Missing}
+		"unsourced": run.Counts.Unsourced, "failed": run.Counts.Failed, "missing": run.Counts.Missing,
+		"unanswered": run.Counts.Unanswered}
 	cursor := map[string]any{}
 	for k, v := range run.Cursor {
 		cursor[k] = v

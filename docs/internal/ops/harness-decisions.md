@@ -2600,6 +2600,32 @@ tick's first step that embeds or moves the binding (`IndexerIsActiveOwner`);
 a fleet model with no indexer waits, since it would resolve as the job and
 reach nobody's machines.
 
+**An item nobody answers is counted, and two in a row are a wait.** Trigger:
+a machine that takes a call and never answers it says nothing a refusal would.
+Each attempt was capped at 30 s (`memoryIndexItemTimeout`) and attempts
+stopped at the tick's hard limit (the 45 s budget plus 10 s grace), so an item
+over 30 s got at most two attempts a tick and then stopped the walk BEFORE
+itself: never counted failed, the cursor never past it, retried first by every
+tick for ever, with no wait reason, so no backfill counting walk ran either.
+Chosen path: an attempt that runs out the WHOLE per-item timeout is not
+retried in the walk, and an item whose every attempt did so is unanswered:
+counted failed, the walk goes on, the next walk tries it again. The second
+unanswered item in a row (`memoryIndexUnansweredInARow`) makes the run wait,
+"the indexer's machines offering <model> are not answering" (a vendor model:
+"<ref> is not answering"), that item not counted, as for a machine that is
+offline; a waiting backfill then counts its backlog, and each tick tries the
+item once more. The streak is `counts.unanswered` on the run row, so it
+survives the tick between the two (a timed-out item takes most of a tick);
+any answer, written or refused, ends it, and every new walk starts it at zero.
+An attempt the tick cut short, given less than the whole timeout, is the
+tick's time running out, and the item is tried again, first, next tick.
+Rejected: keeping the retry (it is what stalled the walk), and a per-tick
+streak, which never sees two 30 s items in one 55 s tick. Cost: a hung
+machine's first unanswered item is counted failed. Tests:
+`TestAnItemThatNeverAnswersIsCountedFailedAndTheWalkGoesOn`,
+`TestTwoItemsInARowThatNeverAnswerMakeTheRunWait`, and the streak's round trip
+in `TestARunWriteAnswersTheVersionItStored` (db).
+
 **The backlog is counted, waiting or not (ruling R10).** Trigger: design
 section 8's "37 items waiting: none of your machines offering ... is online",
 which no count the job kept could say. A waiting walk stops at its first

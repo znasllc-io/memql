@@ -79,6 +79,27 @@ package memql
 // or an owner chooses the model again. The indexer's role is checked before a
 // tick's first step that embeds or moves the binding (work).
 //
+// AN ITEM NOBODY ANSWERS. A machine can take a call and never answer it, which
+// no refusal says. TRIGGER: an attempt given the whole per-item timeout
+// (memoryIndexItemTimeout) runs out of it. Such an attempt is not retried in
+// the walk: a retry costs another whole timeout of a tick that has under two,
+// and the old loop retried it until the tick's own limit stopped the walk
+// BEFORE the item -- never counted, never waited for, tried first again by
+// every tick for ever, with no reason shown and no backlog counted. So an item
+// whose every attempt ran out the timeout is UNANSWERED: counted failed, and
+// the walk goes on (the next walk tries it again). The SECOND unanswered item
+// in a row (memoryIndexUnansweredInARow, the streak kept on the run as
+// Counts.Unanswered, so it survives the tick between them) is no longer two
+// slow items but a machine that is not answering: the run waits at it, with a
+// plain reason (memoryIndexNotAnsweringReason), the item not counted, as for a
+// machine that is offline; a waiting backfill counts its backlog meanwhile,
+// and every tick tries that item again first, once. An answer of any kind --
+// written, or refused -- ends the streak. An attempt that the TICK cut short,
+// given less than the whole timeout, is not unanswered: the tick's time ran
+// out, and the item is tried again, first, by the next tick. Cost: the first
+// unanswered item of a hung machine is counted failed, which one item cannot
+// tell apart from a slow one.
+//
 // # The backlog: what is missing, counted (ruling R10)
 //
 // Every walk that ends records what it LEFT missing -- items absent from the
@@ -188,8 +209,14 @@ const (
 	// counts it failed. The next walk tries it again.
 	memoryIndexAttempts = 3
 	// memoryIndexItemTimeout bounds one embedding call, distinct from the
-	// tick's budget: one hung machine must not hold the job past its tick.
+	// tick's budget: one hung machine must not hold the job past its tick. An
+	// attempt that runs the whole of it out is not retried (the header's "An
+	// item nobody answers").
 	memoryIndexItemTimeout = 30 * time.Second
+	// memoryIndexUnansweredInARow is how many items in a row, each unanswered
+	// for the whole per-item timeout, make the run wait for a machine that is
+	// not answering; the last of them is not counted failed.
+	memoryIndexUnansweredInARow = 2
 	// memoryIndexGrace is how far past its budget a tick may run to finish the
 	// batch it is in. Budget plus grace stays under the minute between ticks
 	// and far under the gate session's five-minute idle limit.
@@ -281,7 +308,13 @@ var (
 // found absent from the target, or older there than their row
 // (memoryIndexCurrent), and LEFT so -- the ones whose embedding failed. A walk
 // that ends records it on the run (MemoryIndexRun.Missing).
-type MemoryIndexCounts struct{ Total, Done, Skipped, Unsourced, Failed, Missing int }
+//
+// Unanswered is not a count of the walk but a streak: the items in a row,
+// ending with the last one the walk tried to embed, whose every attempt ran
+// out the whole per-item timeout (the header's "An item nobody answers"). An
+// item that answered, written or refused, sets it back to zero; one the walk
+// did not try (already present, or its source cannot rebuild it) leaves it.
+type MemoryIndexCounts struct{ Total, Done, Skipped, Unsourced, Failed, Missing, Unanswered int }
 
 // MemoryIndexRun is the Go mirror of v1:platform:memoryIndexRun.
 type MemoryIndexRun struct {
@@ -470,6 +503,17 @@ func memoryIndexWaitReason(err error, ref string) (string, bool) {
 		return fmt.Sprintf("none of the indexer's machines offering %s is online", model), true
 	}
 	return fmt.Sprintf("%s cannot be reached right now", strings.TrimSpace(ref)), true
+}
+
+// memoryIndexNotAnsweringReason is the wait of a run whose machine took items
+// and answered none in the whole per-item timeout, memoryIndexUnansweredInARow
+// in a row: a fleet model's indexer's machines, in the words the screen says
+// from the reader's side, or a vendor model in its own name.
+func memoryIndexNotAnsweringReason(ref string) string {
+	if model, fleet := IsFleetReference(ref); fleet {
+		return fmt.Sprintf("the indexer's machines offering %s are not answering", model)
+	}
+	return fmt.Sprintf("%s is not answering", strings.TrimSpace(ref))
 }
 
 // memoryIndexTick is one tick's working state.
@@ -827,24 +871,39 @@ func (t *memoryIndexTick) batch(ctx context.Context) (bool, error) {
 			t.run.Counts.Total++
 			t.run.Counts.Skipped++
 		default:
-			reason, stopped, err := t.embed(ctx, s, item)
-			if stopped || reason != "" {
+			tried := t.embed(ctx, s, item)
+			if tried.unanswered && t.run.Counts.Unanswered+1 >= memoryIndexUnansweredInARow {
+				// Not one slow item but a machine that is not answering: a
+				// wait, and this item is not counted (the header's "An item
+				// nobody answers").
+				tried = memoryIndexAttempt{reason: memoryIndexNotAnsweringReason(t.run.TargetRef)}
+			}
+			if tried.stopped || tried.reason != "" {
 				// Resume at this item: everything before it is counted.
 				t.run.Cursor = map[string]string{s.Name: last}
-				if reason != "" {
-					return true, t.wait(ctx, reason)
+				if tried.reason != "" {
+					return true, t.wait(ctx, tried.reason)
 				}
 				_, serr := t.save(ctx)
 				return true, serr
 			}
 			t.run.Counts.Total++
-			if err != nil {
-				t.log.Warn("memory index: an item could not be indexed; it counts as failed and the next walk tries it again",
-					"source", s.Name, "id", item.Id, "target", t.run.TargetRef, "error", err)
+			switch {
+			case tried.unanswered:
+				t.log.Warn("memory index: an item was not answered in the whole per-item timeout; it counts as failed and the next walk tries it again",
+					"source", s.Name, "id", item.Id, "target", t.run.TargetRef, "timeout", memoryIndexItemTimeout)
 				t.run.Counts.Failed++
 				t.run.Counts.Missing++
-			} else {
+				t.run.Counts.Unanswered++
+			case tried.err != nil:
+				t.log.Warn("memory index: an item could not be indexed; it counts as failed and the next walk tries it again",
+					"source", s.Name, "id", item.Id, "target", t.run.TargetRef, "error", tried.err)
+				t.run.Counts.Failed++
+				t.run.Counts.Missing++
+				t.run.Counts.Unanswered = 0
+			default:
 				t.run.Counts.Done++
+				t.run.Counts.Unanswered = 0
 			}
 			changed = true
 		}
@@ -874,30 +933,57 @@ func (t *memoryIndexTick) moveOn(ctx context.Context, pos int) (ended, stop bool
 	return true, stop, err
 }
 
-// embed tries one item up to memoryIndexAttempts times. It answers the wait
-// reason when the model cannot be reached at all, stopped when the tick ran
-// out of time, and otherwise the last error (nil when written).
-func (t *memoryIndexTick) embed(ctx context.Context, s MemorySource, item MemoryItem) (string, bool, error) {
+// memoryIndexAttempt is how embedding one item ended (embed).
+type memoryIndexAttempt struct {
+	// reason is set when the model cannot be reached at all: the run waits.
+	reason string
+	// stopped is the tick's own time, or its context, running out: the item
+	// is tried again, first, by the next tick.
+	stopped bool
+	// unanswered is every attempt having run out the whole per-item timeout
+	// (the header's "An item nobody answers"); err is then that timeout.
+	unanswered bool
+	// err is the last attempt's error; nil when the item was written.
+	err error
+}
+
+// embed tries one item up to memoryIndexAttempts times, each attempt bounded
+// by memoryIndexItemTimeout and by what is left of the tick. An attempt that
+// ran out the WHOLE per-item timeout is not retried; an attempt the tick cut
+// short is the tick's time running out (the header's "An item nobody
+// answers").
+func (t *memoryIndexTick) embed(ctx context.Context, s MemorySource, item MemoryItem) memoryIndexAttempt {
 	var err error
+	answered := false
 	for attempt := 1; attempt <= memoryIndexAttempts; attempt++ {
 		remaining := t.hard.Sub(t.w.now())
 		if remaining <= 0 {
-			return "", true, nil
+			return memoryIndexAttempt{stopped: true}
 		}
-		call, cancel := context.WithTimeout(ctx, min(remaining, memoryIndexItemTimeout))
+		limit := min(remaining, memoryIndexItemTimeout)
+		call, cancel := context.WithTimeout(ctx, limit)
 		err = t.w.embed(call, t.run, s, item)
+		// The call's own deadline, or a store that says it ran out of time.
+		timedOut := errors.Is(call.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded)
 		cancel()
-		if err == nil {
-			return "", false, nil
+		switch {
+		case err == nil:
+			return memoryIndexAttempt{}
+		case ctx.Err() != nil:
+			return memoryIndexAttempt{stopped: true}
 		}
 		if reason, wait := memoryIndexWaitReason(err, t.run.TargetRef); wait {
-			return reason, false, nil
+			return memoryIndexAttempt{reason: reason}
 		}
-		if ctx.Err() != nil || !t.w.now().Before(t.hard) {
-			return "", true, nil
+		if timedOut && limit == memoryIndexItemTimeout {
+			return memoryIndexAttempt{unanswered: !answered, err: err}
 		}
+		if !t.w.now().Before(t.hard) {
+			return memoryIndexAttempt{stopped: true}
+		}
+		answered = answered || !timedOut
 	}
-	return "", false, err
+	return memoryIndexAttempt{err: err}
 }
 
 // endWalk decides what follows a walk that reached the end of the last source.

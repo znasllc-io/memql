@@ -852,8 +852,8 @@ concept memoryIndexRun {
   /// indexing: the first walk fills the target. catchingUp: a second walk picks up what arrived
   /// meanwhile. needsDecision: an item failed or no source rebuilds an entry of the active index,
   /// and the owner decides. switching: the flip is under way. finishing: the walk after the flip.
-  /// done and cancelled are over. waiting: the indexer's machines are offline or the indexer is no
-  /// longer an owner; nothing is counted failed, and the next tick tries again.
+  /// done and cancelled are over. waiting: the indexer's machines are offline or not answering, or
+  /// the indexer is no longer an owner; nothing is counted failed, and the next tick tries again.
   state             enum("indexing", "catchingUp", "needsDecision", "switching", "finishing", "done", "cancelled", "waiting")
   /// The model this run fills: a switch's new model, or the active one for a backfill.
   targetRef         string
@@ -876,10 +876,11 @@ concept memoryIndexRun {
   /// Where the walk stands: the source it is in, mapped to the last item id done in it. Sources
   /// before it, in name order, are done for this walk. Empty is the walk's beginning.
   cursor            object
-  /// This walk's {total, done, skipped, unsourced, failed, missing}. total = done + skipped +
-  /// failed; unsourced counts the active index's entries no source rebuilds, set when a walk ends;
-  /// missing counts the items the walk found absent from the target, or older there than their
-  /// row, and left so.
+  /// This walk's {total, done, skipped, unsourced, failed, missing, unanswered}. total = done +
+  /// skipped + failed; unsourced counts the active index's entries no source rebuilds, set when a
+  /// walk ends; missing counts the items the walk found absent from the target, or older there
+  /// than their row, and left so; unanswered is a streak, the items in a row the model never
+  /// answered within the per-item timeout, and the run waits at the second.
   counts            object
   /// Why the run waits, in plain words. Empty unless state is waiting.
   waitingReason     string

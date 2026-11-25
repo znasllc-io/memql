@@ -968,15 +968,17 @@ func TestARunWriteAnswersTheVersionItStored(t *testing.T) {
 	require.True(t, ok)
 
 	run.LastPassAt = run.LastPassAt.Add(-time.Minute)
+	run.Counts.Unanswered = 1 // the streak of unanswered items lives on the row, across ticks
 	fenced := ContextWithRowVersionFence(auth.ContextWithInternalOrigin(f.ctx), MemoryIndexRunConceptID, run.Kind, version)
 	res, err := f.a.memoryIndexMutationResult(fenced, "platform.recordMemoryIndexRun", memoryIndexRunArgs(run, VersionTimeAfter(version, time.Now())))
 	require.NoError(t, err)
 	written := memoryIndexWrittenVersion(res, MemoryIndexRunConceptID+":"+run.Kind)
 	require.False(t, written.IsZero(), "the write's result names the version it stored")
-	_, stored, _, err := f.a.readMemoryIndexRun(f.ctx, run.Kind)
+	back, stored, _, err := f.a.readMemoryIndexRun(f.ctx, run.Kind)
 	require.NoError(t, err)
 	require.True(t, written.Equal(stored), "answered %s, stored %s", written, stored)
 	require.True(t, written.After(version))
+	require.Equal(t, run.Counts, back.Counts, "every count, the streak included, reads back as written")
 }
 
 // A vector older than its row's newest version is MISSING (ruling R7): the row

@@ -26,14 +26,17 @@ import (
 // is appended to events in the order the tick made it, so a test can say what
 // happened before what.
 type memoryIndexFake struct {
-	clock      time.Time
-	active     EmbedderBinding
-	runs       map[string]MemoryIndexRun
-	srcs       []MemorySource
-	rows       map[string][]MemoryItem
-	sourceErr  map[string]error
-	tables     map[string]map[string]bool
-	embedErr   func(run MemoryIndexRun, item MemoryItem) error
+	clock     time.Time
+	active    EmbedderBinding
+	runs      map[string]MemoryIndexRun
+	srcs      []MemorySource
+	rows      map[string][]MemoryItem
+	sourceErr map[string]error
+	tables    map[string]map[string]bool
+	embedErr  func(run MemoryIndexRun, item MemoryItem) error
+	// hung are the items a machine takes and never answers: each call runs
+	// out the whole allowance it was given, on this world's clock.
+	hung       map[string]bool
 	owners     map[string]bool
 	unsourcedN int
 	events     []string
@@ -65,6 +68,7 @@ func newMemoryIndexFake(n int) *memoryIndexFake {
 		owners:    map[string]bool{fakeOwner: true},
 		attempts:  map[string]int{},
 		embedded:  map[string]int{},
+		hung:      map[string]bool{},
 	}
 	f.addSource("alpha", n)
 	f.runs[memoryIndexKindSwitch] = MemoryIndexRun{
@@ -162,9 +166,15 @@ func (f *memoryIndexFake) vectorTimes(_ context.Context, table, field string, id
 	return out, nil
 }
 
-func (f *memoryIndexFake) embed(_ context.Context, run MemoryIndexRun, s MemorySource, item MemoryItem) error {
+func (f *memoryIndexFake) embed(ctx context.Context, run MemoryIndexRun, s MemorySource, item MemoryItem) error {
 	f.attempts[item.Id]++
 	f.events = append(f.events, "embed "+item.Id)
+	if f.hung[item.Id] {
+		if deadline, ok := ctx.Deadline(); ok {
+			f.clock = f.clock.Add(time.Until(deadline).Round(time.Second))
+		}
+		return fmt.Errorf("store: embed: %w", context.DeadlineExceeded)
+	}
 	if f.embedErr != nil {
 		if err := f.embedErr(run, item); err != nil {
 			return err
@@ -337,6 +347,91 @@ func TestAnOfflineIndexerMakesTheRunWaitNotFail(t *testing.T) {
 	}
 	_, wait := memoryIndexWaitReason(errors.New("embedding model returned a zero vector"), fakeNewRef)
 	require.False(t, wait, "a bad answer is a failure, not a wait")
+}
+
+// ONE ITEM THAT NEVER ANSWERS DOES NOT STALL THE WALK. An item whose attempt
+// ran out the whole per-item timeout (30 s) is not tried again in that walk:
+// it is counted failed, and the walk goes on, so the switch reaches the owner's
+// decision instead of retrying that one item every tick for ever. An attempt
+// the tick cut short is not that: the item is tried again, first, next tick.
+func TestAnItemThatNeverAnswersIsCountedFailedAndTheWalkGoesOn(t *testing.T) {
+	f := newMemoryIndexFake(5)
+	f.fill(fakeOldRef, 4)
+	slow := memoryIndexItemId(2)
+	f.hung[slow] = true
+	for tick := 0; tick < 6 && f.runs[memoryIndexKindSwitch].State != memoryIndexStateNeedsDecision; tick++ {
+		require.NoError(t, runMemoryIndexTick(context.Background(), f, memoryIndexDefaultBudget))
+		require.NotEqual(t, memoryIndexStateWaiting, f.runs[memoryIndexKindSwitch].State, "one slow item is no reason to wait")
+	}
+	run := f.runs[memoryIndexKindSwitch]
+	require.Equal(t, memoryIndexStateNeedsDecision, run.State, "the walk got past the item that never answers")
+	require.Equal(t, 1, run.Counts.Failed, "counted failed, by the catch-up walk too")
+	for _, n := range []int{1, 3, 4, 5} {
+		require.Equal(t, 1, f.embedded[memoryIndexItemId(n)], "item %d", n)
+	}
+	// Once in each walk, and once more where a tick cut the catch-up's try short.
+	require.Equal(t, 3, f.attempts[slow])
+}
+
+// TWO ITEMS IN A ROW THAT NEVER ANSWER ARE A MACHINE THAT IS NOT ANSWERING,
+// not two slow items: the run waits, with a plain reason, as it does for a
+// machine that is offline. The first is counted failed (nothing said yet that
+// the machine was the trouble); the second is not, and the walk resumes at it.
+// The streak survives the tick between them, as it lives on the run row. A
+// waiting backfill counts its backlog meanwhile.
+func TestTwoItemsInARowThatNeverAnswerMakeTheRunWait(t *testing.T) {
+	ctx := context.Background()
+	f := newMemoryIndexFake(5)
+	f.fill(fakeOldRef, 4)
+	first, second := memoryIndexItemId(2), memoryIndexItemId(3)
+	f.hung[first], f.hung[second] = true, true
+
+	// The first runs out its 30 s; the tick's last 25 s are not a whole try of the second.
+	require.NoError(t, runMemoryIndexTick(ctx, f, memoryIndexDefaultBudget))
+	run := f.runs[memoryIndexKindSwitch]
+	require.Equal(t, memoryIndexStateIndexing, run.State)
+	require.Equal(t, MemoryIndexCounts{Total: 2, Done: 1, Failed: 1, Missing: 1, Unanswered: 1}, run.Counts)
+	require.Equal(t, map[string]string{"alpha": first}, run.Cursor)
+
+	require.NoError(t, runMemoryIndexTick(ctx, f, memoryIndexDefaultBudget))
+	run = f.runs[memoryIndexKindSwitch]
+	require.Equal(t, memoryIndexStateWaiting, run.State)
+	require.Equal(t, "the indexer's machines offering new-embedder are not answering", run.WaitingReason)
+	require.Equal(t, 1, run.Counts.Failed, "the second is not counted: waiting is not failing")
+	require.Equal(t, map[string]string{"alpha": first}, run.Cursor, "the walk resumes at the second")
+
+	// Still not answering: it waits on, and counts nothing more.
+	require.NoError(t, runMemoryIndexTick(ctx, f, memoryIndexDefaultBudget))
+	require.Equal(t, memoryIndexStateWaiting, f.runs[memoryIndexKindSwitch].State)
+	require.Equal(t, 1, f.runs[memoryIndexKindSwitch].Counts.Failed)
+
+	// It answers: the walk goes on from there, and the first is tried again by the next walk.
+	f.hung = map[string]bool{}
+	for tick := 0; tick < 4 && f.runs[memoryIndexKindSwitch].State != memoryIndexStateDone; tick++ {
+		require.NoError(t, runMemoryIndexTick(ctx, f, memoryIndexDefaultBudget))
+	}
+	require.Equal(t, memoryIndexStateDone, f.runs[memoryIndexKindSwitch].State)
+	require.Equal(t, fakeNewRef, f.active.ProviderRef)
+	for n := 1; n <= 5; n++ {
+		require.True(t, f.tables[f.table(fakeNewRef, 4)]["content|"+memoryIndexItemId(n)], "item %d", n)
+	}
+
+	// A backfill that waits for the same reason still counts what is missing.
+	f = newMemoryIndexFake(5)
+	delete(f.runs, memoryIndexKindSwitch)
+	f.hung[first], f.hung[second] = true, true
+	for tick := 0; tick < 3 && f.runs[memoryIndexKindBackfill].State != memoryIndexStateWaiting; tick++ {
+		require.NoError(t, runMemoryIndexTick(ctx, f, memoryIndexDefaultBudget))
+	}
+	bf := f.runs[memoryIndexKindBackfill]
+	require.Equal(t, memoryIndexStateWaiting, bf.State)
+	require.Equal(t, "the indexer's machines offering old-embedder are not answering", bf.WaitingReason)
+	require.False(t, bf.MissingAt.IsZero(), "the counting walk ran")
+	require.Equal(t, 4, bf.Missing, "the item counted failed, the one it waits at and the two after")
+
+	// A vendor model that stops answering says so in its own name.
+	reason := memoryIndexNotAnsweringReason("embedding3Small")
+	require.Equal(t, "embedding3Small is not answering", reason)
 }
 
 // The flip is automatic only when the catch-up walk left nothing failed and
