@@ -2738,12 +2738,11 @@ between that read and `bindEmbedder`'s own, under its lock, makes
 is; that refusal (`errEmbedderBindingActive`) is answered "changed meanwhile,
 try again" instead (`TestABindingThatLandsMeanwhileIsAChangeNotADirection`),
 and `bindEmbedder`'s own lock held elsewhere is said as the binding lock's is
-(below).
-Otherwise a look before
-the lock says only whether a new switch starts, so the new model can be probed
-as its indexer OUTSIDE the lock (a machine call takes seconds); everything is
-then decided again under the binding lock, from the run and the binding read
-there (a state that moved meanwhile is "changed meanwhile, try again"):
+(below). Otherwise a look before the lock says only whether a new switch
+starts, so the new model can be probed as its indexer OUTSIDE the lock (a
+machine call takes seconds); everything is then decided again under the binding
+lock, from the run and the binding read there (a state that moved meanwhile is
+"changed meanwhile, try again"):
 
 - A switch before the flip refuses another model, before anything is probed.
   One held in `needsDecision` names Switch anyway and Cancel; any other says to
