@@ -8,6 +8,7 @@ import type { ReactNode } from "react";
 
 import { coreAt, readiness, withOs } from "../setup/harness";
 import { fakeConnection, passkeyRow, rowsResult, withSession } from "../cluster/harness";
+import { builtinReply } from "../fleet/harness";
 import { installSeededAccess, seededAccessWithout } from "../seededAccess";
 import { setEffectiveCapabilities } from "../../src/system/roles";
 import { SetupFactsScope } from "../../src/apps/setup/SetupFactsScope";
@@ -26,8 +27,9 @@ import type { Readiness } from "../../src/live/readiness";
 // case that pins the composition itself.
 //
 // What every other case asserts is which of the three things is on screen --
-// the rail, the sentence, or the desk -- because that is the whole of what
-// this surface decides.
+// the rail, the held page, or the desk -- because that is the whole of what
+// this surface decides. The held page's own behaviour (its reference, checking
+// again, adding a key on it) is test/chrome/accessHeld.test.tsx.
 
 afterEach(() => {
   cleanup();
@@ -39,13 +41,20 @@ afterEach(() => {
 
 const DESK = <p data-testid="desk">the desk</p>;
 
-const READER_SENTENCE = "An owner or developer has to set up inference before anyone can use it.";
-
-/** What somebody who may add an API key of their own is told instead. */
-const KEY_SENTENCE = "An owner or developer has to set up inference. Until then, an API key of your own lets you in.";
+/** What everybody but an owner or developer gets with no model access set up. */
+const HELD = "Your access is not set up yet";
 
 /** What an owner or developer is told under the cluster's doors. */
 const OWNER_KEY_LINE = "An API key of your own lets you in, and nobody else.";
+
+/** The per-person access check holding somebody with nothing set up. */
+function heldConnection() {
+  const connection = fakeConnection({ passkeysForSelf: [] });
+  connection.query.desktopAccess.mockResolvedValue(builtinReply("desktopAccess", [
+    { id: "current", admitted: false, exempt: false, sources: [], reference: "ERR-0a1b2c", reasonsDigest: "p.r" },
+  ]));
+  return connection;
+}
 
 /** The per-person answer the gate reads: whether a key of theirs can pay. */
 function keyStatus(keyAccount: boolean) {
@@ -227,17 +236,19 @@ describe("the two role variants", () => {
     expect(await screen.findByText("Local")).toBeTruthy();
   });
 
-  it("gives every other role one sentence and Sign out, and never names the owner", async () => {
-    // Every predefined role may add an API key of its own (owner decision
-    // 2026-11-22), so each is told it can; a role that holds nothing is told
-    // what it always was.
-    for (const [role, sentence] of [["writer", KEY_SENTENCE], ["reader", KEY_SENTENCE], ["admin", KEY_SENTENCE], ["", READER_SENTENCE]] as const) {
+  it("holds every other role with nothing set up on the held page, and never names the owner", async () => {
+    // Design record 2026-11-24-desktop-access: everybody but an owner or
+    // developer needs model access of their own, admin included. Every
+    // predefined role may add an API key of its own (owner decision
+    // 2026-11-22), so each is offered one on the page; a role that holds
+    // nothing is offered nothing it cannot finish.
+    for (const [role, addsKey] of [["writer", true], ["reader", true], ["admin", true], ["", false]] as const) {
       cleanup();
       installSeededAccess(role);
-      h.connection = fakeConnection({ passkeysForSelf: [] });
+      h.connection = heldConnection();
       render(gate(role, UNCONFIGURED()));
-      expect(await screen.findByText("MemQL is not set up yet")).toBeTruthy();
-      expect(screen.getByText(sentence)).toBeTruthy();
+      expect(await screen.findByRole("heading", { name: HELD })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Add an API key" }) !== null).toBe(addsKey);
       expect(screen.getByRole("button", { name: "Sign out" })).toBeTruthy();
       expect(screen.queryByRole("list", { name: "Set up this cluster" })).toBeNull();
       expect(screen.queryByTestId("desk")).toBeNull();
@@ -317,22 +328,28 @@ describe("lifting", () => {
     expect(screen.queryByRole("list", { name: "Set up this cluster" })).toBeNull();
   });
 
-  it("lifts for a reader too, without them doing anything", async () => {
-    h.connection = fakeConnection({ passkeysForSelf: [] });
+  it("does not lift the held page for a reader when the cluster is set up", async () => {
+    // The held page is about the person: a cluster that reaches a model lets
+    // in nobody who has nothing set up of their own. It lifts on their own
+    // check (accessHeld.test.tsx), not on the cluster's feed.
+    installSeededAccess("reader");
+    h.connection = heldConnection();
     const view = render(gate("reader", UNCONFIGURED()));
-    expect(await screen.findByText("MemQL is not set up yet")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: HELD })).toBeTruthy();
     view.rerender(gate("reader", coreAt("configured", "configured", "configured")));
-    await waitFor(() => expect(screen.getByTestId("desk")).toBeTruthy());
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.getByRole("heading", { name: HELD })).toBeTruthy();
+    expect(screen.queryByTestId("desk")).toBeNull();
   });
 
   it("comes back when the door goes away again", async () => {
     // A cluster can stop being configured: a machine is revoked, federation is
     // cleared. The verdict IS the state, so the gate returns.
     h.connection = fakeConnection({ passkeysForSelf: [] });
-    const view = render(gate("reader", coreAt("configured", "configured", "configured")));
+    const view = render(gate("owner", coreAt("configured", "configured", "configured")));
     expect(await screen.findByTestId("desk")).toBeTruthy();
-    view.rerender(gate("reader", UNCONFIGURED()));
-    await waitFor(() => expect(screen.getByText("MemQL is not set up yet")).toBeTruthy());
+    view.rerender(gate("owner", UNCONFIGURED()));
+    await waitFor(() => expect(screen.getByRole("list", { name: "Set up this cluster" })).toBeTruthy());
     expect(screen.queryByTestId("desk")).toBeNull();
   });
 });
@@ -340,42 +357,39 @@ describe("lifting", () => {
 // AN API KEY THAT CAN PAY LETS ITS HOLDER IN (owner decision 2026-11-23,
 // design record 2026-11-21-vendor-accounts-and-api-keys). Model access is
 // bring-your-own, so a cluster with no machine, no app and no vendor account
-// is still usable by somebody with a key; the screen held them anyway, and
-// somebody who was not an owner or developer could not reach Settings to add
-// one. The cluster's readiness is unchanged: the key lets its holder in.
+// is still usable by somebody with a key. On the setup screen that is asked of
+// `inferenceStatus` for an owner or developer; everybody else is held or let
+// in by their own access check, which counts a key among their sources (design
+// record 2026-11-24-desktop-access). The cluster's readiness is unchanged.
 describe("an API key that can pay", () => {
-  it("lets its holder past the screen, whatever their role", async () => {
-    for (const role of ["owner", "writer"]) {
+  it("lets an owner or developer whose key can pay past the screen", async () => {
+    for (const role of ["owner", "developer"]) {
       cleanup();
       installSeededAccess(role);
       h.connection = fakeConnection({ passkeysForSelf: [], inferenceStatus: keyStatus(true) });
       render(gate(role, UNCONFIGURED()));
       expect(await screen.findByTestId("desk")).toBeTruthy();
-      expect(screen.queryByText("MemQL is not set up yet")).toBeNull();
       expect(screen.queryByRole("list", { name: "Set up this cluster" })).toBeNull();
     }
   });
 
   it("does not let anybody in on a key that cannot pay", async () => {
-    installSeededAccess("writer");
     h.connection = fakeConnection({ passkeysForSelf: [], inferenceStatus: keyStatus(false) });
-    render(gate("writer", UNCONFIGURED()));
-    expect(await screen.findByText(KEY_SENTENCE)).toBeTruthy();
+    render(gate("owner", UNCONFIGURED()));
+    expect(await screen.findByRole("list", { name: "Set up this cluster" })).toBeTruthy();
     expect(screen.queryByTestId("desk")).toBeNull();
   });
 
   it("keeps the screen when the answer cannot be read: the cluster's verdict stands", async () => {
-    installSeededAccess("writer");
     const connection = fakeConnection({ passkeysForSelf: [] });
     connection.query.inferenceStatus.mockRejectedValue(new Error("refused"));
     h.connection = connection;
-    render(gate("writer", UNCONFIGURED()));
-    expect(await screen.findByText(KEY_SENTENCE)).toBeTruthy();
+    render(gate("owner", UNCONFIGURED()));
+    expect(await screen.findByRole("list", { name: "Set up this cluster" })).toBeTruthy();
     expect(screen.queryByTestId("desk")).toBeNull();
   });
 
   it("offers somebody who may add a key the act that adds one, straight into adding it", async () => {
-    installSeededAccess("writer");
     h.connection = fakeConnection({ passkeysForSelf: [] });
     render(
       withSession(
@@ -385,10 +399,10 @@ describe("an API key that can pay", () => {
               <CoreGate onSignOut={() => {}}>{DESK}</CoreGate>
               <WindowProbe />
             </>,
-            "writer",
+            "owner",
           )}
         </SetupFactsScope>,
-        { role: "writer", readiness: UNCONFIGURED() },
+        { role: "owner", readiness: UNCONFIGURED() },
       ),
     );
     fireEvent.click(await screen.findByRole("button", { name: "Add an API key" }));
@@ -400,7 +414,6 @@ describe("an API key that can pay", () => {
   });
 
   it("stays out of the way once the key added in that window can pay", async () => {
-    installSeededAccess("writer");
     const connection = fakeConnection({ passkeysForSelf: [] });
     h.connection = connection;
     render(
@@ -411,10 +424,10 @@ describe("an API key that can pay", () => {
               <CoreGate onSignOut={() => {}}>{DESK}</CoreGate>
               <WindowDriver />
             </>,
-            "writer",
+            "owner",
           )}
         </SetupFactsScope>,
-        { role: "writer", readiness: UNCONFIGURED() },
+        { role: "owner", readiness: UNCONFIGURED() },
       ),
     );
     fireEvent.click(await screen.findByRole("button", { name: "Add an API key" }));
@@ -424,15 +437,16 @@ describe("an API key that can pay", () => {
     fireEvent.click(screen.getByRole("button", { name: "close all" }));
     await waitFor(() => expect(connection.query.inferenceStatus.mock.calls.length).toBeGreaterThan(1));
     await waitFor(() => expect(screen.getByTestId("desk")).toBeTruthy());
-    expect(screen.queryByText("MemQL is not set up yet")).toBeNull();
+    expect(screen.queryByRole("list", { name: "Set up this cluster" })).toBeNull();
   });
 
-  it("offers nothing more to somebody withheld from adding keys", async () => {
+  it("offers nothing more to a held person withheld from adding keys", async () => {
     setEffectiveCapabilities(seededAccessWithout("writer", "app:settings/apikeys"));
-    h.connection = fakeConnection({ passkeysForSelf: [] });
+    h.connection = heldConnection();
     render(gate("writer", UNCONFIGURED()));
-    expect(await screen.findByText(READER_SENTENCE)).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: HELD })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Add an API key" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeTruthy();
   });
 
   it("offers an owner the key under the cluster's doors, saying it lets them in alone", async () => {

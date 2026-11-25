@@ -55,12 +55,21 @@ export function AddKeyWizard({
   taken,
   onCancel,
   onAdded,
+  from = "API keys",
 }: {
   keys: Pick<VendorKeys, "add">;
   /** The names of the person's own keys, which a new one may not repeat. */
   taken: readonly string[];
   onCancel: () => void;
   onAdded: (card: KeyCard | null) => void;
+  /**
+   * The page it was opened from, named in its trail and on the way back after
+   * a reply that never came. `null` for the held page (chrome/AccessHeld),
+   * which opens it in the entry frame: there is no list of keys to go back
+   * to, so it draws no trail, as the entry frame's other wizards draw none,
+   * and Cancel is the way back.
+   */
+  from?: string | null;
 }) {
   const [step, setStep] = useState<Step>("vendor");
   const [vendor, setVendor] = useState<Vendor | "">("");
@@ -201,7 +210,7 @@ export function AddKeyWizard({
     ending !== null
       ? ending.kind === "useOnly"
         ? { label: "Done", tone: "primary", onAct: () => onAdded(ending.card) }
-        : { label: "Back to API keys", tone: "primary", onAct: () => onAdded(null) }
+        : { label: from === null ? "Done" : `Back to ${from}`, tone: "primary", onAct: () => onAdded(null) }
       : step === "name"
         ? named
           ? { label: "Continue", tone: "primary", onAct: () => setStep("key") }
@@ -221,7 +230,7 @@ export function AddKeyWizard({
   const status = ending !== null
     ? ending.kind === "useOnly"
       ? { word: "Added", detail: "Checked by the calls it pays for" }
-      : { word: "Not known", detail: "Check the list" }
+      : { word: "Not known", detail: from === null ? "" : "Check the list" }
     : step === "vendor"
       ? { word: "Choose a vendor", detail: "" }
       : step === "name"
@@ -236,8 +245,8 @@ export function AddKeyWizard({
       icon={<KeyRound aria-hidden />}
       title="Add an API key"
       lead="Pay for Anthropic or OpenAI models with an account of your own."
-      breadcrumbs={[{ label: "API keys", onSelect: onCancel }, { label: "Add an API key" }]}
-      back={{ label: "API keys", onSelect: onCancel }}
+      breadcrumbs={from === null ? undefined : [{ label: from, onSelect: onCancel }, { label: "Add an API key" }]}
+      back={from === null ? undefined : { label: from, onSelect: onCancel }}
       label="Adding an API key"
       steps={steps}
       open={step}

@@ -13068,6 +13068,12 @@ button.os-cluster-mesh-peer:focus-visible {
   margin-top: 14px;
 }
 
+/* The held page's reference (chrome/AccessHeld.tsx). The column sizes the copy
+   control to its content, so the value must not grow to fill the line: a
+   refused copy's note widens it, and the icon would slide away from the
+   pointer that just pressed it. */
+.os-access-reference .os-copyvalue-text { flex: 0 1 auto; }
+
 /* The way out, under its own hairline: an escape, never one of the acts in the
    rail (rule 6 -- an action is never seated among the things it is not). */
 .os-core-gate-out {

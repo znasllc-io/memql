@@ -15,6 +15,11 @@ import { useOsConnection } from "../live/connection";
 // `keyAccount` (component/memql, VendorDoor.Key), the answer Fleet and Ask
 // already read.
 //
+// WHOSE SCREEN. An owner's or developer's: CoreGate asks for them alone. Since
+// design record 2026-11-24-desktop-access everybody else enters on the
+// per-person access check, which counts a key among their sources, and the
+// cluster's verdict holds nobody else.
+//
 // WHEN IT IS ASKED. Only while the screen would show: the verdict is
 // unconfigured and no window is open. A window open in front of the screen is
 // one of its own acts at work (adding a key among them), and closing it is the

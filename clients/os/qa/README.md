@@ -121,10 +121,17 @@ a source with no pipeline, the Overview map's Checks nodes) and
 `add-machine-ready`, `add-machine-tools-ready` (Fleet's Add a machine in each
 phase, from a fixture flow: every reading is a function of facts, so a capture
 of a phase is exactly that phase), `setup-ownership` (taking ownership of a
-fresh cluster) and `setup-gate` (the first-run inference choice, memql#6214);
+fresh cluster), `setup-gate` (the first-run inference choice, memql#6214), or
+`access-held` and `access-held-no-reference` (the page somebody with no model
+access set up gets, with the reference an administrator searches in Logs and
+without one; `&click=Add an API key` opens the key wizard on the page);
 `mode` is `dark`
 or `light`. **Take at least one narrow capture** (`820,760`): two of
 the first three real defects this harness found were invisible at 1400x900.
+The entry pages (`setup-*`, `access-held*`) fill the viewport rather than a
+window, so `width=narrow` does not narrow them; a phone width needs device
+emulation, because headless Chrome will not open a window narrower than about
+500px and crops a wider layout to the size asked for.
 
 `&click=A|B` presses the control whose text or accessible name is A once the
 reads have landed, then B a beat later: `pipeline-source&click=Pipeline
