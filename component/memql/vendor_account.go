@@ -122,6 +122,30 @@ type VendorAccountQuery struct {
 	ForVisitor bool
 }
 
+// The reasons a key cannot pay, as the key resolver writes them
+// (integrations/vendorkeys) and as desktopAccessSources reads them. They live
+// here because the resolver imports this package and not the other way round,
+// and a reader that compared against the resolver's wording by guessing at
+// substrings would drift the first time a sentence was reworded. A reason
+// that names a vendor is a function of the vendor, compared whole.
+const (
+	// VendorKeyPausedReason: the owner paused lending a key to this person.
+	VendorKeyPausedReason = "an API key's owner has paused lending it"
+	// VendorKeyOwnerInactiveReason: the key's owner is no longer an active user.
+	VendorKeyOwnerInactiveReason = "an API key's owner is no longer an active user"
+)
+
+// VendorKeyRefusedReason is why a key the vendor refused cannot pay.
+func VendorKeyRefusedReason(vendor string) string {
+	return "an API key was refused by " + vendorDisplayName(vendor)
+}
+
+// VendorKeyCreditReason is why a key whose vendor account is out of credit
+// cannot pay for now.
+func VendorKeyCreditReason(vendor string) string {
+	return "an API key's account is out of credit at " + vendorDisplayName(vendor)
+}
+
 // VendorAccountPassedOver is one account that could not pay, and why. The
 // reason is written on the decision record, which every signed-in person can
 // read, so it never names a key.

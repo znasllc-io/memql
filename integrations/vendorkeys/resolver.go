@@ -2,7 +2,6 @@ package vendorkeys
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 
@@ -118,7 +117,7 @@ func (r *Resolver) KeysFor(ctx context.Context, q memql.VendorAccountQuery) ([]m
 			}
 		case tieLentPaused:
 			if judge.countsForRoute(key) {
-				passedOver = append(passedOver, passedOverKey(key, "an API key's owner has paused lending it"))
+				passedOver = append(passedOver, passedOverKey(key, memql.VendorKeyPausedReason))
 			}
 		}
 	}
@@ -286,13 +285,12 @@ func (j *judge) countsForRoute(key Key) bool { return j.chosen || key.AutoUse }
 
 // unfit is why a candidate cannot pay right now, or "" when it can.
 func (j *judge) unfit(key Key, state State) (string, error) {
-	vendor := vendorName(key.Vendor)
 	switch state.State {
 	case StateRefused:
-		return fmt.Sprintf("an API key was refused by %s", vendor), nil
+		return memql.VendorKeyRefusedReason(key.Vendor), nil
 	case StateCredit:
 		if state.HeldUntil.After(j.now) {
-			return fmt.Sprintf("an API key's account is out of credit at %s", vendor), nil
+			return memql.VendorKeyCreditReason(key.Vendor), nil
 		}
 	}
 	active, known := j.active[key.OwnerUserId]
@@ -304,7 +302,7 @@ func (j *judge) unfit(key Key, state State) (string, error) {
 		j.active[key.OwnerUserId] = active
 	}
 	if !active {
-		return "an API key's owner is no longer an active user", nil
+		return memql.VendorKeyOwnerInactiveReason, nil
 	}
 	return "", nil
 }

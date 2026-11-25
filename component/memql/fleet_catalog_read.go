@@ -216,6 +216,17 @@ type inferenceDoors struct {
 	Doors     []string
 }
 
+// chatModelMeetsMinimum is the minimum capability profile a model must have to
+// count as chat access: not an embedder, able to answer structured output, and
+// a context window of at least MinimumContextWindow. It asks nothing about
+// whether a machine is awake. inferenceDoors adds the online test (a door that
+// can answer now) and desktopAccessSources does not (a machine that is asleep
+// is still set up), and both read this one predicate so the two never drift
+// apart in anything else. Regression test: TestAnEmbeddingOnlyModelIsNotAccess.
+func chatModelMeetsMinimum(m FleetModel) bool {
+	return !m.Embeddings && m.StructuredOutput && m.ContextWindow >= MinimumContextWindow
+}
+
 func (e *MemQLEngine) inferenceDoors(ctx context.Context) inferenceDoors {
 	var d inferenceDoors
 	if e == nil || e.providers == nil {
@@ -236,7 +247,7 @@ func (e *MemQLEngine) inferenceDoors(ctx context.Context) inferenceDoors {
 			// only model cannot do structured output would pass a naive gate
 			// and then refuse every conductor turn, which is a worse place to
 			// put a person than the door they were on.
-			if m.Online() && m.StructuredOutput && m.ContextWindow >= MinimumContextWindow {
+			if m.Online() && chatModelMeetsMinimum(m) {
 				d.LocalEligible = true
 				d.EligibleModelIds = append(d.EligibleModelIds, m.ModelId)
 			}

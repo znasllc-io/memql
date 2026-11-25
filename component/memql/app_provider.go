@@ -163,6 +163,15 @@ type AppMachine struct {
 	// planner/app-source design section 3a). It opens the chat door -- chat,
 	// structured and vision turns -- and never the session door.
 	Forwardable bool
+	// OutOfUsage is true when the machine measured the app as out of usage:
+	// allowed and signed in, with its limit spent until a reset. Desktop access
+	// counts such a machine as set up (desktop_access.go, ruling R-D2). It is
+	// NEVER a place a call can go, so Runnable, Reachable and SupportsStructured
+	// skip it. KNOWN LIMIT: nothing sets it yet. projectAppDoors still gives an
+	// out-of-usage app no door, which TestAnAppTheMachineMeasuredAsOutOfUsageGetsNoDoor
+	// holds for routing, so feeding this from a real registration needs a
+	// separate read and is left to a decision.
+	OutOfUsage bool
 }
 
 // AppDoor is one app id and the machines behind it.
@@ -179,7 +188,7 @@ type AppDoor struct {
 // cannot run and, by the park rule, has no remaining chain.
 func (d AppDoor) Runnable() bool {
 	for _, m := range d.Machines {
-		if m.Online && m.LocalStream {
+		if m.Online && m.LocalStream && !m.OutOfUsage {
 			return true
 		}
 	}
@@ -200,7 +209,7 @@ func (d AppDoor) Reachable() bool {
 }
 
 func (m AppMachine) reachable() bool {
-	return m.Online && (m.LocalStream || m.Forwardable)
+	return m.Online && !m.OutOfUsage && (m.LocalStream || m.Forwardable)
 }
 
 // SupportsStructured reports whether any reachable machine's harness can
