@@ -66,11 +66,13 @@ import { useDesktopAccess } from "./useDesktopAccess";
 // ===========================================================================
 // Briefly hold the shared entry frame while readiness, access and setup facts
 // arrive, and, for anybody not already known to be an owner or developer,
-// until the first access check settles: a held person must never see the
-// desktop drawn first. A check that fails settles too, and lets the person in
-// at once. Once entered, refreshes never replace the page with a loading
-// frame. A missing feed still opens the desktop after the bounded initial
-// wait: an outage is not evidence that the cluster needs configuration.
+// until the first access check settles. The wait is bounded: three seconds
+// from the gate's mount (`waitExpired`). A held person whose first answer
+// lands within it sees the page and not the desktop; an answer after it
+// replaces the desktop with the page. A check that fails settles too, and lets
+// the person in at once. Once entered, refreshes never replace the page with a
+// loading frame. A missing feed still opens the desktop after the bound: an
+// outage is not evidence that the cluster needs configuration.
 //
 // Nothing is dismissed and nothing is remembered in a browser: the verdict IS
 // the state, so there is no Skip and nothing to remember. It lifts on a feed
@@ -99,7 +101,7 @@ export function CoreGate({ onSignOut, children, waitForReadiness = true }: {
   const facts = useSetupFacts();
   const role = access?.role ?? "";
   // The cluster's owners and developers: the setup screen is theirs, and the
-  // access check never holds them (the engine decides that on the stored role).
+  // engine's access check exempts them by their stored role.
   const exempt = canConfigure(role);
   const [override, setOverride] = useState<string | null>(null);
 
@@ -108,7 +110,11 @@ export function CoreGate({ onSignOut, children, waitForReadiness = true }: {
   const unconfigured = readiness?.of("ai")?.state === "unconfigured";
   const windowsOpen = Object.keys(state.shell.windows).length > 0;
   const desktopAccess = useDesktopAccess(true);
-  const keyAnswer = useKeyLetsIn(unconfigured && exempt, windowsOpen);
+  // Asked with the verdict while it is not yet known who is looking, as it was
+  // before the question became an owner's or developer's alone, so an owner's
+  // way in does not wait on the identity read and then on this one. Once the
+  // identity names somebody else, it is no longer asked and nothing waits on it.
+  const keyAnswer = useKeyLetsIn(unconfigured && (exempt || access === null), windowsOpen);
   const settings = useAppReach("settings");
   // Adding a key is offered only where it can be finished: the part, and a
   // Settings window with its API keys section to open.
@@ -116,7 +122,7 @@ export function CoreGate({ onSignOut, children, waitForReadiness = true }: {
     ? () => settings.open("apikeys", { addKey: true })
     : undefined;
   // The access check is waited for unless the person is already known to be
-  // an owner or developer, whom it never holds: their entry is what it was.
+  // an owner or developer, whom it does not hold: their entry is what it was.
   const resolving = readiness != null && (!readiness.loaded || (!exempt && !desktopAccess.settled) ||
     (unconfigured && (ladderLoaded !== true || access === null || (exempt && (keyAnswer === "unknown" || facts?.known !== true)))));
   const waiting = waitForReadiness && !entered && !waitExpired && resolving && Object.keys(state.shell.windows).length === 0;
@@ -208,7 +214,7 @@ export function CoreGate({ onSignOut, children, waitForReadiness = true }: {
   }));
 
   return (
-    <EntryLayout><main className="os-core-gate" data-os-core-gate="held">
+    <EntryLayout><main className="os-core-gate" data-os-core-gate="setup">
       <div className="os-core-gate-column">
         <span className="os-core-gate-mark" aria-hidden>
           <Mark className="os-ask-mark" />

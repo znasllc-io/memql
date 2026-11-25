@@ -55,11 +55,14 @@ import { useConnectionRecovery, useConnectionStatus } from "./connection";
 // same as a failure.
 //
 // `settled` says whether a check has come back at all, with an answer or a
-// failure. The gate's first entry waits on it (bounded, as for the readiness
-// feed), so a held person never sees the desktop drawn first, and a check that
-// fails lets the person in at once rather than after the bound.
+// failure. The gate's first entry waits on it for up to three seconds from the
+// gate's mount, the bound the readiness feed has. A held person whose answer
+// lands within it sees the page and not the desktop; one whose answer comes
+// later sees the desktop replaced by the page. A check that fails lets the
+// person in at once rather than after the bound.
 //
-// Regression tests: test/chrome/accessHeld.test.tsx.
+// Regression tests: test/chrome/accessHeld.test.tsx ("waits at the door for the
+// first check" pins the wait).
 
 /** One model source the person has set up, as the engine lists it. */
 export type AccessSourceRow = {

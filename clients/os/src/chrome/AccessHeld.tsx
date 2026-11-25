@@ -52,7 +52,7 @@ export function AccessHeld({ reference, canAddKey, onSignOut, onAdded }: {
   }
 
   return (
-    <EntryLayout><main className="os-core-gate" data-os-core-gate="access">
+    <EntryLayout><main className="os-core-gate" data-os-core-gate="held">
       <div className="os-core-gate-column">
         <span className="os-core-gate-mark" aria-hidden>
           <Mark className="os-ask-mark" />
@@ -84,13 +84,21 @@ export function AccessHeld({ reference, canAddKey, onSignOut, onAdded }: {
 /**
  * The add wizard, in the entry frame. Its own component so the person's keys
  * are read only while a key is being added, for the names a new one may not
- * repeat.
+ * repeat. It leads with the MemQL mark beside its key, as the entry frame's
+ * other wizards (ownership, passkey) lead with it.
  */
 function AddingKey({ onCancel, onAdded }: { onCancel: () => void; onAdded: () => void }) {
   const keys = useVendorKeys();
   return (
     <EntryLayout>
-      <AddKeyWizard keys={keys} taken={keys.mine.map((card) => card.label)} onCancel={onCancel} onAdded={() => onAdded()} from={null} />
+      <AddKeyWizard
+        keys={keys}
+        taken={keys.mine.map((card) => card.label)}
+        onCancel={onCancel}
+        onAdded={() => onAdded()}
+        from={null}
+        leadingIcon={<Mark />}
+      />
     </EntryLayout>
   );
 }

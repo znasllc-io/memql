@@ -170,6 +170,7 @@ describe("the held page", () => {
     // the person, not the cluster.
     expect(screen.queryByTestId("desk")).toBeNull();
     expect(screen.queryByRole("list", { name: "Set up this cluster" })).toBeNull();
+    expect(document.querySelector('[data-os-core-gate="held"]')).not.toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Copy reference" }));
     expect(writeText).toHaveBeenCalledExactlyOnceWith(REFERENCE);
@@ -198,6 +199,24 @@ describe("the held page", () => {
 });
 
 describe("who is let in", () => {
+  it("waits at the door for the first check, so a held person does not see the desk first", async () => {
+    // The cluster is set up and its facts are in: only the person's own check
+    // is out, and it alone keeps the opening frame up.
+    installSeededAccess("writer");
+    const connection = use(null);
+    let reply!: (value: unknown) => void;
+    connection.query.desktopAccess.mockReturnValueOnce(new Promise((resolve) => { reply = resolve; }));
+    render(gate("writer"));
+    await settle();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.getByRole("status").textContent).toBe("Opening MemQL OS");
+    expect(screen.queryByTestId("desk")).toBeNull();
+
+    await act(async () => reply(answer(held())));
+    expect(await screen.findByRole("heading", { name: HEADING })).toBeTruthy();
+    expect(screen.queryByTestId("desk")).toBeNull();
+  });
+
   it("an unknown answer lets the person in", async () => {
     // A check that cannot be answered is not evidence that a person lacks
     // access, whatever the cluster's own verdict: the model calls are still
@@ -373,14 +392,17 @@ describe("adding a key on the page", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Add an API key" }));
     const title = await screen.findByRole("heading", { name: "Add an API key" });
-    // In the entry frame, where the page was, and nothing behind it.
+    // In the entry frame, where the page was, and nothing behind it: the gate's
+    // children (the desk) are not drawn and no window was opened. The dock and
+    // the launcher are the real Shell's (readinessReactivity.test.tsx).
     expect(title.closest(".os-entry-layout")).not.toBeNull();
     expect(screen.getByRole("radiogroup", { name: "Vendor" })).toBeTruthy();
     expect(screen.queryByTestId("desk")).toBeNull();
-    expect(document.querySelector("[data-os-root]")).toBeNull();
-    expect(document.querySelector("[data-os-window]")).toBeNull();
     expect(JSON.parse(screen.getByTestId("windows").textContent ?? "[]")).toEqual([]);
     expect(screen.queryByText(HEADING)).toBeNull();
+    // It leads with the MemQL mark beside the key, as the entry frame's other
+    // wizards do.
+    expect(document.querySelectorAll(".os-wizard-marks .os-wizard-mark")).toHaveLength(2);
     // No trail back to a list of keys this page never showed, as the entry
     // frame's other wizards draw none.
     expect(screen.queryByRole("button", { name: "Back to API keys" })).toBeNull();
@@ -434,6 +456,9 @@ describe("adding a key on the page", () => {
     await pressBar("Add key");
 
     expect(screen.getByText("The key may have been added.")).toBeTruthy();
+    // In the page's own words: there is no list here to check.
+    expect(screen.getByText("If it was, this page opens by itself when you press Done.")).toBeTruthy();
+    expect(screen.queryByText(/Check the list/)).toBeNull();
     expect(within(bar()).queryAllByRole("button").map((b) => b.textContent?.trim())).toEqual(["Done"]);
     await pressBar("Done");
     expect(screen.getByRole("heading", { name: HEADING })).toBeTruthy();

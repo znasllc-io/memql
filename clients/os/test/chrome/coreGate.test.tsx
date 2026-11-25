@@ -12,6 +12,8 @@ import { builtinReply } from "../fleet/harness";
 import { installSeededAccess, seededAccessWithout } from "../seededAccess";
 import { setEffectiveCapabilities } from "../../src/system/roles";
 import { SetupFactsScope } from "../../src/apps/setup/SetupFactsScope";
+import { SessionProvider } from "../../src/chrome/access";
+import { UNKNOWN_RUNTIME_CONFIG } from "../../src/cluster/config";
 import { CoreGate } from "../../src/chrome/CoreGate";
 import { useOs } from "../../src/chrome/state";
 import type { Readiness } from "../../src/live/readiness";
@@ -189,6 +191,8 @@ describe("the two role variants", () => {
     render(gate("owner", UNCONFIGURED()));
     expect(await screen.findByRole("list", { name: "Set up this cluster" })).toBeTruthy();
     expect(screen.queryByTestId("desk")).toBeNull();
+    // The setup screen's marker, distinct from the held page's ("held").
+    expect(document.querySelector('[data-os-core-gate="setup"]')).not.toBeNull();
     // BEHIND THE GATE THERE IS NO APP, DOCK OR LAUNCHER (D6): the gate renders
     // in PLACE of its children, so none of it is even mounted.
     expect(document.querySelector("[data-os-root]")).toBeNull();
@@ -371,6 +375,28 @@ describe("an API key that can pay", () => {
       expect(await screen.findByTestId("desk")).toBeTruthy();
       expect(screen.queryByRole("list", { name: "Set up this cluster" })).toBeNull();
     }
+  });
+
+  it("asks whether a key can pay with the verdict, before the identity read lands", async () => {
+    // The key read starts as soon as the cluster is unconfigured, as it did
+    // before only owners and developers were asked, rather than waiting for
+    // the identity to say who is looking: an owner's way in must not pay for
+    // two reads in a row.
+    const connection = fakeConnection({ passkeysForSelf: [], inferenceStatus: keyStatus(true) });
+    h.connection = connection;
+    const shell = (access: Parameters<typeof SessionProvider>[0]["value"]["access"]) => (
+      <SessionProvider value={{ access, config: UNKNOWN_RUNTIME_CONFIG, ladderLoaded: true, readiness: UNCONFIGURED() }}>
+        <SetupFactsScope>{withOs(<CoreGate onSignOut={() => {}}>{DESK}</CoreGate>, access?.role ?? "")}</SetupFactsScope>
+      </SessionProvider>
+    );
+    const view = render(shell(null));
+    await waitFor(() => expect(connection.query.inferenceStatus).toHaveBeenCalledTimes(1));
+    // Nothing drawn yet: who is looking decides between the screen and the desk.
+    expect(screen.queryByTestId("desk")).toBeNull();
+
+    view.rerender(shell({ userId: "v1:identity:user:me", primaryEmail: "me@example.com", role: "owner", roleName: "", rank: 0 }));
+    expect(await screen.findByTestId("desk")).toBeTruthy();
+    expect(connection.query.inferenceStatus).toHaveBeenCalledTimes(1);
   });
 
   it("does not let anybody in on a key that cannot pay", async () => {

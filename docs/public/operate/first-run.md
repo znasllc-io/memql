@@ -22,70 +22,125 @@ while anything is still outstanding, the **Set up** card.
 It renders in place of the desk. Behind it there is no app, no dock and no
 launcher: they are not hidden, they are not mounted.
 
+**It asks two questions, each about different people.**
+
+- For the cluster's **owners and developers**: can this cluster reach a model?
+  Until it can, they get the setup screen.
+- For **everybody else**: is model access set up for this person? Until it is,
+  they get the held page, whether or not the cluster as a whole is set up.
+
+An owner or developer of one account is not exempt; only the cluster-wide role is.
+
+### The setup screen: owners and developers
+
+An **owner** or a **developer** gets the rail of core stops, with the inference
+stop already open on its three doors, then a quiet line, *An API key of your
+own lets you in, and nobody else*, with **Add an API key**, and Sign out under
+a rule beneath it. **Add an API key** opens Settings > API keys straight into
+its add wizard, and the screen steps aside while that window is open, as for
+its other acts. Closing the window asks again whether a key of theirs can pay.
+
 **It keys on inference alone.** Storage is always configured on a local cluster
 and mail is log-only there by design, and neither is needed to use the OS. The
 other core stops are on the rail, unlit and non-blocking, and they follow the
-Set up card onto the desk once the gate lifts.
+Set up card onto the desk once the screen lifts.
 
 **Nothing dismisses it and nothing is remembered in a browser.** The readiness
 verdict is the state, so there is no Skip and nothing to skip past. It lifts on
-a feed change with no reload — including for somebody who cannot act on it and
-is simply waiting.
+a feed change with no reload.
 
 **A door that is configured but not live still lifts it.** A machine that
 serves a qualifying model but is asleep is a configured door: the OS opens, and
 a call that needs it parks with a report naming the machine. Configuration
 opens the OS; presence decides a call.
 
-**An API key that can pay lets its holder past it.** Model access is
-bring-your-own, so somebody whose own key, or a key lent to them, can pay for a
-vendor's models on a route they choose is not held, whatever the cluster's
-verdict. The cluster's readiness is unchanged and so is everybody else's gate:
-a key lets in the person it pays for. The gate asks for this person's answer
-(`inferenceStatus`, `keyAccount`) whenever it would show, and again when a
-window opened from it closes; an answer it cannot read keeps the gate.
-([API keys](api-keys.md))
+**An API key that can pay lets an owner or developer past it.** Model access is
+bring-your-own, so an owner or developer whose own key, or a key lent to them,
+can pay for a vendor's models on a route they choose is not held, whatever the
+cluster's verdict. The screen asks for their answer (`inferenceStatus`,
+`keyAccount`) whenever it would show, and again when a window opened from it
+closes. An answer it cannot read keeps the screen. For everybody else a key is
+one of the things the held page counts. ([API keys](api-keys.md))
 
-### Two variants
+### The held page: everybody else
 
-An **owner** or a **developer** gets the rail of core stops, with the inference
-stop already open on its three doors, then a quiet line, *An API key of your
-own lets you in, and nobody else*, with **Add an API key**, and Sign out under
-a rule beneath it.
+Ask, goals and file summaries run on the person's own model access, so somebody
+with none would get a desktop whose features fail one at a time. When the
+person signs in, the OS asks the cluster whether they have any of these set up:
 
-Everybody else who may add a key (every predefined role may) gets one
-sentence — *An owner or developer has to set up inference. Until then, an API
-key of your own lets you in* — with **Add an API key**, a line saying the page
-opens by itself once they have, and Sign out. Somebody withheld from adding
-keys gets the sentence it always was: *An owner or developer has to set up
-inference before anyone can use it*. **It does not name the owner.** A
-person's name is not the cluster's to publish, and the sentence is exactly as
-actionable without one.
+- a machine of theirs, or one lent to them, that runs a usable model;
+- Claude Code or Codex on a machine of theirs;
+- an API key of theirs, or one lent to them;
+- the cluster's own vendor account, where it pays for them.
 
-**Add an API key** opens Settings > API keys straight into its add wizard, and
-the gate steps aside while that window is open, as for its other acts. Closing
-the window asks again whether a key of theirs can pay.
+Set up counts even when it cannot answer right now: a lent laptop that is
+asleep, a key out of credit, an app out of usage. With something set up, the
+person enters. With nothing, they see the held page in place of the desk:
+
+- the title, *Your access is not set up yet*;
+- one sentence asking them to have an administrator set a model up, and to give
+  the administrator the reference beneath it, which has a copy control;
+- *This page opens by itself once it is set up*;
+- **Add an API key**, for anybody who may add one (every predefined role may);
+- Sign out.
+
+**It does not name the owner.** A person's name is not the cluster's to
+publish, and the page is as actionable without one.
+
+**It lifts by itself.** Nothing an administrator changes reaches the held
+person's connection, so the page asks again:
+
+- when the window regains focus;
+- when the connection returns;
+- every 30 seconds while it is visible;
+- after a key is added.
+
+Open windows never keep the desk from it. Access taken away while somebody is
+inside shows the page at the next check.
+
+**Add an API key runs the key wizard on the page**, in the same frame, not in a
+Settings window: a window needs the desk drawn under it, and the desk is what a
+held person does not get. Cancel returns to the page. A key added asks again,
+and the page opens if the key counts.
+
+**The reference is what an administrator looks up.** It is `ERR-` and six hex
+characters. Before the page shows it, the cluster writes one line under it to
+the log store, naming the person and each source it checked with why it does
+not count. An administrator, or anyone of higher rank, searches the reference
+in Logs and finds that line
+([the held person's reference](logs.md#the-one-line-that-is-never-dropped-a-held-persons-reference)).
+A check that still holds the person keeps the same reference. If the line could
+not be stored, the page shows no reference and does not ask for one.
 
 ### What it does when it cannot say
 
-Three silences, and only one of them holds anybody.
+The readiness feed has three silences, and only one of them holds anybody.
 
 | The feed says | The gate |
 |---|---|
 | nothing yet — it has not loaded | draws nothing, and the shell opens |
 | `unreported` — no live node reported inference | draws nothing, and the shell opens |
 | `configured`, `partial` | draws nothing, and the shell opens |
-| `unconfigured` | holds |
+| `unconfigured` | holds owners and developers on the setup screen |
 
 **A broken cluster is not an unconfigured one.** `unreported` means no live
 node answered, which is a different problem with a different fix — and a gate
 that held on it would lock somebody out of the Cluster app they need in order
 to go and find out why nothing is reporting.
 
-The one exception is the role ladder: while the cluster is unconfigured AND the
-ladder has not landed, nothing is drawn at all. Which variant to show is not a
-question a wrong answer gets nearly right, and telling an owner to go and find
-an owner is worse than a beat of empty ground.
+**A person's own check that cannot be answered lets them in.** An outage is not
+evidence that a person lacks access, and the cluster refuses their model calls
+either way. On the way in, for anybody not already known to be an owner or
+developer, the opening frame waits for the first answer for up to three
+seconds, the same bound as for the feed, so a held person whose answer comes in
+time sees the page rather than the desk. An answer that comes later replaces
+the desk with the page. A check that fails ends the wait at once. A check that
+fails after one has held the person leaves the page up until the next answer.
+
+One more wait has no time limit. While the cluster is unconfigured AND the role
+ladder or the signed-in identity has not landed, nothing is drawn at all. Who is
+looking decides between the setup screen and the desk, and opening the desk for
+an owner who has to set the cluster up is worse than a beat of empty ground.
 
 ## The Set up card, once the gate has lifted
 
