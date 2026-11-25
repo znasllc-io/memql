@@ -43,6 +43,11 @@ export interface MemorySearchSwitch {
   startedBy: string;
   waitingReason: string;
   estimatedTotal: number;
+  /** The RUN's indexer, whose machines the rebuild embeds on, BARE as the wire carries it. */
+  indexedBy: string;
+  indexedByName: string;
+  /** Choosing the switch's target again would make the caller the run's indexer (ruling R14). */
+  takeOver: boolean;
 }
 
 export interface MemorySearchStatus {
@@ -150,6 +155,9 @@ export function readMemorySearchStatus(raw: Row | null): MemorySearchStatus {
       startedBy: text(sw.startedBy),
       waitingReason: text(sw.waitingReason),
       estimatedTotal: whole(sw.estimatedTotal),
+      indexedBy: text(sw.indexedBy),
+      indexedByName: text(sw.indexedByName),
+      takeOver: sw.takeOver === true,
     },
     retained: (Array.isArray(row.retained) ? row.retained : [])
       .map((entry) => ({ providerRef: text(record(entry).providerRef), retireAt: text(record(entry).retireAt) }))

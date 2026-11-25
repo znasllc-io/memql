@@ -2958,7 +2958,12 @@ bound model locked and says where to change it.
   while that model can be chosen.
 - **THE TAKE-OVER IS OFFERED ONLY WHERE IT CHANGES SOMETHING**: when the status's
   `takeOver` says choosing the model in use again would make you its indexer
-  (ruling R13), as "Index on my machines", during a switch too.
+  (ruling R13), as "Index on my machines", during a switch too; and when a
+  running switch's own `takeOver` says choosing its target again would make you
+  the RUN's indexer (ruling R14), as "Re-index on my machines" on the Switching
+  row, held with Cancel. A wait is said from the reader's side: "your machines",
+  or the indexer's by name -- the binding's for the backlog, the run's for a
+  switch, which need not be the same person.
 - QA views: `memory-search*` (`qa/README.md`). Tests:
   `test/cluster/memorySearch.test.tsx`.
 

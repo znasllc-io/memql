@@ -13,10 +13,13 @@ import { ConnectionStatusContext } from "../src/chrome/connection";
 //                            `&click=nomic-embed-text` opens the confirmation;
 //                            `&click=text-embedding-3-small` shows its cost line.
 //   memory-search-switching  a switch re-indexing, with Cancel
-//   memory-search-waiting    the same switch waiting for a machine
+//   memory-search-waiting    the same switch waiting for one of your machines
+//   memory-search-switch-takeover
+//                            a switch whose own indexer, another owner, cannot
+//                            index its target: Re-index on my machines and Cancel
 //   memory-search-decision   a switch held for Switch anyway or Cancel
 //   memory-search-vendor     a vendor model nobody chose, asked once
-//   memory-search-takeover   another owner's machines cannot index it
+//   memory-search-takeover   another owner can no longer index the model in use
 //   memory-search-unbound    no model chosen yet
 //   memory-search-loading    the first read still out
 //   memory-search-error      the first read refused
@@ -41,7 +44,8 @@ function switchRun(over: Row = {}): Row {
   return {
     state: "indexing", targetRef: NOMIC, targetLabel: "nomic-embed-text",
     counts: { total: 1300, done: 1200, skipped: 40, unsourced: 0, failed: 60 },
-    startedAt: new Date(Date.now() - 20 * 60 * 1000).toISOString(), startedBy: "u-me", waitingReason: "", estimatedTotal: 8310, ...over,
+    startedAt: new Date(Date.now() - 20 * 60 * 1000).toISOString(), startedBy: "u-me", waitingReason: "", estimatedTotal: 8310,
+    indexedBy: "u-me", indexedByName: "Ana Owner", takeOver: false, ...over,
   };
 }
 
@@ -62,6 +66,8 @@ const SCENES: Record<string, { status: Answer; section?: string }> = {
     switch: switchRun({ state: "done", targetRef: QWEN, targetLabel: "qwen3-embedding:0.6b" }) }) },
   "memory-search-switching": { status: status({ switch: switchRun() }) },
   "memory-search-waiting": { status: status({ switch: switchRun({ state: "waiting", waitingReason: "none of the indexer's machines offering nomic-embed-text is online" }) }) },
+  "memory-search-switch-takeover": { status: status({ switch: switchRun({ state: "waiting", indexedBy: "u-bo", indexedByName: "Bo Owner", takeOver: true,
+    waitingReason: "none of the indexer's machines offering nomic-embed-text is online" }) }) },
   "memory-search-decision": { status: status({ switch: switchRun({ state: "needsDecision", counts: { total: 8310, done: 8305, skipped: 0, unsourced: 2, failed: 3 } }) }) },
   "memory-search-vendor": { status: status({ ...VENDOR_STATUS, needsConfirmation: true }) },
   "memory-search-takeover": { status: status({ indexedBy: "ana", indexedByName: "Ana Owner", takeOver: true, backlog: 12,

@@ -43,8 +43,11 @@ import "./memorySearch.css";
 
 const items = (n: number) => `${formatCount(n)} ${n === 1 ? "item" : "items"}`;
 
-function indexerIsMe(status: MemorySearchStatus, me: string): boolean {
-  return me !== "" && bareId(status.indexedBy) === me;
+/** Whose machines embed: the binding's indexer (the status row) or a running switch's (its summary). */
+type Indexer = Pick<MemorySearchStatus, "indexedBy" | "indexedByName">;
+
+function indexerIsMe(indexer: Indexer, me: string): boolean {
+  return me !== "" && bareId(indexer.indexedBy) === me;
 }
 
 /** Whose machines index the model, from the reader's side. */
@@ -58,12 +61,13 @@ function indexingLine(status: MemorySearchStatus, me: string): string {
 /**
  * The index job's wait, as the person reading it: the job says "the indexer's
  * machines" (memoryIndexWaitReason), which is "your machines" to the indexer
- * and the indexer's by name to anybody else. The backfill embeds as the
- * binding's indexer, so it is the binding's indexer who is meant. Any other
- * wording is shown as the engine wrote it.
+ * and the indexer's by name to anybody else. Which indexer is meant follows
+ * which run waits: the backfill embeds as the BINDING's indexer, a switch's
+ * rebuild as the RUN's (ruling R14), and the two need not be one person. Any
+ * other wording is shown as the engine wrote it.
  */
-function asReader(reason: string, status: MemorySearchStatus, me: string): string {
-  const whose = indexerIsMe(status, me) ? "your machines" : status.indexedByName ? `${status.indexedByName}'s machines` : "";
+function asReader(reason: string, indexer: Indexer, me: string): string {
+  const whose = indexerIsMe(indexer, me) ? "your machines" : indexer.indexedByName ? `${indexer.indexedByName}'s machines` : "";
   return whose ? reason.replaceAll("the indexer's machines", whose) : reason;
 }
 
@@ -73,10 +77,20 @@ function backlogLine(status: MemorySearchStatus, me: string): string {
   return reason ? `Indexing waits: ${reason}` : "";
 }
 
-/** Why the take-over is offered: the status said choosing the model again takes over (takeOver). */
+/**
+ * Why the binding's take-over is offered (the row's takeOver). "Can no longer
+ * index", never "its machines cannot": a demoted owner is a cause as often as
+ * a machine that is off, and the status does not say which.
+ */
 function takeOverLine(status: MemorySearchStatus): string {
   if (status.indexedBy === "") return "Search and new items wait until an owner indexes it.";
-  return `${status.indexedByName ? `${status.indexedByName}'s` : "Its indexer's"} machines cannot index it, so search and new items wait.`;
+  return `${status.indexedByName || "Its indexer"} can no longer index it, so search and new items wait.`;
+}
+
+/** Why a running switch's take-over is offered (its own takeOver, ruling R14): the RUN's indexer cannot index its target. */
+function switchTakeOverLine(sw: MemorySearchSwitch): string {
+  if (sw.indexedBy === "") return `The switch waits until an owner indexes ${sw.targetLabel}.`;
+  return `${sw.indexedByName || "Its indexer"} can no longer index ${sw.targetLabel}, so the switch waits.`;
 }
 
 /** What choosing `target` will do, said before it is done (the brief's confirmation). */
@@ -131,7 +145,7 @@ export function MemorySearchPage({ query, connected, visible, me, mayChange }: {
     : <Details>
       <InUse status={status} me={me} search={search} mayChange={mayChange} refusal={actedIn === "inUse" ? search.error : ""} act={act} />
       {switchRunning(status) && !switchFlipped(status)
-        ? <Switching status={status} sw={status.switch!} mayChange={mayChange} refusal={actedIn === "switch" ? search.error : ""} search={search} act={act} />
+        ? <Switching status={status} sw={status.switch!} me={me} mayChange={mayChange} refusal={actedIn === "switch" ? search.error : ""} search={search} act={act} />
         : mayChange ? <ChangeModel status={status} search={search} draft={draft === status.providerRef ? null : draft} setDraft={setDraft}
           refusal={actedIn === "change" ? search.error : ""} act={act} /> : null}
     </Details>}
@@ -188,18 +202,28 @@ function InUse({ status, me, search, mayChange, refusal, act }: { status: Memory
  * walk (embedded or already there), and is CLAMPED to the estimated total: the
  * estimate is the active index plus its backlog, not a count of the corpus, and
  * a walk that finds more than it would otherwise read "8,400 of 8,310".
+ *
+ * THE SWITCH'S OWN TAKE-OVER (ruling R14). The rebuild embeds as the RUN's
+ * indexer, so a run whose indexer cannot index its target waits however healthy
+ * the binding's indexer is. Choosing the target again makes the caller the
+ * run's indexer (memorySearchTakeOverRun), and it is offered only where the
+ * switch summary's takeOver says so. It stands with Cancel in one hold: it
+ * arrives with a read and moves Cancel down, and a press aimed at Cancel must
+ * not land on what took its place. The progress lines stay outside the hold,
+ * because they change with every read and would hold Cancel each time.
  */
-function Switching({ status, sw, mayChange, refusal, search, act }: { status: MemorySearchStatus; sw: MemorySearchSwitch; mayChange: boolean; refusal: string; search: MemorySearch; act: Act }) {
+function Switching({ status, sw, me, mayChange, refusal, search, act }: { status: MemorySearchStatus; sw: MemorySearchSwitch; me: string; mayChange: boolean; refusal: string; search: MemorySearch; act: Act }) {
   const total = sw.estimatedTotal;
   const done = Math.min(sw.counts.done + sw.counts.skipped, total);
   const fraction = total > 0 ? done / total : 0;
   const held = sw.counts.failed + sw.counts.unsourced;
   const kinds = [sw.counts.failed > 0 ? `${formatCount(sw.counts.failed)} failed` : "", sw.counts.unsourced > 0 ? `${formatCount(sw.counts.unsourced)} cannot be rebuilt` : ""].filter(Boolean).join(", ");
+  const deciding = sw.state === "needsDecision";
   return <DetailsSection title="Change model">
     <SettingRow label="Switching to">
       <div className="os-memory-search-stack">
         <span className="os-mono os-memory-search-target">{sw.targetLabel}</span>
-        {sw.state === "needsDecision" ? <InPlaceAsk>
+        {deciding ? <InPlaceAsk>
           <Notice tone="warn" sentence={`${items(held)} could not be indexed${kinds ? ` (${kinds})` : ""}.`}>
             <p className="os-caption">Switch anyway leaves them out of search until they are indexed again.</p>
             {mayChange ? <div className="os-panel-actions">
@@ -212,9 +236,14 @@ function Switching({ status, sw, mayChange, refusal, search, act }: { status: Me
             <span className="os-progress-bar" style={{ width: `${fraction * 100}%` }} />
           </span>
           <p className="os-memory-search-line">{`Re-indexing ${formatCount(done)} of ${items(total)}. Search uses ${status.label} until this finishes.`}</p>
-          {sw.state === "waiting" && sw.waitingReason ? <p className="os-caption os-memory-search-line">{`Waiting: ${sw.waitingReason}.`}</p> : null}
-          {mayChange ? <InPlaceAsk className="os-panel-actions"><Button onClick={act("switch", search.cancel)}>Cancel</Button></InPlaceAsk> : null}
+          {sw.state === "waiting" && sw.waitingReason ? <p className="os-caption os-memory-search-line">{`Waiting: ${asReader(sw.waitingReason, sw, me)}.`}</p> : null}
         </div>}
+        {mayChange && (sw.takeOver || !deciding) ? <InPlaceAsk className="os-memory-search-stack">
+          {sw.takeOver ? <Notice tone="warn" sentence={switchTakeOverLine(sw)}>
+            <div className="os-panel-actions"><Button tone="primary" onClick={act("switch", () => search.switchTo(sw.targetRef))}>Re-index on my machines</Button></div>
+          </Notice> : null}
+          {deciding ? null : <div className="os-panel-actions"><Button onClick={act("switch", search.cancel)}>Cancel</Button></div>}
+        </InPlaceAsk> : null}
         {refusal ? <Notice tone="error" sentence={refusal} /> : null}
       </div>
     </SettingRow>

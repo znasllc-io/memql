@@ -70,6 +70,9 @@ function switchRun(over: Partial<Row> = {}): Row {
     startedBy: "me",
     waitingReason: "",
     estimatedTotal: 8310,
+    indexedBy: "me",
+    indexedByName: "Ana Owner",
+    takeOver: false,
     ...over,
   };
 }
@@ -286,7 +289,8 @@ describe("Cluster > Settings > Memory search", () => {
     const query = memorySearchQuery(statusRow({ indexedBy: "ana", indexedByName: "Ana Owner", takeOver: true }),
       statusRow({ indexedBy: "me", takeOver: false }));
     mount("memorysearch", query);
-    expect(await screen.findByText("Ana Owner's machines cannot index it, so search and new items wait.")).toBeTruthy();
+    // Said without blaming the machines: a demoted indexer is a cause too.
+    expect(await screen.findByText("Ana Owner can no longer index it, so search and new items wait.")).toBeTruthy();
     await readTheBar();
     fireEvent.click(screen.getByRole("button", { name: "Index on my machines" }));
     await settle();
@@ -303,6 +307,43 @@ describe("Cluster > Settings > Memory search", () => {
     mount("memorysearch", memorySearchQuery(statusRow({ indexedBy: "ana", indexedByName: "Ana Owner", takeOver: false })));
     await screen.findByText("Indexed on Ana Owner's machines");
     expect(screen.queryByRole("button", { name: "Index on my machines" })).toBeNull();
+  });
+
+  it("a switch says its wait as the reader, naming whose machines the rebuild waits for", async () => {
+    // The job writes "the indexer's machines"; the rebuild embeds as the RUN's
+    // indexer, who need not be the binding's (statusRow's is the reader).
+    const offline = "none of the indexer's machines offering nomic-embed-text is online";
+    mount("memorysearch", memorySearchQuery(statusRow({ switch: switchRun({ state: "waiting", waitingReason: offline, indexedBy: "me", indexedByName: "Ana Owner" }) })));
+    expect(await screen.findByText("Waiting: none of your machines offering nomic-embed-text is online.")).toBeTruthy();
+    cleanup();
+
+    mount("memorysearch", memorySearchQuery(statusRow({ switch: switchRun({ state: "waiting", waitingReason: offline, indexedBy: "bo", indexedByName: "Bo Owner" }) })));
+    expect(await screen.findByText("Waiting: none of Bo Owner's machines offering nomic-embed-text is online.")).toBeTruthy();
+  });
+
+  it("a switch whose own indexer cannot index offers the take-over: choosing its target again", async () => {
+    const stuck = switchRun({ state: "waiting", indexedBy: "bo", indexedByName: "Bo Owner", takeOver: true,
+      waitingReason: "the owner who chose this model is no longer an owner; an owner can choose again" });
+    const query = memorySearchQuery(statusRow({ switch: stuck }),
+      statusRow({ switch: switchRun({ indexedBy: "me", indexedByName: "Ana Owner", takeOver: false }) }));
+    mount("memorysearch", query);
+    expect(await screen.findByText("Bo Owner can no longer index nomic-embed-text, so the switch waits.")).toBeTruthy();
+    // The binding's own take-over is a different act, and is not offered here.
+    expect(screen.queryByRole("button", { name: "Index on my machines" })).toBeNull();
+    await readTheBar();
+    fireEvent.click(screen.getByRole("button", { name: "Re-index on my machines" }));
+    await settle();
+    expect(query.memorySearchSwitch).toHaveBeenCalledTimes(1);
+    expect(query.memorySearchSwitch).toHaveBeenCalledWith({ provider: NOMIC });
+    expect(screen.queryByRole("button", { name: "Re-index on my machines" })).toBeNull();
+    // Cancel is still the switch's way out.
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
+    cleanup();
+
+    // Only where the status says so.
+    mount("memorysearch", memorySearchQuery(statusRow({ switch: switchRun({ indexedBy: "bo", indexedByName: "Bo Owner", takeOver: false }) })));
+    await screen.findByRole("progressbar");
+    expect(screen.queryByRole("button", { name: "Re-index on my machines" })).toBeNull();
   });
 
   it("reads the status every 5 s while a switch runs, and every 30 s otherwise", async () => {
