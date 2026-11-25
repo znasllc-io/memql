@@ -1,8 +1,10 @@
 package memql
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"log/slog"
 	"math"
 	"strings"
 	"testing"
@@ -391,4 +393,42 @@ func TestTheSemanticCacheIsWiredBeforeAModelIsBound(t *testing.T) {
 	value, hit := cache.Lookup(ctx, "test.ns", "classify: hello")
 	require.True(t, hit)
 	require.Equal(t, "label-a", value)
+}
+
+// With an operator-enabled namespace and no memory-search model bound, every
+// lookup and store fails the same way until an owner binds one. The cache says
+// so once when that starts and once when it ends, rather than at every call;
+// each failure is still counted, and any other failure is logged as it happens.
+func TestTheSemanticCacheSaysOnceThatNoModelIsBound(t *testing.T) {
+	var calls []string
+	var binding EmbedderBinding
+	cache, _ := semanticCacheOnBinding(t, &calls, &binding)
+	var logs bytes.Buffer
+	cache.logger = slog.New(slog.NewTextHandler(&logs, nil))
+	warnings := func() int { return strings.Count(logs.String(), "level=WARN") }
+	ctx := context.Background()
+	for range 3 {
+		_, hit := cache.Lookup(ctx, "test.ns", "classify: hello")
+		require.False(t, hit)
+		cache.Store(ctx, "test.ns", "classify: hello", "label")
+	}
+	require.Equal(t, 1, warnings(), logs.String())
+	require.EqualValues(t, 6, cache.Stats().Errors, "each failure is still counted")
+
+	binding = EmbedderBinding{ProviderRef: "semanticEmbedA", Dimensions: 4, ActivatedAt: "2026-11-24T00:00:00Z"}
+	cache.Store(ctx, "test.ns", "classify: hello", "label-a")
+	cache.Store(ctx, "test.ns", "classify: other", "label-b")
+	require.Equal(t, 1, strings.Count(logs.String(), "level=INFO"), "a model is bound again: said once")
+
+	binding = EmbedderBinding{}
+	for range 2 {
+		cache.Lookup(ctx, "test.ns", "classify: hello")
+	}
+	require.Equal(t, 2, warnings(), "unbound again: said once more")
+
+	binding = EmbedderBinding{ProviderRef: "semanticEmbedMissing", Dimensions: 4, ActivatedAt: "2026-11-24T00:00:00Z"}
+	for range 2 {
+		cache.Lookup(ctx, "test.ns", "classify: hello")
+	}
+	require.Equal(t, 4, warnings(), "any other failure is logged as it happens")
 }

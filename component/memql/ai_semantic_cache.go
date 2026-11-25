@@ -2,6 +2,7 @@ package memql
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -165,6 +166,10 @@ type semanticAICache struct {
 	disabledLookups atomic.Int64
 	errors          atomic.Int64
 	tokensSaved     atomic.Int64
+
+	// unbound is the cache embedding with no memory-search model bound
+	// (logEmbedFailure).
+	unbound atomic.Bool
 }
 
 // newSemanticAICache builds the primitive. namespaces is the initial
@@ -255,9 +260,10 @@ func (c *semanticAICache) Lookup(ctx context.Context, namespace, promptText stri
 	vec, key, err := c.embedFor(ctx, namespace, promptText)
 	if err != nil {
 		c.errors.Add(1)
-		c.logSoft("semanticCache: embed failed on lookup; falling through to fresh", namespace, err)
+		c.logEmbedFailure("semanticCache: embed failed on lookup; falling through to fresh", namespace, err)
 		return nil, false
 	}
+	c.embedded()
 
 	cached, sim, found, err := c.store.Nearest(ctx, key, vec)
 	if err != nil {
@@ -298,9 +304,10 @@ func (c *semanticAICache) Store(ctx context.Context, namespace, promptText strin
 	vec, key, err := c.embedFor(ctx, namespace, promptText)
 	if err != nil {
 		c.errors.Add(1)
-		c.logSoft("semanticCache: embed failed on store; result not cached", namespace, err)
+		c.logEmbedFailure("semanticCache: embed failed on store; result not cached", namespace, err)
 		return
 	}
+	c.embedded()
 	if err := c.store.Store(ctx, key, vec, cloneInterface(value), cfg.TTL); err != nil {
 		c.errors.Add(1)
 		c.logSoft("semanticCache: store failed; result not cached", namespace, err)
@@ -339,6 +346,30 @@ func (c *semanticAICache) logSoft(msg, namespace string, err error) {
 		return
 	}
 	c.logger.Warn(msg, "namespace", namespace, "err", err)
+}
+
+// logEmbedFailure logs an embedding that failed. With no memory-search model
+// bound (ErrNoEmbedderBound), every lookup and store of an enabled namespace
+// fails the same way until an owner binds one, so that state is said ONCE, when
+// the cache enters it, and once more when an embedding works again (embedded),
+// rather than at every call. Every other failure is logged as it happens. The
+// error counter counts each failure either way.
+func (c *semanticAICache) logEmbedFailure(msg, namespace string, err error) {
+	if !errors.Is(err, ErrNoEmbedderBound) {
+		c.logSoft(msg, namespace, err)
+		return
+	}
+	if !c.unbound.Swap(true) && c.logger != nil {
+		c.logger.Warn("semanticCache: no memory-search model is bound; enabled namespaces go to a fresh call until one is",
+			"namespace", namespace)
+	}
+}
+
+// embedded notes an embedding that worked, ending a spell with no model bound.
+func (c *semanticAICache) embedded() {
+	if c.unbound.Swap(false) && c.logger != nil {
+		c.logger.Info("semanticCache: a memory-search model is bound again; enabled namespaces are cached")
+	}
 }
 
 // estimatePromptTokens is a coarse token estimate (~4 chars/token) used only

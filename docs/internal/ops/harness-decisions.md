@@ -2653,9 +2653,14 @@ the binding (fresh, like every memory-search embedding), embeds with its model a
 its indexer (`boundSemanticEmbedder`), and keys the row by the model as well as
 the namespace (`semanticModelNamespace`), so a lookup never compares two models'
 vectors, including a row a lagging replica writes after the flip's DELETE. The
-cache is wired before any model is bound, and works once one is. Tests:
+cache is wired before any model is bound, and works once one is. Until then
+every lookup and store of an enabled namespace fails open the same way, so the
+log says it once when the cache enters that state and once when an embedding
+works again, not at every call; each failure is still counted, and any other
+embedding failure is logged as it happens (`logEmbedFailure`). Tests:
 `TestTheSemanticCacheFollowsTheBinding`,
-`TestTheSemanticCacheIsWiredBeforeAModelIsBound`.
+`TestTheSemanticCacheIsWiredBeforeAModelIsBound`,
+`TestTheSemanticCacheSaysOnceThatNoModelIsBound`.
 
 **Limits.** Not run against a live cluster. The store path in the db tests is a
 stub of `integrations/embedding`'s contract (this package cannot import it);
