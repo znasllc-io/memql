@@ -180,6 +180,47 @@ func TestAFailedCrossOwnerReadKeepsTheOwnCatalog(t *testing.T) {
 	if err != nil || len(got) != 1 || got[0].ModelId != "model-mine" {
 		t.Fatalf("catalog = %+v, %v; the own half must survive a failed shared read", got, err)
 	}
+
+	// A reader that must not answer from half the rows (desktop access)
+	// listens with an auth.ReadFailures: it gets the same answer, and hears
+	// that the lent half is missing. Nobody listening, as above, hears nothing
+	// and routing is unchanged.
+	ctx, failures := auth.ContextWithReadFailures(context.Background())
+	got, err = r.Catalog(ctx, "alice")
+	if err != nil || len(got) != 1 || got[0].ModelId != "model-mine" {
+		t.Fatalf("catalog = %+v, %v; listening must not change the answer", got, err)
+	}
+	if failures.Err() == nil {
+		t.Fatal("the failed cross-owner read was not noted for the listening reader")
+	}
+}
+
+// A machine lent to a group asks for the person's groups, on the caller's
+// context: a membership read that fails answers no groups and is noted there
+// by the installed source (activeGroupIdsForUser), so a listening reader such
+// as desktop access hears it instead of reading "nothing is lent to them".
+func TestAFailedGroupReadIsNotedForAListeningReader(t *testing.T) {
+	now := time.Now().UTC()
+	viaGroup := machineRow("via-group", "model-via-group", now)
+	viaGroup["ownerUserId"] = "bob"
+	viaGroup["sharing"] = map[string]any{"mode": "people", "groupIds": []any{"design"}}
+	viaGroup["capabilityDescriptor"] = map[string]any{"inferenceServe": "cluster"}
+	r := &Reader{
+		Store: &EngineStore{Engine: dualFixture{t: t, owner: "alice", all: []any{viaGroup}}},
+		Now:   func() time.Time { return now },
+		Groups: func(ctx context.Context, _ string) []string {
+			auth.NoteReadFailure(ctx, fmt.Errorf("memberships unreadable"))
+			return nil
+		},
+	}
+	ctx, failures := auth.ContextWithReadFailures(context.Background())
+	got, err := r.Catalog(ctx, "alice")
+	if err != nil || len(got) != 0 {
+		t.Fatalf("catalog = %+v, %v; a failed group read lends nothing", got, err)
+	}
+	if failures.Err() == nil {
+		t.Fatal("the failed group read did not reach the listening reader")
+	}
 }
 
 // failingShared is an owner store whose cross-owner read fails.

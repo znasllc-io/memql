@@ -260,6 +260,60 @@ func TestAFailedGrantReadBehindTheClusterAccountIsAnError(t *testing.T) {
 	}
 }
 
+// halfCatalog is fleetcatalog.Reader after its read of everybody else's
+// machines failed: the person's own machines, no error, and the failure noted
+// on the context for whoever listens (catalog.go).
+type halfCatalog struct{ own []FleetModel }
+
+func (c halfCatalog) Catalog(ctx context.Context, _ string) ([]FleetModel, error) {
+	auth.NoteReadFailure(ctx, errors.New("shared fleet read: unavailable"))
+	return c.own, nil
+}
+
+// Final review, Important 1: a person whose only source is a lent machine is
+// not held because the read of the lent machines failed. The catalog keeps
+// the own half for routing and notes the failure; desktop access hears it and
+// answers an error, which the client reads as unknown.
+func TestAFailedReadOfLentMachinesIsAnErrorNotAHold(t *testing.T) {
+	rec := installRecorder(t)
+	e := holdEngine(auth.RoleWriter)
+	e.providers.SetFleetCatalog(halfCatalog{})
+	got, err := e.desktopAccess(personContext("ana"), "ana", "", "")
+	if err == nil || !strings.Contains(err.Error(), "shared fleet read: unavailable") || got.Reference != "" || got.Admitted {
+		t.Fatalf("answer = %+v, err = %v, want an error and nothing else", got, err)
+	}
+	if len(rec.lines) != 0 {
+		t.Fatalf("lines = %+v, want none: an error writes no hold line", rec.lines)
+	}
+}
+
+// lentThroughGroups stands in for the lent half of fleetcatalog.Reader: it
+// asks for the person's groups through the engine's own membership source, as
+// lentToPerson does through workerservice.InstalledGroups, and lends nothing.
+type lentThroughGroups struct{ engine *MemQLEngine }
+
+func (c lentThroughGroups) Catalog(ctx context.Context, person string) ([]FleetModel, error) {
+	_ = graphMembershipSource{engine: c.engine}.ActiveGroupIdsForUser(ctx, person)
+	return nil, nil
+}
+
+// The membership read inside the lent read is the real one
+// (membershipsFor -> activeGroupIdsForUser) over a database that refuses: it
+// answers no groups, notes the failure, and desktop access answers an error.
+func TestAFailedMembershipReadInTheLentReadIsAnError(t *testing.T) {
+	rec := installRecorder(t)
+	e := holdEngine(auth.RoleWriter)
+	e.db = closedDatabase(t)
+	e.providers.SetFleetCatalog(lentThroughGroups{engine: e})
+	got, err := e.desktopAccess(personContext("ana"), "ana", "", "")
+	if err == nil || !strings.Contains(err.Error(), "the machines theirs or lent to them could not be read") || got.Reference != "" {
+		t.Fatalf("answer = %+v, err = %v, want an error naming the machine read", got, err)
+	}
+	if len(rec.lines) != 0 {
+		t.Fatalf("lines = %+v, want none", rec.lines)
+	}
+}
+
 // Sources are computed for the exempt too, because Ask uses them.
 func TestAnExemptPersonStillGetsTheirSources(t *testing.T) {
 	installRecorder(t)

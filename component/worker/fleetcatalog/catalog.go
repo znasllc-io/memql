@@ -64,8 +64,21 @@ func (r *Reader) Catalog(ctx context.Context, owner string) ([]memqlengine.Fleet
 		// PlanUserModelWithShared already follows: the own machines are a
 		// complete answer to a narrower question, and a person whose laptop
 		// can serve must not lose it to a read about somebody else's.
+		//
+		// AND THE FAILURE IS NOTED on the context's auth.ReadFailures, for a
+		// reader that must not answer from half the rows. Desktop access is one
+		// (component/memql/desktop_access.go): "nothing is lent to them" read
+		// off a failed read would hold a person whose only source is a
+		// colleague's machine, so it listens and answers "unknown" instead.
+		// With no holder on the context NoteReadFailure does nothing, so
+		// routing, availability and the Providers page still get the own half
+		// and no error, as before. Tests:
+		// TestAFailedCrossOwnerReadKeepsTheOwnCatalog (both kinds of caller)
+		// and component/memql's TestAFailedReadOfLentMachinesIsAnErrorNotAHold.
 		if shared, ok := r.Store.(SharedStoreReader); ok {
-			if all, sharedErr := shared.SharedInferenceWorkers(ctx); sharedErr == nil {
+			if all, sharedErr := shared.SharedInferenceWorkers(ctx); sharedErr != nil {
+				auth.NoteReadFailure(ctx, sharedErr)
+			} else {
 				machines = append(machines, lentToPerson(ctx, owner, machines, all, r.Groups)...)
 			}
 		}
@@ -91,7 +104,10 @@ func (r *Reader) Catalog(ctx context.Context, owner string) ([]memqlengine.Fleet
 // the plan serves it with no sharing consent at all; the catalog decides
 // availability, so leaving it out would call a model unavailable that the plan
 // could serve. Their groups are resolved at most once, and only if a machine
-// lent to a group asks.
+// lent to a group asks. A membership read that fails answers no groups, and
+// the installed membership source notes the failure on ctx
+// (component/memql activeGroupIdsForUser), so a reader holding an
+// auth.ReadFailures hears it: TestAFailedGroupReadIsNotedForAListeningReader.
 func lentToPerson(ctx context.Context, person string, own, all []Candidate, groups workerservice.GroupResolver) []Candidate {
 	seen := make(map[string]struct{}, len(own))
 	for _, m := range own {

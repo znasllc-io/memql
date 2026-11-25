@@ -1115,7 +1115,10 @@ same reference. A reference is never shared by two people.
 - A check that fails lets the person in. An outage is not evidence that they
   lack access, and the server refuses their model calls either way. A read the
   engine could not complete (a machine, key or grant read that failed) is an
-  error, never a hold.
+  error, never a hold. That includes the reads routing answers around: when
+  the read of the machines lent to the person, or of the groups a machine is
+  lent through, fails, routing keeps their own machines and carries on, and
+  the check answers an error instead of holding them.
 - A failed RE-check keeps an already-held person held until a check
   succeeds: the page stays up and the next answer decides.
 - A line that could not be stored holds the person with no reference, and the

@@ -44,10 +44,12 @@ package memql
 //     absent and never written (a client must not be able to put its own text
 //     into the log under this name). Any replica can answer a re-check: the
 //     reference travels with the client, not in a replica's memory.
-//   - AN ERROR IS NEVER A HOLD. A read that fails (catalog, apps, keys, the
-//     stored role, a grant or membership read behind the cluster's account)
-//     comes back as an error; the client reads that as "unknown" and lets the
-//     person in. A person is held only on an answer the engine is sure of.
+//   - AN ERROR IS NEVER A HOLD. A read that fails (the catalog, the read of
+//     the machines lent to them, apps, keys, the stored role, a grant or
+//     membership read) comes back as an error, including a failure a tolerant
+//     reader answered around and noted on the sources' failure holder; the
+//     client reads that as "unknown" and lets the person in. A person is held
+//     only on an answer the engine is sure of.
 //
 // Tests: desktop_access_test.go (sources), desktop_access_hold_test.go (hold),
 // desktop_access_db_test.go (real rows: apps, the stored role, a scoped role).
@@ -129,11 +131,37 @@ func (e *MemQLEngine) desktopAccessSources(ctx context.Context, actingUserId str
 		reasons = append(reasons, r)
 	}
 
+	// ONE FAILURE HOLDER FOR EVERY READ BELOW. The tolerant readers answer
+	// from what they could read when a read fails, on purpose, because that
+	// is the right answer for routing: the catalog keeps the person's own
+	// machines when the read of everybody else's fails (fleetcatalog's
+	// Reader.Catalog), a membership read that fails answers "in no groups"
+	// (activeGroupIdsForUser), and a grant read that fails falls back to the
+	// role's answer (grant_resolver.go, ruling R-D8). Here each would report
+	// "could not read" as "nothing set up" and hold a person on a transient
+	// error, the lent machine they rely on included. So every read runs under
+	// one holder, each of those readers notes what it swallowed on it, and a
+	// noted failure is an error: unknown, which lets the person in.
+	//
+	// OrganizationReadContext rather than auth.ContextWithReadFailures alone:
+	// it also gives these reads a fresh account-scope memo, because the
+	// person's memberships memoised earlier in the request, with nobody
+	// listening, could rest on a failure this holder never heard. The cost is
+	// at most one more membership read per check.
+	//
+	// Tests: TestAFailedReadOfLentMachinesIsAnErrorNotAHold,
+	// TestAFailedMembershipReadInTheLentReadIsAnError,
+	// TestAFailedGrantReadBehindTheClusterAccountIsAnError.
+	ctx, readFailures := e.OrganizationReadContext(ctx)
+
 	// Machines: their own and the ones lent to them. One source per machine,
 	// however many qualifying models it offers.
 	models, err := e.fleetCatalogForCaller(ctx)
 	if err != nil {
 		return nil, nil, err
+	}
+	if err := readFailures.Err(); err != nil {
+		return nil, nil, fmt.Errorf("desktop access: the machines theirs or lent to them could not be read: %w", err)
 	}
 	seen := map[string]bool{}
 	machines := 0
@@ -218,19 +246,18 @@ func (e *MemQLEngine) desktopAccessSources(ctx context.Context, actingUserId str
 	// A grant or membership read that fails inside the gate falls back to the
 	// role's answer on purpose (grant_resolver.go), which for a person whose
 	// only source is this account would read as "closed" and hold them on a
-	// transient database error (ruling R-D8). So the read runs under a failure
-	// holder and a noted failure is an error: unknown, not held.
+	// transient database error (ruling R-D8). The holder above hears it, and a
+	// noted failure is an error: unknown, not held.
 	//
 	// LIMIT (review minor 2): the holder hears only reads made through the
 	// person's own session. Off that path (personSubject, personRole and
 	// organizationUserRole, which swallows a failed principal read) R-D8 still
 	// fails closed. desktopAccess runs on the person's own session, so it is
 	// not affected; a caller on any other context would be.
-	doorCtx, readFailures := auth.ContextWithReadFailures(ctx)
-	door := e.providers.VendorDoorFor(doorCtx, actingUserId)
+	door := e.providers.VendorDoorFor(ctx, actingUserId)
 	clusterClosed := ""
 	if !door.Cluster && !door.ClusterSetUp {
-		clusterClosed = e.providers.ClusterAccountClosedTo(doorCtx, actingUserId)
+		clusterClosed = e.providers.ClusterAccountClosedTo(ctx, actingUserId)
 	}
 	if err := readFailures.Err(); err != nil {
 		return nil, nil, fmt.Errorf("desktop access: what the person may use could not be read: %w", err)
