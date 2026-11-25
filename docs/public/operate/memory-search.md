@@ -144,11 +144,11 @@ embeds it as the indexer, or at the vendor. An item already in the index, and
 not older than its row, is skipped, so a walk can always be run again; an item
 rewritten after it was embedded is embedded again. An item that fails three
 times is counted failed and the walk goes on; the next walk tries it again.
-So is an item the model takes and does not answer within 30 seconds, which is
-not tried again in that walk; when a second item in a row goes unanswered, the
-job waits, saying the indexer's machines are not answering. When the model
-cannot be reached at all, the job waits with the reason and counts nothing
-failed.
+An item the model takes and does not answer within 30 seconds is counted failed
+the same way, without another try in that walk; when a second item in a row
+goes unanswered, the job waits instead, saying the indexer's machines are not
+answering. When the model cannot be reached at all, the job waits with the
+reason and counts nothing failed.
 
 A switch, step by step:
 

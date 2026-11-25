@@ -341,8 +341,8 @@ func memorySearchSwitchRunning(w memorySearchWorld, sw MemoryIndexRun) error {
 
 // memorySearchFlipped reports whether sw is a switch whose binding already
 // names its target and whose walk after the flip is under way or waiting: the
-// switch happened, and only that walk remains: it is the way out of a switch
-// whose walk after the flip cannot go on (the header's "The take-over").
+// switch happened, and only that walk remains. Choosing again is then the way
+// out of a walk that cannot go on (the header's "The take-over").
 func memorySearchFlipped(sw MemoryIndexRun, active EmbedderBinding) bool {
 	return (sw.State == memoryIndexStateFinishing || sw.State == memoryIndexStateWaiting) &&
 		active.ProviderRef == sw.TargetRef && active.Dimensions == sw.TargetDimensions
