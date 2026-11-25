@@ -36,6 +36,8 @@ type memorySearchFake struct {
 	catalogs    map[string][]FleetModel
 	vendors     []vendorEmbedderRecord
 	names       map[string]string
+	// catalogWidths is the catalog's row width per machine model id.
+	catalogWidths map[string]int
 
 	locked     bool
 	lockErr    error
@@ -56,11 +58,12 @@ type memorySearchFake struct {
 
 func newMemorySearchFake(n int) *memorySearchFake {
 	return &memorySearchFake{
-		job:         newMemoryIndexFake(n),
-		widths:      map[string]int{fakeOldRef: 4, fakeNewRef: 4},
-		retiredRows: map[string]retiredMemoryIndex{},
-		catalogs:    map[string][]FleetModel{},
-		names:       map[string]string{},
+		job:           newMemoryIndexFake(n),
+		widths:        map[string]int{fakeOldRef: 4, fakeNewRef: 4},
+		retiredRows:   map[string]retiredMemoryIndex{},
+		catalogs:      map[string][]FleetModel{},
+		names:         map[string]string{},
+		catalogWidths: map[string]int{},
 	}
 }
 
@@ -199,6 +202,8 @@ func (f *memorySearchFake) catalog(_ context.Context, userId string) ([]FleetMod
 }
 
 func (f *memorySearchFake) vendorEmbedders() []vendorEmbedderRecord { return f.vendors }
+
+func (f *memorySearchFake) catalogWidth(model string) int { return f.catalogWidths[model] }
 
 func (f *memorySearchFake) displayName(_ context.Context, userId string) string {
 	return f.names[userId]
@@ -366,6 +371,63 @@ func TestStatusSaysWhetherTheCallerMayAct(t *testing.T) {
 			require.Zero(t, f.runAttempts, "a status writes nothing")
 		})
 	}
+}
+
+// A model whose vectors are wider than memory search's index can hold (2000,
+// pgvector's limit for an indexed vector column) can never be bound, so it is
+// refused BEFORE anything is embedded -- no probe, so nothing is paid for a
+// vendor's -- on every path: a switch, and a cluster's first model. Its width
+// is known before it is asked: a vendor record declares it, and a machine
+// model's catalog row does. The choices still list it, unavailable, saying why.
+func TestAModelTooWideForTheIndexIsRefusedBeforeAnythingIsSpent(t *testing.T) {
+	ctx := context.Background()
+	const wide, wideMachine = "embedding3Large", "fleet:wide-embedder"
+	nothingSpent := func(t *testing.T, f *memorySearchFake) {
+		t.Helper()
+		require.Empty(t, f.probes, "nothing probed, so nothing paid for")
+		require.Empty(t, f.binds)
+		require.Zero(t, f.runAttempts)
+	}
+	f := newMemorySearchFake(3).noSwitch()
+	f.job.fill(fakeOldRef, 4)
+	f.vendors = []vendorEmbedderRecord{{Name: wide, Model: "text-embedding-3-large", Dimensions: 3072},
+		{Name: "embedding3Small", Model: "text-embedding-3-small", Dimensions: 1536}}
+	f.widths[wide] = 3072
+	const refusal = "text-embedding-3-large produces vectors 3072 wide, and memory search's index holds at most 2000"
+	require.EqualError(t, memorySearchSwitch(ctx, f, fakeOwner, wide), refusal)
+	nothingSpent(t, f)
+
+	// As a cluster's first model, whose binding would probe it too.
+	f.job.active = EmbedderBinding{}
+	require.EqualError(t, memorySearchSwitch(ctx, f, fakeOwner, wide), refusal)
+	nothingSpent(t, f)
+
+	// A machine model whose catalog row says it.
+	f = newMemorySearchFake(3).noSwitch()
+	f.job.fill(fakeOldRef, 4)
+	f.catalogWidths["wide-embedder"] = 4096
+	require.EqualError(t, memorySearchSwitch(ctx, f, fakeOwner, wideMachine),
+		"wide-embedder produces vectors 4096 wide, and memory search's index holds at most 2000")
+	nothingSpent(t, f)
+
+	// The choices list both, unavailable, with the reason; the others are untouched.
+	f.vendors = []vendorEmbedderRecord{{Name: wide, Model: "text-embedding-3-large", Dimensions: 3072},
+		{Name: "embedding3Small", Model: "text-embedding-3-small", Dimensions: 1536}}
+	f.catalogs[fakeOwner] = append(onlineFor("wide-embedder"), onlineFor("new-embedder")...)
+	rows, err := memorySearchChoices(ctx, f, fakeOwner)
+	require.NoError(t, err)
+	byRef := map[string]map[string]any{}
+	for _, row := range rows {
+		byRef[row["providerRef"].(string)] = row
+	}
+	require.Len(t, byRef, 4)
+	require.Equal(t, false, byRef[wideMachine]["available"])
+	require.Equal(t, "Its vectors are 4096 wide, and the index holds at most 2000", byRef[wideMachine]["hint"])
+	require.Equal(t, false, byRef[wide]["available"])
+	require.Equal(t, "Its vectors are 3072 wide, and the index holds at most 2000", byRef[wide]["hint"])
+	require.Equal(t, true, byRef[wide]["paidByCluster"])
+	require.Equal(t, true, byRef[fakeNewRef]["available"])
+	require.Equal(t, true, byRef["embedding3Small"]["available"])
 }
 
 // A cluster with no model binds the first one at once: nothing is indexed under
@@ -1322,6 +1384,9 @@ func TestChoicesMarkVendorModelsAsPaidByTheCluster(t *testing.T) {
 	e.providers.setEntry(&ProviderConfigEntry{Config: ProviderConfig{Name: "embedding3Large", Type: "OpenAIEmbedding", Model: "text-embedding-3-large"}, Client: probe, Available: true})
 	// Set up, but not an embedder.
 	e.providers.setEntry(&ProviderConfigEntry{Config: ProviderConfig{Name: "chat54Mini", Type: "OpenAI", Model: "gpt-5.4-mini", Auth: federated}, Client: chatOnlyProvider{}, Available: true})
+	// Set up, and wider than the index holds: listed, never choosable.
+	e.providers.setEntry(&ProviderConfigEntry{Config: ProviderConfig{Name: "embeddingWide", Type: "OpenAIEmbedding", Model: "text-embedding-wide", Auth: federated},
+		Client: declaredWidthProbe{activationProbe: &activationProbe{}, width: 3072}, Available: true})
 
 	nodes, err := e.memorySearchChoicesBuiltin(asCaller("owner"), nil, 0)
 	require.NoError(t, err)
@@ -1348,6 +1413,7 @@ func TestChoicesMarkVendorModelsAsPaidByTheCluster(t *testing.T) {
 		{ProviderRef: "fleet:nomic-embed-text", Kind: "machine", Label: "nomic-embed-text", Machines: 1},
 		{ProviderRef: "fleet:qwen3-embedding:0.6b", Kind: "machine", Label: "qwen3-embedding:0.6b", Machines: 2, Available: true},
 		{ProviderRef: "embedding3Small", Kind: "vendor", Label: "text-embedding-3-small", PaidByCluster: true, Available: true},
+		{ProviderRef: "embeddingWide", Kind: "vendor", Label: "text-embedding-wide", PaidByCluster: true},
 	}, got)
 
 	_, err = e.memorySearchChoicesBuiltin(auth.ContextWithSystemActor(context.Background(), "someSweep"), nil, 0)

@@ -212,6 +212,9 @@ type memorySearchWorld interface {
 	catalog(ctx context.Context, userId string) ([]FleetModel, error)
 	// vendorEmbedders are the vendor embedding records the cluster's own account pays for.
 	vendorEmbedders() []vendorEmbedderRecord
+	// catalogWidth is a machine model's width as its catalog row records it; 0
+	// when the catalog has none.
+	catalogWidth(model string) int
 	displayName(ctx context.Context, userId string) string
 	now() time.Time
 	logger() *slog.Logger
@@ -271,6 +274,28 @@ func memorySearchLabel(w memorySearchWorld, ref string) string {
 		}
 	}
 	return ref
+}
+
+// memorySearchDeclaredWidth is the vector width a model is known to produce
+// BEFORE it is asked: a vendor record's declared dimensions, or the width a
+// machine model's catalog row records. 0 when nothing says; the probe then
+// measures it.
+func memorySearchDeclaredWidth(w memorySearchWorld, ref string) int {
+	if model, fleet := IsFleetReference(ref); fleet {
+		return w.catalogWidth(model)
+	}
+	for _, v := range w.vendorEmbedders() {
+		if v.Name == ref {
+			return v.Dimensions
+		}
+	}
+	return 0
+}
+
+// memorySearchTooWide refuses a model whose declared width the index cannot
+// hold (embeddingWidthRefusal), in the model's own name.
+func memorySearchTooWide(w memorySearchWorld, ref string) error {
+	return embeddingWidthRefusal(memorySearchLabel(w, ref), memorySearchDeclaredWidth(w, ref))
 }
 
 // memorySearchLock takes the binding lock. Held by another request, the act
@@ -483,6 +508,11 @@ func memorySearchSwitch(ctx context.Context, w memorySearchWorld, caller, provid
 		return err
 	}
 	if !bound && (!has || memorySearchSwitchOver(sw.State)) {
+		// The width is checked before bindEmbedder probes the model, which for
+		// a vendor model the cluster's account pays for.
+		if err := memorySearchTooWide(w, provider); err != nil {
+			return err
+		}
 		switch err := w.bind(ctx, provider, embedderChoice{IndexedBy: indexer, ChosenBy: caller}); {
 		case errors.Is(err, errEmbedderBindingActive):
 			// A binding landed between this read and bindEmbedder's own, under
@@ -500,6 +530,9 @@ func memorySearchSwitch(ctx context.Context, w memorySearchWorld, caller, provid
 	}
 	dims := 0
 	if memorySearchStartsASwitch(sw, has, active, bound, provider) {
+		if err := memorySearchTooWide(w, provider); err != nil {
+			return err
+		}
 		if dims, err = w.probe(ctx, provider, indexer); err != nil {
 			return fmt.Errorf("%s could not be checked: %w", memorySearchLabel(w, provider), err)
 		}

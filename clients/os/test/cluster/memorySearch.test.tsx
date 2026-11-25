@@ -231,6 +231,21 @@ describe("Cluster > Settings > Memory search", () => {
     expect(query.memorySearchSwitch).toHaveBeenCalledWith({ provider: NOMIC });
   });
 
+  it("a model wider than the index holds is listed with why, and cannot be chosen", async () => {
+    const wide: Row = { id: "embedding3Large", providerRef: "embedding3Large", kind: "vendor", label: "text-embedding-3-large", machines: 0,
+      paidByCluster: true, available: false, hint: "Its vectors are 3072 wide, and the index holds at most 2000" };
+    const query = memorySearchQuery(statusRow());
+    query.memorySearchChoices.mockImplementation(async () => rowsResult([...CHOICES, wide]));
+    mount("memorysearch", query);
+    const models = await screen.findByRole("radiogroup", { name: "Memory search model" });
+    const radio = within(models).getByRole("radio", { name: /text-embedding-3-large/ });
+    expect(radio.textContent).toContain("Paid by the cluster's vendor account. Its vectors are 3072 wide, and the index holds at most 2000");
+    expect(radio.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(radio);
+    expect(screen.queryByText(/^Everything is re-indexed/)).toBeNull();
+    expect(query.memorySearchSwitch).not.toHaveBeenCalled();
+  });
+
   it("progress shows while a switch runs, and Cancel cancels", async () => {
     const query = memorySearchQuery(statusRow({ switch: switchRun() }), statusRow({ switch: switchRun({ state: "cancelled" }) }));
     mount("memorysearch", query);

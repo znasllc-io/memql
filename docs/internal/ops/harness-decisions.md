@@ -2932,6 +2932,27 @@ whose credential came through federation), applied to embedding records by
 `federationEmbedderRecords`, which `federationEmbedders` now reads too. Who the
 account pays for is not asked: an embedding is the cluster's work.
 
+**A model too wide for the index is refused before anything is spent**
+(`embeddingWidthRefusal`, `maxEmbeddingIndexDimensions`). Trigger: every
+model's table carries an HNSW index, which pgvector builds only for a column of
+at most 2000 dimensions, so `EmbeddingVectorTable` refuses a wider width. The
+choices listed every federated embedding record, `embedding3Large` (3072)
+among them: an owner confirmed, a paid probe ran, and then the table was
+refused, on a switch and on a first binding alike. Evidence: the width a model
+declares before it is called -- a vendor record's client (`Dimensions`, carried
+on `vendorEmbedderRecord`) and a machine model's catalog row
+(`catalogDimensionsFor`, which a fleet provider's `Dimensions` answers too).
+Chosen path: the choices keep such a model listed, unavailable, with its hint,
+as other unavailable models are; `memorySearchSwitch` refuses it before
+`bindEmbedder` or the probe runs; and `probeEmbedder` refuses it after the
+resolution, which calls nothing, and before the one embedding, so the
+`bindEmbedder` builtin and the automatic choice are covered too. A width nothing
+declares is measured by the probe (on the owner's machine, unpaid) and refused
+by `EmbeddingVectorTable` before any table exists. Tests:
+`TestAModelTooWideForTheIndexIsRefusedBeforeAnythingIsSpent`,
+`TestTheProbeRefusesAModelTooWideForTheIndexBeforeEmbedding`,
+`TestChoicesMarkVendorModelsAsPaidByTheCluster`.
+
 **The cleanup** (`memoryIndexRetentionSweep`, daily at 03:20 on the general cron
 leader, builtin `memoryIndexRetire`, refused without internal origin) runs under
 the binding lock, so it never reads the protected set and then drops a table a

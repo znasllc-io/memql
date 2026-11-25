@@ -205,6 +205,12 @@ func memorySearchStatus(ctx context.Context, w memorySearchWorld, caller string)
 //     records by federationEmbedderRecords. Who the account pays for is not
 //     asked: an embedding is the cluster's work, paid by its account for
 //     everybody (vendor_account_cluster.go, "EMBEDDINGS ARE NOT ASKED").
+//
+// A model of either kind whose declared width the index cannot hold
+// (memorySearchTooWide) stays listed, as an unavailable model is, and is not
+// available, its hint saying why: choosing it would be refused before anything
+// is embedded, and offering it would invite a confirmation over a switch that
+// can never start.
 func memorySearchChoices(ctx context.Context, w memorySearchWorld, caller string) ([]map[string]any, error) {
 	models, err := w.catalog(ctx, caller)
 	if err != nil {
@@ -234,16 +240,34 @@ func memorySearchChoices(ctx context.Context, w memorySearchWorld, caller string
 		case online > 1:
 			hint = fmt.Sprintf("%d machines offering it are online", online)
 		}
-		out = append(out, map[string]any{"providerRef": FleetReferencePrefix + m.ModelId, "kind": "machine", "label": m.ModelId,
-			"machines": machines, "paidByCluster": false, "available": online > 0, "hint": hint})
+		ref := FleetReferencePrefix + m.ModelId
+		available := online > 0
+		if tooWide := memorySearchWidthHint(w, ref); tooWide != "" {
+			hint, available = tooWide, false
+		}
+		out = append(out, map[string]any{"providerRef": ref, "kind": "machine", "label": m.ModelId,
+			"machines": machines, "paidByCluster": false, "available": available, "hint": hint})
 	}
 	for _, v := range w.vendorEmbedders() {
 		label := strings.TrimSpace(v.Model)
 		if label == "" {
 			label = v.Name
 		}
+		hint, available := "Paid by the cluster's vendor account", true
+		if tooWide := memorySearchWidthHint(w, v.Name); tooWide != "" {
+			hint, available = tooWide, false
+		}
 		out = append(out, map[string]any{"providerRef": v.Name, "kind": "vendor", "label": label, "machines": 0,
-			"paidByCluster": true, "available": true, "hint": "Paid by the cluster's vendor account"})
+			"paidByCluster": true, "available": available, "hint": hint})
 	}
 	return out, nil
+}
+
+// memorySearchWidthHint is a choice's hint when its declared width is more
+// than the index holds (memorySearchTooWide), "" otherwise.
+func memorySearchWidthHint(w memorySearchWorld, ref string) string {
+	if dims := memorySearchDeclaredWidth(w, ref); dims > maxEmbeddingIndexDimensions {
+		return fmt.Sprintf("Its vectors are %d wide, and the index holds at most %d", dims, maxEmbeddingIndexDimensions)
+	}
+	return ""
 }

@@ -6692,7 +6692,7 @@ func MemorySearchCancelBuild(args MemorySearchCancelArgs) string {
 	return "builtin memorySearchCancel()"
 }
 
-// MemorySearchChoices -- The models the caller may choose for memory search, one row each: {providerRef, kind, label, machines, paidByCluster, available, hint}. Machine models are the embedding models of the caller's own machines and the ones lent to them, counted by the machines that offer them; vendor embedding models appear only where the cluster's vendor account is set up, and each is paid by it.
+// MemorySearchChoices -- The models the caller may choose for memory search, one row each: {providerRef, kind, label, machines, paidByCluster, available, hint}. Machine models are the embedding models of the caller's own machines and the ones lent to them, counted by the machines that offer them; vendor embedding models appear only where the cluster's vendor account is set up, and each is paid by it. A model whose vectors are wider than the index holds (2000) is listed unavailable, its hint saying so.
 type MemorySearchChoicesArgs struct {
 }
 
@@ -6737,7 +6737,7 @@ func MemorySearchStatusBuild(args MemorySearchStatusArgs) string {
 	return "builtin memorySearchStatus()"
 }
 
-// MemorySearchSwitch -- Choose memory search's model. With none bound it is bound at once. Choosing the model in use (or a running switch's own target) moves nothing, and takes over indexing it when its indexer is no longer an owner, has no machine offering it, or has none of those online while one of the caller's is. Otherwise the whole index is rebuilt with the new model in the background while search keeps the current one, and search switches over by itself when the rebuild is complete; a machine model is indexed on the chooser's machines and the ones lent to them, a vendor model is paid by the cluster's vendor account. Refused while another switch runs, except once it has switched over: choosing another model then starts it. Only an active cluster owner chooses.
+// MemorySearchSwitch -- Choose memory search's model. With none bound it is bound at once. Choosing the model in use (or a running switch's own target) moves nothing, and takes over indexing it when its indexer is no longer an owner, has no machine offering it, or has none of those online while one of the caller's is. Otherwise the whole index is rebuilt with the new model in the background while search keeps the current one, and search switches over by itself when the rebuild is complete; a machine model is indexed on the chooser's machines and the ones lent to them, a vendor model is paid by the cluster's vendor account. Refused while another switch runs, except once it has switched over: choosing another model then starts it. A model whose declared width is more than the index holds (2000) is refused before anything is embedded. Only an active cluster owner chooses.
 type MemorySearchSwitchArgs struct {
 	Provider string
 }

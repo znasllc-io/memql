@@ -117,12 +117,32 @@ func EmbeddingVectorTables(ctx context.Context, db interface {
 	return tables, rows.Err()
 }
 
+// maxEmbeddingIndexDimensions is the widest vector memory search's index can
+// hold. Every model's table carries an HNSW index on its vector column
+// (createVectorTableSQL), and pgvector builds one only for a column of at most
+// 2000 dimensions, so a wider model can never be bound or switched to.
+const maxEmbeddingIndexDimensions = 2000
+
+// embeddingWidthRefusal refuses a model whose vectors are wider than the index
+// can hold, in words a person reads, BEFORE anything is embedded: the probe
+// that would learn the width otherwise runs first, and for a vendor model the
+// cluster's account pays for it (and for a confirmation answered over a switch
+// that can never start). A width nothing has declared (0) is not refused here;
+// the probe measures it, on the owner's machine, and EmbeddingVectorTable
+// refuses it before any table exists.
+func embeddingWidthRefusal(label string, dims int) error {
+	if dims <= maxEmbeddingIndexDimensions {
+		return nil
+	}
+	return fmt.Errorf("%s produces vectors %d wide, and memory search's index holds at most %d", label, dims, maxEmbeddingIndexDimensions)
+}
+
 // Model identity as well as width defines a vector space. Two 1024-wide models
 // must never search one another's vectors. The identifier is derived entirely
 // from a digest and a validated integer, not SQL supplied by a caller.
 func EmbeddingVectorTable(provider string, dimensions int) (string, error) {
-	if strings.TrimSpace(provider) == "" || dimensions < 1 || dimensions > 2000 {
-		return "", fmt.Errorf("embedding index requires a provider and 1–2000 dimensions")
+	if strings.TrimSpace(provider) == "" || dimensions < 1 || dimensions > maxEmbeddingIndexDimensions {
+		return "", fmt.Errorf("embedding index requires a provider and 1–%d dimensions", maxEmbeddingIndexDimensions)
 	}
 	hash := sha256.Sum256([]byte(provider))
 	return fmt.Sprintf("node_vectors_%d_%x", dimensions, hash[:8]), nil
@@ -276,10 +296,17 @@ func (e *MemQLEngine) bindEmbedder(ctx context.Context, provider string, choice 
 // The probe runs where the model will index, not on the caller's machines: a
 // fleet model is resolved as indexer (their machines and the ones lent to
 // them); a vendor model, with no indexer, on the cluster's account. bindEmbedder
-// learns a first model's width this way, and memorySearchSwitch a new one's.
+// learns a first model's width this way (a first choice, the automatic choice
+// and the bindEmbedder builtin), and memorySearchSwitch a new one's. So this is
+// where every path refuses a model whose declared width the index cannot hold:
+// after the resolution, which calls nothing, and before the one embedding,
+// which a vendor bills (embeddingWidthRefusal).
 func (e *MemQLEngine) probeEmbedder(ctx context.Context, provider, indexer string) (int, error) {
 	model, _, err := ResolveAITyped[EmbeddingAIProvider](ContextWithEmbeddingIndexer(ctx, indexer), e, airoute.ResolveRequest{Level: airoute.LevelEmbeddings, Modality: airoute.ModalityEmbedding, ExplicitProvider: provider, UserId: indexer})
 	if err != nil {
+		return 0, err
+	}
+	if err := embeddingWidthRefusal(provider, model.Dimensions()); err != nil {
 		return 0, err
 	}
 	vector, err := model.Embed(ctx, "MemQL embedding readiness check")

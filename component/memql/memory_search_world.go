@@ -225,6 +225,13 @@ func (w engineMemorySearchWorld) vendorEmbedders() []vendorEmbedderRecord {
 	return w.e.providers.federationEmbedderRecords()
 }
 
+// catalogWidth is the width a machine model's catalog row records
+// (v1:models:modelProfile, catalogDimensionsFor); 0 when the catalog has none.
+func (w engineMemorySearchWorld) catalogWidth(model string) int {
+	dims, _ := catalogDimensionsFor(model)
+	return dims
+}
+
 // displayName is a person's display name, through the narrow cross-user read
 // (userDisplayById: id and displayName, nothing else); empty when unknown.
 func (w engineMemorySearchWorld) displayName(ctx context.Context, userId string) string {

@@ -920,7 +920,8 @@ builtin memorySearchStatus { }
 /// machines, paidByCluster, available, hint}. Machine models are the embedding models of the
 /// caller's own machines and the ones lent to them, counted by the machines that offer them;
 /// vendor embedding models appear only where the cluster's vendor account is set up, and each is
-/// paid by it.
+/// paid by it. A model whose vectors are wider than the index holds (2000) is listed unavailable,
+/// its hint saying so.
 @sdk
 @executor("memorySearchChoices")
 @requiresCapability("read", "app:cluster/memorysearch")
@@ -934,7 +935,8 @@ builtin memorySearchChoices { }
 /// itself when the rebuild is complete; a machine model is indexed on the chooser's machines and
 /// the ones lent to them, a vendor model is paid by the cluster's vendor account. Refused while
 /// another switch runs, except once it has switched over: choosing another model then starts it.
-/// Only an active cluster owner chooses.
+/// A model whose declared width is more than the index holds (2000) is refused before anything is
+/// embedded. Only an active cluster owner chooses.
 @sdk
 @executor("memorySearchSwitch")
 @args(profile="object")

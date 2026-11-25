@@ -83,7 +83,7 @@ export interface MemorySearchChoice {
   /** The machines offering it for embeddings; 0 for a vendor model. */
   machines: number;
   paidByCluster: boolean;
-  /** A machine model with none of its machines online cannot be checked, so cannot be chosen now. */
+  /** False for a model the engine would refuse: a machine model with none of its machines online, or one wider than the index holds (`hint` says which). */
   available: boolean;
   hint: string;
 }

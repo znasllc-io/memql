@@ -298,12 +298,14 @@ function Switching({ status, sw, me, mayChange, refusal, search, act }: { status
 
 function choiceOption(choice: MemorySearchChoice): ChoiceOption {
   const machines = `${formatCount(choice.machines)} ${choice.machines === 1 ? "machine" : "machines"}`;
+  const what = choice.kind === "vendor" ? "Paid by the cluster's vendor account" : machines;
   return {
     value: choice.providerRef,
     label: choice.label,
-    description: choice.kind === "vendor" ? "Paid by the cluster's vendor account" : choice.available ? machines : `${machines}. ${choice.hint}`,
-    // A machine model with none of its machines online cannot be checked, so
-    // the engine would refuse it: visible, with the reason, and not choosable.
+    description: choice.available ? what : `${what}. ${choice.hint}`,
+    // A model the engine would refuse -- a machine model with none of its
+    // machines online, which cannot be checked, or one whose vectors are wider
+    // than the index holds -- is visible, with the reason, and not choosable.
     unavailable: !choice.available,
   };
 }

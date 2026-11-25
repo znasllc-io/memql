@@ -23,6 +23,44 @@ func (p *activationProbe) Embed(context.Context, string) ([]float32, error) {
 func (p *activationProbe) EmbedBatch(context.Context, []string) ([][]float32, error) { return nil, nil }
 func (*activationProbe) Dimensions() int                                             { return 0 }
 
+// declaredWidthProbe is an embedder that says its width before it is asked,
+// as a vendor record does (its declared dimensions).
+type declaredWidthProbe struct {
+	*activationProbe
+	width int
+}
+
+func (p declaredWidthProbe) Dimensions() int                         { return p.width }
+func (declaredWidthProbe) Call(context.Context, string) (any, error) { return nil, nil }
+
+// The readiness probe refuses a model wider than memory search's index can
+// hold BEFORE it embeds anything, whichever path asked for it: bindEmbedder (a
+// cluster's first model, the automatic choice, the bindEmbedder builtin) and
+// memorySearchSwitch learn a width through it. The resolved model declares its
+// width before it is called, so nothing is paid for a vendor's.
+func TestTheProbeRefusesAModelTooWideForTheIndexBeforeEmbedding(t *testing.T) {
+	probe := declaredWidthProbe{activationProbe: &activationProbe{vector: make([]float32, 3072)}, width: 3072}
+	probe.vector[0] = 1
+	e := &MemQLEngine{}
+	e.SetAIResolver(testAIResolver{fn: func(context.Context, airoute.ResolveRequest) (ResolvedProvider, error) {
+		return ResolvedProvider{Client: probe}, nil
+	}})
+	_, err := e.probeEmbedder(context.Background(), "embedding3Large", "")
+	require.EqualError(t, err, "embedding3Large produces vectors 3072 wide, and memory search's index holds at most 2000")
+	require.Zero(t, probe.calls, "nothing embedded")
+
+	// One the index holds is embedded and measured.
+	fits := declaredWidthProbe{activationProbe: &activationProbe{vector: make([]float32, 1536)}, width: 1536}
+	fits.vector[0] = 1
+	e.SetAIResolver(testAIResolver{fn: func(context.Context, airoute.ResolveRequest) (ResolvedProvider, error) {
+		return ResolvedProvider{Client: fits}, nil
+	}})
+	dims, err := e.probeEmbedder(context.Background(), "embedding3Small", "")
+	require.NoError(t, err)
+	require.Equal(t, 1536, dims)
+	require.Equal(t, 1, fits.calls)
+}
+
 func TestEmbedderActivationProbesPersistsAndReadsAcrossReplicas(t *testing.T) {
 	a, db, _ := readMergeTestEngine(t)
 	b, _, _ := readMergeTestEngine(t)

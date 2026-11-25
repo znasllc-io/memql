@@ -108,6 +108,12 @@ Memory search lists what can be chosen:
 - every vendor embedding model the cluster's own vendor account is set up for,
   marked "Paid by the cluster's vendor account".
 
+A model of either kind whose vectors are wider than the index can hold (2000
+dimensions, such as `embedding3Large` at 3072) is listed with that reason and
+cannot be chosen. Its width is known before it is asked -- a vendor record
+declares it, and so does a machine model's catalog row -- so it is refused
+before anything is embedded, and the cluster's account pays nothing for it.
+
 Choosing asks first, in place. On a cluster with no model yet, the model is
 bound at once: one sentence is embedded to measure its vector width, its table
 is made, and every item is indexed with it from then on. Any other choice
