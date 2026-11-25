@@ -1086,7 +1086,7 @@ cannot answer right now:
 |---|---|---|
 | Machine, theirs or lent to them (directly or through a group) | a chat model with structured output and a context window of at least `MinimumContextWindow` (8192) on that machine, online or asleep | a model that only makes embeddings, a model below the minimum, a revoked machine |
 | App (Claude Code or Codex) on their own machine | allowed by the machine, signed in, allowed by their own app routing, and ready, unmeasured, asleep or out of usage | measured signed out, or an app the machine or their routing disallows |
-| API key, theirs or lent | usable (including not yet checked), or held for lack of credit | paused, refused, or its owner inactive |
+| API key, theirs or lent | usable (including not yet checked), or held for lack of credit | paused, refused, or its owner inactive; any key at a vendor whose calls this cluster sends to another address, since no key is ever sent there |
 | The cluster's vendor account | where the cluster's account pays for them | no permission to use it (`execute app:settings/clusteraccount`), or the permission and no account set up |
 
 A machine is judged by what it advertises for a model itself. A model's
@@ -1130,6 +1130,7 @@ for something lent to this person; no machine or key is ever named.
 | no API key at all | `no API key of theirs or lent to them` |
 | a key of theirs that does not count | `their own key was refused by <vendor>`, or `their own key cannot be used` |
 | a key lent to them that does not count | `the key lent by <id> is paused by its owner`, `... was refused by <vendor>`, `... belongs to someone who is no longer an active user`, or `... cannot be used` |
+| a vendor whose calls this cluster sends to another address | `this cluster sends <vendor> calls to another address, so API keys cannot be used here` |
 | no permission to the cluster's account | `may not use the cluster's account` |
 | the permission, and no account set up | `may use the cluster's account, but none is set up` |
 

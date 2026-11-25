@@ -11,16 +11,18 @@ package memql
 // is out of credit all come back, and keeping a person out of MemQL OS while
 // they wait would send them to a setup page for a thing already set up. The
 // two share their predicates (meetsChatMinimum, the app row tests in
-// app_selection.go and core/airoute, the resolver's reasons) and drop only the
-// "is it awake" tests, so they cannot drift apart in anything else. One difference is deliberate: a
+// app_selection.go and core/airoute, the resolver's reasons, keysRefusedAt
+// through VendorKeysRefusedHere) and drop only the "is it awake" tests, so
+// they cannot drift apart in anything else. One difference is deliberate: a
 // machine is judged by what IT advertised for a model (chatMachineMeetsMinimum),
 // as per-call eligibility judges the machine that would serve, and never by
 // the model's union over every machine behind it, revoked ones included, which
 // could let a machine below the floor count because a revoked machine
 // qualified its model (final review, minor 3). What does NOT count: a model
 // that only embeds, a model below the context floor, a revoked machine, a key
-// that was refused or paused or whose owner left, an app measured signed out
-// or whose last session was refused as signed out.
+// that was refused or paused or whose owner left, a key the cluster would
+// never send (its vendor's calls go to another address), an app measured
+// signed out or whose last session was refused as signed out.
 //
 // ONE PLAIN REASON PER DISTINCT CAUSE, so the line under a held person's
 // reference says what is missing and never less (design section 3, "each
@@ -298,14 +300,24 @@ func (e *MemQLEngine) desktopAccessSources(ctx context.Context, actingUserId str
 		why(accessReasonNoApp)
 	}
 
-	// Keys: asked once per vendor, as a route the person chooses. A cluster
+	// Keys: asked once per vendor, as a route the person chooses. A key counts
+	// only where the cluster would send it: a vendor none of whose text
+	// records dials the vendor's own address uses no key (keysRefusedAt), the
+	// rule VendorAccountsWith applies for inferenceStatus and every call, read
+	// here through VendorKeysRefusedHere (final review, minor 4). Such a key,
+	// usable or out of credit, adds that vendor's sentence instead. A cluster
 	// with no vendor text record asks nothing and reads as no key, which is
 	// what it is for this check: nothing a key could pay at.
 	keys := 0
 	for _, vendor := range e.providers.textVendors() {
+		refusal := e.providers.VendorKeysRefusedHere(vendor)
 		answer := e.providers.VendorKeysAt(ctx, VendorAccountQuery{Vendor: vendor, ActingUserId: actingUserId, Chosen: true})
 		for _, account := range answer.Usable {
 			keys++
+			if refusal != "" {
+				why(refusal)
+				continue
+			}
 			add(keySource(account, AccessReady, actingUserId))
 		}
 		for _, passed := range answer.PassedOver {
@@ -324,8 +336,10 @@ func (e *MemQLEngine) desktopAccessSources(ctx context.Context, actingUserId str
 			if account.Vendor == "" {
 				account.Vendor = vendor
 			}
-			switch passed.Reason {
-			case VendorKeyCreditReason(account.Vendor):
+			switch {
+			case passed.Reason == VendorKeyCreditReason(account.Vendor) && refusal != "":
+				why(refusal)
+			case passed.Reason == VendorKeyCreditReason(account.Vendor):
 				// Credit comes back the way a machine wakes.
 				add(keySource(account, AccessOutOfCredit, actingUserId))
 			default:

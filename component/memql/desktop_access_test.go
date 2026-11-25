@@ -414,6 +414,37 @@ func TestNoKeyAtAllIsItsOwnReason(t *testing.T) {
 	noReason(t, reasons, "no API key of theirs or lent to them")
 }
 
+// Final review, minor 4: a key counts only where the cluster would send it.
+// With the vendor's calls going to another address, no key is ever used
+// (keysRefusedAt, as inferenceStatus applies it), so neither a usable key nor
+// one out of credit counts, and the line says why.
+func TestAKeyTheClusterWouldNeverSendDoesNotCount(t *testing.T) {
+	elsewhere := func(keys *fakeVendorKeys) *MemQLEngine {
+		e := engineWithFleet(nil)
+		e.providers.setEntry(vendorRecord("claude", VendorAnthropic, false, "https://proxy.internal"))
+		e.providers.SetVendorKeys(keys)
+		return e
+	}
+	want := "this cluster sends Anthropic calls to another address, so API keys cannot be used here"
+
+	sources, reasons := accessSourcesFor(t, elsewhere(keysHeldBy("ana", keyAccount(VendorAnthropic, "k1", "ana"))), "ana")
+	wantSources(t, sources, nil)
+	wantReason(t, reasons, want)
+	noReason(t, reasons, "no API key of theirs or lent to them")
+
+	credit := newFakeVendorKeys()
+	credit.passedOver = []VendorAccountPassedOver{{Account: keyAccount(VendorAnthropic, "k1", "lender"), Reason: VendorKeyCreditReason(VendorAnthropic)}}
+	sources, reasons = accessSourcesFor(t, elsewhere(credit), "ana")
+	wantSources(t, sources, nil)
+	wantReason(t, reasons, want)
+
+	// One record of the vendor that dials its own address is enough.
+	e := elsewhere(keysHeldBy("ana", keyAccount(VendorAnthropic, "k1", "ana")))
+	e.providers.setEntry(vendorRecord("claude-direct", VendorAnthropic, false, ""))
+	sources, _ = accessSourcesFor(t, e, "ana")
+	wantSources(t, sources, []AccessSource{{Kind: AccessSourceKey, State: AccessReady, Own: true, Label: "Anthropic"}})
+}
+
 func TestTheClusterAccountCountsWhereItPaysForThePerson(t *testing.T) {
 	e := engineWithFleet(nil)
 	e.providers.setEntry(federatedOpenAI(vendorRecord("gpt", VendorOpenAI, true, "")))
