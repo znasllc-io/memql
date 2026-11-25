@@ -114,7 +114,7 @@ type AgentRequest struct {
 	Acknowledged      bool                      `json:"acknowledged,omitempty"`
 }
 
-var DelegationScopes = []string{"read", "join", "host", "schedule", "control", "topup", "skills_read", "skills_write", "skills_control", "resources_read", "resources_publish", "resources_control", "invite", "portraits_write", "processing", "report", "message"}
+var DelegationScopes = []string{"read", "join", "host", "schedule", "control", "topup", "skills_read", "skills_write", "skills_control", "resources_read", "resources_publish", "resources_control", "invite", "portraits_write", "processing", "report", "message", "questions"}
 
 func ValidDelegation(r DelegationRequest, now time.Time) bool {
 	if r.PortraitData != "" || !ValidPortraitReference(r.PortraitID, r.PortraitDigest) {

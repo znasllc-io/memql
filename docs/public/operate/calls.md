@@ -1976,6 +1976,37 @@ host's camera. A camera track is not identity or age evidence. Supervision
 requirements need an occupied, non-agent human host with adult evidence; this
 does not substitute for parental authority or child-use launch review.
 
+Moderated questions use the same workflow transport with a separate `question`
+request. `question_submit` requires explicit `publication: "host_then_room_v1"`:
+the host can read the question and select it for the room. Pending text is private
+to the original author admission and eligible host; only the current selection
+is public. `question_withdraw` is author-only. Host `question_select`,
+`question_dismiss` and `question_resolve` never change microphones or advance a
+turn. A selection must be resolved, dismissed or withdrawn before another is
+selected. Questions require an active Insights Skills run and exclude family
+calls; existing cleanup remains available after entitlement loss.
+
+The `questions` read returns at most 20 pending items, an opaque `nextCursor` and
+`queueRevision`, current selection, and native per-item action permissions.
+Continue with both returned values; restart the first page on `questions_changed`.
+Old-run pending questions remain available for authorized cleanup. Limits are
+500 Unicode characters, two open questions per admission, ten submissions per
+owning Callkey and 100 total per room across runs. Mutations bind current room,
+identity and run, exact question revision, and an idempotency key; host controls
+also bind the control epoch. Retry the identical request after an unknown reply.
+The receipt describes the original transition; the accompanying queue is current.
+
+Agents need explicit `questions` authority, independently of `message`.
+Host queue access also requires `skills_read` and approved originating versions;
+moderation additionally requires `skills_control`, `control`, current and original
+approved versions, and no human hold. A fresh guest-agent admission still requires
+human host review. Question text is private database content under existing
+storage controls, not model input or call history. Terminal current text is
+cleared; historical versions remain until successful physical cleanup. The fixed
+technical expiry is no later than the room deadline plus one hour, and never
+more than 25 hours after submission. Cleanup may run later or retry on failure;
+this technical bound is not a legal retention policy.
+
 Managed resource grants separately require `resources_read`,
 `resources_publish`/`resources_control`, exact resource IDs and room authority.
 The owner runs the encoder; Callkey receives a WHIP push. **Callkey does not

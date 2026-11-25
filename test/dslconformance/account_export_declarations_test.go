@@ -35,11 +35,12 @@ var stayingKinds = map[string]string{
 	"v1:calls:credential": "signin",
 	// Provider receipts and standing agent authority are bound to this account,
 	// provider environment and cluster pepper; importing them cannot grant access.
-	"v1:calls:workflowState":   "signin",
-	"v1:calls:resourceState":   "signin",
-	"v1:calls:familyState":     "signin",
-	"v1:calls:commerceState":   "signin",
-	"v1:calls:delegationState": "signin",
+	"v1:calls:workflowQuestion": "signin",
+	"v1:calls:workflowState":    "signin",
+	"v1:calls:resourceState":    "signin",
+	"v1:calls:familyState":      "signin",
+	"v1:calls:commerceState":    "signin",
+	"v1:calls:delegationState":  "signin",
 	// Local simulated credit is bound to the originating key/site, never portable value.
 	"v1:calls:simulatedWalletEntry": "signin",
 	"v1:platform:siteAccessSession": "signin",

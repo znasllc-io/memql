@@ -1103,3 +1103,29 @@ mutation messageRate saveCallsMessageRate {
  insert { accept { scope, targetId, rateData }
  stamp { id: args.stateId, ownerUserId: actor.userId, createdAt: args.versionTime } }
 }
+
+/// Private native queue write; actor.userId scoping is not the fix: current admission and room gate are mandatory.
+@serverOnly
+@actor
+mutation workflowQuestion saveCallsQuestion {
+ args {
+ questionId string!
+ versionTime datetime!
+ siteId string!
+ roomId string!
+ runId string!
+ authorKeyId string!
+ authorAdmission string!
+ submittedAt datetime!
+ roomDeadline datetime!
+ expiresAt datetime!
+ revision int!
+ status string!
+ body string!
+ stateData string!
+ }
+ insert {
+ accept { siteId, roomId, runId, authorKeyId, authorAdmission, submittedAt, roomDeadline, expiresAt, revision, status, body, stateData }
+ stamp { id: args.questionId, ownerUserId: actor.userId, createdAt: args.versionTime }
+ }
+}

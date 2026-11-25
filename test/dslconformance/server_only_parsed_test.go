@@ -227,8 +227,13 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// submission budgets and audited operator access before disclosure.
 		{Path: "calls/queries.memql", Name: "callsReportById"}:          true,
 		{Path: "calls/queries.memql", Name: "callsReportsForRecipient"}: true,
+		// Private moderated questions: native admission/visibility gates, no generic work-tool exposure.
+		{Path: "calls/queries.memql", Name: "callsQuestionInventory"}:   true,
+		{Path: "calls/queries.memql", Name: "callsQuestionById"}:        true,
+		{Path: "calls/queries.memql", Name: "callsQuestionPage"}:        true,
 		{Path: "calls/queries.memql", Name: "callsReportBudget"}:        true,
 		{Path: "calls/queries.memql", Name: "callsReportAudit"}:         true,
+		{Path: "calls/mutations.memql", Name: "saveCallsQuestion"}:      true,
 		{Path: "calls/mutations.memql", Name: "saveCallsReport"}:        true,
 		{Path: "calls/mutations.memql", Name: "createCallsReportAudit"}: true,
 		// A borrowed owner is not an occupied room host or delegated source owner.
