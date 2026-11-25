@@ -1101,9 +1101,10 @@ something is set up.
 the engine writes one line under it to the log store, naming the person and
 each source it checked with why it did not count. The line is written
 synchronously, and the page shows a reference only after the write succeeded.
-In Logs (an administrator, or anyone of higher rank), search the reference, for example `ERR-3fa90c`: the line is component
-`desktopAccess`, its subject is the person's bare user id, and its attributes
-are `reference` and `reasons`. See
+In Logs (an administrator, or anyone of higher rank), search the reference,
+for example `ERR-3fa90c`: the line is component `desktopAccess`, its subject
+is the person's bare user id, and its attributes are `reference` and
+`reasons`. See
 [the held person's reference](../logs.md#the-one-line-that-is-never-dropped-a-held-persons-reference).
 A re-check that passes back its reference with the same reasons writes
 nothing and keeps the reference; changed reasons write a new line under the
