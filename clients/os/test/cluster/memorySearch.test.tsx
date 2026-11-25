@@ -95,7 +95,15 @@ function memorySearchQuery(first: Row, after: Row = first) {
     memorySearchCancel: act(),
     memorySearchSwitchAnyway: act(),
     memorySearchConfirm: act(),
+    /** What the cluster holds from now on: somebody else acted, or the job moved on. */
+    becomes: (next: Row) => { current = next; },
   };
+}
+
+/** The clock a test that waits for reads runs on: timers and Date, so the press hold (Date) moves with them. */
+function fakeClock() {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  return (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
 }
 
 type Query = ReturnType<typeof memorySearchQuery>;
@@ -380,6 +388,88 @@ describe("Cluster > Settings > Memory search", () => {
     fireEvent.click(screen.getByRole("button", { name: "Switch to nomic-embed-text" }));
     expect(await screen.findByText("memory search changed meanwhile, try again")).toBeTruthy();
     await waitFor(() => expect(query.memorySearchStatus.mock.calls.length).toBeGreaterThanOrEqual(2));
+  });
+
+  // A switch started elsewhere, then cancelled: the reads a page left open
+  // through an afternoon can bring.
+  const elsewhere = switchRun({ targetRef: VENDOR, targetLabel: "text-embedding-3-small" });
+  const cancelled = switchRun({ state: "cancelled", targetRef: VENDOR, targetLabel: "text-embedding-3-small" });
+  const question = /^Everything is re-indexed/;
+
+  it("a question the cluster has moved past is dropped, and does not come back with the choices", async () => {
+    const advance = fakeClock();
+    try {
+      const query = memorySearchQuery(statusRow());
+      mount("memorysearch", query);
+      await advance(0);
+      fireEvent.click(within(screen.getByRole("radiogroup", { name: "Memory search model" })).getByRole("radio", { name: /nomic-embed-text/ }));
+      expect(screen.getByText(question)).toBeTruthy();
+
+      query.becomes(statusRow({ switch: elsewhere }));
+      await advance(30_000);
+      expect(screen.getByRole("progressbar")).toBeTruthy();
+      expect(screen.queryByText(question)).toBeNull();
+
+      query.becomes(statusRow({ switch: cancelled }));
+      await advance(5_000);
+      const models = screen.getByRole("radiogroup", { name: "Memory search model" });
+      expect(within(models).getByRole("radio", { name: /qwen3-embedding:0\.6b/ }).getAttribute("aria-checked")).toBe("true");
+      expect(screen.queryByText(question)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a refusal stands while the state it answered does, and goes with it", async () => {
+    const advance = fakeClock();
+    try {
+      const query = memorySearchQuery(statusRow());
+      query.memorySearchSwitch.mockRejectedValueOnce(new Error("memorySearchSwitch: memory search changed meanwhile, try again"));
+      mount("memorysearch", query);
+      await advance(0);
+      fireEvent.click(within(screen.getByRole("radiogroup", { name: "Memory search model" })).getByRole("radio", { name: /nomic-embed-text/ }));
+      await readTheBar();
+      fireEvent.click(screen.getByRole("button", { name: "Switch to nomic-embed-text" }));
+      await advance(0);
+      // The read the refusal asks for finds the same state: the refusal stays, with its question.
+      expect(screen.getByText("memory search changed meanwhile, try again")).toBeTruthy();
+      expect(screen.getByText(question)).toBeTruthy();
+
+      query.becomes(statusRow({ switch: elsewhere }));
+      await advance(30_000);
+      expect(screen.queryByText("memory search changed meanwhile, try again")).toBeNull();
+
+      query.becomes(statusRow({ switch: cancelled }));
+      await advance(5_000);
+      expect(screen.queryByText("memory search changed meanwhile, try again")).toBeNull();
+      expect(screen.queryByText(question)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("Change model is one place: a refusal is said there whichever of its states it arrives in", async () => {
+    const advance = fakeClock();
+    try {
+      const flipped = statusRow({ providerRef: NOMIC, label: "nomic-embed-text", switch: switchRun({ state: "finishing" }) });
+      const query = memorySearchQuery(statusRow({ switch: switchRun() }));
+      let refuse: (e: Error) => void = () => {};
+      query.memorySearchCancel.mockImplementationOnce(() => new Promise((_resolve, reject) => { refuse = reject; }));
+      mount("memorysearch", query);
+      await advance(0);
+      await readTheBar();
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      // The switch flips while the Cancel is out: the section shows the choices.
+      query.becomes(flipped);
+      await advance(5_000);
+      expect(screen.getByRole("radiogroup", { name: "Memory search model" })).toBeTruthy();
+      const why = "the switch to nomic-embed-text has already happened and search uses it now; switching back is a new switch, and the previous model's index is kept for 30 days";
+      await act(async () => { refuse(new Error(`memorySearchCancel: ${why}`)); });
+      await advance(0);
+      expect(screen.getByText(why)).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

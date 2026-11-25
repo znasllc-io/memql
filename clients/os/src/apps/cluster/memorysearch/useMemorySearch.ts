@@ -22,8 +22,9 @@ import { useReleaseRead } from "../releases/useReleaseRead";
 // until the next read lands, which the act asks for. A refusal is the engine's
 // own sentence ("changed meanwhile, try again" is a fence the job or another
 // owner moved), and the status is read again after it, because the page is
-// showing a state that is gone. No act is repeated: not on a timer, not on a
-// reconnect, not after a refusal.
+// showing a state that is gone. The refusal stays while reads show the state it
+// answered, and goes with that state (changeModelState). No act is repeated:
+// not on a timer, not on a reconnect, not after a refusal.
 
 /** The capability resource the page and its builtins are gated on (owner only, by seed). */
 export const MEMORY_SEARCH_RESOURCE = "app:cluster/memorysearch";
@@ -90,7 +91,7 @@ export interface MemorySearch {
   status: MemorySearchStatus | null;
   /** Null until the first read lands, or when the page asked for none. */
   choices: MemorySearchChoice[] | null;
-  /** The last act's refusal, in the engine's words; "" when the last act went through. */
+  /** The last act's refusal, in the engine's words; "" when the last act went through, or once a read shows another state (changeModelState). */
   error: string;
   /** Why the status could not be read, when the last read failed. */
   readError: string;
@@ -125,6 +126,21 @@ export function switchRunning(status: MemorySearchStatus | null): boolean {
 export function switchFlipped(status: MemorySearchStatus | null): boolean {
   const sw = status?.switch;
   return !!sw && (sw.state === "finishing" || sw.state === "waiting") && sw.targetRef !== "" && sw.targetRef === status!.providerRef;
+}
+
+/**
+ * WHAT A QUESTION OR A REFUSAL WAS ABOUT: the model in use, and the switch's
+ * state and target, which together decide what the page's Change model section
+ * shows (the choices or the switch). A refusal, or a confirmation left open,
+ * answers the state it was given over. Once a read lands with another one --
+ * a switch started, cancelled or flipped elsewhere -- the page drops it rather
+ * than keep it for later: a section that swapped to the switch and back hours
+ * after would otherwise reopen the old question, or say a refusal about a
+ * state long gone (step 6 review).
+ */
+export function changeModelState(status: MemorySearchStatus | null): string {
+  if (status === null) return "";
+  return JSON.stringify([status.providerRef, status.switch?.state ?? "", status.switch?.targetRef ?? ""]);
 }
 
 export function readMemorySearchStatus(raw: Row | null): MemorySearchStatus {
@@ -201,27 +217,37 @@ export function useMemorySearch(query: MemorySearchQueries | null, { visible = t
   const latestRead = useRef(status.value);
   latestRead.current = status.value;
   const shown = reply !== null && reply.base === status.value ? reply.value : status.value;
+  const latestShown = useRef(shown);
+  latestShown.current = shown;
   // The cadence follows what is shown, in the same render (React's "information
   // from previous renders" form, guarded so it settles): the read that first
   // sees a switch, or the act that starts one, moves to 5 s at once rather than
   // after the next 30 s read. A changed cadence reads once at once.
   if (switchRunning(shown) !== running) setRunning(switchRunning(shown));
 
-  const [error, setError] = useState("");
+  // The last act's refusal, with the state it answered (changeModelState). The
+  // read a refusal asks for usually finds the same state, and the refusal stays
+  // beside what was pressed; a read with another state drops it, in the same
+  // render form as the cadence above.
+  const [refusal, setRefusal] = useState<{ sentence: string; over: string } | null>(null);
+  if (refusal !== null && changeModelState(shown) !== refusal.over) setRefusal(null);
   const acting = useRef(false);
   const { retry } = status;
   const act = useCallback(async (name: ActName, run: (q: MemorySearchQueries) => Promise<Result>): Promise<boolean> => {
     if (!query || acting.current) return false;
     acting.current = true;
-    setError("");
+    setRefusal(null);
     try {
       const answered = (await run(query)).single();
       if (answered) setReply({ value: readMemorySearchStatus(answered), base: latestRead.current });
       return true;
     } catch (e) {
       // A dropped connection is not a refusal: what happened is unknown, and
-      // the read that follows says what the cluster holds now.
-      setError(isTransportInterruption(e) ? "The cluster did not answer. What is shown here has been read again." : refusalSentence(e, name));
+      // the read that follows says what the cluster holds now. The state is
+      // read as the answer arrived: a read that landed while the act was out
+      // is what the refusal answers.
+      const sentence = isTransportInterruption(e) ? "The cluster did not answer. What is shown here has been read again." : refusalSentence(e, name);
+      setRefusal({ sentence, over: changeModelState(latestShown.current) });
       return false;
     } finally {
       acting.current = false;
@@ -232,7 +258,7 @@ export function useMemorySearch(query: MemorySearchQueries | null, { visible = t
   return {
     status: shown,
     choices: choices ? choiceRead.value : null,
-    error,
+    error: refusal?.sentence ?? "",
     readError: status.error,
     choicesError: choices ? choiceRead.error : "",
     retry: useCallback(() => { status.retry(); choiceRead.retry(); }, [status.retry, choiceRead.retry]),

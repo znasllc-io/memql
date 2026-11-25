@@ -10,6 +10,7 @@ import { holds } from "../../../system/roles";
 import { bareId } from "../../settings/access/model";
 import {
   MEMORY_SEARCH_RESOURCE,
+  changeModelState,
   switchFlipped,
   switchRunning,
   useMemorySearch,
@@ -39,7 +40,12 @@ import "./memorySearch.css";
 //
 // WHERE AN ANSWER APPEARS: below what was pressed, never above it, so nothing
 // moves under the pointer. The confirmation stands at the end of Change model,
-// after the choices and the kept index's line, whichever asked.
+// after the choices and the kept index's line, whichever asked. CHANGE MODEL IS
+// ONE PLACE, whether it shows the choices or a switch: a refusal of an act
+// pressed there is said at its end, so a read that swaps the two while the act
+// is out still shows the answer. A refusal or a question left open lasts only
+// while reads show the state it was given over (changeModelState), so it never
+// comes back with the section hours later.
 
 const items = (n: number) => `${formatCount(n)} ${n === 1 ? "item" : "items"}`;
 
@@ -120,7 +126,7 @@ export function MemorySearchSection({ visible = true }: { visible?: boolean }) {
     me={bareId(access?.userId ?? "")} mayChange={holds("execute", MEMORY_SEARCH_RESOURCE)} />;
 }
 
-type Place = "inUse" | "change" | "switch";
+type Place = "inUse" | "change";
 
 export function MemorySearchPage({ query, connected, visible, me, mayChange }: {
   query: MemorySearchQueries | null;
@@ -132,10 +138,14 @@ export function MemorySearchPage({ query, connected, visible, me, mayChange }: {
   mayChange: boolean;
 }) {
   const search = useMemorySearch(query, { visible, connected });
-  const [draft, setDraft] = useState<string | null>(null);
+  const status = search.status;
+  // The model a confirmation is open for, and the state it was picked over: a
+  // read with another state drops it (changeModelState), in the same render.
+  const [draft, setDraft] = useState<{ ref: string; over: string } | null>(null);
+  if (draft !== null && changeModelState(status) !== draft.over) setDraft(null);
+  const pick = (next: string | null) => setDraft(next === null || next === status?.providerRef ? null : { ref: next, over: changeModelState(status) });
   // Which part of the page the last act was pressed in: its refusal is said there.
   const [actedIn, setActedIn] = useState<Place>("change");
-  const status = search.status;
   const act = (place: Place, run: () => Promise<boolean>) => () => { setActedIn(place); return run(); };
   return <div className="os-cluster os-memory-search">
     <Head title="Memory search" note={search.readError && status ? <HeadNote sentence="Memory search could not be refreshed." next="Showing the last reading." detail={search.readError} /> : null} />
@@ -145,8 +155,8 @@ export function MemorySearchPage({ query, connected, visible, me, mayChange }: {
     : <Details>
       <InUse status={status} me={me} search={search} mayChange={mayChange} refusal={actedIn === "inUse" ? search.error : ""} act={act} />
       {switchRunning(status) && !switchFlipped(status)
-        ? <Switching status={status} sw={status.switch!} me={me} mayChange={mayChange} refusal={actedIn === "switch" ? search.error : ""} search={search} act={act} />
-        : mayChange ? <ChangeModel status={status} search={search} draft={draft === status.providerRef ? null : draft} setDraft={setDraft}
+        ? <Switching status={status} sw={status.switch!} me={me} mayChange={mayChange} refusal={actedIn === "change" ? search.error : ""} search={search} act={act} />
+        : mayChange ? <ChangeModel status={status} search={search} draft={draft?.ref ?? null} pick={pick}
           refusal={actedIn === "change" ? search.error : ""} act={act} /> : null}
     </Details>}
   </div>;
@@ -227,8 +237,8 @@ function Switching({ status, sw, me, mayChange, refusal, search, act }: { status
           <Notice tone="warn" sentence={`${items(held)} could not be indexed${kinds ? ` (${kinds})` : ""}.`}>
             <p className="os-caption">Switch anyway leaves them out of search until they are indexed again.</p>
             {mayChange ? <div className="os-panel-actions">
-              <Button onClick={act("switch", search.cancel)}>Cancel</Button>
-              <Button tone="primary" onClick={act("switch", search.switchAnyway)}>Switch anyway</Button>
+              <Button onClick={act("change", search.cancel)}>Cancel</Button>
+              <Button tone="primary" onClick={act("change", search.switchAnyway)}>Switch anyway</Button>
             </div> : null}
           </Notice>
         </InPlaceAsk> : <div className="os-memory-search-progress">
@@ -240,9 +250,9 @@ function Switching({ status, sw, me, mayChange, refusal, search, act }: { status
         </div>}
         {mayChange && (sw.takeOver || !deciding) ? <InPlaceAsk className="os-memory-search-stack">
           {sw.takeOver ? <Notice tone="warn" sentence={switchTakeOverLine(sw)}>
-            <div className="os-panel-actions"><Button tone="primary" onClick={act("switch", () => search.switchTo(sw.targetRef))}>Re-index on my machines</Button></div>
+            <div className="os-panel-actions"><Button tone="primary" onClick={act("change", () => search.switchTo(sw.targetRef))}>Re-index on my machines</Button></div>
           </Notice> : null}
-          {deciding ? null : <div className="os-panel-actions"><Button onClick={act("switch", search.cancel)}>Cancel</Button></div>}
+          {deciding ? null : <div className="os-panel-actions"><Button onClick={act("change", search.cancel)}>Cancel</Button></div>}
         </InPlaceAsk> : null}
         {refusal ? <Notice tone="error" sentence={refusal} /> : null}
       </div>
@@ -262,11 +272,13 @@ function choiceOption(choice: MemorySearchChoice): ChoiceOption {
   };
 }
 
-function ChangeModel({ status, search, draft, setDraft, refusal, act }: {
+function ChangeModel({ status, search, draft, pick, refusal, act }: {
   status: MemorySearchStatus;
   search: MemorySearch;
+  /** The model a confirmation is open for. */
   draft: string | null;
-  setDraft: (next: string | null) => void;
+  /** Opens the confirmation for a model, or closes it (null, or the model in use). */
+  pick: (next: string | null) => void;
   refusal: string;
   act: Act;
 }) {
@@ -278,7 +290,6 @@ function ChangeModel({ status, search, draft, setDraft, refusal, act }: {
   const previous = status.previousRef === "" ? null : status.retained.find((kept) => kept.providerRef === status.previousRef) ?? null;
   const until = previous ? keptUntil(previous.retireAt) : "";
   const back = previous ? choices?.find((choice) => choice.providerRef === previous.providerRef && choice.available) ?? null : null;
-  const pick = (next: string | null) => setDraft(next === status.providerRef ? null : next);
   const bound = status.providerRef !== "";
   return <DetailsSection title="Change model">
     <SettingRow label="Model">
@@ -297,10 +308,10 @@ function ChangeModel({ status, search, draft, setDraft, refusal, act }: {
         {target ? <InPlaceAsk key={target.providerRef}>
           <Notice sentence={confirmationLine(status, target)}>
             <div className="os-panel-actions">
-              <Button onClick={() => setDraft(null)}>{bound ? `Keep ${status.label}` : "Not now"}</Button>
+              <Button onClick={() => pick(null)}>{bound ? `Keep ${status.label}` : "Not now"}</Button>
               <Button tone="primary" onClick={act("change", async () => {
                 const done = await search.switchTo(target.providerRef);
-                if (done) setDraft(null);
+                if (done) pick(null);
                 return done;
               })}>{bound ? `Switch to ${target.label}` : `Use ${target.label}`}</Button>
             </div>
