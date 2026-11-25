@@ -114,3 +114,10 @@ func GenerateTesterPassword() (password, hashLine string, err error) {
 	hashLine = "v1$" + base64.RawURLEncoding.EncodeToString(salt) + "$" + base64.RawURLEncoding.EncodeToString(digest)
 	return password, hashLine, nil
 }
+
+// testerBackOut names the two results a person can always produce without the
+// tester password, as on Stripe's or Didit's own page: leaving the checkout or
+// the age check. They apply no credit and no age result.
+func testerBackOut(kind, outcome string) bool {
+	return kind == "checkout" && outcome == "cancelled" || kind == "verification" && outcome == "abandoned"
+}

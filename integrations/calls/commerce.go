@@ -22,6 +22,11 @@ func validCommerceRequest(r callrules.AccountRequest) bool {
 	if !commerceAction(r.Action) || r.AccountID == "" || len(r.AccountID) > 128 || r.Key != "" || r.ChallengeID != "" || len(r.Credential) != 0 || r.CredentialID != "" || r.Label != "" || r.Plan != "" || r.ParticipantLimit != 0 || r.DurationMinutes != 0 || r.Insights {
 		return false
 	}
+	// Only a gated simulated result carries the tester password. Backing out
+	// never needs one, so it never accepts one either.
+	if r.TesterPassword != "" && (!strings.HasPrefix(r.Action, "mock_") || testerBackOut(strings.TrimSuffix(strings.TrimPrefix(r.Action, "mock_"), "_complete"), r.Outcome) || len(r.TesterPassword) > testerPasswordMaxBytes) {
+		return false
+	}
 	switch r.Action {
 	case "checkout_begin":
 		return fundingOperationID.MatchString(r.IdempotencyKey) && r.AmountCents >= 1000 && r.AmountCents <= 50000 && r.OperationID == "" && r.Outcome == "" && r.AdultDeclared && r.TermsAccepted

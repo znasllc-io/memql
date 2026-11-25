@@ -8,27 +8,31 @@ import (
 // AccountRequest is one bounded account ceremony or credential-management act.
 // Credential is the browser's WebAuthn response, verified by the service.
 type AccountRequest struct {
-	Report            *ReportRequest  `json:"report,omitempty"`
-	ParticipationMode string          `json:"participationMode,omitempty"`
-	OperationID       string          `json:"operationId,omitempty"`
-	Outcome           string          `json:"outcome,omitempty"`
-	AdultDeclared     bool            `json:"adultDeclared,omitempty"`
-	TermsAccepted     bool            `json:"termsAccepted,omitempty"`
-	SaveMethod        bool            `json:"saveMethod,omitempty"`
-	ParticipantLimit  int             `json:"participantLimit,omitempty"`
-	DurationMinutes   int             `json:"durationMinutes,omitempty"`
-	Insights          bool            `json:"insights,omitempty"`
-	Resources         bool            `json:"resources,omitempty"`
-	Action            string          `json:"action"`
-	Key               string          `json:"key,omitempty"`
-	ChallengeID       string          `json:"challengeId,omitempty"`
-	Credential        json.RawMessage `json:"credential,omitempty"`
-	CredentialID      string          `json:"credentialId,omitempty"`
-	Label             string          `json:"label,omitempty"`
-	AccountID         string          `json:"accountId,omitempty"`
-	AmountCents       int64           `json:"amountCents,omitempty"`
-	Plan              string          `json:"plan,omitempty"`
-	IdempotencyKey    string          `json:"idempotencyKey,omitempty"`
+	Report            *ReportRequest `json:"report,omitempty"`
+	ParticipationMode string         `json:"participationMode,omitempty"`
+	OperationID       string         `json:"operationId,omitempty"`
+	Outcome           string         `json:"outcome,omitempty"`
+	// TesterPassword applies a simulated payment or age result in mock commerce
+	// mode. Only the mock_*_complete actions carry it; it is never stored,
+	// digested or logged.
+	TesterPassword   string          `json:"testerPassword,omitempty"`
+	AdultDeclared    bool            `json:"adultDeclared,omitempty"`
+	TermsAccepted    bool            `json:"termsAccepted,omitempty"`
+	SaveMethod       bool            `json:"saveMethod,omitempty"`
+	ParticipantLimit int             `json:"participantLimit,omitempty"`
+	DurationMinutes  int             `json:"durationMinutes,omitempty"`
+	Insights         bool            `json:"insights,omitempty"`
+	Resources        bool            `json:"resources,omitempty"`
+	Action           string          `json:"action"`
+	Key              string          `json:"key,omitempty"`
+	ChallengeID      string          `json:"challengeId,omitempty"`
+	Credential       json.RawMessage `json:"credential,omitempty"`
+	CredentialID     string          `json:"credentialId,omitempty"`
+	Label            string          `json:"label,omitempty"`
+	AccountID        string          `json:"accountId,omitempty"`
+	AmountCents      int64           `json:"amountCents,omitempty"`
+	Plan             string          `json:"plan,omitempty"`
+	IdempotencyKey   string          `json:"idempotencyKey,omitempty"`
 }
 
 type AccountCapabilities struct {
