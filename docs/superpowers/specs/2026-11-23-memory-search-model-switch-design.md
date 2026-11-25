@@ -1,7 +1,9 @@
 # Memory search: choosing and switching its model
 
-Design record, 2026-11-23/24. Status: approved by the owner 2026-11-24; being
-built (plan `docs/superpowers/plans/2026-11-24-memory-search-switch.md`).
+Design record, 2026-11-23/24. Status: approved 2026-11-24, built. How it was
+built, and the rulings made on the way, are in the decision map's three
+memory-search sections (`docs/internal/ops/harness-decisions.md`); the
+operator's guide is `docs/public/operate/memory-search.md`.
 Follows the vendor accounts work
 ([2026-11-21-vendor-accounts-and-api-keys-design.md](2026-11-21-vendor-accounts-and-api-keys-design.md)).
 
@@ -78,10 +80,12 @@ Anti-goals, each of which makes the work a failure:
   `node_vectors_<width>_<hash of providerRef>` (`EmbeddingVectorTable`), with
   columns `id, concept, vector_field, embedding, created_at, updated_at`. The
   item's TEXT is not stored: each writer builds it from its own row and calls
-  `integration.embedding.store` (work observations, memory beliefs, Library
-  file chunks, knowledge items, the authoring catalog, work memory and
-  acknowledgements, Library training). Readers resolve the active binding's
-  table, and embed a search query with the same pinned model.
+  `integration.embedding.store` (work observations, Library file chunks,
+  knowledge chunks from every knowledge path -- ingest, the seed corpora, the
+  canonical and release seeds, the LLM-seeded domains and their bridges, and
+  the Trainer --, the authoring catalog, work memory's conversation evidence
+  and acknowledgements, and the Training lessons). Readers resolve the active
+  binding's table, and embed a search query with the same pinned model.
 - An embedding call is a fleet or vendor call like any other: a fleet model
   resolves against the ACTING person's machines and the ones lent to them.
   Since September a machine can only be private or lent to named people and
@@ -91,9 +95,11 @@ Anti-goals, each of which makes the work a failure:
   `federationEmbedders()` (the vendor fallback this design removes).
   `bindEmbedder` is cluster-owner only and refuses any change of an active
   binding.
-- `embedder_activation.go` already describes the safe order (new table, plan,
-  re-embed, compare, flip) but the re-embed was never built, and its count
-  comparison still uses the older width-only table names.
+- An activation path (`embedder_activation.go`) described the safe order (new
+  table, plan, re-embed, compare, flip), but the re-embed was never built, and
+  its count comparison used the older width-only table names. Nothing called
+  it; it was deleted when this design was built, and the index job (section 4)
+  is the order it described.
 - Binding changes are broadcast to every replica
   (`component/node/routing.go`), which invalidates each replica's cached
   binding.
@@ -174,9 +180,10 @@ and the catch-up passes around a flip.
 
 A registry in `component/memql` keyed by `(concept, vector_field)`: each
 writer registers which of its rows are indexed and how their text is built.
-Most are one payload field (a Library chunk's text, a memory belief's
-content); a work observation reuses the rules `embedWorkObservation` applies
-(summary over content, the excluded administrative rows). The writers'
+Most are one payload field (a Library chunk's text, a piece of conversation
+evidence's content); a work observation reuses the rules
+`embedWorkObservation` applies (summary over content, the excluded
+administrative rows). The writers'
 everyday path and the job use the same recipe, so the two never disagree. A
 test pins that every concept with rows in a seeded index has a recipe; an
 entry in an old table with no recipe is counted as `unsourced` at a switch.

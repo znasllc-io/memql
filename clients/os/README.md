@@ -2929,7 +2929,8 @@ choice; it does not apply a plan. Reconnecting and status refreshes never land c
 
 Cluster > Settings > **Memory search** (`src/apps/cluster/memorysearch/`; design
 record `docs/superpowers/specs/2026-11-23-memory-search-model-switch-design.md`,
-section 8) is where an owner sees which model memory search uses, whose machines
+section 8; operator's guide `docs/public/operate/memory-search.md`) is where an
+owner sees which model memory search uses, whose machines
 index it, how many items the index holds and what waits, and changes it. Settings
 links to it with a row showing the model in use. Fleet's model board keeps the
 bound model locked and says where to change it, to whoever can open Memory

@@ -716,8 +716,10 @@ does not pay for, a picture, speech, transcription or an image at a vendor is
 passed over like a shut door, with that reason in `considered`. Embeddings use
 the cluster's one memory-search model (`v1:platform:embedderBinding`), pinned
 on every call and never degraded: when it is a vendor's, the cluster's account
-pays for every caller; when it is a model on a machine, it runs on the
-caller's own machines or ones lent to them, and no vendor account pays.
+pays for every caller; when it is a model on a machine, everything is embedded
+by the indexer, on the machines of the owner the binding names (`indexedBy`)
+and the machines lent to them, whoever wrote the item or runs the search, and
+no vendor account pays. [Memory search](memory-search.md) has the rest.
 
 **Who a call is for is read from the call.** The request names a person, or
 its context does: a signed-in session, borrowed authority, or the owner of the
