@@ -965,19 +965,21 @@ concept inferenceStatus {
   minimumContextWindow     int!     @description("The context floor localEligible applied, published so the gate's recommendation and its check cannot drift. It is a floor for the GATE; what enforces capability per CALL is the catalog gating the router applies.")
 }
 
-/// Virtual SINGLE-ROW answer to "may this caller enter MemQL OS yet" (desktop-access design,
-/// section 3). Never persisted. The OS entry page reads it through the `desktopAccess` builtin.
+/// Virtual SINGLE-ROW answer to "does this caller have model access set up" (desktop-access
+/// design, section 3). Never persisted. MemQL OS reads it through the `desktopAccess` builtin to
+/// decide whether the caller gets Ask; it keeps nobody out (who-gets-into-memql-os design,
+/// 2026-11-25). `admitted` keeps its name from when a false answer did.
 ///
 /// ONE ROW, FOR THE CALLER ALONE: the person is the acting user, never an argument, so no
 /// capability gate is needed, as for inferenceStatus. A failed call is an error, not a row.
 @displayCard(primary="admitted", secondary="exempt", tertiary="reference")
 @belongsTo(cluster)
 concept desktopAccess {
-  admitted       bool!    @description("Whether the caller may enter: exempt, or at least one source counts.")
+  admitted       bool!    @description("Whether the caller has model access set up: exempt, or at least one source counts. False takes Ask away in MemQL OS and keeps nobody out.")
   exempt         bool!    @description("Whether the caller is a cluster owner or developer, by their STORED role read fresh, or a cluster owner the server itself made (the troubleshooting shim, the operator credential). The exempt are admitted with nothing set up.")
-  reference      string   @description("ERR- plus six lowercase hex characters, present only on a held answer: the reference of the hold line just written, or the valid one the caller passed back when nothing needed writing or the per-person write bound was reached. The person quotes it to an administrator. Absent when the write failed, or the bound was reached with no reference passed back.")
-  reasonsDigest  string   @description("The person part then the reasons digest of a held answer: of the reasons in the line written under the reference, or the digest the caller passed back when nothing was written. For the OS client it is never a digest of reasons no line holds. A call crafted outside the OS gets its own passed digest back when nothing was written (steady state, or past the per-person write bound), and can compute a digest for reasons never written under the reference it chose. The client passes it back with the reference so a re-check with unchanged reasons writes nothing. Absent whenever reference is.")
-  sources        []object @description("What the caller has set up, for the exempt too: {kind, state, own, lenderUserId, label, app}. kind is machine | app | key | clusterAccount; app is the app id of an app source. Every source listed counts: state is ready, or asleep | outOfCredit | outOfUsage for one that is set up and cannot answer right now. Nothing that does not count is listed; why it does not is in the hold line under the reference.")
+  reference      string   @description("ERR- plus six lowercase hex characters, present only on an answer that is not admitted: the reference of the log line just written, or the valid one the caller passed back when nothing needed writing or the per-person write bound was reached. It names the line for an administrator; MemQL OS shows it nowhere. Absent when the write failed, or the bound was reached with no reference passed back.")
+  reasonsDigest  string   @description("The person part then the reasons digest of an answer that is not admitted: of the reasons in the line written under the reference, or the digest the caller passed back when nothing was written. For the OS client it is never a digest of reasons no line holds. A call crafted outside the OS gets its own passed digest back when nothing was written (steady state, or past the per-person write bound), and can compute a digest for reasons never written under the reference it chose. The client passes it back with the reference so a re-check with unchanged reasons writes nothing. Absent whenever reference is.")
+  sources        []object @description("What the caller has set up, for the exempt too: {kind, state, own, lenderUserId, label, app}. kind is machine | app | key | clusterAccount; app is the app id of an app source. Every source listed counts: state is ready, or asleep | outOfCredit | outOfUsage for one that is set up and cannot answer right now. Nothing that does not count is listed; why it does not is in the log line under the reference.")
 }
 
 /// Virtual single-row RESULT of an owner-only `providersReload` (epic memql#4440). Never persisted:

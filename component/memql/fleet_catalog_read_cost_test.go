@@ -33,8 +33,8 @@ func (c *askingCatalog) Catalog(_ context.Context, actingUserId string) ([]Fleet
 // on every Providers page load and every first-run gate. Measured: a person's
 // read asked for two catalogs, which against fleetcatalog.Reader is three
 // registration reads (own + cross-owner, then cross-owner again); it now asks
-// for one, which is two. desktopAccess is held to it as well: a held person's
-// page asks every 30 seconds.
+// for one, which is two. desktopAccess is held to it as well: MemQL OS asks
+// every 30 seconds for a person with no model access.
 func TestACallersCatalogReadAsksForOneCatalog(t *testing.T) {
 	type caller struct {
 		name string

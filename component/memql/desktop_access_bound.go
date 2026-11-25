@@ -6,7 +6,8 @@ package memql
 // reference (the caller passed back no valid one) and a rewrite under a
 // passed reference whose reasons changed, alike. The steady state, a valid
 // passed reference whose reasons match, writes nothing and never asks, so a
-// held page checking every 30 seconds spends nothing.
+// client checking every 30 seconds for a person with no model access (MemQL OS
+// does, so Ask appears by itself) spends nothing.
 //
 // WHY IT EXISTS. The line goes through logstore's InsertNow, which skips the
 // log store's queue, level floor and per-second bucket so that a reference a

@@ -346,6 +346,12 @@ func TestRecordAccessHoldWritesTheDocumentedLine(t *testing.T) {
 		r.UserId != "ana" || r.NodeType != "bff" || r.Node != "n1" {
 		t.Fatalf("row = %+v", r)
 	}
+	// The message says what MemQL OS does on this answer: since 2026-11-25 the
+	// person is not kept out, they are shown no Ask (design record
+	// 2026-11-25-who-gets-into-memql-os). An administrator reads this line.
+	if want := "No model access is set up for this person: MemQL OS shows them no Ask"; r.Message != want {
+		t.Fatalf("message = %q, want %q", r.Message, want)
+	}
 	var attrs map[string]any
 	if err := json.Unmarshal(r.Attributes, &attrs); err != nil {
 		t.Fatal(err)
