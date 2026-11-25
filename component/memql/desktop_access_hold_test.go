@@ -351,3 +351,42 @@ func TestStoredRoleWithNoDatabaseIsAnError(t *testing.T) {
 		t.Fatalf("found = %v, err = %v, want an error", found, err)
 	}
 }
+
+// One id spelling in the hold line: the person and any lender it names are
+// bare, whatever spelling the call and the key row carried, so an
+// administrator who finds the reference reads ids that match the Logs subject.
+func TestTheHoldLineNamesPeopleByBareIds(t *testing.T) {
+	rec := installRecorder(t)
+	keys := newFakeVendorKeys()
+	keys.passedOver = []VendorAccountPassedOver{{
+		Account: keyAccount(VendorAnthropic, "k1", "v1:identity:user:lender"),
+		Reason:  VendorKeyPausedReason,
+	}}
+	e := keyEngine("claude", keys)
+	withAppRows(e)
+	e.storedRoleForTest = func(context.Context, string) (auth.Role, bool, error) { return auth.RoleWriter, true, nil }
+	who := "v1:identity:user:ana"
+	if _, err := e.desktopAccess(personContext(who), who, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.lines) != 1 {
+		t.Fatalf("lines = %+v, want one", rec.lines)
+	}
+	line := rec.lines[0]
+	if line.UserId != "ana" {
+		t.Fatalf("line person = %q, want the bare id", line.UserId)
+	}
+	want := "the key lent by lender is paused by its owner"
+	found := false
+	for _, r := range line.Reasons {
+		if r == want {
+			found = true
+		}
+		if strings.Contains(r, "v1:identity") {
+			t.Fatalf("reason %q carries a canonical id", r)
+		}
+	}
+	if !found {
+		t.Fatalf("reasons = %q, want %q", line.Reasons, want)
+	}
+}

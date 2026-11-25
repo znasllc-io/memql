@@ -61,6 +61,20 @@ never broadcast, and are read only through the builtins below.
   `secret` or `authorization` attribute is `<redacted>` in the row exactly
   as on the console. `payload` and `body` are redacted whatever they hold.
 
+### The one line that is never dropped: a held person's reference
+
+When MemQL OS holds a person because no model access is set up, the page
+shows a reference (`ERR-` and six hex characters). The line it names is
+written through `Sink.InsertNow`, not the queue: it skips the queue, the
+level floor and the cap, and the caller waits for the insert to answer. A
+reference is shown only after that write succeeded, so searching Logs for it
+(component `desktopAccess`, subject the person's bare user id, attributes
+`reference` and `reasons`) always finds the line. A node with no log store, or
+a failed insert, holds the person with no reference rather than one nobody can
+look up. The wiring is `memql.SetAccessHoldRecorder(logstore.RecordAccessHold)`
+in `app/database.go`; tests are `TestInsertNowWritesOnceAndReportsFailure` and
+the db-gated `TestInsertNowLineIsFoundBySearchingItsReference`.
+
 ## Reading
 
 Every read is a builtin declared in `dsl/observability/builtins.memql`, admin

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/logger"
 )
 
@@ -274,5 +275,92 @@ func TestLevelName(t *testing.T) {
 		if got := levelName(l); got != want {
 			t.Errorf("levelName(%v) = %q, want %q", l, got, want)
 		}
+	}
+}
+
+// InsertNow is the write a caller waits on: one row through the insert
+// function, bypassing the queue, and the insert's error comes back unchanged.
+func TestInsertNowWritesOnceAndReportsFailure(t *testing.T) {
+	cap := &captureInsert{}
+	s := NewSink(nil, SinkOptions{NodeType: "bff", Node: "n1", Insert: cap.insert, Logger: discard()})
+	// The sink is never started: nothing may depend on the drain.
+	line := logger.Line{Level: slog.LevelWarn, Component: "desktopAccess", Message: "held",
+		Subject: "u1", SubjectConcept: "v1:identity:user", Attributes: map[string]any{"reference": "ERR-0a1b2c"}}
+	if err := s.InsertNow(context.Background(), line, Stamp{NodeType: "bff", Node: "n1", UserId: "u1"}); err != nil {
+		t.Fatalf("InsertNow: %v", err)
+	}
+	rows := cap.all()
+	if len(rows) != 1 {
+		t.Fatalf("insert received %d rows, want exactly 1", len(rows))
+	}
+	if !strings.Contains(string(rows[0].Attributes), "ERR-0a1b2c") || rows[0].Subject != "u1" || rows[0].UserId != "u1" {
+		t.Fatalf("row = %+v, want the reference in its attributes and the bare subject", rows[0])
+	}
+	if got := s.Stats(); got.QueueDepth != 0 || got.Written != 0 {
+		t.Fatalf("stats = %+v, want the queue untouched", got)
+	}
+
+	boom := errors.New("insert refused")
+	failing := NewSink(nil, SinkOptions{NodeType: "bff", Node: "n1", Logger: discard(),
+		Insert: func(context.Context, []Row) error { return boom }})
+	if err := failing.InsertNow(context.Background(), line, Stamp{}); err != boom {
+		t.Fatalf("err = %v, want the insert's own error unchanged", err)
+	}
+
+	var none *Sink
+	if err := none.InsertNow(context.Background(), line, Stamp{}); !errors.Is(err, ErrNoStore) {
+		t.Fatalf("nil sink err = %v, want ErrNoStore", err)
+	}
+}
+
+// InsertNow skips the level floor and the rate bucket: a line the owner has
+// to find must not be dropped because the node was chatty that second.
+func TestInsertNowIsNotDroppedByTheBucketOrTheFloor(t *testing.T) {
+	cap := &captureInsert{}
+	s := NewSink(nil, SinkOptions{NodeType: "bff", Node: "n1", Insert: cap.insert, Logger: discard(), MaxLinesPerSecond: 1})
+	s.off = true
+	for i := 0; i < 3; i++ {
+		if err := s.InsertNow(context.Background(), infoLine("x"), Stamp{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := len(cap.all()); n != 3 {
+		t.Fatalf("rows = %d, want 3", n)
+	}
+}
+
+func TestRecordAccessHoldWritesTheDocumentedLine(t *testing.T) {
+	cap := &captureInsert{}
+	s := NewSink(nil, SinkOptions{NodeType: "bff", Node: "n1", Insert: cap.insert, Logger: discard()})
+	err := recordAccessHoldOn(context.Background(), s, memql.AccessHoldLine{
+		Reference: "ERR-0a1b2c", UserId: "ana", Reasons: []string{"no app on their machines is allowed and signed in"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := cap.all()
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+	r := rows[0]
+	if r.Level != "warn" || r.Component != "desktopAccess" || r.Subject != "ana" || r.SubjectConcept != "v1:identity:user" ||
+		r.UserId != "ana" || r.NodeType != "bff" || r.Node != "n1" {
+		t.Fatalf("row = %+v", r)
+	}
+	var attrs map[string]any
+	if err := json.Unmarshal(r.Attributes, &attrs); err != nil {
+		t.Fatal(err)
+	}
+	if attrs["reference"] != "ERR-0a1b2c" || fmt.Sprint(attrs["reasons"]) != "[no app on their machines is allowed and signed in]" {
+		t.Fatalf("attributes = %v", attrs)
+	}
+}
+
+// A node with no log store has no sink; the recorder fails, so its held
+// answers carry no reference.
+func TestRecordAccessHoldWithNoStoreFails(t *testing.T) {
+	setCurrent(nil)
+	err := RecordAccessHold(context.Background(), memql.AccessHoldLine{Reference: "ERR-0a1b2c", UserId: "ana"})
+	if !errors.Is(err, ErrNoStore) {
+		t.Fatalf("err = %v, want ErrNoStore", err)
 	}
 }

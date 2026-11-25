@@ -364,7 +364,8 @@ func keySource(a VendorAccount, state, actingUserId string) AccessSource {
 	return s
 }
 
-// keyReason is the plain reason a key does not count. The resolver's reasons
+// keyReason is the plain reason a key does not count. A lender is named by
+// bare id, the one spelling the hold line's subject and user id use too. The resolver's reasons
 // are compared whole (VendorKey*Reason), never by words in them. A reason this
 // does not know still produces a sentence, so a held person is never left
 // with no reason for a key.
@@ -373,13 +374,13 @@ func keyReason(a VendorAccount, reason, actingUserId string) string {
 	own := sameUserId(a.OwnerUserId, actingUserId)
 	switch {
 	case !own && reason == VendorKeyPausedReason:
-		return fmt.Sprintf("the key lent by %s is paused by its owner", a.OwnerUserId)
+		return fmt.Sprintf("the key lent by %s is paused by its owner", BareShortId(a.OwnerUserId))
 	case !own && reason == VendorKeyOwnerInactiveReason:
-		return fmt.Sprintf("the key lent by %s belongs to someone who is no longer an active user", a.OwnerUserId)
+		return fmt.Sprintf("the key lent by %s belongs to someone who is no longer an active user", BareShortId(a.OwnerUserId))
 	case !own && reason == VendorKeyRefusedReason(a.Vendor):
-		return fmt.Sprintf("the key lent by %s was refused by %s", a.OwnerUserId, vendor)
+		return fmt.Sprintf("the key lent by %s was refused by %s", BareShortId(a.OwnerUserId), vendor)
 	case !own:
-		return fmt.Sprintf("the key lent by %s cannot be used", a.OwnerUserId)
+		return fmt.Sprintf("the key lent by %s cannot be used", BareShortId(a.OwnerUserId))
 	case reason == VendorKeyRefusedReason(a.Vendor):
 		return "their own key was refused by " + vendor
 	default:
@@ -578,7 +579,7 @@ func (e *MemQLEngine) desktopAccess(ctx context.Context, actingUserId, passedRef
 	// no reference and no digest (nothing to compare a re-check against), and
 	// is logged: otherwise "no recorder installed" and "the log store refused
 	// the line" would both show only as a page with no reference.
-	if err := recordAccessHold(ctx, AccessHoldLine{Reference: reference, UserId: actingUserId, Reasons: reasons}); err != nil {
+	if err := recordAccessHold(ctx, AccessHoldLine{Reference: reference, UserId: BareShortId(actingUserId), Reasons: reasons}); err != nil {
 		slog.Warn("desktop access: the hold line could not be written; the person is held with no reference",
 			"userId", actingUserId, "error", err)
 		answer.ReasonsDigest = ""

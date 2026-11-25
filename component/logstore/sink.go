@@ -262,6 +262,23 @@ func (s *Sink) WriteStamped(l logger.Line, st Stamp) bool {
 	}
 }
 
+// InsertNow writes one line and returns only when the insert has answered, so
+// a caller that is about to SHOW somebody a reference to the line knows the
+// line can be found. It builds the row exactly as the queue path does, then
+// calls the sink's insert directly: no queue (a full queue cannot drop it),
+// no level floor and no rate bucket (a chatty second must not lose it), and
+// the insert's own error comes back unchanged so the caller decides what a
+// failed write means. The cost is that the caller waits on the database,
+// which Write never does: use it only where findability is the point, never
+// for ordinary logging. A nil sink returns ErrNoStore.
+func (s *Sink) InsertNow(ctx context.Context, l logger.Line, st Stamp) error {
+	if s == nil {
+		return ErrNoStore
+	}
+	row := rowFromLine(l, st, s.opts.NodeType, s.opts.Node)
+	return s.insert(ctx, []Row{row})
+}
+
 // Start begins the background drain. Idempotent.
 func (s *Sink) Start() {
 	s.startOnce.Do(func() { go s.run() })
