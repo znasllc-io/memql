@@ -100,14 +100,17 @@ What is refused before the vendor is asked:
 
 Your first key at a vendor is your **default** there.
 
-### A key lets you in
+### A key lets an owner or developer in
 
 On a cluster with no machine, no app and no vendor account of its own, MemQL OS
-opens on a setup screen instead of the desk. A key that can pay lets you past
-it: yours, or one lent to you. The screen offers **Add an API key**, which
-opens this wizard directly. The cluster's own setup is unchanged, and so is
-everybody else's screen until they add a key of their own or an owner sets up
-inference ([first run](first-run.md#the-gate)).
+opens on a setup screen for the cluster's owners and developers instead of the
+desk. A key that can pay lets them past it: their own, or one lent to them. The
+screen offers **Add an API key**, which opens this wizard directly. The
+cluster's own setup is unchanged, and nobody else enters until an owner or
+developer sets up inference: a key of their own does not let them in
+([first run](first-run.md#the-gate)). Once the cluster is set up, everybody
+enters, and a key is one of the things that give a person Ask
+([Ask needs model access](first-run.md#ask-needs-model-access)).
 
 ### A key that may not list models
 

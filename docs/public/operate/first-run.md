@@ -15,24 +15,29 @@ a desk. It holds them on **the core gate** until this cluster can reach a
 model.
 
 Once it can, the gate lifts by itself and the desk opens, carrying **Ask** and,
-while anything is still outstanding, the **Set up** card. Anybody who is not an
-owner or developer of the cluster is held by a different question: whether
-model access is set up for them personally (see
-[the held page](#the-held-page-everybody-else)).
+while anything is still outstanding, the **Set up** card. Until then, anybody
+who is not an owner or developer of the cluster is kept out on a page that
+says so (see [everybody else](#everybody-else-memql-is-not-set-up-yet)). Once
+the cluster is set up everybody enters, and a person with no model access of
+their own gets the desk without Ask (see
+[Ask needs model access](#ask-needs-model-access)).
 
 ## The gate
 
 It renders in place of the desk. Behind it there is no app, no dock and no
 launcher: they are not hidden, they are not mounted.
 
-**It asks two questions, each about different people.**
+**It asks one question: can this cluster reach a model?** Until it can, the
+gate stands in place of the desk for everybody, and shows each person one of
+two things.
 
-- For the cluster's **owners and developers**: can this cluster reach a model?
-  Until it can, they get the setup screen.
-- For **everybody else**: is model access set up for this person? Until it is,
-  they get the held page, whether or not the cluster as a whole is set up.
+- The cluster's **owners and developers** get the setup screen, because they
+  are the ones who set it up.
+- **Everybody else** gets the page *MemQL is not set up yet*, whatever model
+  access of their own they have.
 
-Being the owner or developer of an account does not exempt anyone from the second question; only the cluster's own owner and developer roles do.
+Being the owner or developer of an account does not make anyone one of the
+first group; only the cluster's own owner and developer roles do.
 
 ### The setup screen: owners and developers
 
@@ -62,14 +67,35 @@ bring-your-own, so an owner or developer whose own key, or a key lent to them,
 can pay for a vendor's models on a route they choose is not held, whatever the
 cluster's verdict. The screen asks for their answer (`inferenceStatus`,
 `keyAccount`) whenever it would show, and again when a window opened from it
-closes. An answer it cannot read keeps the screen. For everybody else a key is
-one of the things the held page counts. ([API keys](api-keys.md))
+closes. An answer it cannot read keeps the screen. A key lets nobody else into
+a cluster that is not set up. ([API keys](api-keys.md))
 
-### The held page: everybody else
+### Everybody else: MemQL is not set up yet
 
-Ask, goals and file summaries run on the person's own model access, so somebody
-with none would get a desktop whose features fail one at a time. When the
-person signs in, the OS asks the cluster whether they have any of these set up:
+Anybody who is not an owner or developer of the cluster sees one page in place
+of the desk while the cluster cannot reach a model:
+
+- the title, *MemQL is not set up yet*;
+- one sentence: *An owner or developer has to set up inference before anyone
+  can use it.*;
+- *This page opens by itself once they have*;
+- Sign out.
+
+**It offers nothing to add.** An API key of their own does not let such a
+person into a cluster that is not set up, so the page offers none.
+
+**It does not name the owner.** A person's name is not the cluster's to
+publish, and the page is as actionable without one.
+
+**It lifts by itself.** The readiness feed is live, so the desk opens the
+moment the cluster reports it is set up, with no reload. It comes back the
+same way if the cluster stops being set up, open windows or not.
+
+### Ask needs model access
+
+Once the cluster is set up, everybody enters. Ask runs on the person's own
+model access, so the OS asks the cluster at sign-in whether they have any of
+these set up:
 
 - a machine of theirs, or one lent to them, that runs a usable model;
 - Claude Code or Codex on a machine of theirs;
@@ -78,48 +104,24 @@ person signs in, the OS asks the cluster whether they have any of these set up:
 
 Set up counts even when it cannot answer right now: a lent laptop that is
 asleep, a key out of credit, an app out of usage. With something set up, the
-person enters. With nothing, they see the held page in place of the desk:
+person has Ask, and Ask says what is asleep. With nothing set up they have no
+Ask: no button in the dock or the phone bar, no Ask widget on the desk or in
+the launcher, and no "Ask about this" in any app. Everything else their role
+gives them works. The cluster's owners and developers keep Ask with nothing set
+up.
 
-- the title, *Your access is not set up yet*;
-- one sentence asking them to have an administrator set a model up, and to give
-  the administrator the reference beneath it, which has a copy control;
-- *This page opens by itself once it is set up*;
-- **Add an API key**, for anybody who may add one (every predefined role may);
-- Sign out.
-
-**It does not name the owner.** A person's name is not the cluster's to
-publish, and the page is as actionable without one.
-
-**It lifts by itself.** Nothing an administrator changes reaches the held
-person's connection, so the page asks again:
+**Ask appears by itself.** Nothing an administrator changes reaches the
+person's connection, so the OS asks again:
 
 - when the window regains focus;
 - when the connection returns;
-- every 30 seconds while it is visible;
-- after a key is added.
+- every 30 seconds while they have no model access and the tab is visible.
 
-Open windows never keep the desk from it. Access taken away while somebody is
-inside shows the page at the next check.
-
-**Add an API key runs the key wizard on the page**, in the same frame, not in a
-Settings window: a window needs the desk drawn under it, and the desk is what a
-held person does not get. Cancel returns to the page. A key added asks again,
-and the page opens if the key counts.
-
-**The reference is what an administrator looks up.** It is `ERR-` and six hex
-characters. Before the page shows it, the cluster writes one line under it to
-the log store, naming the person and each source it checked with why it does
-not count, one sentence per cause: no machine of theirs or lent to them, a
-revoked machine, machines that offer only embedding models or no model with
-structured output and a context of at least 8192, no app allowed and signed
-in, no API key or a key that cannot be used (and why), and no permission to
-the cluster's account or no account set up. The full list is in
-[Who gets into MemQL OS](auth/access-model.md#who-gets-into-memql-os). An
-administrator, or anyone of higher rank, searches the reference in Logs and
-finds that line
-([the held person's reference](logs.md#the-one-line-that-is-never-dropped-a-held-persons-reference)).
-A check that still holds the person keeps the same reference. If the line could
-not be stored, the page shows no reference and does not ask for one.
+**An administrator finds out why in Logs.** When the check finds nothing set
+up, the cluster writes one line naming the person and each source it checked
+with why it does not count. The full list of reasons, and how to find the
+line, are in
+[Who gets into MemQL OS](auth/access-model.md#who-gets-into-memql-os).
 
 ### What it does when it cannot say
 
@@ -130,26 +132,28 @@ The readiness feed has three silences, and only one of them holds anybody.
 | nothing yet — it has not loaded | draws nothing, and the shell opens |
 | `unreported` — no live node reported inference | draws nothing, and the shell opens |
 | `configured`, `partial` | draws nothing, and the shell opens |
-| `unconfigured` | holds owners and developers on the setup screen |
+| `unconfigured` | holds owners and developers on the setup screen, and everybody else on *MemQL is not set up yet* |
 
 **A broken cluster is not an unconfigured one.** `unreported` means no live
 node answered, which is a different problem with a different fix — and a gate
 that held on it would lock somebody out of the Cluster app they need in order
 to go and find out why nothing is reporting.
 
-**A person's own check that cannot be answered lets them in.** An outage is not
-evidence that a person lacks access, and the cluster refuses their model calls
-either way. On the way in, for anybody not already known to be an owner or
-developer, the opening frame waits for the first answer for up to three
-seconds, the same bound as for the feed, so a held person whose answer comes in
-time sees the page rather than the desk. An answer that comes later replaces
-the desk with the page. A check that fails ends the wait at once. A check that
-fails after one has held the person leaves the page up until the next answer.
+**A person's own check that cannot be answered takes nothing away.** An outage
+is not evidence that a person lacks access, and the cluster refuses their model
+calls either way, so they keep Ask. On the way in to a cluster that is set up,
+for anybody not already known to be an owner or developer, the opening frame
+waits for the first answer for up to three seconds, the same bound as for the
+feed, so the desk is first drawn knowing whether Ask belongs on it. An answer
+that comes later removes Ask when it lands. A check that fails ends the wait at
+once. A later check that fails keeps the answer the OS already has.
 
 One more wait has no time limit. While the cluster is unconfigured AND the role
 ladder or the signed-in identity has not landed, nothing is drawn at all. Who is
-looking decides between the setup screen and the desk, and opening the desk for
-an owner who has to set the cluster up is worse than a beat of empty ground.
+looking decides between the setup screen and the page everybody else gets, and
+telling an owner that an owner has to set the cluster up is worse than a beat
+of empty ground. If a window is already open when the identity goes away, the
+desk stays as it is until the identity is back.
 
 ## The Set up card, once the gate has lifted
 

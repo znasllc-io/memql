@@ -1063,18 +1063,43 @@ hidden control appearing late, never one that works when it should not.
 
 ## Who gets into MemQL OS
 
-Model access in MemQL is bring-your-own: a person's own machines, apps and API
-keys, the machines and keys others lend them, and the cluster's vendor account
-only where the cluster owner allows it. MemQL does not pay for anybody's
-inference on its own. A person with none of these would get a desktop whose
-features fail one at a time, so MemQL OS asks the cluster at sign-in whether
-model access is set up for them, and holds them on a page until it is. The
-check is the `desktopAccess` builtin on the stream (no HTTP endpoint); it
-spends no model call.
+Two separate questions decide what a signed-in person gets.
+
+1. **Is the cluster set up?** This alone decides who enters.
+2. **Does this person have model access?** This alone decides whether they get
+   Ask.
+
+| Situation | What happens |
+|---|---|
+| The cluster is set up | Every signed-in person enters MemQL OS, whatever their own model access |
+| A person with no model access, inside | No Ask: no button in the dock or the phone bar, no Ask widget, and nothing else opens it. Everything else their role gives them works |
+| The cluster is not set up, and the person is not one of its owners or developers | Kept out, on the page *MemQL is not set up yet* ([first-run.md](../first-run.md#everybody-else-memql-is-not-set-up-yet)) |
+| A cluster owner or developer | Always enters, to set the cluster up, and keeps Ask |
+
+**The cluster is set up** when its `ai` readiness verdict is not
+`unconfigured`. That verdict needs both a way to a chat model (a machine that
+advertises a model with structured output and a context of at least 8192, a
+machine with Claude Code or Codex allowed and signed in, or the cluster's own
+vendor account) and an embedding model (a bound embedder, or a machine that
+advertises one). A machine that is asleep still counts. Nobody's API key
+counts: a key is one person's. On a cluster that is not set up, a key of their
+own lets an owner or developer in and nobody else.
+
+**Model access in MemQL is bring-your-own:** a person's own machines, apps and
+API keys, the machines and keys others lend them, and the cluster's vendor
+account only where the cluster owner allows it. MemQL does not pay for
+anybody's inference on its own. MemQL OS asks the cluster at sign-in whether
+any of these is set up for the person. The check is the `desktopAccess` builtin
+on the stream (no HTTP endpoint); it spends no model call. With none set up
+the person has no Ask. To take Ask from somebody who does have model access,
+deny `read app:ask` to them or to their group in Users > Access.
 
 **Who is exempt.** The cluster's own owners and developers, because they
-configure the cluster. The engine reads the person's STORED role, fresh, and
-asks `auth.MayManageFleet` of it. An `admin` is not exempt. Being the owner or
+configure the cluster: they keep Ask with nothing set up of their own, and
+they are the ones a cluster that is not set up lets in. For Ask, the engine
+reads the person's STORED role, fresh, and asks `auth.MayManageFleet` of it.
+For entry to a cluster that is not set up, MemQL OS goes by the role the
+cluster reports for the session, `owner` or `developer`. An `admin` is not exempt. Being the owner or
 developer of one account does not exempt anybody; only the cluster's own owner
 and developer roles do. A per-account exemption is approved but not built
 (accounts program, P27 and P28). The two cluster owners the server itself
@@ -1101,33 +1126,37 @@ machines.
 An app closed by the engaged computer-use kill switch still counts as set up:
 the switch is a temporary stop, and the check does not read it.
 
-**What the held person sees.** The held page ([first-run.md](../first-run.md#the-held-page-everybody-else))
-says their access is not set up and to ask an administrator, and shows a
-reference: `ERR-` and six lowercase hex characters. It lifts by itself once
-something is set up.
+**What a person with no model access sees.** The desktop, without Ask. No page
+stands in their way and nothing tells them a reference. Ask appears by itself
+once something is set up for them: MemQL OS asks again when the window regains
+focus, when the connection returns, and every 30 seconds while they have none
+and the tab is visible.
 
-**How an administrator finds out why.** Before the page shows the reference,
-the engine writes one line under it to the log store, naming the person and
-each source it checked with why it did not count. The line is written
-synchronously, and the page shows a reference only after the write succeeded.
-In Logs (an administrator, or anyone of higher rank), search the reference,
-for example `ERR-3fa90c`: the line is component `desktopAccess`, its subject
-is the person's bare user id, and its attributes are `reference` and
-`reasons`. See
-[the held person's reference](../logs.md#the-one-line-that-is-never-dropped-a-held-persons-reference).
-A re-check that passes back its reference with the same reasons writes
-nothing and keeps the reference; changed reasons write a new line under the
-same reference. Lines are bounded per person on each replica, three at once
-and then one a minute; past that a check writes nothing and answers with the
-reference the page already had, or with none.
+**How an administrator finds out why somebody has no Ask.** When the check
+finds nothing set up for a person, the engine writes one line to the log
+store, naming the person and each source it checked with why it did not count.
+In Logs (an administrator, or anyone of higher rank), filter by component
+`desktopAccess` and the person: the line's subject is the person's bare user
+id, its message is *No model access is set up for this person: MemQL OS shows
+them no Ask*, and its attributes are `reference` and `reasons`. See
+[the line for a person with no model access](../logs.md#the-one-line-that-is-never-dropped-a-person-with-no-model-access).
+
+The `reference` (`ERR-` and six lowercase hex characters) names the line.
+Release 0.31.41 showed it to the person on a page; no surface shows it now,
+and it is kept so a re-check can say which line it already wrote. A
+re-check that passes back its reference with the same reasons writes nothing
+and keeps the reference; changed reasons write a new line under the same
+reference. Lines are bounded per person on each replica, three at once and
+then one a minute; past that a check writes nothing and answers with the
+reference it was passed, or with none.
 
 The engine checks a passed-back reference for its shape and binds it to the
 person it was made for, so MemQL OS never hands one person's reference to
 another. That does not make a reference unique to one person: a call crafted
-outside the OS can choose the `ERR-` value of its own line, including one
-somebody else was shown. It cannot put any other text in the line, every line
-names its person as the subject, and the bound above limits how many lines one
-caller can write. So after searching a reference, read each line's subject.
+outside the OS can choose the `ERR-` value of its own line. It cannot put any
+other text in the line, every line names its person as the subject, and the
+bound above limits how many lines one caller can write. So read each line's
+subject.
 
 **The reasons a line can carry.** One sentence per distinct cause. Several
 can appear together, always in the same (sorted) order, so a line changes only
@@ -1151,19 +1180,21 @@ for something lent to this person; no machine or key is ever named.
 
 **What it does when it cannot tell.**
 
-- A check that fails lets the person in. An outage is not evidence that they
-  lack access, and the server refuses their model calls either way. A read the
-  engine could not complete (a machine, key or grant read that failed) is an
-  error, never a hold. That includes the reads routing answers around: when
-  the read of the machines lent to the person, or of the groups a machine is
-  lent through, fails, routing keeps their own machines and carries on, and
-  the check answers an error instead of holding them.
-- A failed RE-check keeps an already-held person held until a check
-  succeeds: the page stays up and the next answer decides.
-- A line that could not be stored holds the person with no reference, and the
-  page does not ask for one.
-- Open windows never keep a held person's desktop open: the page replaces it at
-  the next check.
+- A check that fails takes nothing away: the person keeps Ask. An outage is
+  not evidence that they lack access, and the server refuses their model calls
+  either way. A read the engine could not complete (a machine, key or grant
+  read that failed) is an error, never an answer of "nothing set up". That
+  includes the reads routing answers around: when the read of the machines
+  lent to the person, or of the groups a machine is lent through, fails,
+  routing keeps their own machines and carries on, and the check answers an
+  error.
+- A failed RE-check keeps the answer MemQL OS already has, either way, until a
+  check succeeds.
+- A line that could not be stored changes nothing for the person: they have no
+  Ask, and the answer carries no reference.
+- On the way in, MemQL OS waits up to three seconds for the first answer, so
+  the desktop is drawn knowing whether Ask belongs on it. An answer that comes
+  later removes Ask when it lands.
 
 **Ask follows the same sources.** When a model call cannot be taken, Ask names
 what is offline (their machine, a lent machine, a lent key, their key, an app)
@@ -1174,14 +1205,20 @@ and whom to ask, and offers Fleet only to somebody who can open it.
 with more than 50 registered machines has only the apps on the 50 most
 recently written counted. Machines are not limited by it: they come through
 the catalog's own reads of the person's machines and of every machine lent to
-them, which page at 200. Through MemQL OS, a person holding a copy of somebody
-else's reference gets their own. The check does not close MemQL's API, the SDK
-or Cockpit to a held person; the server already refuses their model calls,
-and the rule is about MemQL OS. Code: `component/memql/desktop_access.go`,
-`component/logstore/access_hold.go`; client:
-`clients/os/src/chrome/useDesktopAccess.ts`, `AccessHeld.tsx`, `CoreGate.tsx`.
-The design record is
-`docs/superpowers/specs/2026-11-24-desktop-access-design.md`.
+them, which page at 200. The check does not close MemQL's API, the SDK or
+Cockpit to a person with no model access; the server already refuses their
+model calls, and the rule is about MemQL OS. MemQL OS hides Ask and the server
+refuses the call: hiding is not the enforcement. A key added in Settings
+brings Ask at the next check, within 30 seconds. Profile > Ask, the page of
+Ask preferences, stays listed for a person with no Ask. Code:
+`component/memql/desktop_access.go`, `component/logstore/access_hold.go`;
+client: `clients/os/src/chrome/CoreGate.tsx` (who enters),
+`useDesktopAccess.ts` and `desktopAccessContext.tsx` (the check),
+`clients/os/src/ask/AskProvider.tsx` and `chrome/Shell.tsx` (Ask). The design
+records are
+`docs/superpowers/specs/2026-11-25-who-gets-into-memql-os-design.md` for the
+rule and `docs/superpowers/specs/2026-11-24-desktop-access-design.md` for the
+check.
 
 ## Out of scope (deferred)
 

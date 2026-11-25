@@ -161,10 +161,10 @@ from the cluster (`canConfigure`), as in 0.31.40.
 - The page for everybody else does not step aside for open windows: nothing on
   it opens one. A cluster that stops being set up while such a person works
   shows them the page at once.
-- While the connection is away the session's identity is cleared. With a
-  window open the desk stays as it is until the identity is back, so an owner
-  working in a window is not shown the other page for the length of a
-  reconnect. With no window open nothing is drawn, as before.
+- The session clears the signed-in identity when its connection goes away or
+  its read fails. With a window open the desk stays as it is until the identity
+  is back, so an owner working in a window is not shown the other page in the
+  meantime. With no window open nothing is drawn, as before.
 - The opening frame still waits up to three seconds for the person's first
   access answer, for anybody not known to be an owner or developer. It no
   longer decides entry. It is kept so the desk is first drawn knowing whether
@@ -189,14 +189,19 @@ person: the desk draws none and neither the desk menu nor the launcher offers
 one. `holds()` is not touched: it holds the engine's answer about grants and
 nothing derived.
 
-**Removed:** the held page (`chrome/AccessHeld.tsx`), its style rule, and the
-key wizard's mode for running on that page.
+**Removed:** the held page (`chrome/AccessHeld.tsx`), its style rule, the key
+wizard's mode for running on that page (`AddKeyWizard.tsx` is what release
+0.31.40 had), and the two QA scenes that drew it. The QA scene `setup-told`
+draws the page for a cluster that is not set up.
 
-**The engine** is not changed in behavior. Its log line's message no longer
-says the person was held: it says no model access is set up and that MemQL OS
-shows them no Ask. The wire field `admitted` keeps its name; renaming it would
-touch the builtin, the concept, both generated SDKs and the concept snapshot
-for no change in behavior.
+**The engine** is not changed in behavior. One string changed: the log line's
+message no longer says the person was held. It reads "No model access is set
+up for this person: MemQL OS shows them no Ask". The wire field `admitted`
+keeps its name, and so do "held" and "hold" in the engine's code; renaming
+them would touch the builtin, the concept, both generated SDKs and the tests
+for no change in behavior. The top of `component/memql/desktop_access.go` says
+what "held" means now, and the builtin's and the concept's descriptions were
+rewritten (the generated SDK comments follow them).
 
 ## Known limits
 
@@ -218,24 +223,30 @@ for no change in behavior.
 
 ## Tests
 
-- **The four rows.** `clients/os/test/chrome/coreGate.test.tsx`: a person with
-  nothing set up enters a cluster that is set up; everybody but an owner or
-  developer is kept out of a cluster that is not, with access of their own or
-  without; an owner and a developer get the setup screen and enter a cluster
-  that is set up.
+- **Who enters.** `clients/os/test/chrome/coreGate.test.tsx`: "lets every
+  other role into a cluster that is set up, with no model access of their own";
+  "keeps every other role out of a cluster that is not set up, whatever their
+  own model access, and never names the owner"; "holds an owner on the rail"
+  and "gives a developer the same rail"; the page lifting and coming back for
+  a reader; and the desk kept while the identity is away.
 - **Ask.** `clients/os/test/system/readinessReactivity.test.tsx`, through the
-  real shell: no Ask button and no Ask widget for a person with no model
-  access, on the desktop and on a phone; Ask for an owner with nothing set up;
-  Ask for a person whose only source is asleep or out of credit.
-  `clients/os/test/ask/access.test.tsx`: no command, link or sheet opens Ask
-  for a person with no model access.
+  real shell: no Ask button, no Ask widget and no offer of one in the launcher
+  for a reader with nothing set up, on the desktop, and no Ask button on a
+  phone; Ask kept for an owner and a developer with nothing set up, and for a
+  reader whose only source is a lent machine that is asleep or a key out of
+  credit. `clients/os/test/ask/access.test.tsx`: no command, "Ask about this",
+  link from Nexus or sheet opens Ask for a person with no model access.
 - **The access answer.** `clients/os/test/chrome/desktopAccess.test.tsx`: the
   wait at the door, an unknown answer, asking again on focus, on reconnect and
   every 30 seconds, the reference passed back, and a change of person.
 - **The engine.** `component/memql/desktop_access_hold_test.go`,
   `desktop_access_db_test.go` and `desktop_access_test.go` pin the answer and
-  are unchanged; `component/logstore`'s
+  assert what they did; `component/logstore`'s
   `TestRecordAccessHoldWritesTheDocumentedLine` pins the line's new message.
 
+The page for a cluster that is not set up was looked at in the QA harness
+(`clients/os/qa`, view `setup-told`) in light and dark, at desktop width and
+at 375 pixels.
+
 Not verified: any of this on a running cluster. The tests above run against
-doubles and, for the engine's database cases, a throwaway database.
+doubles and, for the engine's database cases, a throwaway test database.
