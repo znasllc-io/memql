@@ -433,12 +433,18 @@ func memoryIndexSwitchActive(state string) bool {
 // refused by the fence. Resumed as `finishing`, the rest of the flip -- the
 // semantic answer cache emptied, the previous model recorded -- would never
 // run; resumed as `switching`, it runs (ruling R6), and work takes it without
-// the indexer check.
+// the indexer check. ONLY A BINDING A FLIP WROTE is that case: the flip's
+// binding write records the model it replaced (previousRef), and a binding
+// written otherwise -- a cluster's first, or by hand -- records none. Such a
+// binding left no flip part done; taken for one, the run was resumed to
+// `switching` on every tick, emptied the answer cache and was written three
+// times each time its indexer could not index. It resumes as `finishing`.
 func memoryIndexResumeState(run MemoryIndexRun, active EmbedderBinding) string {
 	switch {
 	case run.Kind != memoryIndexKindSwitch:
 		return memoryIndexStateIndexing
-	case active.ProviderRef == run.TargetRef && active.Dimensions == run.TargetDimensions && strings.TrimSpace(run.PreviousRef) == "":
+	case active.ProviderRef == run.TargetRef && active.Dimensions == run.TargetDimensions &&
+		strings.TrimSpace(run.PreviousRef) == "" && strings.TrimSpace(active.PreviousRef) != "":
 		return memoryIndexStateSwitching
 	case active.ProviderRef == run.TargetRef && active.Dimensions == run.TargetDimensions:
 		return memoryIndexStateFinishing

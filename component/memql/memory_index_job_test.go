@@ -196,7 +196,8 @@ func (f *memoryIndexFake) unsourced(context.Context, string, []MemorySource) (in
 func (f *memoryIndexFake) flip(_ context.Context, run MemoryIndexRun) (MemoryIndexRun, error) {
 	f.flips++
 	previous := f.active.ProviderRef
-	f.active = EmbedderBinding{ProviderRef: run.TargetRef, Dimensions: run.TargetDimensions, IndexedBy: run.IndexedBy, ActivatedAt: f.clock.Format(time.RFC3339Nano)}
+	f.active = EmbedderBinding{ProviderRef: run.TargetRef, Dimensions: run.TargetDimensions, IndexedBy: run.IndexedBy,
+		ActivatedAt: f.clock.Format(time.RFC3339Nano), PreviousRef: previous}
 	run = cloneMemoryIndexRun(run)
 	run.State, run.PreviousRef = memoryIndexStateFinishing, previous
 	run.Cursor, run.Counts = map[string]string{}, MemoryIndexCounts{}
@@ -572,9 +573,10 @@ func TestAResumedWalkThatStartsFromTheBeginningCountsFromZero(t *testing.T) {
 
 // A waiting run returns to the walk it was in. A switch whose binding already
 // names its target was past the flip -- unless no previous model is recorded on
-// the run, which the flip records together with `finishing`: then the binding
-// moved and the rest of the flip never ran (a tick that lost the job lock wrote
-// its wait meanwhile), and the run resumes to `switching` so that rest runs.
+// the run, which the flip records together with `finishing`, while the binding
+// records the model it replaced: then the flip moved the binding and its rest
+// never ran (a tick that lost the job lock wrote its wait meanwhile), and the
+// run resumes to `switching` so that rest runs.
 func TestAWaitingRunResumesTheWalkItWasIn(t *testing.T) {
 	old := EmbedderBinding{ProviderRef: fakeOldRef, Dimensions: 4}
 	flipped := EmbedderBinding{ProviderRef: fakeNewRef, Dimensions: 4, PreviousRef: fakeOldRef}
@@ -590,6 +592,11 @@ func TestAWaitingRunResumesTheWalkItWasIn(t *testing.T) {
 		{"a switch on its way to the flip", func(r MemoryIndexRun) MemoryIndexRun { r.LastPassAt = time.Now(); return r }, old, memoryIndexStateCatchingUp},
 		{"a switch past its flip", func(r MemoryIndexRun) MemoryIndexRun { r.PreviousRef = fakeOldRef; return r }, flipped, memoryIndexStateFinishing},
 		{"a switch whose binding moved before the flip was recorded", func(r MemoryIndexRun) MemoryIndexRun { r.LastPassAt = time.Now(); return r }, flipped, memoryIndexStateSwitching},
+		// A binding that names the target but was not written by a flip (bound
+		// at first, or by hand) records no model it replaced: no flip stopped
+		// part way, so nothing of one is left to finish.
+		{"a switch whose binding names its target but no model it replaced", func(r MemoryIndexRun) MemoryIndexRun { r.LastPassAt = time.Now(); return r },
+			EmbedderBinding{ProviderRef: fakeNewRef, Dimensions: 4}, memoryIndexStateFinishing},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, tc.want, memoryIndexResumeState(tc.run(sw), tc.active))

@@ -2683,7 +2683,11 @@ leaves:
    the fence then refused), resumes to `switching` rather than `finishing`
    (`memoryIndexResumeState`), and takes the same steps without the indexer
    check: resumed as `finishing`, the cache delete and the previous model
-   would never come.
+   would never come. Only a binding the flip wrote counts, which records the
+   model it replaced (`previousRef`); a binding naming the target that was
+   written otherwise (a first binding, or by hand) left no flip part done,
+   and its run resumes as `finishing`, where it once re-ran these steps every
+   tick its indexer could not index.
 4. The cache emptied, `finishing` not yet recorded: as 3, and the DELETE runs
    again.
 5. `finishing` recorded: the flip is over, and the walk after it follows.
