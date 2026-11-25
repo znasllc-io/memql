@@ -48,9 +48,10 @@ package memql
 // as "another model" left search refused until the flip whenever that indexer
 // could not index. The running switch is left as it is: its own indexer is the
 // run's, taken over by choosing its target, and the flip names that one. The
-// status says when choosing the model in use would take over (`takeOver`), so
-// the screen offers the act only where it changes something. And a switch that
-// has FLIPPED (memorySearchFlipped) is no
+// status says when choosing the model in use would take over (`takeOver`), and
+// its switch summary when choosing the running switch's target again would
+// take over the run's (ruling R14), so the screen offers each act only where it
+// changes something. And a switch that has FLIPPED (memorySearchFlipped) is no
 // longer one switch at a time's to guard (ruling R11): its walk after the flip
 // embeds as the run's indexer, and with that indexer demoted or without the
 // model every other act would be refused while search refuses queries and the

@@ -901,8 +901,11 @@ builtin bindEmbedder { provider string! }
 /// cannot index it, and choosing it again would make the caller its indexer); indexed (the entries
 /// in its index); backlog (the items the backfill's last count found missing from it, counted even
 /// while indexing waits) with backlogCountedAt, and waitingReason; switch (state, targetRef,
-/// targetLabel, counts, startedAt, startedBy, waitingReason, and estimatedTotal, an ESTIMATE: the
-/// active index plus the backlog), or null; retained, the kept indexes as {providerRef, retireAt}.
+/// targetLabel, counts, startedAt, startedBy, waitingReason, estimatedTotal, an ESTIMATE: the
+/// active index plus the backlog, indexedBy and indexedByName, whose machines the rebuild embeds
+/// on, and takeOver: before the flip, its indexer cannot index the target, and choosing the
+/// target again would make the caller its indexer), or null; retained, the kept indexes as
+/// {providerRef, retireAt}.
 @sdk
 @executor("memorySearchStatus")
 @requiresCapability("read", "app:cluster/memorysearch")

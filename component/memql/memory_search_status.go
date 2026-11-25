@@ -13,28 +13,30 @@ import (
 	"time"
 )
 
-// memorySearchOffersTakeOver is the status's `takeOver` (ruling R13): whether
-// caller, choosing the model in use again, would become its indexer --
-// memorySearchSwitch's own path to memorySearchKeep, asked without writing. A
-// machine model is indexed only by an active owner, so a caller who is not one
-// takes over nothing; the cluster asking (no caller) takes over nothing either.
+// memorySearchOffersTakeOver is a status `takeOver`: whether caller, choosing
+// ref again, would become its indexer in place of indexer -- memorySearchSwitch's
+// own take-over (memorySearchTakesOver), asked without writing. It is asked of
+// the model in use and the BINDING's indexer (the row's takeOver, ruling R13),
+// and of a running switch's target and the RUN's indexer (the switch summary's,
+// ruling R14). A machine model is indexed only by an active owner, so a caller
+// who is not one takes over nothing; the cluster asking (no caller) takes over
+// nothing either.
 //
 // A catalog or an owner check that cannot be read answers false, logged, rather
 // than failing the status: the screen then withholds the act for that read and
 // still shows what is in use, and the next read asks again. An act offered on a
 // guess would be one the engine might answer by doing nothing.
-func memorySearchOffersTakeOver(ctx context.Context, w memorySearchWorld, caller string, active EmbedderBinding) bool {
-	indexer, fleet := IndexerFor(active)
-	if !fleet || strings.TrimSpace(caller) == "" {
+func memorySearchOffersTakeOver(ctx context.Context, w memorySearchWorld, caller, indexer, ref string) bool {
+	if _, fleet := IsFleetReference(ref); !fleet || strings.TrimSpace(caller) == "" {
 		return false
 	}
 	owner, err := w.isActiveOwner(ctx, caller)
 	takeOver := false
 	if err == nil && owner {
-		takeOver, err = memorySearchTakesOver(ctx, w, caller, indexer, active.ProviderRef)
+		takeOver, err = memorySearchTakesOver(ctx, w, caller, indexer, ref)
 	}
 	if err != nil {
-		w.logger().Warn("memory search: could not tell whether choosing the model in use again would take over its indexing", "provider", active.ProviderRef, "error", err)
+		w.logger().Warn("memory search: could not tell whether choosing a model again would take over its indexing", "provider", ref, "error", err)
 		return false
 	}
 	return takeOver
@@ -67,7 +69,14 @@ func memorySearchOffersTakeOver(ctx context.Context, w memorySearchWorld, caller
 //     walk, so estimatedTotal gives the screen a denominator: AN ESTIMATE,
 //     indexed + backlog, the size of the active index plus what is known to be
 //     missing from it. It is not a walk of the corpus, which a poll must not
-//     cost, and it counts entries no source rebuilds.
+//     cost, and it counts entries no source rebuilds. indexedBy and
+//     indexedByName name the RUN's indexer, whose machines the rebuild embeds
+//     on, so the screen can say its waitingReason from the viewer's side; and
+//     takeOver says whether caller, choosing the switch's target again, would
+//     become that indexer (ruling R14; R11 b is the act). It is false once the
+//     switch has flipped -- its target is then the model in use, whose
+//     take-over the row's takeOver says, and one act is offered once -- and
+//     once the switch is over.
 //   - retained: the retired indexes still kept, {providerRef, retireAt}, by
 //     date. A row naming the active model or a running switch's target is not
 //     one: that table is in use.
@@ -81,19 +90,21 @@ func memorySearchStatus(ctx context.Context, w memorySearchWorld, caller string)
 	}
 	bound := err == nil && active.Valid()
 	indexed, backlog := 0, 0
+	indexer, indexerName := "", ""
 	if bound {
 		row["providerRef"] = active.ProviderRef
 		row["kind"] = memorySearchKind(active.ProviderRef)
 		row["label"] = memorySearchLabel(w, active.ProviderRef)
-		indexer, fleet := IndexerFor(active)
-		row["indexedBy"] = indexer
+		var fleet bool
+		indexer, fleet = IndexerFor(active)
 		if indexer != "" {
-			row["indexedByName"] = w.displayName(ctx, indexer)
+			indexerName = w.displayName(ctx, indexer)
 		}
+		row["indexedBy"], row["indexedByName"] = indexer, indexerName
 		row["chosenBy"] = strings.TrimSpace(active.ChosenBy)
 		row["needsConfirmation"] = !fleet && strings.TrimSpace(active.ChosenBy) == ""
 		row["previousRef"] = strings.TrimSpace(active.PreviousRef)
-		row["takeOver"] = memorySearchOffersTakeOver(ctx, w, caller, active)
+		row["takeOver"] = memorySearchOffersTakeOver(ctx, w, caller, indexer, active.ProviderRef)
 		activeTable, err := EmbeddingVectorTable(active.ProviderRef, active.Dimensions)
 		if err != nil {
 			return nil, err
@@ -125,12 +136,21 @@ func memorySearchStatus(ctx context.Context, w memorySearchWorld, caller string)
 		if !sw.StartedAt.IsZero() {
 			startedAt = sw.StartedAt.UTC().Format(time.RFC3339Nano)
 		}
+		runIndexer, runIndexerName := strings.TrimSpace(sw.IndexedBy), ""
+		if runIndexer == indexer {
+			runIndexerName = indexerName // the binding's, already read
+		} else if runIndexer != "" {
+			runIndexerName = w.displayName(ctx, runIndexer)
+		}
+		takeOver := !memorySearchSwitchOver(sw.State) && !(bound && memorySearchFlipped(sw, active)) &&
+			memorySearchOffersTakeOver(ctx, w, caller, runIndexer, sw.TargetRef)
 		row["switch"] = map[string]any{
 			"state": sw.State, "targetRef": sw.TargetRef, "targetLabel": memorySearchLabel(w, sw.TargetRef),
 			"counts": map[string]any{"total": sw.Counts.Total, "done": sw.Counts.Done, "skipped": sw.Counts.Skipped,
 				"unsourced": sw.Counts.Unsourced, "failed": sw.Counts.Failed},
 			"startedAt": startedAt, "startedBy": sw.StartedBy, "waitingReason": sw.WaitingReason,
 			"estimatedTotal": indexed + backlog,
+			"indexedBy":      runIndexer, "indexedByName": runIndexerName, "takeOver": takeOver,
 		}
 	}
 	retired, err := w.retired(ctx)

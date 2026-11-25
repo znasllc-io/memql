@@ -925,6 +925,9 @@ func TestStatusReportsTheBacklogAndWhyItWaits(t *testing.T) {
 		"startedBy":      fakeOwner,
 		"waitingReason":  "",
 		"estimatedTotal": 47,
+		"indexedBy":      fakeOwner,
+		"indexedByName":  "Ana Owner",
+		"takeOver":       false,
 	}, row["switch"])
 	require.Equal(t, []any{map[string]any{"providerRef": third, "retireAt": keptUntil.Format(time.RFC3339Nano)}}, row["retained"])
 
@@ -1025,6 +1028,87 @@ func TestStatusSaysWhenChoosingTheModelInUseTakesOver(t *testing.T) {
 	row, err = memorySearchStatus(ctx, f, other)
 	require.NoError(t, err)
 	require.Equal(t, false, row["takeOver"])
+}
+
+// A running switch says too when choosing its TARGET again would take over its
+// own indexer (ruling R14): the switch summary's takeOver -- the take-over rule
+// asked for the caller, the run's indexer and its target -- beside whose
+// machines the rebuild embeds on (indexedBy, indexedByName), so the screen can
+// offer the act on the Switching row and say the waiting reason from the
+// viewer's side. The binding's own takeOver stays the binding's question. A
+// switch that has flipped is the binding's question only (its target is the
+// model in use), and one that is over offers nothing.
+func TestTheSwitchSaysWhenChoosingItsTargetAgainTakesOver(t *testing.T) {
+	ctx := context.Background()
+	const other, third = memorySearchOtherOwner, "v1:identity:user:owner-3"
+	summary := func(t *testing.T, f *memorySearchFake, caller string) map[string]any {
+		t.Helper()
+		row, err := memorySearchStatus(ctx, f, caller)
+		require.NoError(t, err)
+		sw, ok := row["switch"].(map[string]any)
+		require.True(t, ok, "a switch summary")
+		return sw
+	}
+	// The binding is indexed by a third owner who can index it; the run, by an
+	// owner who is no longer one.
+	running := func() *memorySearchFake {
+		f := newMemorySearchFake(3)
+		f.job.fill(fakeOldRef, 4)
+		f.job.active.IndexedBy = third
+		f.job.owners[third], f.job.owners[other] = true, true
+		delete(f.job.owners, fakeOwner)
+		f.catalogs[third] = offeredFor("old-embedder", true)
+		f.names[fakeOwner] = "Ana Owner"
+		return f
+	}
+
+	f := running()
+	row, err := memorySearchStatus(ctx, f, other)
+	require.NoError(t, err)
+	require.Equal(t, false, row["takeOver"], "the binding's indexer can index the model in use")
+	sw := summary(t, f, other)
+	require.Equal(t, true, sw["takeOver"], "the run's indexer is no longer an owner")
+	require.Equal(t, fakeOwner, sw["indexedBy"])
+	require.Equal(t, "Ana Owner", sw["indexedByName"])
+	require.Zero(t, f.runAttempts, "a status writes nothing")
+
+	// Choosing the target again is the act it offers (ruling R11 b).
+	require.NoError(t, memorySearchSwitch(ctx, f, other, fakeNewRef))
+	sw = summary(t, f, other)
+	require.Equal(t, false, sw["takeOver"], "the caller indexes the rebuild now")
+	require.Equal(t, other, sw["indexedBy"])
+
+	for name, arrange := range map[string]func(f *memorySearchFake){
+		"the run's indexer can index the target": func(f *memorySearchFake) {
+			f.job.owners[fakeOwner] = true
+			f.catalogs[fakeOwner] = offeredFor("new-embedder", true)
+			f.catalogs[other] = offeredFor("new-embedder", true)
+		},
+		"the switch is over": func(f *memorySearchFake) { f.setSwitchState(memoryIndexStateCancelled) },
+		"the target is a vendor model": func(f *memorySearchFake) {
+			run := f.job.runs[memoryIndexKindSwitch]
+			run.TargetRef, run.IndexedBy = "embedding3Small", ""
+			f.job.runs[memoryIndexKindSwitch] = run
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := running()
+			arrange(f)
+			require.Equal(t, false, summary(t, f, other)["takeOver"])
+		})
+	}
+	require.Equal(t, false, summary(t, running(), fakeOwner)["takeOver"], "the caller is the run's indexer")
+
+	// Flipped: the target is the model in use, whose take-over the row says.
+	f = newMemorySearchFake(3)
+	f.job.fill(fakeOldRef, 4)
+	f.job.owners[other] = true
+	tickUntil(t, f.job, memoryIndexStateFinishing)
+	delete(f.job.owners, fakeOwner)
+	row, err = memorySearchStatus(ctx, f, other)
+	require.NoError(t, err)
+	require.Equal(t, true, row["takeOver"])
+	require.Equal(t, false, row["switch"].(map[string]any)["takeOver"], "one act, offered once")
 }
 
 // A vendor model nobody chose -- bound by the fallback this design removed --

@@ -2798,9 +2798,19 @@ Memory search offers the act only where it changes something. A catalog or an
 owner check that cannot be read answers false, logged, and the next read asks
 again; the status itself still answers. Tests:
 `TestChoosingTheModelInUseDuringASwitchTakesOverTheBindingsIndexer`,
-`TestStatusSaysWhenChoosingTheModelInUseTakesOver`. Limit: a running switch
-whose RUN indexer cannot index is told only by its `waitingReason`; the status
-has no take-over answer for the run.
+`TestStatusSaysWhenChoosingTheModelInUseTakesOver`.
+
+**The switch says it too (ruling R14).** A running switch whose OWN indexer
+cannot index was told only by its `waitingReason`, though choosing its target
+again is the take-over of the run's indexer (R11 b), and design section 1 lets
+an owner take over at any time. So the switch summary carries `takeOver`, the
+same rule asked for the caller, the RUN's indexer and the switch's target, and
+`indexedBy` and `indexedByName` for the run's indexer, so the Switching row can
+offer the act and say the waiting reason from the viewer's side. It is false
+once the switch has flipped, when the target is the model in use and the row's
+`takeOver` already answers for the one act there is, and once the switch is
+over. The run's indexer's name is the binding's when they are the same person,
+so a poll reads it once. Test: `TestTheSwitchSaysWhenChoosingItsTargetAgainTakesOver`.
 
 **Fenced, answered, never retried.** Every run-row write goes through
 `writeMemoryIndexRun`, fenced to the version the builtin read. A refused fence
@@ -2854,7 +2864,7 @@ poll. `retained` lists the retired indexes still kept, leaving out any row that
 names the active model or a running switch's target. `previousRef` is the model
 the binding replaced, which is the kept index Switch back names: `retained` also
 holds a cancelled switch's partial index, a model that was never in use.
-`takeOver` is above (R13).
+`takeOver` is above (R13), and so is the switch summary's (R14).
 
 **The choices** are the embedding models of the caller's own catalog (their
 machines and the ones lent to them), counted by the machines that embed with
