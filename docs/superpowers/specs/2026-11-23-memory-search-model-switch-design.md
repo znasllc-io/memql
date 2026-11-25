@@ -241,7 +241,10 @@ rules (`clients/os/DESIGN.md`):
   kept until <date>." and **Switch back**;
 - the one-time confirmation of a vendor model picked before this change.
 
-Fleet's board keeps the bound model locked and says where to change it.
+Fleet's board keeps the bound model locked and says where to change it, to
+whoever can open that page: "Change it in Cluster > Settings > Memory search."
+Anybody else reads "A cluster owner can change it.", since a page the reader
+cannot open is no answer to where.
 
 ### 9. Across replicas and restarts
 
