@@ -10,11 +10,12 @@ package memql
 // lent laptop that is closed, an app out of usage, a key whose vendor account
 // is out of credit all come back, and keeping a person out of MemQL OS while
 // they wait would send them to a setup page for a thing already set up. The
-// two share their predicates (chatModelMeetsMinimum, AppDoors, the resolver's
-// reasons) and drop only the "is it awake" tests, so they cannot drift apart
-// in anything else. What does NOT count: a model that only embeds, a model
-// below the context floor, a key that was refused or paused or whose owner
-// left, an app measured signed out.
+// two share their predicates (chatModelMeetsMinimum, the app row tests in
+// app_selection.go and core/airoute, the resolver's reasons) and drop only the
+// "is it awake" tests, so they cannot drift apart in anything else. What does
+// NOT count: a model that only embeds, a model below the context floor, a
+// revoked machine, a key that was refused or paused or whose owner left, an
+// app measured signed out or whose last session was refused as signed out.
 //
 // EVERY SOURCE THAT DOES NOT COUNT ADDS ONE PLAIN REASON, so the page's
 // reference can be tied to why a person was held. A reason names a lender's id
@@ -22,20 +23,51 @@ package memql
 // a vendor's words. Reasons are digested (accessReasonsDigest) so a re-check
 // that finds the same reasons can reuse the reference it already logged.
 //
-// Tests: desktop_access_test.go. Not verified here: the exemption, the
-// reference and the log line (later tasks).
+// THE HOLD (desktopAccess, below) puts it together:
+//   - Exempt: the person's STORED role passes auth.MayManageFleet (owner or
+//     developer, never admin, never an account-scoped role). The stored row is
+//     read fresh, never the AccessContext's role, because work continued on a
+//     person's behalf carries a stand-in role (RoleStandIn) that says nothing
+//     about who they are. An account-scoped owner or developer (design section
+//     2, "per-account roles arrive later") is not exempt: only the stored
+//     cluster role is.
+//   - Admitted: any source counts. Held: none does.
+//   - A held answer carries a reference (ERR- and six hex digits, the shape the
+//     logs already use) and the line that explains it is written BEFORE the
+//     reference is returned, so a person reading it out to an administrator
+//     can always be found in Logs. A failed write holds with NO reference
+//     rather than a reference nobody can look up. A re-check passing back its
+//     reference and an unchanged reasons digest writes nothing, so a page
+//     polling every few seconds adds one line, not one per poll; changed
+//     reasons write a new line under the SAME reference so the person keeps
+//     one number. A passed-back value that is not a reference is treated as
+//     absent and never written (a client must not be able to put its own text
+//     into the log under this name). Any replica can answer a re-check: the
+//     reference travels with the client, not in a replica's memory.
+//   - AN ERROR IS NEVER A HOLD. A read that fails (catalog, apps, keys, the
+//     stored role, a grant or membership read behind the cluster's account)
+//     comes back as an error; the client reads that as "unknown" and lets the
+//     person in. A person is held only on an answer the engine is sure of.
+//
+// Tests: desktop_access_test.go (sources), desktop_access_hold_test.go (hold).
+// Not verified here: the builtin that exposes it (task 3) and the recorder
+// that writes the line to the log store (task 4); until one is installed every
+// held answer carries no reference.
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/airoute"
 )
@@ -178,7 +210,17 @@ func (e *MemQLEngine) desktopAccessSources(ctx context.Context, actingUserId str
 	// The cluster's account counts where it pays for this person. Holding the
 	// permission with no account set up is a reason of its own, because the
 	// fix is the administrator's and not the person's.
-	door := e.providers.VendorDoorFor(ctx, actingUserId)
+	//
+	// A grant or membership read that fails inside the gate falls back to the
+	// role's answer on purpose (grant_resolver.go), which for a person whose
+	// only source is this account would read as "closed" and hold them on a
+	// transient database error (ruling R-D8). So the read runs under a failure
+	// holder and a noted failure is an error: unknown, not held.
+	doorCtx, readFailures := auth.ContextWithReadFailures(ctx)
+	door := e.providers.VendorDoorFor(doorCtx, actingUserId)
+	if err := readFailures.Err(); err != nil {
+		return nil, nil, fmt.Errorf("desktop access: the cluster account's permission could not be read: %w", err)
+	}
 	switch {
 	case door.Cluster:
 		add(AccessSource{Kind: AccessSourceClusterAccount, State: AccessReady, Label: "the cluster's account"})
@@ -386,4 +428,117 @@ func accessReasonsDigest(reasons []string) string {
 	sort.Strings(sorted)
 	sum := sha256.Sum256([]byte(strings.Join(sorted, "\n")))
 	return hex.EncodeToString(sum[:])[:16]
+}
+
+// AccessHoldLine is what is written when a person is held: enough for an
+// administrator holding the reference to find the person and why.
+type AccessHoldLine struct {
+	Reference string
+	UserId    string
+	Reasons   []string
+}
+
+var accessHoldRecorder struct {
+	sync.RWMutex
+	record func(ctx context.Context, line AccessHoldLine) error
+}
+
+// SetAccessHoldRecorder installs the writer of the hold line (the log store,
+// wired at boot), the SetEmbedderBindingReader pattern. With none installed
+// writing counts as failed, so a node that cannot write the line holds people
+// with no reference and never with one nobody can look up.
+func SetAccessHoldRecorder(record func(ctx context.Context, line AccessHoldLine) error) {
+	accessHoldRecorder.Lock()
+	defer accessHoldRecorder.Unlock()
+	accessHoldRecorder.record = record
+}
+
+func recordAccessHold(ctx context.Context, line AccessHoldLine) error {
+	accessHoldRecorder.RLock()
+	record := accessHoldRecorder.record
+	accessHoldRecorder.RUnlock()
+	if record == nil {
+		return errors.New("desktop access: no hold recorder installed")
+	}
+	return record(ctx, line)
+}
+
+// accessReferencePattern is the shape of a reference: the ERR- ids the logs
+// already carry (generateErrorId), so Logs search finds it as it finds those.
+var accessReferencePattern = regexp.MustCompile("^ERR-[0-9a-f]{6}$")
+
+// newAccessReference mints a reference from three random bytes.
+func newAccessReference() string {
+	var b [3]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// crypto/rand does not fail on a supported platform; a zero reference
+		// still has the right shape and the line is written under it.
+		return "ERR-000000"
+	}
+	return "ERR-" + hex.EncodeToString(b[:])
+}
+
+// DesktopAccess is the answer to "may this person open MemQL OS now".
+type DesktopAccess struct {
+	Admitted, Exempt bool
+	// Sources are what the person has set up, computed for the exempt too
+	// (Ask uses them).
+	Sources []AccessSource
+	// Reference and ReasonsDigest are set only on a held answer. Reference is
+	// empty when the line could not be written.
+	Reference, ReasonsDigest string
+}
+
+// desktopAccess decides. passedReference and passedDigest are what the client
+// got from its previous held answer ("" for none); see the header for what
+// each case writes. An error is never a hold.
+//
+// Tests: desktop_access_hold_test.go.
+func (e *MemQLEngine) desktopAccess(ctx context.Context, actingUserId, passedReference, passedDigest string) (DesktopAccess, error) {
+	actingUserId = strings.TrimSpace(actingUserId)
+	if auth.NamesNoPerson(actingUserId) {
+		return DesktopAccess{}, errors.New("desktop access: the call names no person")
+	}
+
+	role, found, err := e.accessStoredRole(ContextWithFreshRead(ctx), actingUserId)
+	if err != nil {
+		return DesktopAccess{}, fmt.Errorf("desktop access: the stored role could not be read: %w", err)
+	}
+	sources, reasons, err := e.desktopAccessSources(ctx, actingUserId)
+	if err != nil {
+		return DesktopAccess{}, err
+	}
+	switch {
+	case found && auth.MayManageFleet(role):
+		return DesktopAccess{Admitted: true, Exempt: true, Sources: sources}, nil
+	case len(sources) > 0:
+		return DesktopAccess{Admitted: true, Sources: sources}, nil
+	}
+
+	digest := accessReasonsDigest(reasons)
+	answer := DesktopAccess{Sources: sources, ReasonsDigest: digest}
+	reference := ""
+	if accessReferencePattern.MatchString(passedReference) {
+		reference = passedReference
+		if passedDigest == digest {
+			answer.Reference = reference
+			return answer, nil
+		}
+	} else {
+		reference = newAccessReference()
+	}
+	// Written before the reference is returned. A failure answers held with
+	// no reference at all.
+	if err := recordAccessHold(ctx, AccessHoldLine{Reference: reference, UserId: actingUserId, Reasons: reasons}); err != nil {
+		return answer, nil
+	}
+	answer.Reference = reference
+	return answer, nil
+}
+
+func (e *MemQLEngine) accessStoredRole(ctx context.Context, userId string) (auth.Role, bool, error) {
+	if e.storedRoleForTest != nil {
+		return e.storedRoleForTest(ctx, userId)
+	}
+	return e.storedUserRole(ctx, userId)
 }

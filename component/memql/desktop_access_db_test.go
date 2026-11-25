@@ -53,3 +53,43 @@ func TestAnAppOutOfUsageOnARegistrationCountsAsSetUp(t *testing.T) {
 	require.Equal(t, []AccessSource{{Kind: AccessSourceApp, App: "codex", State: AccessOutOfUsage, Own: true, Label: "codex on Desk"}}, apps)
 	require.NotContains(t, reasons, "no app on their machines is allowed and signed in")
 }
+
+// The stored-role read is the real principal row, and tells "no such person"
+// from a failed read (the hold never turns the second into a held page).
+func TestTheStoredRoleIsReadFromThePrincipalRow(t *testing.T) {
+	eng, db, _ := sharedReadMergeEngine(t)
+	key := uniqueSuffix("desktop-access-role")
+	insert := func(id string, payload map[string]any) {
+		raw, _ := json.Marshal(payload)
+		row := memorynodes.MemoryNode{ID: id, Concept: conceptIdentityUser, CreatedAt: time.Now().UTC(), CreatedBy: id,
+			Type: memorynodes.NodeTypeObject, Payload: raw, Schema: json.RawMessage(`{}`), Metadata: json.RawMessage(`{}`), Provenance: json.RawMessage(`{}`)}
+		_, err := db.NewInsert().Model(&row).Exec(context.Background())
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_, err := db.NewDelete().Model((*memorynodes.MemoryNode)(nil)).Where("id = ?", id).Exec(context.Background())
+			require.NoError(t, err)
+		})
+	}
+	owner := conceptIdentityUser + ":" + key + "-owner"
+	admin := conceptIdentityUser + ":" + key + "-admin"
+	gone := conceptIdentityUser + ":" + key + "-gone"
+	insert(owner, map[string]any{"role": "owner", "active": true})
+	insert(admin, map[string]any{"role": "admin", "active": true})
+	insert(gone, map[string]any{"role": "owner", "active": false})
+
+	ctx := context.Background()
+	role, found, err := eng.storedUserRole(ctx, owner)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.True(t, auth.MayManageFleet(role))
+	role, found, err = eng.storedUserRole(ctx, admin)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.False(t, auth.MayManageFleet(role))
+	_, found, err = eng.storedUserRole(ctx, gone)
+	require.NoError(t, err)
+	require.False(t, found, "an inactive person holds no role")
+	_, found, err = eng.storedUserRole(ctx, conceptIdentityUser+":"+key+"-nobody")
+	require.NoError(t, err)
+	require.False(t, found)
+}

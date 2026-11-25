@@ -348,24 +348,41 @@ func (e *MemQLEngine) organizationReadAllows(ctx context.Context, account, app s
 // the synthetic writer rung is attribution, not their current permission.
 // staged-data: MUST-NOT-GATE -- a current principal role is authorization state, not content visibility.
 func (e *MemQLEngine) organizationUserRole(ctx context.Context, userID string) (auth.Role, bool) {
-	if e == nil || e.database() == nil {
+	role, found, err := e.storedUserRole(ctx, userID)
+	if err != nil {
 		return "", false
+	}
+	return role, found
+}
+
+// storedUserRole is organizationUserRole with its read failure told apart from
+// "no such person": found is false for no row, an inactive or deleted person
+// or a role the cluster does not know, and err is set only when the read
+// itself failed. Desktop access needs the difference: a failed read must reach
+// the client as "unknown", which lets the person in, never as "not an owner".
+// staged-data: MUST-NOT-GATE -- a current principal role is authorization state, not content visibility.
+func (e *MemQLEngine) storedUserRole(ctx context.Context, userID string) (auth.Role, bool, error) {
+	if e == nil || e.database() == nil {
+		return "", false, nil
 	}
 	var rows []memorynodes.MemoryNode
 	err := e.database().NewSelect().Model(&rows).Where("concept = ?", conceptIdentityUser).
 		Where("id IN (?)", bun.In([]string{userID, BareShortId(userID), conceptIdentityUser + ":" + BareShortId(userID)})).OrderExpr(`"createdAt" DESC`).Limit(1).Scan(ctx)
-	if err != nil || len(rows) != 1 {
-		return "", false
+	if err != nil {
+		return "", false, err
+	}
+	if len(rows) != 1 {
+		return "", false, nil
 	}
 	row := accountRowPayload(rows[0])
 	if row == nil || row["active"] == false || row["status"] == "deleted" {
-		return "", false
+		return "", false, nil
 	}
 	role, _ := row["role"].(string)
 	if !auth.IsValidRole(auth.Role(role)) {
-		return "", false
+		return "", false, nil
 	}
-	return auth.Role(role), true
+	return auth.Role(role), true, nil
 }
 
 // ErrOrganizationRowForbidden is the refusal of a write to a row that exists in
