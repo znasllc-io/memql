@@ -35,7 +35,9 @@ func (e *displayNameEngine) Execute(ctx context.Context, query string) (*memqlen
 		}
 		payload, _ := structpb.NewStruct(map[string]any{
 			"displayName": "Old name", "primaryEmail": "person@example.test", "firstName": "Keep",
-			"lastName": "Family", "phone": "555", "role": "developer", "signInPolicy": "passkey_only",
+			// A writer, so both callers below outrank the target: the rank tree
+			// (target_rank_guard_test.go) refuses an admin a developer's row.
+			"lastName": "Family", "phone": "555", "role": "writer", "signInPolicy": "passkey_only",
 			"sharedMailbox": true, "preferences": map[string]any{"theme": "dark"},
 		})
 		return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{Nodes: []*memqlv1.MemoryNode{{

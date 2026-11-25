@@ -411,6 +411,34 @@ func principalOf(userID, role string) auth.Principal {
 	}
 }
 
+// refuseOutrankedTarget applies the RANK TREE to a write that names another
+// person, and answers the refusal to return when the caller may not act on them.
+//
+// `authorize` asks whether the caller manages people at all; it compares
+// nobody. Until this guard (design record 2026-11-25, developer access) that
+// was the whole authorization of every write here except SetUserRole and
+// IssueEnrolmentLink, so an admin could suspend the owner, edit the owner's
+// profile, turn the owner's sign-in links back on, revoke the owner's tokens
+// and rotate the owner recovery key, which returns the new key in plain text.
+//
+// The rule is auth.GovernPrincipal's, the one those two seams already apply:
+// an owner is reachable only by an owner, an owner reaches everyone, anybody
+// reaches themselves, and otherwise the caller must STRICTLY outrank the
+// target. It is what keeps the owner out of reach of every role below it, and
+// so what makes it safe for the developer role to hold the principal verbs.
+// The audit reason is the one the enrolment guard and auth.MayAssignRole write.
+//
+// Regression tests: target_rank_guard_test.go.
+func (s *Service) refuseOutrankedTarget(ctx context.Context, action string, act actor, user *userRow, detail map[string]any) (Result, bool) {
+	if auth.GovernPrincipal(principalOf(act.userID, string(act.role)), principalOf(user.ID, user.Role), auth.GovernUpdate) {
+		return Result{}, false
+	}
+	detail["targetRole"] = strings.ToLower(strings.TrimSpace(user.Role))
+	return fail(CodePermissionDenied, s.emit(ctx, identity.AuditCategoryAdmin, action,
+		act, user.ID, user.PrimaryEmail, detail, identity.AuditOutcomeBlocked, "target_outranks_caller"),
+		"identity admin: that account is not one your role may act on"), true
+}
+
 func (a actor) userContext() auth.UserContext {
 	return auth.UserContext{ID: a.userID, Email: a.email, Role: a.role}
 }
@@ -517,6 +545,9 @@ func (s *Service) UpdateUserProfile(ctx context.Context, in UserProfile) Result 
 	user, err := s.userById(ctx, userID)
 	if err != nil || user == nil {
 		return s.notFound(ctx, "user_profile_edited", act, userID, detail, err)
+	}
+	if refusal, refused := s.refuseOutrankedTarget(ctx, "user_profile_edited", act, user, detail); refused {
+		return refusal
 	}
 
 	displayName := strings.TrimSpace(in.DisplayName)
@@ -628,6 +659,9 @@ func (s *Service) SetUserSuspended(ctx context.Context, userId string, suspended
 	if err != nil || user == nil {
 		return s.notFound(ctx, action, act, userID, detail, err)
 	}
+	if refusal, refused := s.refuseOutrankedTarget(ctx, action, act, user, detail); refused {
+		return refusal
+	}
 
 	message := "Suspension lifted."
 	if suspended {
@@ -695,6 +729,17 @@ func (s *Service) RevokePersonalAccessToken(ctx context.Context, identityId stri
 	}
 	detail["ownerUserId"] = row.UserId
 	detail["label"] = row.Label
+
+	// The token belongs to a person, so revoking it answers to the rank tree
+	// like every other write that names one. A token whose person cannot be
+	// read is an OWNER's to revoke: an unresolvable rank denies.
+	user, err := s.userById(ctx, row.UserId)
+	if err != nil || user == nil {
+		user = &userRow{ID: row.UserId, Role: string(auth.RoleOwner)}
+	}
+	if refusal, refused := s.refuseOutrankedTarget(ctx, "pat_revoked_admin", act, user, detail); refused {
+		return refusal
+	}
 
 	return s.finish(ctx, identity.AuditCategoryAdmin, "pat_revoked_admin", act, row.UserId, "",
 		detail, "Token revoked.", store.Revoke(internal, target))
@@ -1091,6 +1136,9 @@ func (s *Service) ResetSignInPolicy(ctx context.Context, userId string) Result {
 	if err != nil || user == nil {
 		return s.notFound(ctx, action, act, userID, detail, err)
 	}
+	if refusal, refused := s.refuseOutrankedTarget(ctx, action, act, user, detail); refused {
+		return refusal
+	}
 	detail["from"] = user.SignInPolicy
 	if user.SignInPolicy != "passkey_only" {
 		// Already permissive. Reported as success rather than refused: the
@@ -1130,6 +1178,9 @@ func (s *Service) SetUserSharedMailbox(ctx context.Context, userId string, share
 	user, err := s.userById(ctx, userID)
 	if err != nil || user == nil {
 		return s.notFound(ctx, action, act, userID, detail, err)
+	}
+	if refusal, refused := s.refuseOutrankedTarget(ctx, action, act, user, detail); refused {
+		return refusal
 	}
 	detail["from"] = user.SharedMailbox
 

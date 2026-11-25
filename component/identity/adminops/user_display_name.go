@@ -35,6 +35,9 @@ func (s *Service) SetUserDisplayName(ctx context.Context, userID, displayName st
 	if user == nil {
 		return s.notFound(ctx, action, act, userID, detail, nil)
 	}
+	if refusal, refused := s.refuseOutrankedTarget(ctx, action, act, user, detail); refused {
+		return refusal
+	}
 	if user.CreatedAt.IsZero() {
 		return fail(CodeFailedPrecondition, s.emit(ctx, identity.AuditCategoryAdmin, action,
 			act, userID, user.PrimaryEmail, detail, identity.AuditOutcomeFailure, "missing_user_version"),

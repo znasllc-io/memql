@@ -85,6 +85,11 @@ func (s *Service) RotateRecoveryKey(ctx context.Context, userId string) Result {
 	if err != nil || user == nil {
 		return s.notFound(ctx, "recovery_key_rotated", act, target, detail, err)
 	}
+	// The new key comes back in plain text, so who it may be rotated FOR is the
+	// rank tree's question: an owner's key is an owner's to rotate.
+	if refusal, refused := s.refuseOutrankedTarget(ctx, "recovery_key_rotated", act, user, detail); refused {
+		return refusal
+	}
 
 	recStore := &recoverykey.Store{Engine: s.Engine, Logger: s.Logger}
 
