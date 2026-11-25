@@ -38,6 +38,7 @@ type memoryIndexFake struct {
 	// out the whole allowance it was given, on this world's clock.
 	hung       map[string]bool
 	owners     map[string]bool
+	ownerErr   error // the owner check could not be made
 	unsourcedN int
 	events     []string
 	saves      []MemoryIndexRun
@@ -126,8 +127,11 @@ func (f *memoryIndexFake) saveRun(_ context.Context, run MemoryIndexRun) error {
 	return nil
 }
 
-func (f *memoryIndexFake) isActiveOwner(_ context.Context, userId string) bool {
-	return f.owners[userId]
+func (f *memoryIndexFake) isActiveOwner(_ context.Context, userId string) (bool, error) {
+	if f.ownerErr != nil {
+		return false, f.ownerErr
+	}
+	return f.owners[userId], nil
 }
 
 func (f *memoryIndexFake) sources() []MemorySource { return f.srcs }
@@ -433,6 +437,25 @@ func TestTwoItemsInARowThatNeverAnswerMakeTheRunWait(t *testing.T) {
 	// A vendor model that stops answering says so in its own name.
 	reason := memoryIndexNotAnsweringReason("embedding3Small")
 	require.Equal(t, "embedding3Small is not answering", reason)
+}
+
+// An owner check the replica could not make is not a demotion. With no owner
+// set read yet (every read failed), the indexer cannot be confirmed, so the run
+// waits and nothing is embedded on their machines -- but it says so in neutral
+// words, never "no longer an owner", which would send an owner to choose the
+// model again for nothing. The next tick asks again.
+func TestAnOwnerCheckThatCouldNotBeMadeWaitsWithoutSayingDemoted(t *testing.T) {
+	f := newMemoryIndexFake(3)
+	f.ownerErr = errors.New("the cluster's owners could not be read: database unavailable")
+	require.NoError(t, runMemoryIndexTick(context.Background(), f, time.Hour))
+	run := f.runs[memoryIndexKindSwitch]
+	require.Equal(t, memoryIndexStateWaiting, run.State)
+	require.Equal(t, "the cluster could not confirm who its owners are; the next tick asks again", run.WaitingReason)
+	require.Empty(t, f.attempts, "nothing is embedded on an unconfirmed indexer's machines")
+
+	f.ownerErr = nil
+	require.NoError(t, runMemoryIndexTick(context.Background(), f, time.Hour))
+	require.Equal(t, memoryIndexStateDone, f.runs[memoryIndexKindSwitch].State)
 }
 
 // The flip is automatic only when the catch-up walk left nothing failed and

@@ -276,9 +276,10 @@ const memoryIndexActorName = "memoryIndex"
 
 // The reasons a run waits, in words an owner reads on Memory search.
 const (
-	memoryIndexOwnerReason     = "the owner who chose this model is no longer an owner; an owner can choose again"
-	memoryIndexNoIndexerReason = "nobody is named to index this model yet; an owner can choose it in Cluster > Settings > Memory search"
-	memoryIndexNoWriterReason  = "the replica running the index job has no embedding writer, so nothing can be indexed there"
+	memoryIndexOwnerReason       = "the owner who chose this model is no longer an owner; an owner can choose again"
+	memoryIndexOwnerUnreadReason = "the cluster could not confirm who its owners are; the next tick asks again"
+	memoryIndexNoIndexerReason   = "nobody is named to index this model yet; an owner can choose it in Cluster > Settings > Memory search"
+	memoryIndexNoWriterReason    = "the replica running the index job has no embedding writer, so nothing can be indexed there"
 )
 
 var (
@@ -354,7 +355,7 @@ type memoryIndexWorld interface {
 	// saveRun writes the whole row, and answers errMemoryIndexRunChanged when
 	// somebody else wrote it since this tick read or wrote it.
 	saveRun(ctx context.Context, run MemoryIndexRun) error
-	isActiveOwner(ctx context.Context, userId string) bool
+	isActiveOwner(ctx context.Context, userId string) (bool, error)
 	sources() []MemorySource
 	items(ctx context.Context, s MemorySource, after string, limit int) ([]MemoryItem, string, error)
 	ensureTable(ctx context.Context, ref string, dims int) (string, error)
@@ -698,6 +699,9 @@ func (t *memoryIndexTick) bindingNamesTarget() bool {
 // longer an active owner indexes nothing; a fleet model with no indexer named
 // would resolve as the job itself and reach no one's machines. A vendor model
 // has no indexer: the cluster's account pays, as it does for every embedding.
+// The check is indexerOwnerAnswer's, which tells "not an owner" from "could
+// not be read" (no owner set read on this replica yet): both wait, and only
+// the first is said as a demotion.
 func (t *memoryIndexTick) indexerWait(ctx context.Context) (string, bool) {
 	indexer, fleet := IndexerFor(EmbedderBinding{ProviderRef: t.run.TargetRef, IndexedBy: t.run.IndexedBy})
 	if !fleet {
@@ -706,7 +710,15 @@ func (t *memoryIndexTick) indexerWait(ctx context.Context) (string, bool) {
 	if indexer == "" {
 		return memoryIndexNoIndexerReason, true
 	}
-	if !t.w.isActiveOwner(ctx, indexer) {
+	owner, err := t.w.isActiveOwner(ctx, indexer)
+	switch {
+	case err != nil:
+		// No owner set read yet on this replica: unconfirmed is not trusted,
+		// so the run waits, but it is no demotion either, and is not said as
+		// one -- that would send an owner to choose the model again for
+		// nothing. The next tick asks again.
+		return memoryIndexOwnerUnreadReason, true
+	case !owner:
 		return memoryIndexOwnerReason, true
 	}
 	return "", false

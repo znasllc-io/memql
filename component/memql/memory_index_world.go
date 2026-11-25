@@ -145,8 +145,8 @@ func (w *engineMemoryIndexWorld) saveRun(ctx context.Context, run MemoryIndexRun
 	return nil
 }
 
-func (w *engineMemoryIndexWorld) isActiveOwner(ctx context.Context, userId string) bool {
-	return w.e.IndexerIsActiveOwner(ctx, userId)
+func (w *engineMemoryIndexWorld) isActiveOwner(ctx context.Context, userId string) (bool, error) {
+	return w.e.indexerOwnerAnswer(ctx, userId)
 }
 
 func (w *engineMemoryIndexWorld) sources() []MemorySource {

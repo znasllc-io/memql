@@ -2601,9 +2601,14 @@ writer on the replica), the run goes to `waiting` with a plain reason, keeps
 its cursor and counts nothing; the next tick tries again. A vendor refusal
 waits too: counting every item failed during an outage would offer the owner
 "Switch anyway" over an empty index. The indexer is re-checked before a
-tick's first step that embeds or moves the binding (`IndexerIsActiveOwner`);
+tick's first step that embeds or moves the binding (`indexerOwnerAnswer`);
 a fleet model with no indexer waits, since it would resolve as the job and
-reach nobody's machines.
+reach nobody's machines. A check this replica could not make (no owner set
+read yet) waits too, since an unconfirmed indexer is not trusted, but in
+neutral words ("the cluster could not confirm who its owners are; the next
+tick asks again"), never as the demotion it may not be, which would send an
+owner to choose the model again for nothing
+(`TestAnOwnerCheckThatCouldNotBeMadeWaitsWithoutSayingDemoted`).
 
 **An item nobody answers is counted, and two in a row are a wait.** Trigger:
 a machine that takes a call and never answers it says nothing a refusal would.
