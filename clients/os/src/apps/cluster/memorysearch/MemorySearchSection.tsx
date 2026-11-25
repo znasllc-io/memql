@@ -361,14 +361,18 @@ function ChangeModel({ status, search, draft, pick, refusal, act }: {
 /**
  * Settings' link row: the model in use, opening Memory search. It reads the
  * status alone (no choices), at the page's own cadence, and only while Settings
- * is showing.
+ * is showing. Before its first read lands it answers as the page does: a
+ * cluster that is away gets a sentence, not a skeleton (DESIGN.md: a skeleton
+ * never implies that a disconnected read is progressing), then a refusal, then
+ * the shape of the value while the read is out.
  */
 export function MemorySearchLink({ visible = true, onOpen }: { visible?: boolean; onOpen: () => void }) {
   const { access } = useSession();
   const connection = useOsConnection();
   const connected = useConnectionStatus() === "connected";
   const { status, readError } = useMemorySearch(connection?.query ?? null, { visible, connected, choices: false });
-  const model = status === null ? readError ? "Could not be read" : null : status.providerRef ? status.label : "No model chosen yet";
+  const model = status === null ? !connected ? "Loads when the cluster reconnects" : readError ? "Could not be read" : null
+    : status.providerRef ? status.label : "No model chosen yet";
   return <DetailsSection title="Memory search">
     <RecordList as="ul">
       <RecordRow

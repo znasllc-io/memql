@@ -162,6 +162,23 @@ describe("Cluster > Settings > Memory search", () => {
     expect(developer.memorySearchChoices).not.toHaveBeenCalled();
   });
 
+  it("Settings' link row never shows a shape that a disconnected read will not fill", async () => {
+    // DESIGN.md: a skeleton must never imply that a disconnected read is progressing.
+    const query = memorySearchQuery(statusRow());
+    h.connection = { query, subscriptions: null };
+    render(withSession(
+      <ConnectionStatusContext.Provider value="disconnected">
+        <ClusterApp sectionId="settings" navigate={vi.fn()} askContext={vi.fn()} />
+      </ConnectionStatusContext.Provider>,
+      { role: "owner" },
+    ));
+    await settle();
+    const link = screen.getByRole("button", { name: "Memory search: Loads when the cluster reconnects" });
+    expect(within(link).queryByRole("status")).toBeNull();
+    expect(within(link).getByText("Loads when the cluster reconnects")).toBeTruthy();
+    expect(query.memorySearchStatus).not.toHaveBeenCalled();
+  });
+
   it("it shows the model, the indexer and the backlog", async () => {
     mount("memorysearch", memorySearchQuery(statusRow({
       backlog: 37,
