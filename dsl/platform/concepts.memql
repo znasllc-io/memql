@@ -774,6 +774,13 @@ concept providerAuthStatus {
 /// their search results changed shape has exactly one row that explains it, and hiding it from
 /// everyone but the owner would make that unanswerable for the people most likely to ask.
 ///
+/// The fields memory search's switch added keep that answer. previousRef is a model id, as
+/// providerRef is. indexedBy and chosenBy name a cluster owner by id, which any signed-in person can
+/// already resolve to a name (userDisplayById), and indexedBy answers a question every person has a
+/// stake in: whose machines receive their memory text to embed. retireAt and droppedAt are dates on
+/// the retired rows, which share this concept and so its tier: when a replaced model's index is kept
+/// until, and when it was dropped.
+///
 /// v1:platform:inferenceStatus and v1:models:modelProfile carry the same tier for the same reason.
 /// WRITING is a different question and is settled separately: every mutation is @serverOnly,
 /// because activating, flipping or retiring a binding is a step of ordered work and not a write.
@@ -821,9 +828,12 @@ concept embedderBinding {
 /// owner's Memory search page reads them through a builtin, and nobody else has a reason to.
 /// WRITING is @serverOnly (recordMemoryIndexRun): only the job and the owner's builtins write it.
 ///
-/// NO BROADCAST ROUTING RULE (ruling R3, 2026-11-24). Nothing subscribes to these rows -- the OS
-/// polls the status builtin -- and a broadcast on every batch's write would put a mesh event on
-/// every node per 32 items. Add one only when a live subscriber exists.
+/// NO GRAPH ROUTING RULE (ruling R3, 2026-11-24). Nothing subscribes to these rows' graph events --
+/// the OS polls the status builtin -- and forwarding one on every batch's write would wake every
+/// node's graph subscribers per 32 items. Add one only when a live subscriber exists. R3 removed
+/// only that: like every graph write, each write of a run row still emits
+/// cache.invalidate.v1:platform:memoryIndexRun, which the cache.invalidate.* rule carries to every
+/// node for its result-cache evictor.
 ///
 /// THE JOB'S BOOKKEEPING EXPIRES: a row is written after every batch and nothing reads a superseded
 /// version, so only the newest version of each run outlives a day, and nothing is archived (the

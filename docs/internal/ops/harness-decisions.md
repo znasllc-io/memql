@@ -2532,8 +2532,13 @@ the row it reads is the row just written.
 The job and the owner's builtins (`memorySearchSwitch`, `memorySearchCancel`
 and `memorySearchSwitchAnyway`, `component/memql/memory_search_builtins.go`)
 are the only writers and all go through `writeMemoryIndexRun`. A doubled tick (a lost lock) costs
-duplicate embeddings, never a wrong row. No broadcast rule (ruling R3): nothing
-subscribes, and one would put a mesh event per 32 items on every node.
+duplicate embeddings, never a wrong row. No graph routing rule (ruling R3):
+nothing subscribes to the rows' graph events, and forwarding one would wake every
+node's graph subscribers per 32 items. R3 removed only that rule: like every
+graph write, each run-row write still emits
+`cache.invalidate.v1:platform:memoryIndexRun`, which the `cache.invalidate.*`
+rule carries to every node for its result-cache evictor, one small mesh event
+per write.
 
 **The cursor and the counts.** The cursor names one source and the last item
 done in it; earlier sources in name order are done. A batch (32 items) that
@@ -2678,7 +2683,18 @@ stub of `integrations/embedding`'s contract (this package cannot import it);
 that integration's own tests hold the real one. A walk's `total` counts what it
 has visited, so a progress figure for a running switch needs the active
 index's count as its denominator. A row rewritten within the clock slack after
-the job embedded it keeps the older vector until its next write. Tests: `component/memql/memory_index_job_test.go`
+the job embedded it keeps the older vector until its next write. So does a row
+rewritten between a batch's read and that item's embed: the job embeds the text
+it read, and its vector, stamped after the rewrite, then counts as current. In a
+backfill or a walk after the flip the target is the active table, which the
+writers write too, so the job's late write can also replace the vector the
+writer had just embedded from the new text. The window is one batch's
+embedding time; closing it would mean reading each batch's newest versions
+again after it embeds. A counting walk cut off when the model comes back keeps
+its cursor and tally, and finishes at the next wait, stamping `missingAt` with
+its end: the backlog then reads as counted later than some of it was, and may
+count items the embed walk filled meanwhile, until the next count.
+Tests: `component/memql/memory_index_job_test.go`
 (the decisions); `component/memql/memory_index_job_db_test.go` (two engines over
 one database: the lock, the resume on another replica, the flip, the width
 change, the backfill, the waits); `TestTheLessonSourceReadsItsEventsFromPostgres`

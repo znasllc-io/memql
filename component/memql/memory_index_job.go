@@ -130,11 +130,15 @@ package memql
 //     runs again.
 //  5. `finishing` recorded: the flip is over, and the walk after it follows.
 //
-// # Nothing is broadcast (ruling R3)
+// # No graph routing rule (ruling R3)
 //
-// The run rows have no routing rule (component/node/routing.go). Nothing
-// subscribes to them: the OS polls memorySearchStatus, and a broadcast on every
-// batch's write would put a mesh event on every node per 32 items. The
+// The run rows have no graph.node.* routing rule (component/node/routing.go).
+// Nothing subscribes to their row events: the OS polls memorySearchStatus, and
+// forwarding one on every batch's write would wake every node's graph
+// subscribers per 32 items. R3 removed only that rule. Like every graph write,
+// a run-row write still emits cache.invalidate.v1:platform:memoryIndexRun,
+// which the cache.invalidate.* rule carries to every node, where the result
+// cache's evictor alone reads it: one small mesh event per write. The
 // binding's own rule already tells every replica about a flip.
 //
 // # The files

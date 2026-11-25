@@ -125,7 +125,7 @@ builtin libraryEmbedChunk {
   text         string!  @description("The chunk text to embed. The same text stored on the row, so a match can quote what it matched.")
   concept      string   @description("Concept of the node, stored alongside the vector for filtered queries. v1:library:fileChunk.")
   vectorField  string   @description("Which embedding field this is. 'content' -- see the description above before changing it.")
-  provider     string   @description("Embedding provider name. Defaults to embedding3Small, which is what the rest of the tree embeds with; a Library chunk embedded by a different provider is not comparable to the query vector.")
+  provider     string   @description("Embedding provider name. Omit it: the store then embeds with the cluster's active memory-search binding, the model every writer and every search use. A chunk embedded by another provider lands in that model's own table, where no search looks.")
 }
 
 /// Search the caller's Library by meaning and get whole artifacts back, best match first.

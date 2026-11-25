@@ -3428,8 +3428,10 @@ mutation embedderBinding flipEmbedderBinding {
 /// EVERY CALLER HOLDS THE BINDING LOCK (`lockAskConversationKind(ctx, "active", "embedder-binding")`)
 /// around its read and this write. The update read-merges the `active` row, so a flip on another
 /// replica between the caller's read and this write would be silently reverted (memql#5431: lock,
-/// fresh read, newer version). The callers are bindEmbedder and adoptEmbedderIndexer in
-/// component/memql/embedder_runtime.go.
+/// fresh read, newer version). Every caller goes through writeEmbedderChoice
+/// (component/memql/embedder_runtime.go): bindEmbedder and adoptEmbedderIndexer there, and the
+/// owner's memorySearchKeep (choosing the model in use again, the take-over) and memorySearchConfirm
+/// in memory_search_builtins.go.
 @serverOnly
 mutation embedderBinding setEmbedderBindingChoice {
   args {
