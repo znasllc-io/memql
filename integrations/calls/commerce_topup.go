@@ -19,6 +19,9 @@ func (s *Service) commerceAutoTopup(ctx context.Context, site callrules.SiteRef,
 	if !c.enabled() {
 		return callrules.AccountResult{}, accountRefusal("commerce_disabled")
 	}
+	if c.Mode == providers.Mock {
+		return callrules.AccountResult{}, accountRefusal(callrules.ReasonAutomaticTopupUnavailable)
+	}
 	h, err := s.fundingHolder(ctx, site, token, account)
 	if err != nil {
 		return callrules.AccountResult{}, err

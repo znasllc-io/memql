@@ -240,12 +240,12 @@ func TestDelegationAgentStartReplayLabelsAgentAndHidesHostBearer(t *testing.T) {
 	require.ErrorContains(t, err, "delegation_call_limit")
 }
 func TestDelegationAutomaticTopupsRespectSeparateCapsAndConcurrentThreshold(t *testing.T) {
-	cw, k, _ := commerceFixture(t, "delegation-topup")
+	cw, k, _, _ := commerceSandboxFixture(t, "delegation-topup")
 	if cw == nil {
 		return
 	}
 	cleanupDelegationTestRows(t, cw)
-	commerceVerified(t, cw, k)
+	commerceSandboxVerified(t, cw, k)
 	req := delegationTestRequest(cw)
 	req.Scopes = append(req.Scopes, "topup")
 	req.Topup = callrules.AutoTopupLimit{Enabled: true, AmountCents: 1000, ThresholdCents: 1000, PerChargeLimitCents: 1000, PeriodLimitCents: 1000, LifetimeLimitCents: 1000}
@@ -372,12 +372,12 @@ func TestDelegationBookingAndHistoryMutationsStayWithinGrant(t *testing.T) {
 }
 
 func TestDelegationSavedCardReplacementRequiresFreshMandate(t *testing.T) {
-	cw, k, _ := commerceFixture(t, "delegation-card-binding")
+	cw, k, _, _ := commerceSandboxFixture(t, "delegation-card-binding")
 	if cw == nil {
 		return
 	}
 	cleanupDelegationTestRows(t, cw)
-	commerceVerified(t, cw, k)
+	commerceSandboxVerified(t, cw, k)
 	req := delegationTestRequest(cw)
 	req.Scopes = append(req.Scopes, "topup")
 	req.Topup = callrules.AutoTopupLimit{Enabled: true, AmountCents: 1000, ThresholdCents: 1000, PerChargeLimitCents: 1000, PeriodLimitCents: 1000, LifetimeLimitCents: 1000}

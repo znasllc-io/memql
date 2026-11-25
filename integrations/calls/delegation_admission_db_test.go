@@ -11,12 +11,12 @@ import (
 )
 
 func TestDelegationStartValidationPrecedesReservationAndAutomaticTopup(t *testing.T) {
-	cw, k, _ := commerceFixture(t, "delegation-start-validation")
+	cw, k, _, _ := commerceSandboxFixture(t, "delegation-start-validation")
 	if cw == nil {
 		return
 	}
 	cleanupDelegationTestRows(t, cw)
-	commerceVerified(t, cw, k)
+	commerceSandboxVerified(t, cw, k)
 	ctx := context.Background()
 	grant := delegationTestRequest(cw)
 	grant.MaxCallCents, grant.PeriodLimitCents, grant.MaxDurationMinutes = 2000, 2000, 1440
@@ -82,21 +82,6 @@ func TestDelegationStartValidationPrecedesReservationAndAutomaticTopup(t *testin
 	require.NoError(t, err)
 	require.Equal(t, *before.Account.BalanceCents, *unchanged.Account.BalanceCents)
 	require.Equal(t, *before.Account.AvailableCents, *unchanged.Account.AvailableCents)
-	// A same-account quote created by a human does not authorize agent family
-	// participation, and must not trigger funding before that refusal either.
-	t.Setenv("MEMQL_CALLS_FAMILY_MODE", "mock")
-	familyQuote := commerceDo(t, cw, k, callrules.AccountRequest{Action: "quote_call", ParticipantLimit: 4, DurationMinutes: 1440, ParticipationMode: familyMode})
-	familyRequest := request
-	familyRequest.QuoteID = familyQuote.Quote.QuoteID
-	_, err = delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, credential, familyRequest)
-	require.ErrorContains(t, err, "family_features_unavailable")
-	unfunded, err := cw.svc.store.delegation(memql.ContextWithFreshRead(ctx), cw.owner, grantID)
-	require.NoError(t, err)
-	require.Empty(t, unfunded.State.Operations)
-	unchanged, err = cw.svc.Account(ctx, cw.ref, k.result.Session.Token, nil)
-	require.NoError(t, err)
-	require.Equal(t, *before.Account.BalanceCents, *unchanged.Account.BalanceCents)
-	require.Equal(t, *before.Account.AvailableCents, *unchanged.Account.AvailableCents)
 	// Refusal consumed neither the nonce nor the top-up mandate: the corrected
 	// request can fund and start once, and an exact retry cannot charge twice.
 	result, err := delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, credential, request)
@@ -110,4 +95,38 @@ func TestDelegationStartValidationPrecedesReservationAndAutomaticTopup(t *testin
 	require.Len(t, stored.State.Operations, 2)
 	_, topups := delegationUsage(stored, "topup", cw.clock.Now())
 	require.EqualValues(t, 1000, topups)
+}
+
+// Family calls need mock commerce, where automatic top-ups no longer exist, so
+// this ordering check runs in mock mode on its own: a human's family quote never
+// lets an agent start a family call, and the refusal reserves nothing.
+func TestDelegationAgentCannotUseHumanFamilyQuote(t *testing.T) {
+	cw, k, _ := commerceFixture(t, "delegation-family-quote")
+	if cw == nil {
+		return
+	}
+	cleanupDelegationTestRows(t, cw)
+	commerceVerified(t, cw, k)
+	ctx := context.Background()
+	grant := delegationTestRequest(cw)
+	grant.MaxCallCents, grant.PeriodLimitCents, grant.MaxDurationMinutes = 2000, 2000, 1440
+	credential, grantID := delegationTestGrant(t, cw, k, grant)
+	before, err := cw.svc.Account(ctx, cw.ref, k.result.Session.Token, nil)
+	require.NoError(t, err)
+	request := callrules.AgentRequest{Action: "start", IdempotencyKey: "agent-family-quote-0001", Name: "Assistant", Terms: callrules.AgentTermsVersion, Participation: "adults_only"}
+	// A same-account quote created by a human does not authorize agent family
+	// participation, and must not trigger funding before that refusal either.
+	t.Setenv("MEMQL_CALLS_FAMILY_MODE", "mock")
+	familyQuote := commerceDo(t, cw, k, callrules.AccountRequest{Action: "quote_call", ParticipantLimit: 4, DurationMinutes: 1440, ParticipationMode: familyMode})
+	familyRequest := request
+	familyRequest.QuoteID = familyQuote.Quote.QuoteID
+	_, err = delegationTestAgent(t, cw, cw.svc, ctx, cw.ref, credential, familyRequest)
+	require.ErrorContains(t, err, "family_features_unavailable")
+	unfunded, err := cw.svc.store.delegation(memql.ContextWithFreshRead(ctx), cw.owner, grantID)
+	require.NoError(t, err)
+	require.Empty(t, unfunded.State.Operations)
+	unchanged, err := cw.svc.Account(ctx, cw.ref, k.result.Session.Token, nil)
+	require.NoError(t, err)
+	require.Equal(t, *before.Account.BalanceCents, *unchanged.Account.BalanceCents)
+	require.Equal(t, *before.Account.AvailableCents, *unchanged.Account.AvailableCents)
 }

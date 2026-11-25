@@ -14,6 +14,7 @@ import (
 	callrules "github.com/znasllc-io/memql/component/calls"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
+	"github.com/znasllc-io/memql/integrations/calls/providers"
 )
 
 type agentCallContext struct{}
@@ -492,7 +493,9 @@ func (s *Service) Agent(ctx context.Context, site callrules.SiteRef, token strin
 		return nil, err
 	}
 	// Funding is a separate fixed mandate; no amount is taken from the agent.
-	if d.State.Request.Topup.Enabled {
+	// Simulated payments never top up automatically: the start proceeds on the
+	// existing credit and meets the ordinary funding refusal when it is short.
+	if d.State.Request.Topup.Enabled && s.commerceConfig().Mode != providers.Mock {
 		a, e := s.accountSnapshot(ctx, site, sess.Token)
 		if e != nil {
 			return nil, e
@@ -668,6 +671,11 @@ func (s *Service) finishDelegated(ctx context.Context, site callrules.SiteRef, g
 func (s *Service) agentTopup(ctx context.Context, site callrules.SiteRef, token string, d *delegationRow, sess callrules.Session, req callrules.AgentRequest) (any, error) {
 	if !d.State.Request.Topup.Enabled {
 		return nil, accountRefusal("delegation_topup_disabled")
+	}
+	// While payments are simulated an automatic top-up would be credit nobody
+	// typed the tester password for; refuse before reserving any mandate.
+	if s.commerceConfig().Mode == providers.Mock {
+		return nil, accountRefusal(callrules.ReasonAutomaticTopupUnavailable)
 	}
 	op, err := s.reserveDelegated(ctx, site, token, req, "topup", d.State.Request.Topup.AmountCents)
 	if err != nil {
