@@ -75,7 +75,10 @@ look up. The wiring is `memql.SetAccessHoldRecorder(logstore.RecordAccessHold)`
 in `app/database.go`; tests are `TestInsertNowWritesOnceAndReportsFailure` and
 the db-gated `TestInsertNowLineIsFoundBySearchingItsReference`. This line
 skips `core/logger`'s redactor as well; its attributes carry only the
-reference and fixed reason sentences, never a secret or a payload.
+reference and fixed reason sentences, never a secret or a payload. Because it
+skips the cap, the engine bounds these lines itself: per person on each
+replica, three at once and then one a minute
+([Who gets into MemQL OS](auth/access-model.md#who-gets-into-memql-os)).
 
 ## Reading
 

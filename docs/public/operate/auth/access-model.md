@@ -1112,7 +1112,10 @@ is the person's bare user id, and its attributes are `reference` and
 [the held person's reference](../logs.md#the-one-line-that-is-never-dropped-a-held-persons-reference).
 A re-check that passes back its reference with the same reasons writes
 nothing and keeps the reference; changed reasons write a new line under the
-same reference. A reference is never shared by two people.
+same reference. A reference is never shared by two people. Lines are bounded
+per person on each replica, three at once and then one a minute; past that a
+check writes nothing and answers with the reference the page already had, or
+with none.
 
 **The reasons a line can carry.** One sentence per distinct cause. Several
 can appear together, always in the same (sorted) order, so a line changes only

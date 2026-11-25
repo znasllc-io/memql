@@ -32,6 +32,10 @@ type MemQLEngine struct {
 	// storedRoleForTest answers desktop access's stored-role read without a
 	// database (desktop_access.go). Nil in production.
 	storedRoleForTest func(ctx context.Context, userId string) (auth.Role, bool, error)
+	// accessHolds bounds desktop access's hold-line writes per person on this
+	// replica (desktop_access_bound.go). Made on first use; a test stores one
+	// with its own clock.
+	accessHolds atomic.Pointer[accessHoldLimiter]
 
 	// appSignInRelay reaches the replica holding a machine's stream, for Fleet's
 	// Sign in action (fleet_app_signin.go). Nil on a node with no route to one.

@@ -55,6 +55,10 @@ package memql
 //     absent and never written (a client must not be able to put its own text
 //     into the log under this name). Any replica can answer a re-check: the
 //     reference travels with the client, not in a replica's memory.
+//   - Every write is bounded per person on each replica, a burst of three and
+//     then one a minute (desktop_access_bound.go), because the line skips the
+//     log store's own limits. Past the bound nothing is written and no digest
+//     is returned for reasons that were not written.
 //   - AN ERROR IS NEVER A HOLD. A read that fails (the catalog, the read of
 //     the machines lent to them, apps, keys, the stored role, a grant or
 //     membership read) comes back as an error, including a failure a tolerant
@@ -709,15 +713,28 @@ func (e *MemQLEngine) desktopAccess(ctx context.Context, actingUserId, passedRef
 	// reference is minted and its line written, so a reference is never shared
 	// by two people. The line's Reasons stay the plain reasons.
 	digest := personAccessDigest(actingUserId, reasons)
-	answer := DesktopAccess{Sources: sources, ReasonsDigest: digest}
-	reference := ""
-	if accessReferencePattern.MatchString(passedReference) && digestIsFor(passedDigest, actingUserId) {
-		reference = passedReference
-		if passedDigest == digest {
-			answer.Reference = reference
-			return answer, nil
+	passed := accessReferencePattern.MatchString(passedReference) && digestIsFor(passedDigest, actingUserId)
+	if passed && passedDigest == digest {
+		// The steady state: nothing changed, nothing is written, and the
+		// write bound is not asked, so it spends nothing.
+		return DesktopAccess{Sources: sources, Reference: passedReference, ReasonsDigest: digest}, nil
+	}
+
+	// Every write is bounded per person on this replica (accessHoldBound):
+	// a new reference and a rewrite under a passed one alike. Past the bound
+	// nothing is written, and a digest is never returned for reasons that
+	// were not written: a valid passed reference comes back with the digest
+	// the caller passed, unchanged, so the next check after the bucket
+	// refills still sees the changed reasons and writes them; anything else
+	// is held with no reference, the answer a failed write gives.
+	if !e.accessHoldBound().allow(BareShortId(actingUserId)) {
+		if passed {
+			return DesktopAccess{Sources: sources, Reference: passedReference, ReasonsDigest: passedDigest}, nil
 		}
-	} else {
+		return DesktopAccess{Sources: sources}, nil
+	}
+	reference := passedReference
+	if !passed {
 		reference = newAccessReference()
 	}
 	// Written before the reference is returned. A failure answers held with
@@ -727,11 +744,9 @@ func (e *MemQLEngine) desktopAccess(ctx context.Context, actingUserId, passedRef
 	if err := recordAccessHold(ctx, AccessHoldLine{Reference: reference, UserId: BareShortId(actingUserId), Reasons: reasons}); err != nil {
 		slog.Warn("desktop access: the hold line could not be written; the person is held with no reference",
 			"userId", actingUserId, "error", err)
-		answer.ReasonsDigest = ""
-		return answer, nil
+		return DesktopAccess{Sources: sources}, nil
 	}
-	answer.Reference = reference
-	return answer, nil
+	return DesktopAccess{Sources: sources, Reference: reference, ReasonsDigest: digest}, nil
 }
 
 func (e *MemQLEngine) accessStoredRole(ctx context.Context, userId string) (auth.Role, bool, error) {
