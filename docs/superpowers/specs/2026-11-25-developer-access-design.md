@@ -32,7 +32,7 @@ Read from `dsl/rbac/seeds.memql` (owner 112 rows, developer 96): seventeen pairs
 | `create` / `update` on `group` | create a group, rename it, place and remove members | yes | **given** |
 | `create` / `update` / `delete` on `role` | author custom roles | create, update | **given** (delete too, as the owner has) |
 | `create` on `agent` | create agents | yes | **given** |
-| `read app:settings/pipelines` | the Pipelines readiness item: is the cluster's GitHub App installed and current | no | **given**, read only |
+| `read app:settings/pipelines` | the Pipelines readiness item: is the cluster's GitHub App installed and current | no | owner only for now: holding the read also draws the setup marker, for a step only an owner can finish |
 | `read` / `execute app:cluster/capacity` | the background resource budget | no | owner only: budgets are the billing José named |
 | `execute app:settings/clusteraccount` | the cluster's vendor account pays for one's model calls | no | owner only: billing |
 | `read` / `execute app:cluster/memorysearch` | which model memory search uses | no | owner only: it picks the vendor account the cluster pays from (record 2026-11-23) |
@@ -47,7 +47,7 @@ could not. Changing a group's apps, the case that started this, is the grant wri
 
 1. **The developer role is seeded with the people-work verbs** (`dsl/rbac/seeds.memql`, mirrored in
    `component/auth/rbac_model.go`): every verb on `principal`, `create` and `update` on `group`, `create`, `update`
-   and `delete` on `role`, `create` on `agent`, and `read app:settings/pipelines`. Nothing else is seeded.
+   and `delete` on `role`, and `create` on `agent`. Nothing else is seeded.
 2. **An owner stays out of reach through the rank tree, not through a missing verb.** `auth.GovernPrincipal` already
    states it: an owner-ranked target is an owner's alone, an owner reaches everyone, anybody reaches themselves, and
    otherwise the caller must strictly outrank the target. A developer therefore acts on admins, members, viewers and
@@ -71,7 +71,7 @@ could not. Changing a group's apps, the case that started this, is the grant wri
 - **Developer:** manages people ranked below developer (profile, role up to admin, suspension, tokens, sign-in
   policy), groups and their members, custom roles, agents, and app grants to people and groups ranked no higher
   than developer; edits cluster settings (registration, brand, token lifetimes); revokes node tokens; sets an
-  OAuth client's allowed origins; reviews access requests; reads the Pipelines readiness item.
+  OAuth client's allowed origins; reviews access requests.
 - **Admin:** no longer edits, suspends, renames, resets or revokes a token of an owner, a developer or another admin.
   An admin still does all of it for members, viewers and client roles.
 - **Owner:** nothing changes.

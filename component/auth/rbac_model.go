@@ -237,7 +237,7 @@ var appReadFloors = map[string][]Role{
 	"app:settings/tokens":        {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:settings/keys":          {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:settings/logs":          {RoleOwner, RoleDeveloper, RoleAdmin},
-	"app:settings/pipelines":     {RoleOwner, RoleDeveloper},
+	"app:settings/pipelines":     {RoleOwner},
 	"app:profile":                {RoleOwner, RoleDeveloper, RoleAdmin, RoleWriter, RoleReader},
 	"app:profile/logs":           {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:identity":               {RoleOwner, RoleDeveloper, RoleAdmin, RoleWriter, RoleReader},

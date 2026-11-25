@@ -706,16 +706,15 @@ seed capability cap-admin-read-app-settings-access { roleSlug: "admin"  verb: "r
 // Settings -> Pipelines (epic memql#5479, task memql#5498; pipelines program
 // design record, D15): the cluster's optional Pipelines readiness item -- the
 // GitHub App, a connected repository, compute -- and the marker under the
-// gear while it is neither done nor dismissed. OWNER AND DEVELOPER. It was
-// the owner's alone, because what the item asks for is the cluster's GitHub
-// App and its installations, which only an owner registers. Registering
-// stays an owner's; READING the item is how a developer who connects and
-// re-runs pipelines sees why one cannot start (owner's direction 2026-11-25:
-// a developer reads how the pipeline works and why a deployment failed).
+// gear while it is neither done nor dismissed. OWNER ONLY, by decision: what
+// the item asks for is the cluster's GitHub App and its installations, which
+// only an owner registers, and the marker is a nudge meant for the person who
+// decides whether this cluster runs anybody's CI at all. The developer role
+// was NOT given it on 2026-11-25 with the people-work verbs: holding the read
+// also draws the marker, for a step a developer cannot finish
+// (test/kit/readinessStates.test.tsx holds CONFIGURED_BY to these rows).
 @description("owner: open the pipelines section of the settings app -- the optional Pipelines readiness item and its marker (memql#5498, D15).")
 seed capability cap-owner-read-app-settings-pipelines { roleSlug: "owner"  verb: "read"  resourceType: "app:settings/pipelines"  predefined: true }
-@description("developer: open the pipelines section of the settings app -- read the Pipelines readiness item (owner's direction 2026-11-25).")
-seed capability cap-developer-read-app-settings-pipelines { roleSlug: "developer"  verb: "read"  resourceType: "app:settings/pipelines"  predefined: true }
 
 // ---- app:settings/apikeys -- add an API key of one's own (design record 2026-11-21-vendor-accounts-and-api-keys, K4 as amended 2026-11-22) ----
 // A named part, because adding a key puts a credential that spends a person's money on the
