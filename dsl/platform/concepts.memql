@@ -974,10 +974,10 @@ concept inferenceStatus {
 @belongsTo(cluster)
 concept desktopAccess {
   admitted       bool!    @description("Whether the caller may enter: exempt, or at least one source counts.")
-  exempt         bool!    @description("Whether the caller is a cluster owner or developer, by their STORED role read fresh. The exempt are admitted with nothing set up.")
-  reference      string   @description("ERR- plus six lowercase hex characters, present only on a held answer whose hold line was written. The person quotes it to an operator. Absent when the write failed.")
-  reasonsDigest  string   @description("The person part then the reasons digest of a held answer. The client passes it back with the reference so a re-check with unchanged reasons writes nothing. Absent when the write failed.")
-  sources        []object @description("What the caller has set up, for the exempt too: {kind, state, own, lenderUserId, label, app}. kind is machine | app | key | clusterAccount; app is the app id of an app source. A source whose state does not count is listed so a page can say why.")
+  exempt         bool!    @description("Whether the caller is a cluster owner or developer, by their STORED role read fresh, or a cluster owner the server itself made (the troubleshooting shim, the operator credential). The exempt are admitted with nothing set up.")
+  reference      string   @description("ERR- plus six lowercase hex characters, present only on a held answer: the reference of the hold line just written, or the valid one the caller passed back when nothing needed writing or the per-person write bound was reached. The person quotes it to an administrator. Absent when the write failed, or the bound was reached with no reference passed back.")
+  reasonsDigest  string   @description("The person part then the reasons digest of a held answer: of the reasons in the line written under the reference, or the digest the caller passed back when nothing was written. Never a digest of reasons no line holds. The client passes it back with the reference so a re-check with unchanged reasons writes nothing. Absent whenever reference is.")
+  sources        []object @description("What the caller has set up, for the exempt too: {kind, state, own, lenderUserId, label, app}. kind is machine | app | key | clusterAccount; app is the app id of an app source. Every source listed counts: state is ready, or asleep | outOfCredit | outOfUsage for one that is set up and cannot answer right now. Nothing that does not count is listed; why it does not is in the hold line under the reference.")
 }
 
 /// Virtual single-row RESULT of an owner-only `providersReload` (epic memql#4440). Never persisted:

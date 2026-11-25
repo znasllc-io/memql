@@ -640,7 +640,7 @@ builtin inferenceStatus { }
 
 @sdk
 @executor("desktopAccess")
-@description("Answer, in one row, whether the CALLER may enter MemQL OS yet: admitted when they hold the cluster owner or developer role, or have set up a source of model access (a machine that runs a usable model, an app on their own machine, an API key, or the cluster's own account where it pays for them). A person who has set up none is held, and the row names each source and why it does not count, plus a reference they can quote to an operator. Answers only for the caller and takes no person argument, so it needs no capability, like inferenceStatus. Backs the shell's entry page; a failed call reads as unknown and lets the person in.")
+@description("Answer, in one row, whether the CALLER may enter MemQL OS yet: admitted when they hold the cluster owner or developer role (or are a cluster owner the server itself made: the troubleshooting shim or the operator credential), or have set up a source of model access (a machine that runs a usable model, an app on their own machine, an API key, or the cluster's own account where it pays for them). A person who has set up none is held, and the row carries a reference they can quote to an administrator. The row carries no reasons: why each source checked does not count is in the one log line written under that reference, which an administrator finds by searching it in Logs. Answers only for the caller and takes no person argument, so it needs no capability, like inferenceStatus. Backs the shell's entry page; a failed call reads as unknown and lets the person in.")
 builtin desktopAccess {
   /// The reference the previous held answer returned, passed back so a re-check keeps it. Ignored unless it has the right shape.
   reference      string
