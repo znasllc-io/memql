@@ -1061,6 +1061,81 @@ set on sign-in, on window focus and after a grant write in that browser, and
 the engine honours a grant on the next request regardless -- so the lag is a
 hidden control appearing late, never one that works when it should not.
 
+## Who gets into MemQL OS
+
+Model access in MemQL is bring-your-own: a person's own machines, apps and API
+keys, the machines and keys others lend them, and the cluster's vendor account
+only where the cluster owner allows it. MemQL does not pay for anybody's
+inference on its own. A person with none of these would get a desktop whose
+features fail one at a time, so MemQL OS asks the cluster at sign-in whether
+model access is set up for them, and holds them on a page until it is. The
+check is the `desktopAccess` builtin on the stream (no HTTP endpoint); it
+spends no model call.
+
+**Who is exempt.** The cluster's own owners and developers, because they
+configure the cluster. The engine reads the person's STORED role, fresh, and
+asks `auth.MayManageFleet` of it. An `admin` is not exempt. Being the owner or
+developer of one account does not exempt anybody; only the cluster's own owner
+and developer roles do. A per-account exemption is approved but not built
+(accounts program, P27 and P28).
+
+**What counts as set up.** Anything the person has set up counts, even when it
+cannot answer right now:
+
+| Source | Counts | Does not count |
+|---|---|---|
+| Machine, theirs or lent to them (directly or through a group) | a chat model with structured output and a context window of at least `MinimumContextWindow` (8192), online or asleep | a model that only makes embeddings, a model below the minimum, a revoked machine |
+| App (Claude Code or Codex) on their own machine | allowed by the machine, signed in, allowed by their own app routing, and ready, unmeasured, asleep or out of usage | measured signed out, or an app the machine or their routing disallows |
+| API key, theirs or lent | usable (including not yet checked), or held for lack of credit | paused, refused, or its owner inactive |
+| The cluster's vendor account | where the cluster's account pays for them | everything else |
+
+An app closed by the engaged computer-use kill switch still counts as set up:
+the switch is a temporary stop, and the check does not read it.
+
+**What the held person sees.** The held page ([first-run.md](../first-run.md#the-held-page-everybody-else))
+says their access is not set up and to ask an administrator, and shows a
+reference: `ERR-` and six lowercase hex characters. It lifts by itself once
+something is set up.
+
+**How an administrator finds out why.** Before the page shows the reference,
+the engine writes one line under it to the log store, naming the person and
+each source it checked with why it did not count. The line is written
+synchronously, and the page shows a reference only after the write succeeded.
+In Logs (an administrator, or anyone of higher rank), search the reference, for example `ERR-3fa90c`: the line is component
+`desktopAccess`, its subject is the person's bare user id, and its attributes
+are `reference` and `reasons`. See
+[the held person's reference](../logs.md#the-one-line-that-is-never-dropped-a-held-persons-reference).
+A re-check that passes back its reference with the same reasons writes
+nothing and keeps the reference; changed reasons write a new line under the
+same reference. A reference is never shared by two people.
+
+**What it does when it cannot tell.**
+
+- A check that fails lets the person in. An outage is not evidence that they
+  lack access, and the server refuses their model calls either way. A read the
+  engine could not complete (a machine, key or grant read that failed) is an
+  error, never a hold.
+- A failed RE-check keeps an already-held person held until a check
+  succeeds: the page stays up and the next answer decides.
+- A line that could not be stored holds the person with no reference, and the
+  page does not ask for one.
+- Open windows never keep a held person's desktop open: the page replaces it at
+  the next check.
+
+**Ask follows the same sources.** When a model call cannot be taken, Ask names
+what is offline (their machine, a lent machine, a lent key, their key, an app)
+and whom to ask, and offers Fleet only to somebody who can open it.
+
+**Limits.** A person with more than 50 registered machines is read on the
+first page only. A person holding a copy of somebody else's reference gets their
+own. The check does not close MemQL's API, the SDK or Cockpit to a held
+person; the server already refuses their model calls, and the rule is about
+MemQL OS. Code: `component/memql/desktop_access.go`,
+`component/logstore/access_hold.go`; client:
+`clients/os/src/chrome/useDesktopAccess.ts`, `AccessHeld.tsx`, `CoreGate.tsx`.
+The design record is
+`docs/superpowers/specs/2026-11-24-desktop-access-design.md`.
+
 ## Out of scope (deferred)
 
 - **Per-concept ACL beyond `@rowAuthz`.** Today access is at the granularity

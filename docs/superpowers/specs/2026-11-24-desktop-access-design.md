@@ -1,7 +1,7 @@
 # Desktop access: nobody enters MemQL OS without model access
 
-Design record, 2026-11-24. Status: approved by the owner 2026-11-24; being
-built (plan `docs/superpowers/plans/2026-11-24-desktop-access.md`).
+Design record, 2026-11-24. Status: approved by the owner 2026-11-24; built
+(plan `docs/superpowers/plans/2026-11-24-desktop-access.md`).
 Follows the vendor accounts work
 ([2026-11-21-vendor-accounts-and-api-keys-design.md](2026-11-21-vendor-accounts-and-api-keys-design.md))
 and sits beside the memory-search model switch

@@ -15,7 +15,10 @@ a desk. It holds them on **the core gate** until this cluster can reach a
 model.
 
 Once it can, the gate lifts by itself and the desk opens, carrying **Ask** and,
-while anything is still outstanding, the **Set up** card.
+while anything is still outstanding, the **Set up** card. Anybody who is not an
+owner or developer of the cluster is held by a different question: whether
+model access is set up for them personally (see
+[the held page](#the-held-page-everybody-else)).
 
 ## The gate
 
@@ -29,7 +32,7 @@ launcher: they are not hidden, they are not mounted.
 - For **everybody else**: is model access set up for this person? Until it is,
   they get the held page, whether or not the cluster as a whole is set up.
 
-An owner or developer of one account is not exempt; only the cluster-wide role is.
+Being the owner or developer of an account does not exempt anyone from the second question; only the cluster's own owner and developer roles do.
 
 ### The setup screen: owners and developers
 

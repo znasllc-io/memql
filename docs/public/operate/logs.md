@@ -73,7 +73,9 @@ reference is shown only after that write succeeded, so searching Logs for it
 a failed insert, holds the person with no reference rather than one nobody can
 look up. The wiring is `memql.SetAccessHoldRecorder(logstore.RecordAccessHold)`
 in `app/database.go`; tests are `TestInsertNowWritesOnceAndReportsFailure` and
-the db-gated `TestInsertNowLineIsFoundBySearchingItsReference`.
+the db-gated `TestInsertNowLineIsFoundBySearchingItsReference`. This line
+skips `core/logger`'s redactor as well; its attributes carry only the
+reference and fixed reason sentences, never a secret or a payload.
 
 ## Reading
 

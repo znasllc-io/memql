@@ -47,10 +47,9 @@ import { useDesktopAccess } from "./useDesktopAccess";
 // AN OS SURFACE, NOT AN ENGINE REFUSAL
 // ===========================================================================
 // The engine's per-call refusals are already the enforcement. Refusing the
-// stream instead would block the very reads the wizard needs, and would take
-// from a viewer the feed that tells them to go and ask an owner. The readiness
-// rows are readable by every signed-in person and writable only by the engine,
-// which is exactly what lets a client-side gate be honest for every role.
+// stream instead would block the very reads the wizard needs, and the held
+// page's own check. The readiness rows are readable by every signed-in person
+// and writable only by the engine, which is exactly what lets a client-side gate be honest for every role.
 //
 // ===========================================================================
 // IT KEYS ON INFERENCE ALONE (D2)
