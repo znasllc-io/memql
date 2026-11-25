@@ -89,22 +89,29 @@ func passedOverKey(passed []worker.PassedOver) string {
 
 // waitingNotice is the log line of a fleet step waiting for a steady machine
 // that is busy (D1): "memql: waiting for Box A, whose connection is steady;
-// Box B is free, but its connection dropped 2 times in the last 2 hours (last
-// at 19:44 UTC)".
+// passed over Box B, whose connection dropped 2 times in the last 2 hours (last
+// at 19:44 UTC)". "Passed over", never "free": the dispatcher did not ask that
+// machine, so nothing says it could have taken the step.
 func waitingNotice(res worker.Result) string {
 	parts := []string{fmt.Sprintf("memql: waiting for %s, whose connection is steady", pl.MachineWords(res.MachineName, res.WorkerId))}
 	for _, p := range res.PassedOver {
-		parts = append(parts, fmt.Sprintf("%s is free, but its connection %s", pl.MachineWords(p.MachineName, p.WorkerId), droppedWords(p.Health)))
+		parts = append(parts, fmt.Sprintf("passed over %s, whose connection %s", pl.MachineWords(p.MachineName, p.WorkerId), droppedWords(p.Health)))
 	}
 	return strings.Join(parts, "; ")
 }
 
 // ranOnUnsteadyNotice is the log line of a step that ran on a machine whose
-// connection had dropped inside the window, because no steady machine could
-// take it then.
-func ranOnUnsteadyNotice(res worker.Result) string {
-	return fmt.Sprintf("memql: the step ran on %s, whose connection %s; no machine with a steady connection could take it",
-		pl.MachineWords(res.MachineName, res.WorkerId), droppedWords(*res.Connection))
+// connection had dropped inside the window: because no steady machine could
+// take it then, or, for a retry the driver pinned to its machine (D8), because
+// it was pinned -- a pinned plan has no other machine, steady or not, so
+// claiming none could take it would be a statement nobody checked.
+func ranOnUnsteadyNotice(res worker.Result, pinned bool) string {
+	why := "no machine with a steady connection could take it"
+	if pinned {
+		why = "this retry was pinned to it"
+	}
+	return fmt.Sprintf("memql: the step ran on %s, whose connection %s; %s",
+		pl.MachineWords(res.MachineName, res.WorkerId), droppedWords(*res.Connection), why)
 }
 
 // nodeLossConnectionSentence is added to a node-lost failure on an unsteady

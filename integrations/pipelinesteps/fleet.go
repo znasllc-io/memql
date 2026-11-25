@@ -303,7 +303,7 @@ func (f *Fleet) runStep(ctx context.Context, req pl.StepRequest, run StepRun, se
 	// window says so where the owner reads the step (network-aware fleet
 	// selection): no steady machine could take it then.
 	if unsteady(result) {
-		capture.Notice(ranOnUnsteadyNotice(result))
+		capture.Notice(ranOnUnsteadyNotice(result, run.PinWorker != ""))
 	}
 
 	// The step's files reach the Library as a Job's do on the cluster

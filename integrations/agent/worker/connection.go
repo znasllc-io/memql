@@ -32,8 +32,9 @@ package worker
 //
 // It narrows nothing and admits nothing: every machine it orders is one the
 // plan's consents, labels and contracts already admitted, and a failed read
-// leaves a machine counted steady -- the preference is never a reason to fail
-// or hold a step that today would run.
+// leaves a machine counted steady. It never fails a step, and it holds one only
+// to wait for a steady machine that is busy with work (D1) -- a step that would
+// run today on an unsteady machine waits for that steady machine instead.
 
 import (
 	"context"
@@ -129,6 +130,14 @@ type ConnectionDropReader interface {
 	ConnectionDrops(ctx context.Context, ownerUserId, registrationId string, since time.Time) ([]workerservice.ConnectionDrop, error)
 }
 
+// RunningStepReader counts a machine's running pipeline steps from the durable
+// activity rows (EngineStore.RunningPipelineSteps). Optional, found by a type
+// assertion like ConnectionDropReader; without it the evidence is the row's
+// activeCount and this replica's live count alone.
+type RunningStepReader interface {
+	RunningPipelineSteps(ctx context.Context, ownerUserId, registrationId string) (int, error)
+}
+
 // healthFrom counts the drops inside [now-window, ...). The start is
 // INCLUSIVE, as the query's `droppedAt >= since` is, and there is no upper
 // bound: a drop is stamped on the clock of the replica that held the stream,
@@ -220,12 +229,20 @@ func (d *Dispatcher) readConnectionHealth(ctx context.Context, ownerUserId strin
 }
 
 // hasWorkInFlight says a machine's busy refusal will clear by itself (D6): the
-// cluster has admitted work on it that has not finished -- its registration's
-// activeCount, flushed by the replica holding its stream at most a heartbeat
-// ago, or this replica's live count when this replica holds it. Cockpit answers
+// cluster has work on it that has not finished. Cockpit answers
 // pipeline_capacity_busy for low disk and memory headroom too, which waiting
 // does not fix when nothing of ours is running there.
-func (d *Dispatcher) hasWorkInFlight(c Candidate) bool {
+//
+// THREE SOURCES, because the obvious one lags. The registration's activeCount
+// is flushed by the replica holding the stream only every heartbeat batch (up to
+// about 30 s), and the case D1 exists for is a run's fleet lanes starting
+// together: the first takes the steady machine's slot and the rest are refused
+// busy seconds later, while the row still says 0. So: the row, this replica's
+// live count when it holds the stream, and then the durable activity rows the
+// sending replica writes before the call leaves (RunningStepReader) -- read only
+// on this rare path, and a failed read counts as no work, which passes the
+// machine over as before.
+func (d *Dispatcher) hasWorkInFlight(ctx context.Context, ownerUserId string, c Candidate) bool {
 	if c.ActiveCount > 0 {
 		return true
 	}
@@ -234,7 +251,16 @@ func (d *Dispatcher) hasWorkInFlight(c Candidate) bool {
 			return true
 		}
 	}
-	return false
+	if d.steps == nil {
+		return false
+	}
+	n, err := d.steps.RunningPipelineSteps(ctx, ownerUserId, c.RegistrationId)
+	if err != nil {
+		d.logger.Warn("worker router: could not read a machine's running pipeline steps; not waiting for it",
+			"owner_user_id", ownerUserId, "registration_id", c.RegistrationId, "error", err)
+		return false
+	}
+	return n > 0
 }
 
 // passedOver is the unsteady candidates a fleet step did not try, with their

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -40,6 +41,47 @@ type fakeFleet struct {
 	drops     map[string][]workerservice.ConnectionDrop
 	dropsErr  error
 	dropReads []string
+
+	// activities are the v1:worker:activity rows a dispatching or receiving
+	// replica writes (activity.go), shared like the database: what one replica
+	// writes before it sends a call, another reads back as work in flight.
+	activityMu sync.Mutex
+	activities map[string]map[string]any
+}
+
+// writeMachineActivity stores the row the way the two mutations would: create
+// writes it whole, update merges the fields it names.
+func (f *fakeFleet) writeMachineActivity(_ context.Context, name string, args map[string]any) error {
+	f.activityMu.Lock()
+	defer f.activityMu.Unlock()
+	if f.activities == nil {
+		f.activities = map[string]map[string]any{}
+	}
+	id, _ := args["activityId"].(string)
+	row := f.activities[id]
+	if row == nil || name == "createMachineActivity" {
+		row = map[string]any{"status": "queued"}
+		f.activities[id] = row
+	}
+	for k, v := range args {
+		row[k] = v
+	}
+	return nil
+}
+
+// RunningPipelineSteps answers as the engine store does from
+// activeMachineActivity: the machine's running pipeline-step activities.
+func (f *fakeFleet) RunningPipelineSteps(_ context.Context, _ string, registrationId string) (int, error) {
+	f.activityMu.Lock()
+	defer f.activityMu.Unlock()
+	n := 0
+	for _, row := range f.activities {
+		worker, _ := row["workerId"].(string)
+		if sameRegistration(worker, registrationId) && row["status"] == "running" && row["label"] == "workerHost."+PipelineStepAction {
+			n++
+		}
+	}
+	return n, nil
 }
 
 // ConnectionDrops answers as myWorkerConnectionDrops does: one machine's drops

@@ -54,6 +54,9 @@ type Dispatcher struct {
 	// network-aware placement (connection.go). Nil reads none, and placement is
 	// exactly what it was before drops existed.
 	drops ConnectionDropReader
+	// steps reads a machine's running pipeline steps, the evidence that its
+	// busy refusal will clear (connection.go hasWorkInFlight).
+	steps RunningStepReader
 }
 
 // Store is the persistence side of the dispatcher (resolve agent
@@ -348,6 +351,7 @@ func NewDispatcher(opts Options) (*Dispatcher, error) {
 	}
 	d.destination, _ = opts.Store.(destinationChecker)
 	d.drops, _ = opts.Store.(ConnectionDropReader)
+	d.steps, _ = opts.Store.(RunningStepReader)
 	if opts.Store != nil {
 		d.router = NewRouter(opts.Store, opts.Logger, clock)
 	}
@@ -598,7 +602,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 			// refused busy with nothing of ours running (low disk or memory), or
 			// for any other reason, is passed as it is today (D6).
 			if req.Purpose == PurposePipeline && req.Connection.WaitForSteady && steadyBusy == nil &&
-				measured && health.Steady() && res.ErrorCode == "pipeline_capacity_busy" && d.hasWorkInFlight(cand) {
+				measured && health.Steady() && res.ErrorCode == "pipeline_capacity_busy" && d.hasWorkInFlight(ctx, req.OwnerUserId, cand) {
 				held := res
 				steadyBusy, steadyBusyRecord = &held, record
 			}

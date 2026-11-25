@@ -95,7 +95,9 @@ func TestTheWaitNamesThePassedOverMachineOnce(t *testing.T) {
 	if err != nil || res.Status != pl.OutcomeSucceeded || calls != 4 {
 		t.Fatalf("result = %+v err = %v calls = %d", res, err, calls)
 	}
-	want := "memql: waiting for Box A, whose connection is steady; Box B is free, but its connection dropped 2 times in the last 2 hours (last at 19:44 UTC)"
+	// "Passed over", not "free": the machine was not asked, so nothing says it
+	// is free.
+	want := "memql: waiting for Box A, whose connection is steady; passed over Box B, whose connection dropped 2 times in the last 2 hours (last at 19:44 UTC)"
 	if got := strings.Count(strings.Join(sink.messages(), "\n"), want); got != 1 {
 		t.Fatalf("the waiting notice appears %d times, want once: %q", got, sink.messages())
 	}
@@ -110,7 +112,7 @@ func TestABoundedWaitEndsOnTheFreeMachine(t *testing.T) {
 		}
 		return okAnswer(), nil
 	}}
-	f, _, _, _ := newTestFleet(t, d)
+	f, _, _, sink := newTestFleet(t, d)
 	f.capacityRetry = time.Millisecond
 	f.now = func() time.Time { mu.Lock(); defer mu.Unlock(); now = now.Add(10 * time.Second); return now }
 	req := withConnectionWindow(fleetReq(), 120)
@@ -124,6 +126,9 @@ func TestABoundedWaitEndsOnTheFreeMachine(t *testing.T) {
 	last := d.reqs[len(d.reqs)-1]
 	if last.Connection.WaitForSteady || last.Connection.Window != 2*time.Hour {
 		t.Fatalf("the last dispatch asked %+v, want the window kept and no wait for a steady machine", last.Connection)
+	}
+	if want := "memql: the wait for a steady machine ran out; trying the machines it passed over"; !strings.Contains(strings.Join(sink.messages(), "\n"), want) {
+		t.Fatalf("notices = %q, want %q", sink.messages(), want)
 	}
 }
 
@@ -143,6 +148,18 @@ func TestAStepOnAnUnsteadyMachineSaysSo(t *testing.T) {
 	want := "memql: the step ran on Box B, whose connection dropped 2 times in the last 2 hours (last at 19:44 UTC); no machine with a steady connection could take it"
 	if !strings.Contains(strings.Join(sink.messages(), "\n"), want) {
 		t.Fatalf("notices = %q, want %q", sink.messages(), want)
+	}
+
+	// A retry pinned to its machine (D8) had no other machine to try, steady or
+	// not: the notice says so instead of claiming none could take it.
+	f, _, _, sink = newTestFleet(t, d)
+	run.PinWorker = "reg-b"
+	if res, err := f.RunStep(context.Background(), req, run); err != nil || res.Status != pl.OutcomeSucceeded {
+		t.Fatalf("pinned result = %+v err = %v", res, err)
+	}
+	pinned := "memql: the step ran on Box B, whose connection dropped 2 times in the last 2 hours (last at 19:44 UTC); this retry was pinned to it"
+	if all := strings.Join(sink.messages(), "\n"); !strings.Contains(all, pinned) || strings.Contains(all, "could take it") {
+		t.Fatalf("pinned notices = %q, want %q", sink.messages(), pinned)
 	}
 }
 

@@ -275,6 +275,40 @@ func (s *EngineStore) ConnectionDrops(ctx context.Context, ownerUserId, registra
 
 var _ ConnectionDropReader = (*EngineStore)(nil)
 
+// RunningPipelineSteps counts a machine's pipeline steps that some replica has
+// sent and not yet finished: its RUNNING v1:worker:activity rows of the
+// pipeline_step action (activeMachineActivity). The replica that sends a call
+// -- this one for a machine it holds, the receiving one for a forward -- writes
+// that row and marks it running before the call leaves (activity.go), so the
+// count does not wait for a heartbeat as the registration's activeCount does.
+// Placement asks it only when a steady machine refused busy (connection.go
+// hasWorkInFlight). Read fresh: the row is usually another replica's write.
+func (s *EngineStore) RunningPipelineSteps(ctx context.Context, ownerUserId, registrationId string) (int, error) {
+	if s == nil || s.Engine == nil || strings.TrimSpace(ownerUserId) == "" {
+		return 0, nil
+	}
+	call, err := langparser.RenderCall("activeMachineActivity", map[string]any{"workerId": registrationId})
+	if err != nil {
+		return 0, fmt.Errorf("machine activity read: %w", err)
+	}
+	res, err := s.Engine.Execute(memqlengine.ContextWithFreshRead(s.fleetContext(ctx, ownerUserId)), "query "+call)
+	if err != nil {
+		return 0, fmt.Errorf("machine activity read: %w", err)
+	}
+	if res == nil {
+		return 0, nil
+	}
+	n := 0
+	for _, row := range outputPayloadRows(res.OutputPayload()) {
+		if row != nil && rowString(row, "status") == "running" && rowString(row, "label") == "workerHost."+PipelineStepAction {
+			n++
+		}
+	}
+	return n, nil
+}
+
+var _ RunningStepReader = (*EngineStore)(nil)
+
 // RoutingPolicyForOwner returns the owner's active policy, or nil when they
 // have none. Nil is the COMMON case and not an error: a user who never opened
 // the Fleet page routes on DefaultPolicy.

@@ -234,10 +234,14 @@ func TestRetriesParseStrictly(t *testing.T) {
 		if _, written := returned["retries"]; !written {
 			t.Fatalf("the shipped template returns %v: it must state the portable retry limits, so an installation that copies it sees them", returned)
 		}
-		// The connection window is written out for the same reason: an
-		// installation that copies the template sees the window it is choosing.
-		if _, written := returned["connection"]; !written {
-			t.Fatalf("the shipped template returns %v: it must state the portable connection window, so an installation that copies it sees it", returned)
+		// The connection window is deliberately NOT written out, though its
+		// absence means the same 120 minutes: every run captures this source,
+		// a re-run reuses the capture (capturePipelinePolicy), and an engine
+		// older than the setting refuses an unknown key, so a template that
+		// wrote it would make every run opened on this release unrunnable again
+		// after a rollback. The template's comment names the setting instead.
+		if _, written := returned["connection"]; written {
+			t.Fatalf("the shipped template returns %v: it must not write connection, which an older engine re-running a captured run refuses", returned)
 		}
 		got, err := parseComputePlacement(value)
 		if err != nil {

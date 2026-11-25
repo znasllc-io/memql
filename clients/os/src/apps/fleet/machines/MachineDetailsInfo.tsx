@@ -42,7 +42,7 @@ export function MachineDetailsInfo({ machine, now, machineClass, usableBytes, dr
       <HardwareGroup machine={machine} machineClass={machineClass} usableBytes={usableBytes} now={now} heading={false} />
     </MachineDetailsSection>
     <MachineDetailsSection title="Connection">
-      <PageHelp title="Connection"><p>Online means Cockpit is connected. Active calls reflect the last heartbeat and may trail newly started work. Round trip measures the cluster’s ping to this machine. A missing ping or clock offset means Cockpit has not reported that measurement; it does not mean zero.</p><p>A connection drop is a connection that ended while the machine was running work, or that a new connection replaced before the cluster saw the old one end. Cockpit’s own reconnects are not drops. Pipeline steps wait for a machine with no recent drop when one can take them.</p></PageHelp>
+      <PageHelp title="Connection"><p>Online means Cockpit is connected. Active calls reflect the last heartbeat and may trail newly started work. Round trip measures the cluster’s ping to this machine. A missing ping or clock offset means Cockpit has not reported that measurement; it does not mean zero.</p><p>A connection drop is a connection that ended while the machine was running work, or that a new connection replaced before the cluster saw the old one end. Cockpit’s own reconnects are not drops. Pipeline steps try machines with no recent drop first, and a fleet step waits for one that is busy rather than start on a machine with drops; a pool step only prefers it.</p></PageHelp>
       <Facts>
         <Fact label="Status" value={status} />
         {setup ? <Fact label="Setup" value={setup} /> : null}

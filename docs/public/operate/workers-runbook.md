@@ -675,7 +675,8 @@ replica saw it end (`cause: replaced`), or it ended with a tool call, app
 session, app sign-in, model call or model pull in flight (`cause:
 workInFlight`); Cockpit reconnects on purpose only when idle. A drain, a
 revocation or an expired token is never a drop. The replica's "worker
-disconnected" log line carries `drop=<cause>` when it wrote one. Rows are the
+disconnected" log line carries `drop=<cause>` whenever it classified the end as
+a drop; a failed write of the row is logged separately. Rows are the
 owner's (owner tier, cluster owners too), are read per machine by
 `myWorkerConnectionDrops`, and expire after seven days. Pipeline steps try
 machines without a drop in the run's window first ([Retries and

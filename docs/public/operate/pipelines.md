@@ -1779,8 +1779,9 @@ hours by default) is **unsteady**:
 
 - every fleet or pool step tries the steady machines first, in your routing
   strategy's order, and the unsteady ones after, fewest drops first;
-- a `fleet` step waits for a steady machine that is busy running work rather
-  than start on an unsteady one, the way it waits for capacity. It does not
+- a step placed on your fleet (`placement: fleet`, or implied by its needs or
+  native execution) waits for a steady machine that is busy running work
+  rather than start on an unsteady one, the way it waits for capacity. It does not
   wait for one that is short of disk or memory with nothing of ours running,
   held by an operator's fence or offline, and when no steady machine can take
   it, it runs on the unsteady one. A retry's bounded wait that runs out tries
@@ -1799,7 +1800,7 @@ machine's Details > Connection.
 portable default is:
 
 ```memql fragment
-return {fleetWaitSeconds: 0, cloudFallback: false, retries: {sameMachine: 2, delaysSeconds: [30, 120], otherMachines: true}, connection: {unsteadyMinutes: 120}}
+return {fleetWaitSeconds: 0, cloudFallback: false, retries: {sameMachine: 2, delaysSeconds: [30, 120], otherMachines: true}}
 ```
 
 An installation whose policy names no `retries`, or that has no placement policy
@@ -1809,9 +1810,10 @@ a boolean. Once `retries` is written, all three are required and nothing else is
 accepted. `sameMachine: 0` with `otherMachines: false` stops every retry but a
 pool step's one move to the cluster, which `cloudFallback` decides.
 `connection.unsteadyMinutes` is an integer from 0 to 1440; 0 turns the
-preference off, and a policy that names no `connection` gets 120. An engine
-older than the setting refuses a policy that writes it, so add it to an
-installed policy only once no rollback below this release is planned. A policy
+preference off, and a policy that names no `connection`, as the portable
+default does not, gets 120. A run keeps its policy's source for its re-runs, and
+an engine older than the setting refuses a policy that writes it, so add it to
+an installed policy only once no rollback below this release is planned. A policy
 that cannot be read refuses every run with a command step, as
 `pipeline_stage_invalid` scoped `computePlacement`, naming the field. A run
 keeps the policy it started with, on every replica.

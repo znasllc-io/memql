@@ -5442,8 +5442,12 @@ strategy's order, then unsteady ones by fewest drops, then oldest last drop.
 With `WaitForSteady` (every step but a pool step, `connectionPreference` in
 `integrations/pipelinesteps/fleet_connection.go`) the candidate loop returns the
 first steady machine's `pipeline_capacity_busy` refusal on reaching an unsteady
-candidate, when that steady machine has work in flight (`hasWorkInFlight`), so
-the executor's capacity wait asks again; the unsteady machines ride on
+candidate, when that steady machine has work in flight (`hasWorkInFlight`: the
+registration's `activeCount`, this replica's live count, or a RUNNING
+pipeline-step `v1:worker:activity` row, which the replica sending a call writes
+before the call leaves -- the row count alone lags a heartbeat batch, up to about
+30 s, and a run's fleet lanes are refused busy seconds after the first takes the
+slot), so the executor's capacity wait asks again; the unsteady machines ride on
 `Result.PassedOver`, and the step's log names them. A placed attempt whose
 bounded wait runs out while passing a machine over dispatches once more without
 the wait before `waitRanOut`. The executor writes the reason into the step's log
@@ -5461,13 +5465,17 @@ loses one of the two); the security audit trail as the source; round trip as a
 signal; pool steps waiting and then going to the cloud (the owner chose no
 extra cloud spend: the Linux machines drop about once a day).
 
-**Stop conditions.** The preference never fails or holds a step that would run
-today: a failed drop read counts that machine steady, a step whose only
-eligible machines are unsteady runs on the best of them, a pool step only
+**Stop conditions.** The preference never fails a step, and holds one only to
+wait for a steady machine that is busy with work (D1): a failed drop read counts
+that machine steady, a failed read of running steps counts no work, a step whose
+only eligible machines are unsteady runs on the best of them, a pool step only
 orders, a steady machine that refused for anything but busy-with-work is passed
-as before, and a bounded wait ends on the free machine. A first attempt's wait
-for a busy steady machine is bounded by the run's ceiling, as every capacity
-wait is.
+as before, and a bounded wait ends with one try on the machines it passed over.
+A first attempt's wait for a busy steady machine is bounded by the run's
+ceiling, as every capacity wait is. The shipped placement template leaves
+`connection` out (absence is 120): a run captures the template's source and a
+re-run reuses it, so a template writing the key would make every run opened on
+this release unrunnable again after a rollback to an engine that refuses it.
 
 **Invariants.** It orders what the plan's consents, labels and contracts
 admitted and admits nothing. Nothing a model writes can set it. A drop is never
@@ -5488,9 +5496,15 @@ replica and are written to the invocation's routing record (`connection`,
 before the machine reconnected is not recorded (one of eight on 2026-11-24). A
 front-door restart that closes every stream at once records a drop for every
 machine with work in flight at that moment. A machine that slept for less than
-the keepalive window reads as replaced. With one eligible machine nothing is
-avoided; the step only says why. A busy steady machine can hold a fleet step's
-first attempt until the run's ceiling.
+the keepalive window reads as replaced, and so does a re-pair or reclaim while
+the old process is still connected. Cockpit stopping or restarting with work in
+flight (SIGTERM, a service restart, an upgrade: `Runner.Close` does not wait for
+`busy()`) is filed as a `workInFlight` drop, and so is an idle deliberate
+reconnect that races a call the cluster registered as pending just before
+sending it. With one eligible machine nothing is avoided; the step only says
+why. A busy steady machine can hold a fleet step's first attempt until the
+run's ceiling. `droppedAt >= since` and the read's sort compare RFC3339Nano text,
+whose fraction length varies, so the window's start is exact to the second.
 
 **Not verified.** The classification on real streams in the cluster, and the
 seven-of-eight figure beyond one afternoon of one Mac. The Fleet fact has
@@ -5511,7 +5525,11 @@ component tests and no browser check.
 `TestAPinnedRetryIsNotReorderedButCarriesItsHealth`, `TestAFailedDropReadLeavesTheOwnersOrder`,
 `TestNoDropsAndNoWindowRouteExactlyAsBefore`,
 `TestConnectionPreferenceIsRefusedOutsideThePipelinePurpose` and the hop test
-`TestPipelineWaitsForASteadyMachineBusyWithWork` (`integrations/agent/worker`);
+`TestPipelineWaitsForASteadyMachineBusyWithWork` and
+`TestPipelineWaitsForASteadyMachineRunningWorkTheOtherReplicaAdmitted` (the
+row's count still 0, the sibling really running the first lane), and
+`TestRunningPipelineStepsCountsAnotherReplicasRunningStep` (db)
+(`integrations/agent/worker`);
 `TestTheConnectionWindowReachesTheRequest`, `TestTheWaitNamesThePassedOverMachineOnce`,
 `TestABoundedWaitEndsOnTheFreeMachine`, `TestAStepOnAnUnsteadyMachineSaysSo`,
 `TestANodeLossOnAnUnsteadyMachineSaysItsConnectionHadDropped`,

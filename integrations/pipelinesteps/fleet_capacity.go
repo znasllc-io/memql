@@ -154,7 +154,7 @@ func (f *Fleet) dispatchWhenCapacityAvailable(ctx context.Context, req pl.StepRe
 			// is dropped, and only once.
 			if pref.WaitForSteady && len(result.PassedOver) > 0 {
 				pref.WaitForSteady = false
-				capture.Notice("memql: the wait for a steady machine ran out; trying the free machine")
+				capture.Notice("memql: the wait for a steady machine ran out; trying the machines it passed over")
 				continue
 			}
 			res := waitRanOut(run, result)

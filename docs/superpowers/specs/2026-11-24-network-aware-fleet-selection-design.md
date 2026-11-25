@@ -4,7 +4,11 @@
 - **Status:** approved by the owner on 2026-11-24. Four forks were put to the
   owner and answered in the 2026-11-24 brainstorm (D1 to D3, and D10 after a
   builder's read of the first draft). The rest are the builder's calls, marked
-  as such, and were approved with this record.
+  as such, and were approved with this record. Corrected during the build, after
+  the final review, on two points, each with its reason below: D6's evidence of
+  work in flight (section 2) and the template's `connection` (section 7). The
+  maintained account is "Fleet steps prefer machines whose connection holds" in
+  `docs/internal/ops/harness-decisions.md`.
 - **What it is:** a fleet pipeline step goes to a machine whose connection to
   the cluster has not dropped recently, and waits for one that is busy running
   work. A machine whose connection dropped is used only when no steady machine
@@ -146,9 +150,14 @@ order exactly.
 ### D6 -- Only a steady machine busy with running work is waited for (builder's call)
 
 The wait in D1 is for a steady machine that refused with
-`pipeline_capacity_busy` while it has work the cluster admitted in flight (its
-registration's `activeCount`, or the holding replica's live count when this
-replica holds it). Cockpit answers `pipeline_capacity_busy` for five different
+`pipeline_capacity_busy` while it has work the cluster admitted in flight: its
+registration's `activeCount`, this replica's live count when it holds the
+stream, or a RUNNING pipeline-step `v1:worker:activity` row. *Corrected during
+the build:* the first draft named only the first two, and the final review
+found that the row's count is flushed only every heartbeat batch (up to about
+30 s), so a run's fleet lanes, refused busy seconds after the first took the
+steady machine's slot on the other replica, were not held. The replica sending
+a call writes the activity row before the call leaves, so it does not lag. Cockpit answers `pipeline_capacity_busy` for five different
 things (`cockpit/internal/worker/tools/pipeline_step.go`): all slots taken, a
 reconciliation under way, free disk below `min_free_disk_mib` (an invalid
 setting included), and memory or CPU headroom, before and after the clone.
@@ -401,13 +410,13 @@ sibling still re-checks the machine's consent and contract.
 ## 7. The policy setting
 
 `pipelineComputePlacementPolicy` (`dsl/pipelines/automations.memql`) gains an
-optional `connection` block, and its portable default returns it:
-
-```memql
-return {fleetWaitSeconds: 0, cloudFallback: false,
-        retries: {sameMachine: 2, delaysSeconds: [30, 120], otherMachines: true},
-        connection: {unsteadyMinutes: 120}}
-```
+optional `connection` block, `connection: {unsteadyMinutes: 120}`. *Corrected
+during the build:* the portable template does NOT write it, though the first
+draft did. A run captures the template's source and a re-run reuses the capture,
+and an engine older than the setting refuses an unknown key, so a template that
+wrote it would make every run opened on this release unrunnable again after a
+rollback. Absence means 120, so the behaviour is the same; the template's comment
+names the setting.
 
 - `pipelines.ComputePlacementPolicy` gains `Connection ConnectionPolicy`
   (`json:"connection"`), with `DefaultConnectionPolicy()` returning 120.
@@ -541,8 +550,8 @@ default. The owner can turn it off by installing a policy with
 - **Rolling the engine back below this release** is safe while no installed
   policy writes `connection`: an older engine's parser refuses an unknown key,
   so an installation should add `connection` to its installed policy only once
-  no such rollback is planned. The engine's own template ships with the engine
-  and rolls back with it.
+  no such rollback is planned. The portable template leaves the key out for the
+  same reason (section 7).
 - **Not verified until deployed:** the classification on real streams in the
   cluster, and the seven-of-eight figure beyond one afternoon of one Mac.
 
