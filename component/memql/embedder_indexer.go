@@ -81,24 +81,6 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 )
 
-// retiredEmbedderBindingPrefix marks a binding row that records a model no
-// longer active, whose index is kept for a while (recordRetiredEmbedder).
-const retiredEmbedderBindingPrefix = "retired-"
-
-// RetiredEmbedderBindingID is the row id that records a retired model's index:
-// "retired-" and the 16 hex characters of its vector table's name
-// (EmbeddingVectorTable), so the row and the table it keeps cannot name two
-// different models. The width is not part of the id because a model produces
-// one width; the row carries it. Empty for a reference or width that has no
-// table.
-func RetiredEmbedderBindingID(providerRef string, dims int) string {
-	table, err := EmbeddingVectorTable(providerRef, dims)
-	if err != nil {
-		return ""
-	}
-	return retiredEmbedderBindingPrefix + table[strings.LastIndexByte(table, '_')+1:]
-}
-
 // IndexerFor answers whose machines embed for a binding: its indexer, and
 // whether it is a fleet model at all. A vendor binding has no indexer whatever
 // its row says, because a vendor has no machines.

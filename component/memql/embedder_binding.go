@@ -36,6 +36,24 @@ const EmbedderBindingConceptID = "v1:platform:embedderBinding"
 // ActiveEmbedderBindingID is the literal row id of the active binding.
 const ActiveEmbedderBindingID = "active"
 
+// retiredEmbedderBindingPrefix marks a binding row that records a model no
+// longer active, whose index is kept for a while (recordRetiredEmbedder).
+const retiredEmbedderBindingPrefix = "retired-"
+
+// RetiredEmbedderBindingID is the row id that records a retired model's index:
+// "retired-" and the 16 hex characters of its vector table's name
+// (EmbeddingVectorTable), so the row and the table it keeps cannot name two
+// different models. The width is not part of the id because a model produces
+// one width; the row carries it. Empty for a reference or width that has no
+// table.
+func RetiredEmbedderBindingID(providerRef string, dims int) string {
+	table, err := EmbeddingVectorTable(providerRef, dims)
+	if err != nil {
+		return ""
+	}
+	return retiredEmbedderBindingPrefix + table[strings.LastIndexByte(table, '_')+1:]
+}
+
 // EmbedderBinding is the cluster's active embedding configuration.
 type EmbedderBinding struct {
 	// ProviderRef is a provider record name (embedding3Small) or a fleet
