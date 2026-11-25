@@ -6,7 +6,7 @@ verification is tracked separately from a passing typecheck.
 
 | Surface | Fetch placeholders and navigation |
 | --- | --- |
-| Cluster | Mesh and Agents retain shared live-list skeletons; Audit Trail, Data Origins, dead letters, Modules, module details, readiness, automation map and loop stops use matching placeholders. |
+| Cluster | Mesh and Agents retain shared live-list skeletons; Audit Trail, Data Origins, dead letters, Modules, module details, readiness, automation map and loop stops use matching placeholders. Memory search uses a detail placeholder until its status arrives, a form placeholder for its choices, and an inline one for the model on Settings' link row. |
 | Fleet | Machine directory and overview, recent work, sharing picker, pull history, app sessions, delegation and machine routing, all three Model Library views, and call history. Machine views now use the same `LocalTabs` as Model Library, Activity, Workbenches and Task Routing. |
 | Accounts | Account detail bands, credential collections and account live lists. |
 | Users | Shared directory/membership live lists, with a detail skeleton while a deep-linked group is first read. |

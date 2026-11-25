@@ -14,6 +14,7 @@ import { nexusApprovalScenes, NEXUS_APPROVAL_CLICKS } from "./nexusApprovalScene
 import { fleetEquipmentScenes } from "./fleetEquipmentScenes";
 import { setupWizardScenes } from "./setupWizardScenes";
 import { profileScenes } from "./profileScenes";
+import { memorySearchScenes } from "./memorySearchScenes";
 import { fleetDeviceScenes } from "./fleetDeviceScenes";
 import { mapScenes } from "./mapScenes";
 import { deployableStatisticsScenes } from "./deployableStatisticsScenes";
@@ -1076,6 +1077,8 @@ const VIEWS: Record<
   ...setupWizardScenes(WindowBody),
   // Your profile (memql#6220): `profile`, `profile-photo`, `profile-quiet`.
   ...profileScenes(WindowBody),
+  // Cluster > Settings > Memory search: `memory-search` and its states (memorySearchScenes.tsx).
+  ...memorySearchScenes(WindowBody),
   ...fleetDeviceScenes(WindowBody),
   "users-groups": usersWizardView("groups"),
   "users-roles": usersWizardView("roles"),

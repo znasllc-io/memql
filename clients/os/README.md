@@ -2925,6 +2925,43 @@ Installation proposals use the same separate confirmation when operator configur
 selects `landingMode: "owner_push"`. A landed pin becomes a reviewed installation
 choice; it does not apply a plan. Reconnecting and status refreshes never land changes.
 
+### Memory search
+
+Cluster > Settings > **Memory search** (`src/apps/cluster/memorysearch/`; design
+record `docs/superpowers/specs/2026-11-23-memory-search-model-switch-design.md`,
+section 8) is where an owner sees which model memory search uses, whose machines
+index it, how many items the index holds and what waits, and changes it. Settings
+links to it with a row showing the model in use. Fleet's model board keeps the
+bound model locked and says where to change it.
+
+- **THE PART IS THE GATE.** The section and the link row require
+  `app:cluster/memorysearch`, seeded on the owner alone, which the six
+  `memorySearch*` builtins check themselves; a person without it reads nothing
+  and is offered nothing. The Start page does not offer the section: it is a page
+  of Settings.
+- **POLLED, NEVER SUBSCRIBED.** The status is a row the engine computes per call
+  and the index job's run rows broadcast nothing (ruling R3), so the page reads it
+  every 5 s while a switch runs and every 30 s otherwise, only while visible and
+  connected (`useReleaseRead`). Every act answers the status after it, shown at
+  once; a refusal is the engine's sentence beside the act, and the status is read
+  again. No act is repeated.
+- **EVERY CHANGE ASKS FIRST**, in place (`InPlaceAsk`), saying what happens: the
+  whole index rebuilt in the background on your machines, or on the cluster's
+  vendor account with the estimated item count, search keeping the current model
+  until the rebuild finishes, and the current index kept for 30 days. While a
+  switch runs before its flip, no other model and no Switch back is offered (one
+  switch at a time); its progress shows the items done, clamped to the ESTIMATED
+  total (the index plus its backlog), with Cancel. A switch held for failed or
+  unrebuildable items offers Switch anyway and Cancel.
+- **SWITCH BACK NAMES THE MODEL THE BINDING REPLACED** (`previousRef`), never a
+  cancelled switch's partial index, which `retained` also lists; it is offered only
+  while that model can be chosen.
+- **THE TAKE-OVER IS OFFERED ONLY WHERE IT CHANGES SOMETHING**: when the status's
+  `takeOver` says choosing the model in use again would make you its indexer
+  (ruling R13), as "Index on my machines", during a switch too.
+- QA views: `memory-search*` (`qa/README.md`). Tests:
+  `test/cluster/memorySearch.test.tsx`.
+
 ### Mesh (epic memql#5338)
 
 `src/apps/cluster/mesh/` answers the question an operator arrives with -- is

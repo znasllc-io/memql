@@ -15,8 +15,11 @@ import { ReadinessSection } from "./readiness/ReadinessSection";
 import { CapacitySection } from "./capacity/CapacitySection";
 import { ClusterSection } from "../settings/ClusterSection";
 import { BenchmarksSection } from "../settings/BenchmarksSection";
+import { MemorySearchLink, MemorySearchSection } from "./memorysearch/MemorySearchSection";
+import { MEMORY_SEARCH_RESOURCE } from "./memorysearch/useMemorySearch";
 import {
   CLUSTER_SECTIONS,
+  CLUSTER_START_SECTIONS,
   LocalClusterSettingsStore,
   type ClusterSettings,
   type ClusterSettingsStore,
@@ -119,8 +122,9 @@ function ClusterRuntimeApp({
   if (sectionId === "overview") return <><ReadinessSection title="Overview" />{accessAdmits("app:settings") && accessAdmits("app:settings/cluster") ? <ClusterSection inline /> : null}<div className="os-cluster"><Subhead>Explore</Subhead><RecordList as="ul" label="Cluster details"><RecordRow name="Runtime" secondary="Nodes, capacity and installed capabilities" onOpen={() => navigate("runtime", { fromContent: true })} />{holds("read", "app:cluster/updates") ? <RecordRow name="Updates" secondary="Published versions available to this installation" onOpen={() => navigate("updates", { fromContent: true })} /> : null}</RecordList></div></>;
   if (sectionId === "runtime") return <div className="os-cluster os-app-stack"><Head title="Runtime" /><RecordList as="ul" label="Runtime components">{CLUSTER_SECTIONS.filter(section => section.parent === "runtime" && (!section.requires || holds("read", section.requires))).map(section => <RecordRow key={section.id} name={section.name} onOpen={() => navigate(section.id, { fromContent: true })} />)}</RecordList></div>;
   if (sectionId === "settings") {
-    return <ClusterSettingsSection settings={settings} update={update} />;
+    return <ClusterSettingsSection settings={settings} update={update} visible={windowVisible} openMemorySearch={() => navigate("memorysearch", { fromContent: true })} />;
   }
+  if (sectionId === "memorysearch") return <MemorySearchSection visible={windowVisible} />;
   if (sectionId === "logs") {
     return (
       <AppLogsSection
@@ -144,9 +148,13 @@ function ClusterRuntimeApp({
 function ClusterSettingsSection({
   settings,
   update,
+  visible,
+  openMemorySearch,
 }: {
   settings: ClusterSettings;
   update: (patch: Partial<ClusterSettings>) => void;
+  visible: boolean;
+  openMemorySearch: () => void;
 }) {
   return (
     <div className="os-cluster">
@@ -155,7 +163,7 @@ function ClusterSettingsSection({
         <DetailsSection title="General">
           <SettingRow label="Start page">
             <Select id="cluster-start-page" label="Open Cluster on" value={settings.defaultSection} onChange={defaultSection => update({ defaultSection })}>
-              {CLUSTER_SECTIONS.map(section => <option key={section.id} value={section.id}>{section.name}</option>)}
+              {CLUSTER_START_SECTIONS.map(section => <option key={section.id} value={section.id}>{section.name}</option>)}
             </Select>
             <p className="os-caption">Used the next time you open Cluster.</p>
           </SettingRow>
@@ -163,6 +171,9 @@ function ClusterSettingsSection({
             <Switch checked={settings.showInactiveAgents} onChange={showInactiveAgents => update({ showInactiveAgents })}>Show inactive agents</Switch>
           </SettingRow>
         </DetailsSection>
+        {/* The cluster-wide setting, for those who hold its part (the owner,
+            by seed); the preferences above are this browser's. */}
+        {holds("read", MEMORY_SEARCH_RESOURCE) ? <MemorySearchLink visible={visible} onOpen={openMemorySearch} /> : null}
       </Details>
     </div>
   );

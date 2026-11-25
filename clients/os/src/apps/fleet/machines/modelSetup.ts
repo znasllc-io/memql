@@ -57,7 +57,7 @@ export function assignmentProposal(choices: ModelChoices, modelId: string, purpo
   const model = view.catalog.find(m => m.modelId === modelId);
   for (const purpose of purposes) {
     if (!MODEL_PURPOSES.some(([id]) => id === purpose)) return { choices, refusal: "That task is unavailable." };
-    if (purpose === "embeddings" && view.boundEmbeddingModel && modelId !== view.boundEmbeddingModel) return { choices, refusal: `Memory search keeps ${view.boundEmbeddingModel}. Switching requires a reindex.` };
+    if (purpose === "embeddings" && view.boundEmbeddingModel && modelId !== view.boundEmbeddingModel) return { choices, refusal: `Memory search keeps ${view.boundEmbeddingModel}. Change it in Cluster > Settings > Memory search.` };
     if (modelId) {
       if (!model?.installed) return { choices, refusal: "Install this model before assigning it." };
       if (model.blocked) return { choices, refusal: model.blocked };

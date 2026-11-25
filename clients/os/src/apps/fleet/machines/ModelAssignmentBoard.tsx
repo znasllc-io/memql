@@ -155,7 +155,7 @@ export function ModelAssignmentBoard({ view, choices, onChange, onSave, onDiscar
           </div>;
         })}</div>
         <p id={helpId} className="os-caption fleet-assignment-hint">Select a model, then a task. Or drag it into place.</p>
-        {view.boundEmbeddingModel ? <p className="os-caption">Memory search keeps {view.boundEmbeddingModel}. Switching requires a reindex.</p> : null}
+        {view.boundEmbeddingModel ? <p className="os-caption">{`Memory search keeps ${view.boundEmbeddingModel}. Change it in Cluster > Settings > Memory search.`}</p> : null}
         <span className="os-sr-only" role="status">{message}</span>
       </section>
     </div>

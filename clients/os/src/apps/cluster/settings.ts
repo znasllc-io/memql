@@ -19,8 +19,9 @@ import type { OsAppSection } from "../../system/registry";
 
 /**
  * The sections this app declares, in manifest order. Exported because the
- * manifest and the settings picker must offer the same set: a preference
- * naming a section that no longer exists is what `sanitize` repairs.
+ * manifest and the Start page picker are built from the same list (the picker
+ * from CLUSTER_START_SECTIONS, below): a preference naming a section that no
+ * longer exists is what `sanitize` repairs.
  *
  * ===========================================================================
  * THE ROLE FLOORS ARE ENGINE FACTS, NOT HOUSE STYLE
@@ -59,6 +60,13 @@ import type { OsAppSection } from "../../system/registry";
  * Agents have none: `v1:cluster:node` declares no row tier, so every signed-in
  * person can already read these rows, and a section floor would be editorial
  * rather than a mirror of a gate. It inherits the app's own `app:cluster`.
+ *
+ * MEMORY SEARCH IS `app:cluster/memorysearch`, seeded on the owner alone, and a
+ * mirror like Automations: its six builtins (`memorySearchStatus`, ...,
+ * component/memql/memory_search_builtins.go) declare
+ * `@requiresCapability(..., "app:cluster/memorysearch")`, because the model
+ * decides whose machines receive every person's memory text. A page of
+ * Settings (`parent`), opened from its link row there.
  */
 export const CLUSTER_SECTIONS: OsAppSection[] = [
   { id: "overview", name: "Overview" },
@@ -74,9 +82,18 @@ export const CLUSTER_SECTIONS: OsAppSection[] = [
   { id: "agents", name: "Agents", parent: "runtime" },
   { id: "logs", name: "Logs", requires: "app:cluster/logs" },
   { id: "settings", name: "Settings" },
+  { id: "memorysearch", name: "Memory search", parent: "settings", requires: "app:cluster/memorysearch" },
 ];
 
-export const CLUSTER_SECTION_IDS = CLUSTER_SECTIONS.map((s) => s.id);
+/**
+ * The sections the Start page offers: every section but Memory search, which is
+ * a page OF Settings, reached from its link row there, and not a place to open
+ * the app on. So the preference offers what it offered before the page existed,
+ * and a stored value naming it is repaired like any unknown one.
+ */
+export const CLUSTER_START_SECTIONS = CLUSTER_SECTIONS.filter((s) => s.id !== "memorysearch");
+
+export const CLUSTER_START_SECTION_IDS = CLUSTER_START_SECTIONS.map((s) => s.id);
 
 export interface ClusterSettings {
   version: 1;
@@ -126,7 +143,7 @@ export function sanitizeClusterSettings(raw: unknown): ClusterSettings {
   if (doc.version !== 1) return { ...DEFAULT_CLUSTER_SETTINGS };
 
   const defaultSection =
-    typeof doc.defaultSection === "string" && CLUSTER_SECTION_IDS.includes(doc.defaultSection)
+    typeof doc.defaultSection === "string" && CLUSTER_START_SECTION_IDS.includes(doc.defaultSection)
       ? doc.defaultSection
       : DEFAULT_CLUSTER_SETTINGS.defaultSection;
 

@@ -1,0 +1,62 @@
+/* Memory search (Cluster > Settings), on the kit's details grid (kit/details.css).
+ * Only what the grid does not say: how the parts of a section stack, the
+ * measure of the choices and what is said under them, and the line a fact's
+ * second sentence takes. */
+
+.os-memory-search .os-details-section-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* One column of the setting's value: the choices, the kept index's line, the
+ * question, a refusal. A FIELD'S MEASURE (DESIGN.md rule 9, the kit's 34rem for
+ * a field): a choice as wide as a maximised window reads as a banner. */
+.os-memory-search-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 34rem;
+}
+
+/* The fact's second line: whose machines index it, what is waiting. */
+.os-memory-search-note {
+  display: block;
+}
+
+/* The questions under the model in use, inside its fact's value. */
+.os-memory-search-asks {
+  margin-top: 10px;
+}
+
+/* Text that stands where a control would, on the setting row's line: the row's
+ * label sits 7px down to centre on a control (kit/details.css). At the facts'
+ * size, so the model switched to reads like the model in use above it. */
+.os-memory-search-target {
+  padding-top: 7px;
+  font-size: var(--os-text-sm);
+}
+
+.os-memory-search-line {
+  margin: 0;
+  font-size: var(--os-text-sm);
+}
+
+.os-memory-search-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.os-memory-search-kept {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+/* Its act keeps the right edge when a narrow window wraps it under the
+ * sentence (DESIGN.md rule 8: panel actions align to the right edge). */
+.os-memory-search-kept > :last-child:not(:first-child) {
+  margin-left: auto;
+}
