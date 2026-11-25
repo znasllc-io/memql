@@ -14,6 +14,11 @@ import (
 
 // The exemption, the reference and the hold line (desktop-access design,
 // sections 2, 3 and 7).
+//
+// "Held" in these names is the engine's word for "no source counts for this
+// person". Since 2026-11-25 MemQL OS keeps such a person in and shows them no
+// Ask (design record 2026-11-25-who-gets-into-memql-os). The answer these
+// tests pin is unchanged; what MemQL OS does with it is tested in clients/os.
 
 type holdRecorder struct {
 	mu    sync.Mutex

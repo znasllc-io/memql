@@ -12,7 +12,7 @@ import type { DesktopAccessAnswer } from "../../src/chrome/useDesktopAccess";
 
 afterEach(() => { cleanup(); h.connection = null; });
 const within = (answer: DesktopAccessAnswer | null) =>
-  ({ children }: { children: ReactNode }) => <DesktopAccessContext.Provider value={answer}>{children}</DesktopAccessContext.Provider>;
+  ({ children }: { children: ReactNode }) => <DesktopAccessContext.Provider value={answer && { ...answer, settled: true }}>{children}</DesktopAccessContext.Provider>;
 
 it("takes the sources from the gate's answer, with no shell meaning no Fleet", () => {
   const sources = [{ kind: "key", state: "outOfCredit", own: true }];

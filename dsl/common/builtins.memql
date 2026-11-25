@@ -640,11 +640,11 @@ builtin inferenceStatus { }
 
 @sdk
 @executor("desktopAccess")
-@description("Answer, in one row, whether the CALLER may enter MemQL OS yet: admitted when they hold the cluster owner or developer role (or are a cluster owner the server itself made: the troubleshooting shim or the operator credential), or have set up a source of model access (a machine that runs a usable model, an app on their own machine, an API key, or the cluster's own account where it pays for them). A person who has set up none is held, and the row carries a reference they can quote to an administrator. The row carries no reasons: why each source checked does not count is in the one log line written under that reference, which an administrator finds by searching it in Logs. Answers only for the caller and takes no person argument, so it needs no capability, like inferenceStatus. Backs the shell's entry page; a failed call reads as unknown and lets the person in.")
+@description("Answer, in one row, whether the CALLER has model access set up: admitted when they hold the cluster owner or developer role (or are a cluster owner the server itself made: the troubleshooting shim or the operator credential), or have set up a source of model access (a machine that runs a usable model, an app on their own machine, an API key, or the cluster's own account where it pays for them). MemQL OS shows no Ask to a person who has set up none; it does not keep them out, and `admitted` keeps its name from when it did. For such a person the row carries a reference. The row carries no reasons: why each source checked does not count is in the one log line written under that reference, which an administrator finds in Logs by the reference, or by the component desktopAccess and the person's id. Answers only for the caller and takes no person argument, so it needs no capability, like inferenceStatus. A failed call reads as unknown and takes nothing away.")
 builtin desktopAccess {
-  /// The reference the previous held answer returned, passed back so a re-check keeps it. Ignored unless it has the right shape.
+  /// The reference the previous not-admitted answer returned, passed back so a re-check keeps it. Ignored unless it has the right shape.
   reference      string
-  /// The reasons digest the previous held answer returned, passed back so a re-check with unchanged reasons writes no new line.
+  /// The reasons digest the previous not-admitted answer returned, passed back so a re-check with unchanged reasons writes no new line.
   reasonsDigest  string
 }
 

@@ -3,6 +3,7 @@ import { ConversationSession } from "./conversationSession";
 import { onAppResume } from "../live/resume";
 import { useOsConnection } from "../live/connection";
 import { useSessionIfPresent } from "../chrome/access";
+import { useHasNoModelAccess } from "../chrome/desktopAccessContext";
 import { holds } from "../system/roles";
 import { createContext, useEffect, useCallback, useContext, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 
@@ -98,7 +99,12 @@ export function AskProvider({
   // Subscribe to the session's access epoch as well as reading the effective
   // set: a grant revocation must close every entry point without a reload.
   const session = useSessionIfPresent();
-  const canAsk = (!session || session.access !== null) && holds("read", "app:ask");
+  // AND MODEL ACCESS (design record 2026-11-25-who-gets-into-memql-os): a
+  // person the engine found no model source for has no Ask at all, whatever
+  // their grants say. This is the one switch the dock, the phone bar, the
+  // sheet, "Ask about this" and the links from Nexus all read.
+  const noModelAccess = useHasNoModelAccess();
+  const canAsk = (!session || session.access !== null) && holds("read", "app:ask") && !noModelAccess;
   const storeRef = useRef<AskSettingsStore | null>(null);
   if (!storeRef.current) storeRef.current = settingsStore ?? new LocalAskSettingsStore();
   // A revoked session loses its transcript/draft and in-flight local work.

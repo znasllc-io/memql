@@ -36,13 +36,14 @@ and all subsequent local interactive sign-in uses passkeys; its contact email is
 not verified. `azure`, absent and unknown values retain hosted verification:
 email first, then mandatory passkey registration. Neither email verification nor
 an enrollment grant is an owner session. After both required steps, `CoreGate`
-decides who enters. Owners and developers get the inference setup screen while
-the cluster reaches no model, unless their own API key can pay
-(`inferenceStatus.keyAccount`, `chrome/keyLetsIn.ts`). Everybody else enters once
-model access is set up for them (`desktopAccess`, `chrome/useDesktopAccess.ts`).
-Until then they see the held page (`chrome/AccessHeld.tsx`), whether or not the
-cluster as a whole is set up. It shows a reference an administrator searches in
-Logs and runs the key wizard on the page
+decides who enters, on one question: whether the cluster reaches a model. While
+it reaches none, owners and developers get the inference setup screen, unless
+their own API key can pay (`inferenceStatus.keyAccount`, `chrome/keyLetsIn.ts`),
+and everybody else gets the page "MemQL is not set up yet". Once it does,
+everybody enters. A person's own model access (`desktopAccess`,
+`chrome/useDesktopAccess.ts`, read once in `DesktopAccessScope`) decides only
+whether they get Ask: with none set up, `canAsk` is false and the Ask widget
+leaves their registry
 ([What an owner sees first](../../docs/public/operate/first-run.md)). Organization name is required; setup configures the existing
 `self` account, stamps its owner, and ensures its account group and owner
 membership before sealing the claim or issuing a session. Every step is

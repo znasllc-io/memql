@@ -112,7 +112,10 @@ func insertAccessRow(t *testing.T, db *bun.DB, concept, id string, payload map[s
 
 // The two forms of "owner or developer of another account" the cluster can
 // express today (ruling R-D1, amended). Neither is the cluster role, so both
-// are held, through the REAL stored-role read.
+// are held, through the REAL stored-role read. Held is "no source counts":
+// such a person enters MemQL OS and has no Ask (design record
+// 2026-11-25-who-gets-into-memql-os); only the cluster's own owners and
+// developers keep Ask with nothing set up.
 func TestAnAccountScopedRoleIsHeld(t *testing.T) {
 	eng, db, _ := sharedReadMergeEngine(t)
 	rec := installRecorder(t)

@@ -1,15 +1,27 @@
 package memql
 
-// What model access a person has set up: the foundation of the desktop-access
-// hold (design record docs/superpowers/specs/2026-11-24-desktop-access-design.md,
-// section 1).
+// What model access a person has set up (design record
+// docs/superpowers/specs/2026-11-24-desktop-access-design.md, sections 1 to 3).
+//
+// WHAT THE ANSWER IS USED FOR CHANGED ON 2026-11-25, AND THE WORDS HERE DID
+// NOT (design record 2026-11-25-who-gets-into-memql-os-design.md). This file
+// was built to keep a person with nothing set up OUT of MemQL OS, and it calls
+// such a person "held", the answer for anybody else "admitted", and the log
+// line "the hold line". The owner's rule is that everybody enters a cluster
+// that is set up, and a person with no model access gets no Ask. So read
+// "held" as "no source counts for this person": MemQL OS takes Ask away on
+// that answer and keeps nobody out. Nothing in the answer, the line, the
+// reference or the wire changed, which is why the names were left alone: the
+// wire field `admitted` is in the builtin, the concept and both generated
+// SDKs. No MemQL OS surface shows the reference now; an administrator finds
+// the line in Logs by its component and the person's id.
 //
 // WHY THIS IS NOT inferenceStatus.eligible. inferenceStatus answers "can a
 // call be answered right now". This answers "has the person set something
 // up", and the difference is exactly what is asleep or temporarily empty: a
 // lent laptop that is closed, an app out of usage, a key whose vendor account
-// is out of credit all come back, and keeping a person out of MemQL OS while
-// they wait would send them to a setup page for a thing already set up. The
+// is out of credit all come back, and taking Ask from a person while they
+// wait would tell them to set up a thing already set up. The
 // two share their predicates (meetsChatMinimum, the app row tests in
 // app_selection.go and core/airoute, the resolver's reasons, keysRefusedAt
 // through VendorKeysRefusedHere) and drop only the "is it awake" tests, so
@@ -47,10 +59,10 @@ package memql
 //   - Admitted: any source counts. Held: none does.
 //   - A held answer carries a reference (ERR- and six hex digits, the shape the
 //     logs already use) and the line that explains it is written BEFORE the
-//     reference is returned, so a person reading it out to an administrator
-//     can always be found in Logs. A failed write holds with NO reference
+//     reference is returned, so a reference never names a line Logs does not
+//     have. A failed write holds with NO reference
 //     rather than a reference nobody can look up. A re-check passing back its
-//     reference and an unchanged reasons digest writes nothing, so a page
+//     reference and an unchanged reasons digest writes nothing, so a client
 //     checking every 30 seconds adds one line, not one per poll; changed
 //     reasons write a new line under the SAME reference so the person keeps
 //     one number. A passed-back value that is not a reference is treated as
@@ -67,7 +79,7 @@ package memql
 //     the machines lent to them, apps, keys, the stored role, a grant or
 //     membership read) comes back as an error, including a failure a tolerant
 //     reader answered around and noted on the sources' failure holder; the
-//     client reads that as "unknown" and lets the person in. A person is held
+//     client reads that as "unknown" and takes nothing away. A person is held
 //     only on an answer the engine is sure of.
 //
 // The builtin is evaluateDesktopAccess, below. The line is written by
@@ -207,7 +219,7 @@ func (e *MemQLEngine) desktopAccessSources(ctx context.Context, actingUserId str
 	// "could not read" as "nothing set up" and hold a person on a transient
 	// error, the lent machine they rely on included. So every read runs under
 	// one holder, each of those readers notes what it swallowed on it, and a
-	// noted failure is an error: unknown, which lets the person in.
+	// noted failure is an error: unknown, which takes nothing from the person.
 	//
 	// OrganizationReadContext rather than auth.ContextWithReadFailures alone:
 	// it also gives these reads a fresh account-scope memo, because the
@@ -681,7 +693,9 @@ func newAccessReference() string {
 	return "ERR-" + hex.EncodeToString(b[:])
 }
 
-// DesktopAccess is the answer to "may this person open MemQL OS now".
+// DesktopAccess is the answer to "does this person have model access set up".
+// Admitted false is "none": MemQL OS shows such a person no Ask (before
+// 2026-11-25 it kept them out, which is where the field's name comes from).
 type DesktopAccess struct {
 	Admitted, Exempt bool
 	// Sources are what the person has set up, computed for the exempt too
@@ -693,7 +707,8 @@ type DesktopAccess struct {
 }
 
 // desktopAccess decides. passedReference and passedDigest are what the client
-// got from its previous held answer ("" for none); see the header for what
+// got from its previous held answer ("" for none; "held" is defined at the
+// top of this file); see the header for what
 // each case writes. An error is never a hold.
 //
 // Tests: desktop_access_hold_test.go.
@@ -791,7 +806,7 @@ func (e *MemQLEngine) desktopAccess(ctx context.Context, actingUserId, passedRef
 	// is logged: otherwise "no recorder installed" and "the log store refused
 	// the line" would both show only as a page with no reference.
 	if err := recordAccessHold(ctx, AccessHoldLine{Reference: reference, UserId: BareShortId(actingUserId), Reasons: reasons}); err != nil {
-		slog.Warn("desktop access: the hold line could not be written; the person is held with no reference",
+		slog.Warn("desktop access: the line could not be written; the answer carries no reference",
 			"userId", actingUserId, "error", err)
 		return DesktopAccess{Sources: sources}, nil
 	}
@@ -809,8 +824,9 @@ func (e *MemQLEngine) accessStoredRole(ctx context.Context, userId string) (auth
 const DesktopAccessConcept = "v1:platform:desktopAccess"
 
 // evaluateDesktopAccess is the `desktopAccess` builtin: ONE row answering
-// whether the caller may enter MemQL OS (design section 3). Virtual, never
-// persisted (the answer is the caller's setup right now).
+// whether the caller has model access set up (design section 3), which
+// MemQL OS reads to decide whether they get Ask. Virtual, never persisted (the
+// answer is the caller's setup right now).
 //
 // THE PERSON IS THE ACTOR, NEVER AN ARGUMENT. The only arguments are the
 // reference and digest the client got from its previous held answer; nothing
@@ -820,8 +836,8 @@ const DesktopAccessConcept = "v1:platform:desktopAccess"
 // error (desktopAccess refuses it).
 //
 // AN ERROR STAYS AN ERROR. The client reads a failed call as "unknown" and
-// lets the person in; dressing a read failure as a row would hold somebody
-// out of the console because a database blinked.
+// takes nothing away; dressing a read failure as a row would take Ask from
+// somebody because a database blinked.
 func (e *MemQLEngine) evaluateDesktopAccess(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	reference, _ := args["reference"].(string)
 	digest, _ := args["reasonsDigest"].(string)

@@ -8,65 +8,71 @@ import { useReadEffect } from "../live/useReadEffect";
 import { useSession } from "./access";
 import { useConnectionRecovery, useConnectionStatus } from "./connection";
 
-// WHETHER THIS PERSON MAY ENTER MEMQL OS (design record
-// 2026-11-24-desktop-access, sections 3 and 4).
+// WHETHER THIS PERSON HAS MODEL ACCESS SET UP (design record
+// 2026-11-25-who-gets-into-memql-os; the check itself is design record
+// 2026-11-24-desktop-access, section 3).
 //
 // The `desktopAccess` builtin answers for the CALLER only: whether they are a
 // cluster owner or developer (exempt), whether they have model access set up
 // (machines, apps, keys, the cluster's account, asleep or not), and, when they
-// have none, a reference whose log line says what is missing. CoreGate draws
-// the held page from a held answer.
+// have none, a reference whose log line says what is missing.
+//
+// WHAT THE ANSWER DECIDES: ASK, AND NOTHING ELSE. A person with none set up
+// ("held", the engine's `admitted: false`) enters MemQL OS like anybody and has
+// no Ask (`useHasNoModelAccess` in desktopAccessContext.tsx). Release 0.31.41
+// kept such a person out of the whole desktop on a page of their own; the
+// owner's rule is that the cluster's readiness alone decides who enters
+// (CoreGate). The names here and on the wire are from before that.
 //
 // ===========================================================================
 // WHEN IT ASKS AGAIN
 // ===========================================================================
-// Nothing that fixes a held person reaches their stream: key rows publish no
-// graph event, a machine registration is visible only to its owner and the
-// cluster's owners, grants are readable from admin rank. So the page asks:
+// Nothing that gives a person model access reaches their stream: key rows
+// publish no graph event, a machine registration is visible only to its owner
+// and the cluster's owners, grants are readable from admin rank. So it asks:
 //   - on window focus, tab return and network return (`onAppResume`);
 //   - when the connection returns (`managed` stream back to "connected");
-//   - every 30 seconds while held and the document is visible;
-//   - on `recheck()`, which the page calls after a key is added on it.
+//   - every 30 seconds while the person has none and the document is visible,
+//     so Ask appears by itself soon after an administrator lends a machine or
+//     the person adds a key.
 // A check asked for while one is out runs once more after it, never beside it
-// (`useReadEffect`): two checks in flight for somebody newly held would mint
-// two references, and the page would show the one Logs found second.
+// (`useReadEffect`): two checks in flight for somebody newly without access
+// would mint two references and write two lines.
 //
 // ===========================================================================
-// THE REFERENCE TRAVELS WITH THE PAGE
+// THE REFERENCE TRAVELS WITH THE CLIENT
 // ===========================================================================
-// A check passes back the reference and digest of the last held answer, so a
-// check that still holds the person keeps their reference and writes nothing
-// new (the engine writes a new line under the same reference only when the
-// reasons changed). Nothing lives on a replica, so any replica can answer. An
-// admitted answer drops them: the next hold is a new showing with a new line.
-// They belong to the signed-in person, and are dropped when the session names
-// somebody else. The engine checks a reference's shape and binds it to the
-// person through the digest as well, so this page never hands one person's
-// reference to another. That is a property of this client, not a guarantee
-// about every line: a crafted call can still choose the `ERR-` value of its
-// own line, and each line names its person, which is what an administrator
-// reads after searching a reference.
+// A check passes back the reference and digest of the last such answer, so a
+// check that finds the same thing writes nothing new (the engine writes a new
+// line under the same reference only when the reasons changed): thirty-second
+// re-checks add one line to Logs, not one a poll. Nothing lives on a replica,
+// so any replica can answer. An admitted answer drops them. They belong to the
+// signed-in person, and are dropped when the session names somebody else. The
+// engine checks a reference's shape and binds it to the person through the
+// digest as well, so this client never hands one person's reference to
+// another. NO SURFACE SHOWS THE REFERENCE NOW: the page that did is gone. An
+// administrator finds the line in Logs by its component, `desktopAccess`, and
+// the person's user id.
 //
 // ===========================================================================
 // WHAT A CHECK THAT FAILS MEANS
 // ===========================================================================
 // The engine answers a read it could not make with an ERROR, never a row. The
-// first check failing is "unknown", which lets the person in: an outage is not
+// first check failing is "unknown", which takes nothing away: an outage is not
 // evidence that a person lacks access, and the model calls are still refused
-// on the server. A later check that fails keeps the answer the page already
-// has, so a held person is not let in by a dropped call and an admitted person
-// is not thrown out by one. A reply with no row is no answer, and reads the
-// same as a failure.
+// on the server. A later check that fails keeps the answer already held, so a
+// dropped call neither gives Ask to a person without access nor takes it from
+// one with. A reply with no row is no answer, and reads the same as a failure.
 //
 // `settled` says whether a check has come back at all, with an answer or a
 // failure. The gate's first entry waits on it for up to three seconds from the
-// gate's mount, the bound the readiness feed has. A held person whose answer
-// lands within it sees the page and not the desktop; one whose answer comes
-// later sees the desktop replaced by the page. A check that fails lets the
-// person in at once rather than after the bound.
+// gate's mount, the bound the readiness feed has, so the desk is first drawn
+// knowing whether Ask belongs on it. A person whose answer comes later sees
+// Ask until it does. A check that fails ends the wait at once.
 //
-// Regression tests: test/chrome/accessHeld.test.tsx ("waits at the door for the
-// first check" pins the wait).
+// Regression tests: test/chrome/desktopAccess.test.tsx ("waits at the door for
+// the first check" pins the wait); test/system/readinessReactivity.test.tsx
+// (Ask in the real shell).
 
 /** One model source the person has set up, as the engine lists it. */
 export type AccessSourceRow = {
@@ -84,7 +90,7 @@ export type DesktopAccessAnswer =
   | { state: "admitted"; exempt: boolean; sources: AccessSourceRow[] }
   | { state: "held"; reference: string; reasonsDigest: string };
 
-/** How often a held page asks again while it is visible. */
+/** How often it asks again for a person with no model access, while the tab is visible. */
 export const ACCESS_RECHECK_MS = 30_000;
 
 const UNKNOWN: DesktopAccessAnswer = { state: "unknown" };
@@ -96,7 +102,7 @@ interface Reading {
   settled: boolean;
 }
 
-export function useDesktopAccess(enabled: boolean): DesktopAccessAnswer & { recheck(): void; settled: boolean } {
+export function useDesktopAccess(enabled: boolean): DesktopAccessAnswer & { settled: boolean } {
   const connection = useOsConnection();
   const status = useConnectionStatus();
   const { managed } = useConnectionRecovery();
@@ -159,8 +165,8 @@ export function useDesktopAccess(enabled: boolean): DesktopAccessAnswer & { rech
       ? reading
       : { answer: UNKNOWN, settled: false };
 
-  // Every 30 seconds while held, and never while the document is hidden: the
-  // resume signal asks the moment it is shown again.
+  // Every 30 seconds while the person has no model access, and never while the
+  // document is hidden: the resume signal asks the moment it is shown again.
   const isHeld = current.answer.state === "held";
   useEffect(() => {
     if (!isHeld) return;
@@ -172,7 +178,7 @@ export function useDesktopAccess(enabled: boolean): DesktopAccessAnswer & { rech
 
   useEffect(() => (enabled ? onAppResume(recheck) : undefined), [enabled, recheck]);
 
-  return { ...current.answer, settled: current.settled, recheck };
+  return { ...current.answer, settled: current.settled };
 }
 
 /** The builtin's one row as an answer, or null when the reply is not one. */
@@ -181,7 +187,7 @@ function answerFrom(raw: Row | undefined): DesktopAccessAnswer | null {
   const row = flatten(raw);
   if (typeof row["admitted"] !== "boolean") return null;
   if (row["admitted"]) return { state: "admitted", exempt: row["exempt"] === true, sources: sourcesFrom(row["sources"]) };
-  // Absent when the hold line could not be written: the page then shows no reference.
+  // Absent when the engine's line could not be written: nothing to hand back.
   return { state: "held", reference: text(row, "reference"), reasonsDigest: text(row, "reasonsDigest") };
 }
 

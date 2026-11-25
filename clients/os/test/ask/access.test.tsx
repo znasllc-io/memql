@@ -6,6 +6,7 @@ import { AskSheet } from "../../src/ask/AskSheet";
 import { READY_ASK } from "../../src/ask/useAskReadiness";
 import { Shell } from "../../src/chrome/Shell";
 import { SessionProvider } from "../../src/chrome/access";
+import { DesktopAccessContext } from "../../src/chrome/desktopAccessContext";
 import { useWindowAsk } from "../../src/chrome/windowAsk";
 import { UNKNOWN_RUNTIME_CONFIG } from "../../src/cluster/config";
 import { clearEffectiveCapabilities, effectiveAccessEpoch, setEffectiveCapabilities } from "../../src/system/roles";
@@ -30,9 +31,14 @@ function transportFixture() {
   };
 }
 
-it.each(["not granted", "denied", "not loaded"])("refuses commands, app callbacks, work/discussion links and the sheet when Ask is %s", async state => {
+// The last state is a person who HOLDS the Ask app and has no model access set
+// up (design record 2026-11-25-who-gets-into-memql-os): "you don't even get the
+// Ask app". The engine's answer reaches the provider through the shared context.
+const NO_MODEL_ACCESS = "granted to a person with no model access";
+it.each(["not granted", "denied", "not loaded", NO_MODEL_ACCESS])("refuses commands, app callbacks, work/discussion links and the sheet when Ask is %s", async state => {
   if (state === "not loaded") clearEffectiveCapabilities();
-  else setEffectiveCapabilities(state === "denied" ? [{ verb: "read", resource: "app:ask", effect: "deny", source: "user" }] : []);
+  else if (state !== NO_MODEL_ACCESS) setEffectiveCapabilities(state === "denied" ? [{ verb: "read", resource: "app:ask", effect: "deny", source: "user" }] : []);
+  const access = state === NO_MODEL_ACCESS ? { state: "held" as const, reference: "", reasonsDigest: "", settled: true } : null;
   const transport = transportFixture();
   let ask!: ReturnType<typeof useAsk>;
   function Commands() {
@@ -44,7 +50,7 @@ it.each(["not granted", "denied", "not loaded"])("refuses commands, app callback
     expect(windowAsk.askAbout).toBeUndefined();
     return <><button onClick={() => ask.openAsk()}>Command</button><button onClick={() => windowAsk.askAbout?.("Reviews")}>App command</button></>;
   }
-  render(withOs(<SessionProvider value={{ access: person, config: UNKNOWN_RUNTIME_CONFIG }}><AskProvider transport={transport} availability={READY_ASK}><Commands /><AskSheet /></AskProvider></SessionProvider>, "owner"));
+  render(withOs(<SessionProvider value={{ access: person, config: UNKNOWN_RUNTIME_CONFIG }}><DesktopAccessContext.Provider value={access}><AskProvider transport={transport} availability={READY_ASK}><Commands /><AskSheet /></AskProvider></DesktopAccessContext.Provider></SessionProvider>, "owner"));
   fireEvent.click(screen.getByRole("button", { name: "Command" }));
   fireEvent.keyDown(screen.getByRole("button", { name: "App command" }), { key: "Enter" });
   fireEvent.click(screen.getByRole("button", { name: "App command" }));

@@ -61,19 +61,26 @@ never broadcast, and are read only through the builtins below.
   `secret` or `authorization` attribute is `<redacted>` in the row exactly
   as on the console. `payload` and `body` are redacted whatever they hold.
 
-### The one line that is never dropped: a held person's reference
+### The one line that is never dropped: a person with no model access
 
-When MemQL OS holds a person because no model access is set up, the page
-shows a reference (`ERR-` and six hex characters). The line it names is
-written through `Sink.InsertNow`, not the queue: it skips the queue, the
-level floor and the cap, and the caller waits for the insert to answer, for
-at most five seconds (the drain's per-insert limit; a write that takes longer
-fails, and the person is held with no reference). A reference is shown only
-after that write succeeded, so searching Logs for it
-(component `desktopAccess`, subject the person's bare user id, attributes
-`reference` and `reasons`) always finds the line. A node with no log store, or
-a failed insert, holds the person with no reference rather than one nobody can
-look up. The wiring is `memql.SetAccessHoldRecorder(logstore.RecordAccessHold)`
+When the `desktopAccess` check finds no model access set up for a person,
+MemQL OS shows them no Ask
+([Who gets into MemQL OS](auth/access-model.md#who-gets-into-memql-os)), and
+the engine writes one line saying what is missing: component `desktopAccess`,
+message *No model access is set up for this person: MemQL OS shows them no
+Ask*, subject the person's bare user id, attributes `reference` (`ERR-` and six
+hex characters) and `reasons`. To see why somebody has no Ask, filter Logs by
+that component and the person.
+
+The line is written through `Sink.InsertNow`, not the queue: it skips the
+queue, the level floor and the cap, and the caller waits for the insert to
+answer, for at most five seconds (the drain's per-insert limit; a write that
+takes longer fails, and the answer carries no reference). The check returns a
+reference only after that write succeeded, so a reference always names a line
+that is there. A node with no log store, or a failed insert, answers with no
+reference rather than one nobody can look up. Release 0.31.41 showed the
+reference to the person on a page; no surface shows it now, and it is kept so
+a re-check can say which line it already wrote. The wiring is `memql.SetAccessHoldRecorder(logstore.RecordAccessHold)`
 in `app/database.go`; tests are `TestInsertNowWritesOnceAndReportsFailure` and
 the db-gated `TestInsertNowLineIsFoundBySearchingItsReference`. This line
 skips `core/logger`'s redactor as well; its attributes carry only the

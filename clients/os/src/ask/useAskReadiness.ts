@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { inferenceFrom } from "../apps/settings/routingFacts";
 import { useSession } from "../chrome/access";
+import { useHasNoModelAccess } from "../chrome/desktopAccessContext";
 import { useConnectionStatus, type ShellConnectionStatus } from "../chrome/connection";
 import { useOsConnection } from "../live/connection";
 import { holds } from "../system/roles";
@@ -86,7 +87,9 @@ export function useAskReadiness(): AskAvailability {
   const connection = useOsConnection();
   const status = useConnectionStatus();
   const { access, readiness } = useSession();
-  const canAsk = holds("read", "app:ask");
+  // The provider's `canAsk`: nothing is probed for a person who has no Ask.
+  const noModelAccess = useHasNoModelAccess();
+  const canAsk = holds("read", "app:ask") && !noModelAccess;
   const userId = access?.userId ?? "";
   const moduleState = readiness?.of("ai")?.state;
   const [epoch, setEpoch] = useState(0);

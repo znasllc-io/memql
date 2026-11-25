@@ -14,41 +14,37 @@ import { PasskeyStop } from "../apps/setup/PasskeyStop";
 import { PASSKEY_STOP, drawnState, type SetupStop } from "../apps/setup/stops";
 import type { ModuleId } from "../system/modules";
 import { useSession } from "./access";
-import { AccessHeld } from "./AccessHeld";
 import { useKeyLetsIn } from "./keyLetsIn";
 import { useOs } from "./state";
 import { Mark } from "./Mark";
-import { DesktopAccessContext } from "./desktopAccessContext";
-import { useDesktopAccess } from "./useDesktopAccess";
+import { useDesktopAccessAnswer } from "./desktopAccessContext";
 
 // THE CORE GATE (design record 2026-09-07-core-gate-and-honest-install, D1,
-// D2 and D6; design record 2026-11-24-desktop-access, sections 2 and 4).
+// D2 and D6; design record 2026-11-25-who-gets-into-memql-os).
 //
 // ===========================================================================
-// TWO QUESTIONS, EACH FOR DIFFERENT PEOPLE
+// ONE QUESTION: IS THE CLUSTER SET UP
 // ===========================================================================
-// THE PERSON'S OWN MODEL ACCESS, for everybody but the cluster's owners and
-// developers. Model work runs on a person's own access, in Ask and out of it,
-// so somebody with none set up would get a desktop whose features fail one at
-// a time. `desktopAccess` answers for the caller (useDesktopAccess); a person
-// it holds gets the held page (AccessHeld) in place of everything, whatever
-// the cluster's own verdict and whatever windows are open. It admits anybody
-// with something set up, asleep or out of credit included, and anybody it
-// cannot answer for: a check that fails is no evidence that a person lacks
-// access, and the model calls are refused on the server either way. So the
-// cluster's verdict holds nobody else, and the page everybody else used to
-// get on an unconfigured cluster ("MemQL is not set up yet") is gone.
+// The cluster's `ai` readiness verdict alone decides who enters (the owner's
+// rule, 2026-11-25). While it is `unconfigured`, only the cluster's owners and
+// developers get in, on the setup screen below, because they are the ones who
+// set it up; everybody else gets the page that says so (ToldVariant). On any
+// other verdict everybody enters.
 //
-// THE CLUSTER'S READINESS, for owners and developers alone. They are exempt
-// from the first question (the engine reads their STORED role) and keep the
-// setup screen below.
+// A PERSON'S OWN MODEL ACCESS DOES NOT COME INTO IT. Somebody with nothing set
+// up enters a cluster that is set up like anybody else, and has no Ask
+// (`useHasNoModelAccess`; AskProvider and Shell.tsx's roster). Release 0.31.41
+// held such a person on a page of their own in place of the desk, whatever the
+// cluster's verdict, and let anybody with access of their own into a cluster
+// that was not set up. Both are gone. On a cluster that is not set up, a key
+// of one's own lets in an owner or developer and nobody else.
 //
 // ===========================================================================
 // AN OS SURFACE, NOT AN ENGINE REFUSAL
 // ===========================================================================
 // The engine's per-call refusals are already the enforcement. Refusing the
-// stream instead would block the very reads the wizard needs, and the held
-// page's own check (desktopAccess), which runs on that same stream. The
+// stream instead would block the very reads the wizard needs, and would take
+// from everybody else the feed that tells them to go and ask an owner. The
 // readiness rows are readable by every signed-in person and writable only by
 // the engine, which is exactly what lets a client-side gate be honest for
 // every role.
@@ -68,13 +64,14 @@ import { useDesktopAccess } from "./useDesktopAccess";
 // ===========================================================================
 // Briefly hold the shared entry frame while readiness, access and setup facts
 // arrive, and, for anybody not already known to be an owner or developer,
-// until the first access check settles. The wait is bounded: three seconds
-// from the gate's mount (`waitExpired`). A held person whose first answer
-// lands within it sees the page and not the desktop; an answer after it
-// replaces the desktop with the page. A check that fails settles too, and lets
-// the person in at once. Once entered, refreshes never replace the page with a
-// loading frame. A missing feed still opens the desktop after the bound: an
-// outage is not evidence that the cluster needs configuration.
+// until the first check of their own model access settles. That check no
+// longer decides entry. It is waited for so the desk is first drawn knowing
+// whether Ask belongs on it: without the wait, a person with no model access
+// would see Ask in the dock and watch it go. The wait is bounded: three
+// seconds from the gate's mount (`waitExpired`). A check that fails settles
+// too, and ends the wait at once. Once entered, refreshes never replace the
+// page with a loading frame. A missing feed still opens the desktop after the
+// bound: an outage is not evidence that the cluster needs configuration.
 //
 // Nothing is dismissed and nothing is remembered in a browser: the verdict IS
 // the state, so there is no Skip and nothing to remember. It lifts on a feed
@@ -90,33 +87,28 @@ import { useDesktopAccess } from "./useDesktopAccess";
 // same for everybody, and a key is one person's. So the verdict alone does not
 // hold an owner or developer whose own key, or one lent to them, can pay: that
 // is asked of `inferenceStatus` for them (useKeyLetsIn) whenever this would
-// show. (For everybody else a key is one of the sources the access check
-// counts.) The cluster's verdict is unchanged. The screen also offers adding
-// one: Settings > API keys, opened straight into its add wizard. Somebody
-// withheld from adding keys (the `app:settings/apikeys` part) is offered
-// nothing they cannot finish.
+// show. It lets nobody else in (owner's rule 2026-11-25: on a cluster that is
+// not set up, "nadie debe tener acceso except primary owners y developers").
+// The cluster's verdict is unchanged. The screen also offers adding one:
+// Settings > API keys, opened straight into its add wizard. Somebody withheld
+// from adding keys (the `app:settings/apikeys` part) is offered nothing they
+// cannot finish.
+//
+// Regression tests: test/chrome/coreGate.test.tsx (which of the three is on
+// screen, for each role and verdict), test/system/readinessReactivity.test.tsx
+// (the same through the real shell).
 export function CoreGate({ onSignOut, children, waitForReadiness = true }: {
   onSignOut: () => void; children: ReactNode; waitForReadiness?: boolean;
 }) {
-  // The one access read, shared with the desk through a context: Ask words its
-  // refusals from the same sources and makes no read of its own.
-  const desktopAccess = useDesktopAccess(true);
-  return (
-    <DesktopAccessContext.Provider value={desktopAccess}>
-      <CoreGateBody onSignOut={onSignOut} waitForReadiness={waitForReadiness} desktopAccess={desktopAccess}>{children}</CoreGateBody>
-    </DesktopAccessContext.Provider>
-  );
-}
-
-function CoreGateBody({ onSignOut, children, waitForReadiness, desktopAccess }: {
-  onSignOut: () => void; children: ReactNode; waitForReadiness: boolean; desktopAccess: ReturnType<typeof useDesktopAccess>;
-}) {
   const { access, ladderLoaded, readiness } = useSession();
+  // The person's own model access, read once above Ask (DesktopAccessScope).
+  // Here it is only waited for; it decides Ask, never entry.
+  const desktopAccess = useDesktopAccessAnswer();
   const { state } = useOs();
   const facts = useSetupFacts();
   const role = access?.role ?? "";
-  // The cluster's owners and developers: the setup screen is theirs, and the
-  // engine's access check exempts them by their stored role.
+  // The cluster's owners and developers: the only people a cluster that is not
+  // set up lets in, and the setup screen is theirs.
   const exempt = canConfigure(role);
   const [override, setOverride] = useState<string | null>(null);
 
@@ -136,8 +128,9 @@ function CoreGateBody({ onSignOut, children, waitForReadiness, desktopAccess }: 
     ? () => settings.open("apikeys", { addKey: true })
     : undefined;
   // The access check is waited for unless the person is already known to be
-  // an owner or developer, whom it does not hold: their entry is what it was.
-  const resolving = readiness != null && (!readiness.loaded || (!exempt && !desktopAccess.settled) ||
+  // an owner or developer, who keep Ask whatever it answers.
+  // Nor on a cluster that is not set up, where nobody it is asked for enters.
+  const resolving = readiness != null && (!readiness.loaded || (!unconfigured && !exempt && desktopAccess?.settled === false) ||
     (unconfigured && (ladderLoaded !== true || access === null || (exempt && (keyAnswer === "unknown" || facts?.known !== true)))));
   const waiting = waitForReadiness && !entered && !waitExpired && resolving && Object.keys(state.shell.windows).length === 0;
   useEffect(() => {
@@ -151,36 +144,30 @@ function CoreGateBody({ onSignOut, children, waitForReadiness, desktopAccess }: 
   useEffect(() => { if (!entryTransition.show) bootFinished(); }, [entryTransition.show]);
   if (entryTransition.show) return <EntryPending leaving={entryTransition.leaving} />;
 
-  // HELD: the page replaces everything, the open-window escape below included.
-  // It opens no window (a key is added on the page itself), and a window left
-  // open from before access was taken away does not keep the desk.
-  if (desktopAccess.state === "held") {
-    return (
-      <AccessHeld
-        reference={desktopAccess.reference}
-        canAddKey={holds("execute", API_KEYS_ADD_PART)}
-        onSignOut={onSignOut}
-        onAdded={desktopAccess.recheck}
-      />
-    );
-  }
-
-  // Only a reported unconfigured verdict holds the desktop after entry.
+  // Only a reported unconfigured verdict holds the desktop after entry. On
+  // any other, everybody enters, whatever their own model access.
   if (readiness?.of("ai")?.state !== "unconfigured") return <>{children}</>;
 
   // FAIL-CLOSED ON THE LADDER AND ON THE IDENTITY, and only here, where it is
   // the whole question. The cluster IS unconfigured -- that much is decided --
   // but WHO is looking is not, and it decides between the setup screen and the
-  // desk: the verdict holds owners and developers only.
+  // page everybody else gets.
   //
   // `ladderLoaded` and `access` are two INDEPENDENT reads, fired from separate
   // effects in Shell.tsx with no ordering between them, so the ladder landing
   // says nothing about whether the identity has. Reading `access?.role ?? ""`
-  // while it is still null would read an OWNER as somebody else and open the
-  // desk on a cluster they have to set up. The shared entry transition above
-  // holds the frame until both have landed (or a window is open, which the
-  // desk draws either way), so here the role is the person's.
-  if (!exempt) return <>{children}</>;
+  // while it is still null would read an OWNER as somebody else and tell them
+  // an owner has to set up inference. The shared entry transition above holds
+  // the frame until both have landed, unless a window is open: the session
+  // clears the identity when its connection goes away or its read fails
+  // (useResolvedAccess), and an owner working in a window this screen opened
+  // keeps the desk until it is back, rather than losing the window to the
+  // other page in the meantime.
+  if (ladderLoaded !== true || access === null) return <>{children}</>;
+  // EVERYBODY ELSE IS KEPT OUT, with access of their own or without, and with
+  // windows open or not: nothing on their page opens one, so there is no act
+  // of its own to step aside for.
+  if (!exempt) return <ToldVariant onSignOut={onSignOut} />;
   // An owner or developer whose own API key can pay.
   if (keyAnswer === "yes") return <>{children}</>;
 
@@ -288,6 +275,55 @@ function CoreGateBody({ onSignOut, children, waitForReadiness, desktopAccess }: 
     if (id === "ai") return <InferenceStop />;
     return <ModuleStop id={id} verdict={feed.of(id)} />;
   }
+}
+
+/**
+ * What everybody but an owner or developer gets while the cluster is not set
+ * up (D6; owner's rule 2026-11-25: "they will get this message saying that
+ * they need to contact their admins"). The page and its words are the ones
+ * release 0.31.40 had, brought back as they were.
+ *
+ * THE SAME COLUMN, WITH LESS IN IT. Two shapes for one situation would read as
+ * two different kinds of problem, which is the argument `.os-setup` already
+ * makes about mirroring `.os-rank-refused`.
+ *
+ * THE HEAD AND THE SENTENCE DO NOT REPEAT EACH OTHER. The record states the
+ * whole thing as one sentence -- "MemQL is not set up yet. An owner or
+ * developer has to set up inference before anyone can use it." -- and printing
+ * that under a headline saying the first half is rule 7 broken. So the
+ * headline IS the first half and the paragraph is the rest; together they are
+ * the record's sentence and neither says anything twice.
+ *
+ * IT DOES NOT NAME THE OWNER. A person's name is not the cluster's to publish,
+ * and the sentence is exactly as actionable without one.
+ *
+ * IT OFFERS NO KEY TO ADD. In 0.31.40 a key of one's own let anybody in, and
+ * the page offered adding one. Under the owner's rule it lets in nobody but an
+ * owner or developer, so the act would lead nowhere.
+ *
+ * The third line is the one thing a person on this screen cannot otherwise
+ * know: that they do not have to keep reloading. It is true because the
+ * readiness feed is live and this component re-renders on it, which is what
+ * the "lifts for a reader" case asserts.
+ */
+function ToldVariant({ onSignOut }: { onSignOut: () => void }) {
+  return (
+    <EntryLayout><main className="os-core-gate" data-os-core-gate="told">
+      <div className="os-core-gate-column">
+        <span className="os-core-gate-mark" aria-hidden>
+          <Mark className="os-ask-mark" />
+        </span>
+        <h1 className="os-core-gate-head">MemQL is not set up yet</h1>
+        <p className="os-core-gate-body">
+          An owner or developer has to set up inference before anyone can use it.
+        </p>
+        <p className="os-core-gate-note">This page opens by itself once they have.</p>
+        <div className="os-core-gate-out">
+          <Button onClick={onSignOut}>Sign out</Button>
+        </div>
+      </div>
+    </main></EntryLayout>
+  );
 }
 
 /**

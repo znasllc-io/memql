@@ -288,7 +288,7 @@ func (s *Sink) WriteStamped(l logger.Line, st Stamp) bool {
 // The wait is bounded at the drain's per-insert limit (InsertTimeout, 5 s by
 // default): a hung database fails the write with the context's deadline
 // instead of keeping the caller's request open. desktopAccess answers such a
-// failure as held with no reference, so a held page whose check hung gets an
+// failure as held with no reference, so a client whose check hung gets an
 // answer and can check again (TestInsertNowGivesUpOnAHungStore).
 func (s *Sink) InsertNow(ctx context.Context, l logger.Line, st Stamp) error {
 	if s == nil {
