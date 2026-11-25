@@ -629,6 +629,18 @@ func (t *memoryIndexTick) work(ctx context.Context) error {
 			}
 		}
 		t.run.State, t.run.WaitingReason = resume, ""
+		if len(t.run.Cursor) == 0 {
+			// A walk resumed from its beginning is a new walk, and counts from
+			// zero. TRIGGER: a run that waited after its walk ended -- a
+			// `switching` run (Switch anyway answered, or a catch-up with
+			// nothing held) parked before its flip, which resumes as a
+			// catch-up walk -- still held the ended walk's counts; carried
+			// over, progress read above the estimated total, and the failures
+			// the owner had answered held the flip again though nothing failed
+			// this time. A cursor that names a source is a walk part done,
+			// whose counts are its own.
+			t.run.Counts = MemoryIndexCounts{}
+		}
 	}
 	checked := false
 	check := func() (string, bool) {

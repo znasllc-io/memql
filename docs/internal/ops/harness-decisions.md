@@ -2553,7 +2553,12 @@ missing counts the items found absent or stale and left so (below). An
 item its source cannot rebuild (a payload that does not decode, a lesson event
 that does not read as a lesson, a lesson head with no receipt) arrives as a
 `MemoryItem` with `Failure` and is counted failed and logged; a source that
-cannot be read counts once. Nothing drops out silently.
+cannot be read counts once. Nothing drops out silently. A walk resumed after a
+wait from its beginning (an empty cursor) counts from zero: a `switching` run
+parked before its flip resumes as a catch-up walk, and carrying the ended
+walk's counts read progress above the estimated total and held the flip for
+failures the owner had already answered with Switch anyway
+(`TestAResumedWalkThatStartsFromTheBeginningCountsFromZero`).
 
 **What counts as missing (ruling R7).** An item is missing from the target when
 its vector is absent OR older than its row's newest version

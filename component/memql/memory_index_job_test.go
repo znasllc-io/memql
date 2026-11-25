@@ -527,6 +527,49 @@ func TestAHeldSwitchLeavesTheBackfillRunning(t *testing.T) {
 	require.Greater(t, len(f.saves), saves, "past ten minutes the backfill walks again")
 }
 
+// A resumed walk that starts from its beginning (an empty cursor) counts from
+// zero. A switch held for the owner's decision and answered with Switch
+// anyway, then parked before its flip (its indexer demoted), resumes as a
+// catch-up walk: carrying the held walk's counts, its progress read above the
+// estimated total, and the failures the owner had already answered held the
+// flip and asked them again, though nothing failed this time.
+func TestAResumedWalkThatStartsFromTheBeginningCountsFromZero(t *testing.T) {
+	ctx := context.Background()
+	f := newMemoryIndexFake(4)
+	f.fill(fakeOldRef, 4)
+	held, failing := memoryIndexItemId(2), true
+	f.embedErr = func(_ MemoryIndexRun, item MemoryItem) error {
+		if failing && item.Id == held {
+			return errors.New("embedding model returned a zero vector")
+		}
+		return nil
+	}
+	require.NoError(t, runMemoryIndexTick(ctx, f, time.Hour))
+	require.Equal(t, memoryIndexStateNeedsDecision, f.runs[memoryIndexKindSwitch].State)
+
+	// Switch anyway (memorySearchSwitchAnyway writes `switching`), then the
+	// indexer is demoted before the next tick flips.
+	run := f.runs[memoryIndexKindSwitch]
+	run.State = memoryIndexStateSwitching
+	f.runs[memoryIndexKindSwitch] = run
+	delete(f.owners, fakeOwner)
+	require.NoError(t, runMemoryIndexTick(ctx, f, time.Hour))
+	require.Equal(t, memoryIndexStateWaiting, f.runs[memoryIndexKindSwitch].State)
+
+	// The owner is back and the item no longer fails: the catch-up walk counts
+	// only what it did itself, and nothing failed, so it flips.
+	f.owners[fakeOwner], failing = true, false
+	saves := len(f.saves)
+	require.NoError(t, runMemoryIndexTick(ctx, f, time.Hour))
+	require.Equal(t, 1, f.flips, "nothing failed this time: no second decision")
+	require.Equal(t, memoryIndexStateDone, f.runs[memoryIndexKindSwitch].State)
+	for _, save := range f.saves[saves:] {
+		if save.State == memoryIndexStateCatchingUp {
+			require.LessOrEqual(t, save.Counts.Total, 4, "a walk never counts more items than it has")
+		}
+	}
+}
+
 // A waiting run returns to the walk it was in. A switch whose binding already
 // names its target was past the flip -- unless no previous model is recorded on
 // the run, which the flip records together with `finishing`: then the binding
