@@ -409,9 +409,10 @@ func TestTheStoredRoleReadIsMarkedFresh(t *testing.T) {
 	}
 }
 
-// Ruling R-D9, amended: a reference is never shared by two people. Ana's
-// reference and digest carried to ben's check mint ben a new reference, and
-// his line names him.
+// Ruling R-D9, amended: a reference a page carries across a sign-in change
+// never answers for a second person. Ana's reference and digest carried to
+// ben's check mint ben a new reference, and his line names him. (A crafted
+// call can still choose its own line's ERR- value; see desktopAccess.)
 func TestTheDigestBindsThePerson(t *testing.T) {
 	rec := installRecorder(t)
 	first, err := holdEngine(auth.RoleWriter).desktopAccess(personContext("ana"), "ana", "", "")

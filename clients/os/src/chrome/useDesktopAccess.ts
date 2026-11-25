@@ -40,8 +40,12 @@ import { useConnectionRecovery, useConnectionStatus } from "./connection";
 // reasons changed). Nothing lives on a replica, so any replica can answer. An
 // admitted answer drops them: the next hold is a new showing with a new line.
 // They belong to the signed-in person, and are dropped when the session names
-// somebody else (the engine's digest binds the person as well, so a passed
-// reference never answers for a second person either way).
+// somebody else. The engine checks a reference's shape and binds it to the
+// person through the digest as well, so this page never hands one person's
+// reference to another. That is a property of this client, not a guarantee
+// about every line: a crafted call can still choose the `ERR-` value of its
+// own line, and each line names its person, which is what an administrator
+// reads after searching a reference.
 //
 // ===========================================================================
 // WHAT A CHECK THAT FAILS MEANS

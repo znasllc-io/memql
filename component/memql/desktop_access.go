@@ -53,8 +53,10 @@ package memql
 //     reasons write a new line under the SAME reference so the person keeps
 //     one number. A passed-back value that is not a reference is treated as
 //     absent and never written (a client must not be able to put its own text
-//     into the log under this name). Any replica can answer a re-check: the
-//     reference travels with the client, not in a replica's memory.
+//     into the log under this name); a well-formed one bound to the caller is
+//     reused, so a crafted call can choose its own line's value (the LIMIT in
+//     desktopAccess). Any replica can answer a re-check: the reference
+//     travels with the client, not in a replica's memory.
 //   - Every write is bounded per person on each replica, a burst of three and
 //     then one a minute (desktop_access_bound.go), because the line skips the
 //     log store's own limits. Past the bound nothing is written and no digest
@@ -737,8 +739,18 @@ func (e *MemQLEngine) desktopAccess(ctx context.Context, actingUserId, passedRef
 	// across a sign-in change on one page never answer for a second person. A
 	// passed reference is reused only when the digest's person part is this
 	// person's; for anybody else, or a digest that does not parse, a new
-	// reference is minted and its line written, so a reference is never shared
-	// by two people. The line's Reasons stay the plain reasons.
+	// reference is minted and its line written, so the OS never hands one
+	// person's reference to another. The line's Reasons stay the plain reasons.
+	//
+	// LIMIT, by decision (final review, minor 1: no server secret in this
+	// merge). The person part is a hash of the caller's own bare id, which any
+	// caller can compute, so a crafted call can choose the ERR- value of its
+	// own line: another person's reference, or an engine error id. It cannot
+	// put text in (the value must match accessReferencePattern), every line
+	// names the caller as its subject, and the write bound limits how many
+	// lines one caller can write. An administrator who searches a reference
+	// reads each line's subject. Binding the reference with an HMAC under a
+	// server key would close it, at the cost of a key every replica shares.
 	digest := personAccessDigest(actingUserId, reasons)
 	passed := accessReferencePattern.MatchString(passedReference) && digestIsFor(passedDigest, actingUserId)
 	if passed && passedDigest == digest {

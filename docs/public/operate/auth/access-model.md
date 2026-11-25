@@ -1117,10 +1117,17 @@ is the person's bare user id, and its attributes are `reference` and
 [the held person's reference](../logs.md#the-one-line-that-is-never-dropped-a-held-persons-reference).
 A re-check that passes back its reference with the same reasons writes
 nothing and keeps the reference; changed reasons write a new line under the
-same reference. A reference is never shared by two people. Lines are bounded
-per person on each replica, three at once and then one a minute; past that a
-check writes nothing and answers with the reference the page already had, or
-with none.
+same reference. Lines are bounded per person on each replica, three at once
+and then one a minute; past that a check writes nothing and answers with the
+reference the page already had, or with none.
+
+The engine checks a passed-back reference for its shape and binds it to the
+person it was made for, so MemQL OS never hands one person's reference to
+another. That does not make a reference unique to one person: a call crafted
+outside the OS can choose the `ERR-` value of its own line, including one
+somebody else was shown. It cannot put any other text in the line, every line
+names its person as the subject, and the bound above limits how many lines one
+caller can write. So after searching a reference, read each line's subject.
 
 **The reasons a line can carry.** One sentence per distinct cause. Several
 can appear together, always in the same (sorted) order, so a line changes only
@@ -1163,8 +1170,8 @@ what is offline (their machine, a lent machine, a lent key, their key, an app)
 and whom to ask, and offers Fleet only to somebody who can open it.
 
 **Limits.** A person with more than 50 registered machines is read on the
-first page only. A person holding a copy of somebody else's reference gets their
-own. The check does not close MemQL's API, the SDK or Cockpit to a held
+first page only. Through MemQL OS, a person holding a copy of somebody else's
+reference gets their own. The check does not close MemQL's API, the SDK or Cockpit to a held
 person; the server already refuses their model calls, and the rule is about
 MemQL OS. Code: `component/memql/desktop_access.go`,
 `component/logstore/access_hold.go`; client:
