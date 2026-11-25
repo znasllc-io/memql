@@ -6,8 +6,9 @@ import { ModelAssignmentBoard } from "../../src/apps/fleet/machines/ModelAssignm
 import { assignmentProposal, modelSetupFromRow } from "../../src/apps/fleet/machines/modelSetup";
 import { ConnectionStatusContext } from "../../src/chrome/connection";
 import { sectionsFor } from "../../src/system/registry";
+import { setEffectiveCapabilities } from "../../src/system/roles";
 import { readTheBar } from "../readTheBar";
-import { installSeededAccess } from "../seededAccess";
+import { installSeededAccess, seededAccessFor } from "../seededAccess";
 
 // Cluster > Settings > Memory search (design record 2026-11-23, section 8):
 // the model memory search uses, whose machines index it, and the owner's acts
@@ -274,7 +275,10 @@ describe("Cluster > Settings > Memory search", () => {
     const done = switchRun({ state: "done", targetRef: QWEN, targetLabel: "qwen3-embedding:0.6b" });
     const query = memorySearchQuery(statusRow({ previousRef: NOMIC, retained: [kept], switch: done }));
     mount("memorysearch", query);
-    expect(await screen.findByText(/^The previous model's index is kept until Dec 24, 2026\.$/)).toBeTruthy();
+    // The date is the reader's, in their zone and their locale's words: worked
+    // out here the same way, so the test holds in Kiritimati and in German.
+    const until = new Date(kept.retireAt).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+    expect(await screen.findByText(`The previous model's index is kept until ${until}.`)).toBeTruthy();
     await readTheBar();
     fireEvent.click(screen.getByRole("button", { name: "Switch back" }));
     expect(screen.getByText(/^Everything is re-indexed in the background on your machines\./)).toBeTruthy();
@@ -301,6 +305,66 @@ describe("Cluster > Settings > Memory search", () => {
     mount("memorysearch", memorySearchQuery(statusRow({ previousRef: NOMIC, retained: [kept], switch: switchRun({ targetRef: VENDOR, targetLabel: "text-embedding-3-small" }) })));
     await screen.findByRole("progressbar");
     expect(screen.queryByRole("button", { name: "Switch back" })).toBeNull();
+  });
+
+  it("with no model yet, choosing one asks once and binds it; Not now leaves it unchosen", async () => {
+    const unbound = statusRow({ providerRef: "", kind: "", label: "", indexedBy: "", indexedByName: "", chosenBy: "", indexed: 0 });
+    const query = memorySearchQuery(unbound, statusRow({ providerRef: NOMIC, label: "nomic-embed-text", indexed: 0 }));
+    mount("memorysearch", query);
+    expect(within(await screen.findByRole("region", { name: "In use" })).getByText("Not chosen yet")).toBeTruthy();
+    const models = await screen.findByRole("radiogroup", { name: "Memory search model" });
+    expect(within(models).getAllByRole("radio").filter((r) => r.getAttribute("aria-checked") === "true")).toHaveLength(0);
+
+    // Nothing is indexed under another model, so nothing is re-indexed: the short question.
+    fireEvent.click(within(models).getByRole("radio", { name: /nomic-embed-text/ }));
+    expect(screen.getByText("Everything is indexed in the background on your machines. New items are indexed the same way from now on.")).toBeTruthy();
+    await readTheBar();
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    expect(screen.queryByText(/^Everything is indexed/)).toBeNull();
+    expect(query.memorySearchSwitch).not.toHaveBeenCalled();
+
+    // A vendor model says who pays.
+    fireEvent.click(within(models).getByRole("radio", { name: /text-embedding-3-small/ }));
+    expect(screen.getByText("Everything is indexed in the background on the cluster's vendor account. New items are indexed the same way from now on.")).toBeTruthy();
+
+    fireEvent.click(within(models).getByRole("radio", { name: /nomic-embed-text/ }));
+    await readTheBar();
+    fireEvent.click(screen.getByRole("button", { name: "Use nomic-embed-text" }));
+    await settle();
+    expect(query.memorySearchSwitch).toHaveBeenCalledTimes(1);
+    expect(query.memorySearchSwitch).toHaveBeenCalledWith({ provider: NOMIC });
+    expect(within(screen.getByRole("region", { name: "In use" })).getByText("nomic-embed-text")).toBeTruthy();
+    expect(screen.queryByText(/^Everything is/)).toBeNull();
+  });
+
+  it("with read but not execute on the part, everything is shown and nothing is offered", async () => {
+    setEffectiveCapabilities(seededAccessFor("owner").filter((c) => !(c.verb === "execute" && c.resource === "app:cluster/memorysearch")));
+
+    mount("memorysearch", memorySearchQuery(statusRow({ indexedBy: "ana", indexedByName: "Ana Owner", takeOver: true, backlog: 3,
+      waitingReason: "none of the indexer's machines offering qwen3-embedding:0.6b is online" })));
+    expect(await screen.findByText("Indexed on Ana Owner's machines")).toBeTruthy();
+    expect(screen.getByText("3 items waiting: none of Ana Owner's machines offering qwen3-embedding:0.6b is online")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Index on my machines" })).toBeNull();
+    expect(screen.queryByRole("radiogroup", { name: "Memory search model" })).toBeNull();
+    cleanup();
+
+    // A vendor model nobody chose: said as what pays for it, and not put to this reader.
+    mount("memorysearch", memorySearchQuery(statusRow({ providerRef: VENDOR, kind: "vendor", label: "text-embedding-3-small", indexedBy: "", indexedByName: "", chosenBy: "", needsConfirmation: true })));
+    expect(await screen.findByText("Paid by the cluster's vendor account")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Keep" })).toBeNull();
+    cleanup();
+
+    // A switch, with its progress and its take-over's reason in view, and no act.
+    mount("memorysearch", memorySearchQuery(statusRow({ switch: switchRun({ indexedBy: "bo", indexedByName: "Bo Owner", takeOver: true }) })));
+    expect(await screen.findByRole("progressbar")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Re-index on my machines" })).toBeNull();
+    cleanup();
+
+    mount("memorysearch", memorySearchQuery(statusRow({ switch: switchRun({ state: "needsDecision", counts: { total: 8310, done: 8305, skipped: 0, unsourced: 2, failed: 3 } }) })));
+    expect(await screen.findByText("5 items could not be indexed (3 failed, 2 cannot be rebuilt).")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Switch anyway" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
   });
 
   it("a vendor binding picked before asks once", async () => {
