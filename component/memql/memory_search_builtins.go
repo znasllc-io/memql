@@ -197,6 +197,27 @@ func memorySearchSwitchOver(state string) bool {
 	return false
 }
 
+// memorySearchTablesInUse is the set of vector tables in use, which the daily
+// cleanup never drops and the status never lists as kept for switching back:
+// the active model's (active is the binding read, zero when none is bound) and
+// a running switch's target. They are protected by NAME, whatever a retired row
+// says: a flip that stopped part way dates the active model before the binding
+// moves, and a cancelled target can be chosen again.
+func memorySearchTablesInUse(active EmbedderBinding, sw MemoryIndexRun, hasSwitch bool) map[string]bool {
+	inUse := map[string]bool{}
+	if active.Valid() {
+		if table, err := EmbeddingVectorTable(active.ProviderRef, active.Dimensions); err == nil {
+			inUse[table] = true
+		}
+	}
+	if hasSwitch && !memorySearchSwitchOver(sw.State) {
+		if table, err := EmbeddingVectorTable(sw.TargetRef, sw.TargetDimensions); err == nil {
+			inUse[table] = true
+		}
+	}
+	return inUse
+}
+
 // memorySearchKind is "machine" for a fleet model and "vendor" for a vendor
 // record.
 func memorySearchKind(ref string) string {
@@ -671,25 +692,15 @@ func memoryIndexRetire(ctx context.Context, w memorySearchWorld) error {
 		return fmt.Errorf("memory index cleanup: the binding lock could not be taken; tomorrow's run tries again: %w", err)
 	}
 	defer unlock()
-	keep := map[string]bool{}
-	active, err := w.binding(ctx)
-	if err != nil && !errors.Is(err, ErrNoEmbedderBound) {
+	active, _, err := memorySearchBinding(ctx, w)
+	if err != nil {
 		return err
-	}
-	if err == nil && active.Valid() {
-		if table, err := EmbeddingVectorTable(active.ProviderRef, active.Dimensions); err == nil {
-			keep[table] = true
-		}
 	}
 	sw, _, has, err := w.readRun(ctx, memoryIndexKindSwitch)
 	if err != nil {
 		return err
 	}
-	if has && !memorySearchSwitchOver(sw.State) {
-		if table, err := EmbeddingVectorTable(sw.TargetRef, sw.TargetDimensions); err == nil {
-			keep[table] = true
-		}
-	}
+	keep := memorySearchTablesInUse(active, sw, has)
 	retired, err := w.retired(ctx)
 	if err != nil {
 		return err

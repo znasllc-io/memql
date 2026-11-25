@@ -80,7 +80,7 @@ func memorySearchStatus(ctx context.Context, w memorySearchWorld, caller string)
 		return nil, err
 	}
 	bound := err == nil && active.Valid()
-	activeTable, indexed, backlog := "", 0, 0
+	indexed, backlog := 0, 0
 	if bound {
 		row["providerRef"] = active.ProviderRef
 		row["kind"] = memorySearchKind(active.ProviderRef)
@@ -94,7 +94,8 @@ func memorySearchStatus(ctx context.Context, w memorySearchWorld, caller string)
 		row["needsConfirmation"] = !fleet && strings.TrimSpace(active.ChosenBy) == ""
 		row["previousRef"] = strings.TrimSpace(active.PreviousRef)
 		row["takeOver"] = memorySearchOffersTakeOver(ctx, w, caller, active)
-		if activeTable, err = EmbeddingVectorTable(active.ProviderRef, active.Dimensions); err != nil {
+		activeTable, err := EmbeddingVectorTable(active.ProviderRef, active.Dimensions)
+		if err != nil {
 			return nil, err
 		}
 		if indexed, err = w.vectors(ctx, activeTable); err != nil {
@@ -119,11 +120,7 @@ func memorySearchStatus(ctx context.Context, w memorySearchWorld, caller string)
 	if err != nil {
 		return nil, err
 	}
-	targetTable := ""
 	if hasSwitch {
-		if !memorySearchSwitchOver(sw.State) {
-			targetTable, _ = EmbeddingVectorTable(sw.TargetRef, sw.TargetDimensions)
-		}
 		startedAt := ""
 		if !sw.StartedAt.IsZero() {
 			startedAt = sw.StartedAt.UTC().Format(time.RFC3339Nano)
@@ -141,10 +138,11 @@ func memorySearchStatus(ctx context.Context, w memorySearchWorld, caller string)
 		return nil, err
 	}
 	sort.SliceStable(retired, func(i, j int) bool { return retired[i].RetireAt.Before(retired[j].RetireAt) })
+	inUse := memorySearchTablesInUse(active, sw, hasSwitch)
 	retained := []any{}
 	for _, r := range retired {
 		table, err := EmbeddingVectorTable(r.ProviderRef, r.Dimensions)
-		if err != nil || !r.DroppedAt.IsZero() || r.RetireAt.IsZero() || table == activeTable || table == targetTable {
+		if err != nil || !r.DroppedAt.IsZero() || r.RetireAt.IsZero() || inUse[table] {
 			continue
 		}
 		retained = append(retained, map[string]any{"providerRef": r.ProviderRef, "retireAt": r.RetireAt.UTC().Format(time.RFC3339Nano)})
@@ -178,19 +176,12 @@ func memorySearchChoices(ctx context.Context, w memorySearchWorld, caller string
 		if !m.Embeddings || strings.TrimSpace(m.ModelId) == "" {
 			continue
 		}
+		// Each machine carries its own capabilities, and the model's flag is
+		// their union (fleetcatalog.Project), so an embedding model has at
+		// least one machine that embeds with it.
 		machines, online := 0, 0
 		for _, mm := range m.Machines {
 			if mm.Capabilities.Embeddings {
-				machines++
-				if mm.Online {
-					online++
-				}
-			}
-		}
-		if machines == 0 {
-			// A reader that reports the capability for the model only: every
-			// machine behind it counts.
-			for _, mm := range m.Machines {
 				machines++
 				if mm.Online {
 					online++
