@@ -7,7 +7,9 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -30,6 +32,77 @@ type fakeFleet struct {
 	readErr   error
 	policyErr error
 	touchErr  error
+
+	// drops are each machine's recorded connection drops, keyed by the BARE
+	// registration id, as the shared database holds them for every replica
+	// (network-aware fleet selection). Nil is a fleet with no drops, which is
+	// every test written before drops existed. dropsErr fails every read;
+	// dropReads counts them, by the id asked for.
+	drops     map[string][]workerservice.ConnectionDrop
+	dropsErr  error
+	dropReads []string
+
+	// activities are the v1:worker:activity rows a dispatching or receiving
+	// replica writes (activity.go), shared like the database: what one replica
+	// writes before it sends a call, another reads back as work in flight.
+	activityMu sync.Mutex
+	activities map[string]map[string]any
+}
+
+// writeMachineActivity stores the row the way the two mutations would: create
+// writes it whole, update merges the fields it names.
+func (f *fakeFleet) writeMachineActivity(_ context.Context, name string, args map[string]any) error {
+	f.activityMu.Lock()
+	defer f.activityMu.Unlock()
+	if f.activities == nil {
+		f.activities = map[string]map[string]any{}
+	}
+	id, _ := args["activityId"].(string)
+	row := f.activities[id]
+	if row == nil || name == "createMachineActivity" {
+		row = map[string]any{"status": "queued"}
+		f.activities[id] = row
+	}
+	for k, v := range args {
+		row[k] = v
+	}
+	return nil
+}
+
+// RunningPipelineSteps answers as the engine store does from
+// activeMachineActivity: the machine's running pipeline-step activities.
+func (f *fakeFleet) RunningPipelineSteps(_ context.Context, _ string, registrationId string) (int, error) {
+	f.activityMu.Lock()
+	defer f.activityMu.Unlock()
+	n := 0
+	for _, row := range f.activities {
+		worker, _ := row["workerId"].(string)
+		if sameRegistration(worker, registrationId) && row["status"] == "running" && row["label"] == "workerHost."+PipelineStepAction {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// ConnectionDrops answers as myWorkerConnectionDrops does: one machine's drops
+// at or after since, newest first, capped at 100, whichever spelling of the id
+// is asked for.
+func (f *fakeFleet) ConnectionDrops(_ context.Context, _ string, registrationId string, since time.Time) ([]workerservice.ConnectionDrop, error) {
+	f.dropReads = append(f.dropReads, registrationId)
+	if f.dropsErr != nil {
+		return nil, f.dropsErr
+	}
+	var out []workerservice.ConnectionDrop
+	for _, d := range f.drops[lastSegment(registrationId)] {
+		if !d.DroppedAt.Before(since) {
+			out = append(out, d)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].DroppedAt.After(out[j].DroppedAt) })
+	if len(out) > connectionDropReadCap {
+		out = out[:connectionDropReadCap]
+	}
+	return out, nil
 }
 
 // Fixture work is admitted unless a consent-specific store overrides this.

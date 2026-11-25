@@ -270,6 +270,17 @@ answers it after a command as well as before one: it does not send that step
 here again, and only a step its pipeline marks `repeatable` moves on to another
 machine. Exit 75 is the command's own request for a retry.
 
+**A step needs the connection for its whole run.** When the stream to the
+cluster is lost, this worker stops the step (`cancelled`), and the engine cannot
+tell whether it finished. A long step on a weak connection is the case that
+fails: weak 2.4 GHz Wi-Fi loses the stream on a keepalive timeout ("keepalive
+ping failed to receive ACK within timeout" in `worker.log`). The cluster records
+each connection that ends while a step or other work is running, or that is
+replaced by this worker's next connection before the cluster saw it end, and
+places pipeline steps on machines without such a drop in the run's window (two
+hours by default) first, waiting for one of those when it is only busy. A wired
+connection or 5 GHz Wi-Fi keeps a machine first in line.
+
 ---
 
 ## The environment a step sees

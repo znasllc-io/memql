@@ -50,6 +50,13 @@ type Dispatcher struct {
 	remote      RemoteDispatcher
 	permissions permission.Authority
 	destination destinationChecker
+	// drops reads machines' recorded connection drops for a pipeline step's
+	// network-aware placement (connection.go). Nil reads none, and placement is
+	// exactly what it was before drops existed.
+	drops ConnectionDropReader
+	// steps reads a machine's running pipeline steps, the evidence that its
+	// busy refusal will clear (connection.go hasWorkInFlight).
+	steps RunningStepReader
 }
 
 // Store is the persistence side of the dispatcher (resolve agent
@@ -153,6 +160,17 @@ type Result struct {
 	// Under a pin it is the pinned machine alone that is waited for, and a
 	// machine the request excluded never is.
 	WaitForConnection bool
+
+	// Connection is the attempted machine's connection as placement judged it,
+	// when the request asked for network-aware placement and drops were read
+	// (nil otherwise). Stamped by the dispatching replica from its plan, never
+	// read off a forward's reply, as MachineName is.
+	Connection *ConnectionHealth
+	// PassedOver names the unsteady machines a fleet step did not try because
+	// a steady machine was only busy with work (D1). Set only on that steady
+	// machine's busy refusal, which is what the result then is, so the fleet
+	// executor waits for it and its log says who was passed over.
+	PassedOver []PassedOver
 }
 
 // Request carries the inputs of one dispatch: from the agent tool loop, or --
@@ -227,6 +245,15 @@ type Request struct {
 	// The empty pin is no pin. Regression tests: pipeline_pin_hop_test.go.
 	PinRegistration      string
 	ExcludeRegistrations []string
+
+	// Connection is a pipeline step's network-aware placement (connection.go):
+	// how long a recorded drop makes a machine unsteady, and whether a steady
+	// machine that is busy with work is waited for (D1, a `placement: fleet`
+	// step only). Set only by the engine's fleet executor from the run's
+	// captured policy; purposeRefusal refuses it on every other purpose, as it
+	// does a pin, so design D4 holds -- nothing a model writes can set it. The
+	// zero value reads no drops and changes nothing.
+	Connection ConnectionPreference
 
 	// OnStreamChunk, when set, receives the machine's streamed stdout / stderr
 	// as it arrives. Set by nothing in the tool loop today -- the loop takes a
@@ -323,6 +350,8 @@ func NewDispatcher(opts Options) (*Dispatcher, error) {
 		remote:     opts.Remote,
 	}
 	d.destination, _ = opts.Store.(destinationChecker)
+	d.drops, _ = opts.Store.(ConnectionDropReader)
+	d.steps, _ = opts.Store.(RunningStepReader)
 	if opts.Store != nil {
 		d.router = NewRouter(opts.Store, opts.Logger, clock)
 	}
@@ -470,6 +499,13 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 			plan.PinRegistration(req.PinRegistration)
 		}
 		plan.ExcludeRegistrations(req.ExcludeRegistrations)
+		// NETWORK-AWARE ORDER (connection.go, D4 and D5), LAST: it orders what
+		// every consent and narrowing above admitted and admits nothing. Under
+		// a pin there is one candidate, so its health is recorded and nothing
+		// moves (D8).
+		if req.Connection.Window > 0 && d.drops != nil {
+			plan.ApplyConnection(d.readConnectionHealth(ctx, req.OwnerUserId, plan.Candidates, req.Connection.Window))
+		}
 	}
 	if err == nil && req.computerPermission != nil {
 		plan.RequireActionContract(permission.Contract, permission.Version)
@@ -521,11 +557,35 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 
 	var capacity Result
 	var capacityRecord RoutingRecord
+	// steadyBusy is the first steady machine that refused only because it is
+	// busy with work (D1, D6), for a fleet step that waits for one.
+	var steadyBusy *Result
+	var steadyBusyRecord RoutingRecord
 	for idx, cand := range plan.Candidates {
+		health, measured := plan.healthOf(cand)
+		if steadyBusy != nil && measured && !health.Steady() {
+			// WAIT FOR THE STEADY MACHINE (D1). The candidates are steady first
+			// (ApplyConnection), so every machine from here on is unsteady, and a
+			// steady one is only busy: its refusal is the answer, the fleet
+			// executor's capacity wait asks again, and nothing starts on a
+			// machine whose connection dropped inside the window.
+			res, rec := *steadyBusy, steadyBusyRecord
+			rec.Attempts = record.Attempts
+			res.PassedOver = plan.passedOver(plan.Candidates[idx:])
+			for _, p := range res.PassedOver {
+				rec.PassedOver = append(rec.PassedOver, p.WorkerId)
+			}
+			d.recordInvocation(ctx, req, res.WorkerId, startedAt, d.clock(), res, res.classifyOutcome(), rec)
+			return maskPipelineResult(req, res), nil
+		}
 		record.Attempts = idx + 1
 		record.SelectedBy = selectedBy(req, plan, idx)
 
 		res, outcome := d.attempt(ctx, req, gate.requiredCapability, cand, timeout)
+		if measured {
+			h := health
+			res.Connection = &h
+		}
 		if outcome == ForwardRefusedBeforeStart {
 			// Preserve an eligible pipeline machine's capacity refusal while
 			// looking for one that can start now. A later machine may reject the
@@ -537,6 +597,14 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 				((res.ErrorCode == "pipeline_capacity_busy" && capacity.ErrorCode != "pipeline_capacity_busy") ||
 					(res.ErrorCode == "pipeline_capacity_fenced" && capacity.ErrorCode == "")) {
 				capacity, capacityRecord = res, record
+			}
+			// A steady machine that is busy with work clears by itself; one that
+			// refused busy with nothing of ours running (low disk or memory), or
+			// for any other reason, is passed as it is today (D6).
+			if req.Purpose == PurposePipeline && req.Connection.WaitForSteady && steadyBusy == nil &&
+				measured && health.Steady() && res.ErrorCode == "pipeline_capacity_busy" && d.hasWorkInFlight(ctx, req.OwnerUserId, cand) {
+				held := res
+				steadyBusy, steadyBusyRecord = &held, record
 			}
 			// NOTHING RAN on this machine. That is the whole precondition for
 			// trying another one (design D5): a busy machine and a stream that

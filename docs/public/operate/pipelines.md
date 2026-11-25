@@ -1766,9 +1766,38 @@ that runs out counts as nothing ran, and after a move no other machine is tried:
 the cluster follows where the policy allows it, and otherwise the step fails.
 Every attempt counts against the run's ceiling, and no step makes more than 8.
 
-**The limits are the installation's.** The installed policy's `retries` set
-them ([Operator run admission](#operator-run-admission)). The portable default
-is:
+**Machines whose connection dropped.** A fleet machine's step ends with its
+connection: Cockpit stops the step when the stream to the cluster is lost, and
+the attempt is an unknown outcome. So placement prefers machines whose
+connection has held. The agent replica holding a machine's connection records a
+**drop** when the connection ends in a way Cockpit did not choose: a new
+connection from the same machine replaced it before the cluster saw it end, or
+it ended while the machine had work running. Cockpit reconnects on its own only
+when idle, and the cluster's own drains, revocations and expired credentials
+never count. A machine with a drop in the last `connection.unsteadyMinutes` (two
+hours by default) is **unsteady**:
+
+- every fleet or pool step tries the steady machines first, in your routing
+  strategy's order, and the unsteady ones after, fewest drops first;
+- a step placed on your fleet (`placement: fleet`, or implied by its needs or
+  native execution) waits for a steady machine that is busy running work
+  rather than start on an unsteady one, the way it waits for capacity. It does not
+  wait for one that is short of disk or memory with nothing of ours running,
+  held by an operator's fence or offline, and when no steady machine can take
+  it, it runs on the unsteady one. A retry's bounded wait that runs out tries
+  the free machine once before it counts as nothing ran;
+- a `pool` step never waits or goes to the cloud because of a drop: when the
+  steady machines are busy, a free unsteady one takes it, as before.
+
+The step's log says which steady machine it waited for and which machine it
+passed over, a step that ran on an unsteady machine says so, and a lost
+connection on one adds how many times the connection had dropped. Round trip
+time plays no part. A machine's drops of the last day are in Fleet, under the
+machine's Details > Connection.
+
+**The limits are the installation's.** The installed policy's `retries` and
+`connection` set them ([Operator run admission](#operator-run-admission)). The
+portable default is:
 
 ```memql fragment
 return {fleetWaitSeconds: 0, cloudFallback: false, retries: {sameMachine: 2, delaysSeconds: [30, 120], otherMachines: true}}
@@ -1779,7 +1808,12 @@ at all, gets those values. `sameMachine` is an integer from 0 to 3,
 `delaysSeconds` one to three integers from 0 to 900 seconds, and `otherMachines`
 a boolean. Once `retries` is written, all three are required and nothing else is
 accepted. `sameMachine: 0` with `otherMachines: false` stops every retry but a
-pool step's one move to the cluster, which `cloudFallback` decides. A policy
+pool step's one move to the cluster, which `cloudFallback` decides.
+`connection.unsteadyMinutes` is an integer from 0 to 1440; 0 turns the
+preference off, and a policy that names no `connection`, as the portable
+default does not, gets 120. A run keeps its policy's source for its re-runs, and
+an engine older than the setting refuses a policy that writes it, so add it to
+an installed policy only once no rollback below this release is planned. A policy
 that cannot be read refuses every run with a command step, as
 `pipeline_stage_invalid` scoped `computePlacement`, naming the field. A run
 keeps the policy it started with, on every replica.
@@ -1932,8 +1966,8 @@ recovery remains prioritized over queued runs.
 The optional installed delivery role `computePlacement` selects
 `pipelineComputePlacementPolicy`. Its captured template receives `repository`,
 `pipelineId`, `ownerUserId` and `event`, and returns
-`{fleetWaitSeconds: 60, cloudFallback: true}` and, optionally, `retries` (wait
-seconds must be an integer from 0 through 3600). The two capacity fields choose
+`{fleetWaitSeconds: 60, cloudFallback: true}` and, optionally, `retries` and
+`connection` (wait seconds must be an integer from 0 through 3600). The two capacity fields choose
 capacity for explicit `placement: pool` steps only; `retries` limits every
 command step ([Retries and failover](#retries-and-failover)). The portable
 default and older snapshots allow no cloud fallback. A repository cannot replace

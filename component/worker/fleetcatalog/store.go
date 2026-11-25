@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	workerservice "github.com/znasllc-io/memql/component/worker"
 	"github.com/znasllc-io/memql/core/num"
@@ -106,6 +107,73 @@ func (s *EngineStore) WorkersForOwner(ctx context.Context, ownerUserId string) (
 	}
 	return out, nil
 }
+
+// ConnectionDrops reads one of the owner's machines' dropped connections at or
+// after since, newest first, at most 100 (myWorkerConnectionDrops). Placement
+// asks it per candidate for the run's window (network-aware fleet selection,
+// section 5) and Fleet for a machine's last day.
+//
+// THE ACTOR IS BORROWED exactly as WorkersForOwner borrows it, because the
+// placement replica dispatches on the owner's behalf and has no actor of its
+// own; and the read is FRESH (ContextWithFreshRead), because the rows are
+// written by whichever replica held the machine's stream, so a result cached on
+// this replica could miss a drop written a moment ago (the query is @cache(0)
+// as well; both are stated so neither alone carries the rule).
+func (s *EngineStore) ConnectionDrops(ctx context.Context, ownerUserId, registrationId string, since time.Time) ([]workerservice.ConnectionDrop, error) {
+	if s == nil || s.Engine == nil {
+		return nil, nil
+	}
+	if strings.TrimSpace(ownerUserId) == "" {
+		return nil, fmt.Errorf("fleet drops read: ownerUserId is required")
+	}
+	if strings.TrimSpace(registrationId) == "" {
+		return nil, fmt.Errorf("fleet drops read: registrationId is required")
+	}
+	if err := auth.ValidateRoleTestContext(ctx); err != nil {
+		return nil, err
+	}
+	readCtx := ctx
+	if ac, ok := auth.AccessFromContext(ctx); !ok || !workerservice.SameSubjectId(ac.UserId, ownerUserId) {
+		if auth.IsRoleTestUser(ownerUserId) || roleTestContext(ctx) {
+			return nil, fmt.Errorf("fleet drops read: role test cannot borrow another owner")
+		}
+		readCtx = auth.ContextWithUserActor(ctx, ownerUserId)
+	}
+	call, err := langparser.RenderCall("myWorkerConnectionDrops", map[string]any{
+		"registrationId": registrationId,
+		"since":          since.UTC().Format(time.RFC3339Nano),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("fleet drops read: %w", err)
+	}
+	res, err := s.Engine.Execute(memqlengine.ContextWithFreshRead(readCtx), "query "+call)
+	if err != nil {
+		return nil, fmt.Errorf("fleet drops read: %w", err)
+	}
+	if res == nil {
+		return nil, nil
+	}
+	rows := outputPayloadRows(res.OutputPayload())
+	out := make([]workerservice.ConnectionDrop, 0, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		out = append(out, workerservice.ConnectionDrop{
+			RegistrationId: rowString(row, "registrationId"),
+			OwnerUserId:    ownerUserId,
+			DroppedAt:      rowTime(row, "droppedAt"),
+			ConnectedAt:    rowTime(row, "connectedAt"),
+			Cause:          rowString(row, "cause"),
+			WorkInFlight:   rowInt(row, "workInFlight"),
+			NodeId:         rowString(row, "nodeId"),
+			Code:           rowString(row, "code"),
+			Reason:         rowString(row, "reason"),
+		})
+	}
+	return out, nil
+}
+
 func (s *EngineStore) SharedInferenceWorkers(ctx context.Context) ([]Candidate, error) {
 	if s == nil || s.Engine == nil {
 		return nil, nil

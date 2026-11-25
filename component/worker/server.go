@@ -659,6 +659,9 @@ func (s *streamSession) close(cause error) {
 		}
 		s.mu.Lock()
 		pendingCount := len(s.pending)
+		// Counted before failOpenAppSignIns empties the map below: an open
+		// sign-in is work Cockpit would not reconnect under (WorkInFlight).
+		openSignIns := len(s.appSignIns)
 		for _, ch := range s.pending {
 			close(ch)
 		}
@@ -718,6 +721,20 @@ func (s *streamSession) close(cause error) {
 		}
 		s.failOpenAppSignIns()
 		s.clearConnectedNode()
+		s.mu.Lock()
+		drainReason := s.drainReason
+		s.mu.Unlock()
+		code, reason := disconnectCodeReason(cause, drainReason)
+		// THE DROP RECORD (network-aware fleet selection): whether this end
+		// could have been Cockpit's own choice is decided here, from what only
+		// this replica knows -- the reason the cluster ended it, if any, and
+		// what was still in flight -- and recorded before the log line below,
+		// so the line and the row agree. See connection_drop.go.
+		inFlight := WorkInFlight{ToolCalls: pendingCount, AppSessions: len(liveSessions), AppSignIns: openSignIns, ModelCalls: len(liveCalls), ModelPulls: len(livePulls)}
+		dropCause, dropped := classifyStreamEnd(drainReason, inFlight)
+		if dropped {
+			s.recordDrop(dropCause, inFlight, code, reason)
+		}
 		// Log disconnect symmetrically to "worker registered" on the
 		// connect path. Without this the agent log was silent on
 		// disconnect -- the only signal was the absence of further
@@ -739,11 +756,10 @@ func (s *streamSession) close(cause error) {
 			if len(liveCalls) > 0 {
 				fields = append(fields, "model_calls_aborted", len(liveCalls))
 			}
-			s.mu.Lock()
-			drainReason := s.drainReason
-			s.mu.Unlock()
-			code, reason := disconnectCodeReason(cause, drainReason)
 			fields = append(fields, "code", code, "reason", reason)
+			if dropped {
+				fields = append(fields, "drop", dropCause)
+			}
 			s.server.logger.Info("worker disconnected", fields...)
 		}
 		// Emit an audit event mirroring "worker_registered" so downstream
@@ -775,6 +791,45 @@ func (s *streamSession) close(cause error) {
 			})
 		}
 	})
+}
+
+// recordDrop writes this stream's end as one v1:worker:connectionDrop row
+// through the store's ConnectionDropRecorder, when it has one (a store without
+// it records nothing, which leaves placement as it was before drops existed).
+//
+// ON A DETACHED CONTEXT, for the disconnect audit's reason: s.cancel fired on
+// the first line of close, so s.ctx is done and a write on it would fail before
+// any row existed. WithoutCancel keeps the stream's values; the timeout bounds a
+// teardown that must not hang on a slow database. A failed write is logged and
+// the stream's teardown goes on: a missing drop makes a machine read steadier
+// than it is, and failing the close over it would cost more than it saves.
+func (s *streamSession) recordDrop(cause string, inFlight WorkInFlight, code, reason string) {
+	if s == nil || s.server == nil || s.worker == nil {
+		return
+	}
+	recorder, ok := s.server.store.(ConnectionDropRecorder)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(s.ctx), 5*time.Second)
+	defer cancel()
+	if err := recorder.RecordConnectionDrop(ctx, ConnectionDrop{
+		RegistrationId: s.worker.RegistrationId,
+		OwnerUserId:    s.worker.OwnerUserId,
+		DroppedAt:      s.server.clock(),
+		ConnectedAt:    s.worker.ConnectedAt,
+		Cause:          cause,
+		WorkInFlight:   inFlight.Total(),
+		NodeId:         strings.TrimSpace(s.server.nodeId),
+		Code:           code,
+		Reason:         reason,
+	}); err != nil && s.server.logger != nil {
+		s.server.logger.Warn("worker: record connection drop failed",
+			"registration_id", s.worker.RegistrationId,
+			"cause", cause,
+			"error", err,
+		)
+	}
 }
 
 // clearConnectedNode blanks the registration's connectedNodeId now that this

@@ -152,6 +152,14 @@ type RoutingRecord struct {
 	// nothing, and the question a person actually has is which of their four
 	// machines was ruled out for what.
 	Rejected map[string]string
+	// Connection is each candidate's connection as a pipeline step's placement
+	// judged it (network-aware fleet selection, connection.go):
+	// ConnectionHealth.RecordValue per registration id. Absent when no drops
+	// were read: an agent's call, or a step whose policy window is zero.
+	Connection map[string]string
+	// PassedOver names the unsteady machines a fleet step did not try because a
+	// steady machine was only busy (D1).
+	PassedOver []string
 }
 
 // AsMap renders the record for the mutation's `routing object` argument.
@@ -185,6 +193,12 @@ func (r RoutingRecord) AsMap() map[string]any {
 	}
 	if len(r.Rejected) > 0 {
 		out["rejected"] = r.Rejected
+	}
+	if len(r.Connection) > 0 {
+		out["connection"] = r.Connection
+	}
+	if len(r.PassedOver) > 0 {
+		out["passedOver"] = r.PassedOver
 	}
 	return out
 }
@@ -254,6 +268,10 @@ type RoutePlan struct {
 	// filtering. It separates "you have no machines" from "none of your four
 	// matched", which are different problems with different fixes.
 	Total int
+	// Connection is each candidate's connection health, filed by
+	// ApplyConnection under the bare registration id (connectionKey). Nil when
+	// no drops were read.
+	Connection map[string]ConnectionHealth
 }
 
 // Record seeds a RoutingRecord from the plan. The dispatcher fills in
@@ -263,6 +281,15 @@ func (p RoutePlan) Record() RoutingRecord {
 	for _, c := range p.Candidates {
 		ids = append(ids, c.RegistrationId)
 	}
+	var connection map[string]string
+	if len(p.Connection) > 0 {
+		connection = make(map[string]string, len(p.Candidates))
+		for _, c := range p.Candidates {
+			if h, ok := p.healthOf(c); ok {
+				connection[c.RegistrationId] = h.RecordValue()
+			}
+		}
+	}
 	return RoutingRecord{
 		PolicyId:             p.Policy.Id,
 		Strategy:             p.Policy.Strategy,
@@ -270,6 +297,7 @@ func (p RoutePlan) Record() RoutingRecord {
 		RequireLabels:        p.Require,
 		PreferLabels:         p.Prefer,
 		Rejected:             p.Rejected,
+		Connection:           connection,
 	}
 }
 

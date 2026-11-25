@@ -5400,6 +5400,142 @@ tag).
 hops. Live fleet-to-cloud failover and a production maintenance window for the
 contract-5 switch are not verified.
 
+## Fleet steps prefer machines whose connection holds (2026-11-24)
+
+A fleet or pool step tries machines whose connection to the cluster has not
+dropped recently first, and a fleet step waits for a steady machine that is
+busy with work rather than start on one whose connection dropped. Design record:
+`docs/superpowers/specs/2026-11-24-network-aware-fleet-selection-design.md`
+(decisions D1 to D11). What owners see is in
+[Retries and failover](../../public/operate/pipelines.md#retries-and-failover);
+the record itself in the workers runbook's "Connection drops" paragraph.
+
+**Trigger.** A pipeline step's dispatch whose request carries a connection
+window (`worker.Request.Connection`), which the fleet executor sets from the
+run's captured compute placement policy (`connection.unsteadyMinutes`, default
+120, `pipelines.ConnectionPolicy`). Only the pipeline purpose may carry it:
+`machineNarrowingBinding` refuses it on every other purpose, as it refuses a
+pin, so an agent's call keeps the owner's routing strategy untouched.
+
+**Evidence: the cluster's own drop records, nothing else.** On 2026-11-24 the
+one Mac allowing pipeline steps, on 2.4 GHz Wi-Fi, lost its stream eight times
+in an hour and a half and failed the macOS lanes twice (`pipeline_node_lost`,
+not retried for a step that is not `repeatable`). Round trip did not tell the
+machines apart (the dropping Mac 299 ms, the other 360 ms), and the cluster's
+own disconnect reasons do not separate a lost link from Cockpit reconnecting on
+purpose: both log as `context canceled` or `superseded`. What does separate
+them is known only to the replica holding the stream when it ends: whether a
+new connection replaced it before the end was seen (`drainReason ==
+superseded`), and whether work was in flight (Cockpit's `Runner.busy()` guard
+means it never reconnects on purpose then). `classifyStreamEnd`
+(`component/worker/connection_drop.go`) turns those into a drop; the replica
+writes one append-only `v1:worker:connectionDrop` row (`streamSession.recordDrop`,
+`component/worker/server.go`). On that afternoon the rule counts seven of the
+eight lost links, including the one that failed the lanes, and none of the
+deliberate reconnects.
+
+**Chosen path.** The dispatcher reads each candidate's drops inside the window
+(`myWorkerConnectionDrops`, one read per machine, `@cache(0)`, through the
+optional `ConnectionDropReader` on its store) after every consent and
+narrowing, and `RoutePlan.ApplyConnection` orders steady machines first in the
+strategy's order, then unsteady ones by fewest drops, then oldest last drop.
+With `WaitForSteady` (every step but a pool step, `connectionPreference` in
+`integrations/pipelinesteps/fleet_connection.go`) the candidate loop returns the
+first steady machine's `pipeline_capacity_busy` refusal on reaching an unsteady
+candidate, when that steady machine has work in flight (`hasWorkInFlight`: the
+registration's `activeCount`, this replica's live count, or a RUNNING
+pipeline-step `v1:worker:activity` row, which the replica sending a call writes
+before the call leaves -- the row count alone lags a heartbeat batch, up to about
+30 s, and a run's fleet lanes are refused busy seconds after the first takes the
+slot), so the executor's capacity wait asks again; the unsteady machines ride on
+`Result.PassedOver`, and the step's log names them. A placed attempt whose
+bounded wait runs out while passing a machine over dispatches once more without
+the wait before `waitRanOut`. The executor writes the reason into the step's log
+and, for a node loss on an unsteady machine, into the failure. Fleet reads the
+same rows for the machine's Details > Connection.
+
+**Alternatives rejected.** Cockpit reporting how each connection ended (exact,
+but a Cockpit release and every machine updated before it measures anything)
+and Wi-Fi band and signal (a leading indicator, the most to build, a new kind of
+data leaving the machine); waiting on every busy refusal (Cockpit says busy for
+low disk and memory too, so one steady machine with a full disk would hold every
+step a free machine could run); a list of drops on the registration row (the
+drop is written as the replacing connection writes that row, and a read-merge
+loses one of the two); the security audit trail as the source; round trip as a
+signal; pool steps waiting and then going to the cloud (the owner chose no
+extra cloud spend: the Linux machines drop about once a day).
+
+**Stop conditions.** The preference never fails a step, and holds one only to
+wait for a steady machine that is busy with work (D1): a failed drop read counts
+that machine steady, a failed read of running steps counts no work, a step whose
+only eligible machines are unsteady runs on the best of them, a pool step only
+orders, a steady machine that refused for anything but busy-with-work is passed
+as before, and a bounded wait ends with one try on the machines it passed over.
+A first attempt's wait for a busy steady machine is bounded by the run's
+ceiling, as every capacity wait is. The shipped placement template leaves
+`connection` out (absence is 120): a run captures the template's source and a
+re-run reuses it, so a template writing the key would make every run opened on
+this release unrunnable again after a rollback to an engine that refuses it.
+
+**Invariants.** It orders what the plan's consents, labels and contracts
+admitted and admits nothing. Nothing a model writes can set it. A drop is never
+filed for the cluster's own decision (drain, revocation, expiry). Every machine
+a log line or failure names is named by its owner's display name or
+`pl.MachineWords`, never its reported hostname, because those sentences reach
+check runs. The model-probe exclusion from the work-in-flight set mirrors
+Cockpit's `busy()`; if that guard changes, `WorkInFlight` must change with it.
+
+**What survives a replica change.** Everything that decides: the drop rows (in
+the database, written by the replica that held the stream, read by whichever
+places the step) and the window (in the run's captured policy). The plan's
+health and the passed-over list live for one dispatch on the dispatching
+replica and are written to the invocation's routing record (`connection`,
+`passedOver`). Nothing in memory crosses the mesh.
+
+**Known limitations.** A lost link on an idle machine that the cluster noticed
+before the machine reconnected is not recorded (one of eight on 2026-11-24). A
+front-door restart that closes every stream at once records a drop for every
+machine with work in flight at that moment. A machine that slept for less than
+the keepalive window reads as replaced, and so does a re-pair or reclaim while
+the old process is still connected. Cockpit stopping or restarting with work in
+flight (SIGTERM, a service restart, an upgrade: `Runner.Close` does not wait for
+`busy()`) is filed as a `workInFlight` drop, and so is an idle deliberate
+reconnect that races a call the cluster registered as pending just before
+sending it. With one eligible machine nothing is avoided; the step only says
+why. A busy steady machine can hold a fleet step's first attempt until the
+run's ceiling. `droppedAt >= since` and the read's sort compare RFC3339Nano text,
+whose fraction length varies, so the window's start is exact to the second.
+
+**Not verified.** The classification on real streams in the cluster, and the
+seven-of-eight figure beyond one afternoon of one Mac. The Fleet fact has
+component tests and no browser check.
+
+**Regression tests.** `TestConnectionPolicyParsesStrictly`,
+`TestEveryRunGetsAPolicyEvenWithoutPoolSteps`, `TestRetriesParseStrictly`
+(shipped template) in `component/pipelinerun/compute_placement_test.go`;
+`TestConnectionDropsRoundTripAcrossReplicasAndOwners`
+(`component/worker/fleetcatalog`, db); `TestClassifyStreamEnd`,
+`TestAReplacedStreamRecordsOneDrop`,
+`TestAStreamReplacedOnAnotherReplicaRecordsOneDrop`,
+`TestAStreamLostWithWorkInFlightRecordsOneDrop`,
+`TestAnIdleCloseAndADrainRecordNoDrop` (`component/worker`); the
+`ConnectionHealth` and `ApplyConnection` cases, `TestPipelineTriesASteadyMachineBeforeAnUnsteadyOne`,
+`TestPipelineDoesNotWaitForASteadyMachineThatCannotFreeUp`,
+`TestAPoolStepDoesNotWaitForASteadyMachine`, `TestAllUnsteadyMachinesRunFewestDropsFirst`,
+`TestAPinnedRetryIsNotReorderedButCarriesItsHealth`, `TestAFailedDropReadLeavesTheOwnersOrder`,
+`TestNoDropsAndNoWindowRouteExactlyAsBefore`,
+`TestConnectionPreferenceIsRefusedOutsideThePipelinePurpose` and the hop test
+`TestPipelineWaitsForASteadyMachineBusyWithWork` and
+`TestPipelineWaitsForASteadyMachineRunningWorkTheOtherReplicaAdmitted` (the
+row's count still 0, the sibling really running the first lane), and
+`TestRunningPipelineStepsCountsAnotherReplicasRunningStep` (db)
+(`integrations/agent/worker`);
+`TestTheConnectionWindowReachesTheRequest`, `TestTheWaitNamesThePassedOverMachineOnce`,
+`TestABoundedWaitEndsOnTheFreeMachine`, `TestAStepOnAnUnsteadyMachineSaysSo`,
+`TestANodeLossOnAnUnsteadyMachineSaysItsConnectionHadDropped`,
+`TestUnsteadyNoticesNameAnUnnamedMachineByItsId` (`integrations/pipelinesteps`);
+`clients/os/test/fleet/connectionDrops.test.tsx`.
+
 ## A pipeline's work run is not beaten (2026-11-08)
 
 The pipelines driver's lease is a pipeline run's liveness, and the `v1:work:run`

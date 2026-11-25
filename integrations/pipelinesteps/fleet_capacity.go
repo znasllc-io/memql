@@ -67,6 +67,11 @@ func (f *Fleet) dispatchWhenCapacityAvailable(ctx context.Context, req pl.StepRe
 	queued := false
 	lastReason := ""
 	capacityNotices := 0
+	// The connection preference is per attempt, from the run's policy, and is
+	// held here rather than recomputed per poll because a bounded wait that runs
+	// out drops its wait half once (D11, below).
+	pref := connectionPreference(req)
+	passedOverNoticed := ""
 	for {
 		if ctx.Err() != nil {
 			res := stoppedResult(ctx)
@@ -97,7 +102,7 @@ func (f *Fleet) dispatchWhenCapacityAvailable(ctx context.Context, req pl.StepRe
 			token, tokenAt = fresh, f.now()
 			capture.AddSecrets(secretValues(*run, token)...)
 		}
-		result, err := f.dispatchStep(ctx, req, *run, token, chunk)
+		result, err := f.dispatchStep(ctx, req, *run, token, pref, chunk)
 		if err != nil || result.OK || !result.RefusedBeforeStart || result.RefusedByGate {
 			return result, nil, err
 		}
@@ -138,6 +143,20 @@ func (f *Fleet) dispatchWhenCapacityAvailable(ctx context.Context, req pl.StepRe
 		// not a candidate at all) is answered at once and the budget is only ever
 		// spent on a wait that could have ended differently.
 		if !waitEnds.IsZero() && !f.now().Before(waitEnds) {
+			// A BOUNDED WAIT ENDS ON THE FREE MACHINE (network-aware fleet
+			// selection, D11). When this attempt was waiting for a steady machine
+			// and passing an unsteady one over, the unsteady machine is tried
+			// once, at once, before the attempt answers "nothing ran, not tried
+			// here again": otherwise that answer would mark the busy machine not
+			// retried, the driver would count the fleet exhausted, and a failover
+			// that runs today on the free machine would end the step. The window
+			// stays, so the free machine is still judged and named; only the wait
+			// is dropped, and only once.
+			if pref.WaitForSteady && len(result.PassedOver) > 0 {
+				pref.WaitForSteady = false
+				capture.Notice("memql: the wait for a steady machine ran out; trying the machines it passed over")
+				continue
+			}
 			res := waitRanOut(run, result)
 			return worker.Result{}, &res, nil
 		}
@@ -148,6 +167,13 @@ func (f *Fleet) dispatchWhenCapacityAvailable(ctx context.Context, req pl.StepRe
 		if !queued {
 			capture.Note("memql: waiting for the owner's shared build capacity; no command has started")
 			queued = true
+		}
+		// A fleet step waiting for a steady machine rather than starting on a
+		// free one whose connection dropped says so, once per change in who is
+		// passed over (network-aware fleet selection, D1).
+		if key := passedOverKey(result.PassedOver); key != "" && key != passedOverNoticed {
+			capture.Notice(waitingNotice(result))
+			passedOverNoticed = key
 		}
 		// Preserve the machine's actionable capacity explanation (for example
 		// insufficient disk) without repeating it on every polling attempt.
