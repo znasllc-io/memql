@@ -37,13 +37,14 @@ type memorySearchFake struct {
 	vendors     []vendorEmbedderRecord
 	names       map[string]string
 
-	locked    bool
-	lockErr   error
-	writeErr  error
-	ensureErr error
-	bindErr   error
-	ownerErr  error
-	counted   int
+	locked     bool
+	lockErr    error
+	catalogErr error
+	writeErr   error
+	ensureErr  error
+	bindErr    error
+	ownerErr   error
+	counted    int
 
 	events      []string
 	runAttempts int
@@ -188,6 +189,9 @@ func (f *memorySearchFake) isActiveOwner(_ context.Context, userId string) (bool
 }
 
 func (f *memorySearchFake) catalog(_ context.Context, userId string) ([]FleetModel, error) {
+	if f.catalogErr != nil {
+		return nil, f.catalogErr
+	}
 	return f.catalogs[userId], nil
 }
 
@@ -970,6 +974,12 @@ func TestStatusSaysWhenChoosingTheModelInUseTakesOver(t *testing.T) {
 		{"no machine of the indexer's offers it, and one of the caller's does", other, func(f *memorySearchFake) {
 			f.catalogs[other] = offeredFor(model, true)
 		}, true},
+		// The same, with the catalogs unreadable: the act is withheld for that
+		// read rather than offered on a guess, and the status still answers.
+		{"a catalog that cannot be read", other, func(f *memorySearchFake) {
+			f.catalogs[other] = offeredFor(model, true)
+			f.catalogErr = errors.New("the fleet catalog could not be read")
+		}, false},
 		{"the indexer's machines offer it", other, func(f *memorySearchFake) {
 			f.catalogs[fakeOwner] = offeredFor(model, true)
 			f.catalogs[other] = offeredFor(model, true)

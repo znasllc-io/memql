@@ -547,6 +547,12 @@ func TestASwitchFlipsOnlyWhenEveryItemIsIndexed(t *testing.T) {
 	f := newMemoryIndexDBFixture(t)
 	oldRef, newRef := f.ref("old", 8), f.ref("new", 8)
 	f.bind(oldRef, f.owner)
+	// The run that filled the old model's table: a flip must not carry it to
+	// the new model, whose table the index job filled.
+	const filledOld = "v1:work:run:filled-the-old-table"
+	f.plantVersion(EmbedderBindingConceptID, EmbedderBindingConceptID+":"+ActiveEmbedderBindingID, time.Now(),
+		func(p map[string]any) { p["reembedRunId"] = filledOld })
+	require.Equal(t, filledOld, f.binding().ReembedRunId)
 	ids := f.addItems(memoryIndexNames("item", 6)...)
 	f.write(f.a, ids...)
 	f.mu.Lock()
@@ -584,7 +590,7 @@ func TestASwitchFlipsOnlyWhenEveryItemIsIndexed(t *testing.T) {
 	require.Equal(t, f.owner, bound.IndexedBy)
 	require.Equal(t, f.owner, bound.ChosenBy)
 	require.Equal(t, oldRef, bound.PreviousRef)
-	require.Empty(t, bound.ReembedRunId)
+	require.Empty(t, bound.ReembedRunId, "the run that filled the old table filled nothing of this one")
 	// The model it replaced is kept for thirty days, at the id its table derives.
 	var retiredRef, retireAt string
 	require.NoError(t, f.db.DB.QueryRowContext(f.ctx, `SELECT payload->>'providerRef', payload->>'retireAt' FROM "MemoryNodes" WHERE id = $1 ORDER BY "createdAt" DESC LIMIT 1`,
@@ -927,9 +933,13 @@ func TestAnotherReplicasWriteBetweenTwoBatchesSurvives(t *testing.T) {
 	ids := f.addItems(memoryIndexNames("item", 40)...)
 	f.write(f.a, ids...)
 	f.startSwitch(newRef, f.owner)
-	cancelled := false
+	cancelled, landedAfter := false, 0
 	f.a.memoryIndexAfterRunWrite = func(run MemoryIndexRun) {
-		if cancelled || run.Kind != memoryIndexKindSwitch || run.State != memoryIndexStateIndexing {
+		if cancelled {
+			landedAfter++ // a run write of a's that the fence let through after b's
+			return
+		}
+		if run.Kind != memoryIndexKindSwitch || run.State != memoryIndexStateIndexing {
 			return
 		}
 		cancelled = true // right after a's first batch is saved
@@ -938,10 +948,10 @@ func TestAnotherReplicasWriteBetweenTwoBatchesSurvives(t *testing.T) {
 
 	f.tick(f.a, 45*time.Second)
 	require.True(t, cancelled, "b wrote between a's first and second batch")
+	require.Zero(t, landedAfter, "a stopped at its next write: none of its writes landed after b's")
 	got := f.run(memoryIndexKindSwitch)
 	require.Equal(t, memoryIndexStateCancelled, got.State, "b's write survives")
 	require.Equal(t, oldRef, f.binding().ProviderRef, "nothing flipped")
-	require.LessOrEqual(t, len(f.jobStores(newRef)), 40, "a stopped at its next write; no catch-up walk ran")
 }
 
 // The witness is the write's own answer: on Postgres the mutation's result
