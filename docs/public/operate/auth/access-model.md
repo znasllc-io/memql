@@ -1077,7 +1077,12 @@ configure the cluster. The engine reads the person's STORED role, fresh, and
 asks `auth.MayManageFleet` of it. An `admin` is not exempt. Being the owner or
 developer of one account does not exempt anybody; only the cluster's own owner
 and developer roles do. A per-account exemption is approved but not built
-(accounts program, P27 and P28).
+(accounts program, P27 and P28). The two cluster owners the server itself
+makes are exempt as well: the troubleshooting shim that admits every stream
+when sign-in is turned off (`MEMQL_IDENTITY_ENABLED=false`), and the operator
+credential's synthetic owner ([operator-credential.md](operator-credential.md)).
+They are recognised by what the server stamps on them, never by a role a token
+claims.
 
 **What counts as set up.** Anything the person has set up counts, even when it
 cannot answer right now:

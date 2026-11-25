@@ -16,14 +16,16 @@ import (
 
 // OperatorAuthClaimKey is the claims-map key the operator-aware
 // interceptor stows the operator marker under. Handlers / audit
-// logging branch on it when present.
-const OperatorAuthClaimKey = "identity.operator"
+// logging branch on it when present. Defined as auth.OperatorClaimKey so
+// component/memql, which cannot import this package, recognises the same
+// marker (auth.ServerMadeClusterOwner: desktop access exempts this owner).
+const OperatorAuthClaimKey = auth.OperatorClaimKey
 
 // OperatorSubject is the synthetic identity attached to streams
 // admitted via the operator credential. Distinct from any user /
 // guest / pair / worker subject so audit logs disambiguate
-// cleanly.
-const OperatorSubject = "cluster:operator"
+// cleanly. Defined as auth.OperatorSubject, for the same reason.
+const OperatorSubject = auth.OperatorSubject
 
 // minOperatorKeyLen is the shortest value this interceptor will accept as a
 // configured operator credential. It is a floor on operator error, not a

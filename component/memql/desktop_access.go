@@ -687,6 +687,33 @@ type DesktopAccess struct {
 // Tests: desktop_access_hold_test.go.
 func (e *MemQLEngine) desktopAccess(ctx context.Context, actingUserId, passedReference, passedDigest string) (DesktopAccess, error) {
 	actingUserId = strings.TrimSpace(actingUserId)
+
+	// A CLUSTER OWNER THE SERVER ITSELF MADE IS EXEMPT (final review,
+	// Important 4). Triggered by the troubleshooting shim, which admits every
+	// stream as auth.LocalDevSubject when MEMQL_IDENTITY_ENABLED=false while
+	// the identity node still signs people in to MemQL OS, and by the operator
+	// credential's synthetic owner. Both are owners by construction, made so a
+	// cluster can be reached when nobody can sign in, and neither has a user
+	// row, so the stored-role read below finds no role and would hold them,
+	// every owner of a cluster in troubleshooting mode included: the anti-goal
+	// "an owner or developer is locked out of the cluster they set up".
+	// auth.ServerMadeClusterOwner knows them by what the server stamps, never
+	// by a role claim, so a person's exemption still comes only from their
+	// stored role (TestATokenClaimingOwnerIsNotExempt).
+	//
+	// The shim is the one local owner, so its sources are read as an owner's
+	// are (Ask uses them). The operator names no person (`cluster:`), so there
+	// is nothing of its own to read and nothing is asked.
+	if auth.ServerMadeClusterOwner(ctx, actingUserId) {
+		if auth.NamesNoPerson(actingUserId) {
+			return DesktopAccess{Admitted: true, Exempt: true}, nil
+		}
+		sources, _, err := e.desktopAccessSources(ctx, actingUserId)
+		if err != nil {
+			return DesktopAccess{}, err
+		}
+		return DesktopAccess{Admitted: true, Exempt: true, Sources: sources}, nil
+	}
 	if auth.NamesNoPerson(actingUserId) {
 		return DesktopAccess{}, errors.New("desktop access: the call names no person")
 	}

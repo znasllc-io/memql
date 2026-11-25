@@ -64,6 +64,72 @@ func TestAnOwnerOrDeveloperIsAdmittedWithNothingSetUp(t *testing.T) {
 	}
 }
 
+// streamContext is a stream as the server resolved it: these claims, and the
+// owner access context FallbackFromClaims builds from them (neither shim has a
+// user row to load).
+func streamContext(id string, claims map[string]any) context.Context {
+	ctx := auth.ContextWithClaims(context.Background(), claims)
+	return auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: id, Role: auth.RoleOwner})
+}
+
+// Final review, Important 4: with sign-in enforcement turned off for
+// troubleshooting, every stream is the local-dev shim, an owner with no user
+// row. It is exempt, on its own stream and on a forwarded hop, and nothing is
+// written.
+func TestTheLocalDevShimIsExempt(t *testing.T) {
+	rec := installRecorder(t)
+	forwarded := map[string]any{}
+	for k, v := range auth.ForwardedClaimsWithLocalDev(auth.UserIdentity{Subject: auth.LocalDevSubject, Role: "owner"}) {
+		forwarded[k] = v
+	}
+	for name, claims := range map[string]map[string]any{
+		"its own stream":  {"sub": auth.LocalDevSubject, "role": "owner"},
+		"a forwarded hop": forwarded,
+	} {
+		got, err := holdEngine("").desktopAccess(streamContext(auth.LocalDevSubject, claims), auth.LocalDevSubject, "", "")
+		if err != nil || !got.Admitted || !got.Exempt || got.Reference != "" {
+			t.Fatalf("%s: answer = %+v, err = %v, want admitted and exempt", name, got, err)
+		}
+	}
+	if len(rec.lines) != 0 {
+		t.Fatalf("lines = %+v, want none", rec.lines)
+	}
+}
+
+// The operator credential's synthetic owner is exempt, known by the marker its
+// interceptor stamps. It names no person, so nothing of its own is read. The
+// same subject without the marker is nobody, as before.
+func TestTheOperatorsSyntheticOwnerIsExempt(t *testing.T) {
+	rec := installRecorder(t)
+	e := holdEngine("")
+	catalog := &askingCatalog{}
+	e.providers.SetFleetCatalog(catalog)
+	operator := streamContext(auth.OperatorSubject, map[string]any{"sub": auth.OperatorSubject, "role": "owner",
+		auth.OperatorClaimKey: map[string]any{"source": "operator_key"}})
+	got, err := e.desktopAccess(operator, auth.OperatorSubject, "", "")
+	if err != nil || !got.Admitted || !got.Exempt || len(got.Sources) != 0 || got.Reference != "" {
+		t.Fatalf("answer = %+v, err = %v, want admitted and exempt with nothing read", got, err)
+	}
+	if len(catalog.asked) != 0 || len(rec.lines) != 0 {
+		t.Fatalf("catalogs asked = %q, lines = %+v, want neither", catalog.asked, rec.lines)
+	}
+	unmarked := streamContext(auth.OperatorSubject, map[string]any{"sub": auth.OperatorSubject, "role": "owner"})
+	if got, err := e.desktopAccess(unmarked, auth.OperatorSubject, "", ""); err == nil {
+		t.Fatalf("answer = %+v, want the unmarked subject refused as naming no person", got)
+	}
+}
+
+// A token that claims owner exempts nobody: a person's exemption comes only
+// from their stored role.
+func TestATokenClaimingOwnerIsNotExempt(t *testing.T) {
+	installRecorder(t)
+	claimsOwner := streamContext("ana", map[string]any{"sub": "ana", "role": "owner"})
+	got, err := holdEngine(auth.RoleWriter).desktopAccess(claimsOwner, "ana", "", "")
+	if err != nil || got.Admitted || got.Exempt || !accessReferencePattern.MatchString(got.Reference) {
+		t.Fatalf("answer = %+v, err = %v, want held: the stored role is writer", got, err)
+	}
+}
+
 func TestAnAdminWithNothingSetUpIsHeld(t *testing.T) {
 	installRecorder(t)
 	got, err := holdEngine(auth.RoleAdmin).desktopAccess(personContext("ana"), "ana", "", "")
