@@ -2935,8 +2935,10 @@ index it, how many items the index holds and what waits, and changes it. Setting
 links to it with a row showing the model in use. Fleet's model board keeps the
 bound model locked and says where to change it, to whoever can open Memory
 search; anybody else reads that a cluster owner can change it (ruling R15:
-`memorySearchKeeps`, `src/apps/fleet/machines/modelSetup.ts`, says it for the
-board's caption, its refusal and the Models page's help).
+`memorySearchWhere`, `memorySearchChooses` and `memorySearchKeeps`,
+`src/apps/fleet/machines/modelSetup.ts`, say it for the board's caption, its
+refusal, the Models page's help and the Routes job board's Search and memory
+job).
 
 - **THE PART IS THE GATE, AND ONLY AN OWNER ACTS.** The section and the link
   row require `app:cluster/memorysearch`, seeded on the owner alone, which the

@@ -168,7 +168,6 @@ button.fleet-rule-line[draggable="true"] { cursor: grab; }
 .fleet-route-job-name svg[aria-label] { color: var(--os-muted); margin-left: auto; }
 .fleet-route-job-meaning { margin: -4px 0 2px; font-size: var(--os-text-xs); color: var(--os-muted); }
 .fleet-route-job-empty { margin: 0; font-size: var(--os-text-sm); color: var(--os-muted); }
-.fleet-route-job-link { align-self: flex-start; font-size: var(--os-text-sm); }
 .fleet-route-job-sources { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
 .fleet-route-chip { position: relative; display: flex; align-items: center; min-width: 0; border: 1px solid var(--os-line); border-radius: var(--os-radius-xs); background: var(--os-plate); }
 .fleet-route-chip-body { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; min-height: var(--os-control-h); padding: 0 32px 0 8px; border: 0; border-radius: inherit; background: none; color: var(--os-muted); font: inherit; font-size: var(--os-text-sm); text-align: left; }

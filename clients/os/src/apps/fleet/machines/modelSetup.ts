@@ -3,18 +3,31 @@ import { flatten } from "../../../kit/rows";
 import { holds } from "../../../system/roles";
 
 /**
- * What Fleet says about memory search's model, which a machine's board keeps
- * locked to the embeddings task (design record 2026-11-23, section 8: the board
- * says where to change it). WHERE is a page only to somebody who can open it
- * (ruling R15): Cluster > Settings > Memory search needs `read` on
- * app:cluster/memorysearch (MEMORY_SEARCH_RESOURCE, seeded on the owner alone),
- * so anybody else is told who can change it instead. The board's caption, its
- * refusal and the Models page's help all say it through here.
+ * Where memory search's model is changed, said to the reader (design record
+ * 2026-11-23, section 8: Fleet says where to change it). WHERE is a page only
+ * to somebody who can open it (ruling R15): Cluster > Settings > Memory search
+ * needs `read` on app:cluster/memorysearch (MEMORY_SEARCH_RESOURCE, seeded on
+ * the owner alone), so anybody else is told who can change it instead. Every
+ * Fleet pointer to it says it through here: the board's caption, its refusal,
+ * the Models page's help and the Routes job board's Search and memory job.
  */
+function mayOpenMemorySearch(): boolean {
+  return holds("read", "app:cluster/memorysearch");
+}
+
+/** Where the model in use is changed. */
+export function memorySearchWhere(): string {
+  return mayOpenMemorySearch() ? "Change it in Cluster > Settings > Memory search." : "A cluster owner can change it.";
+}
+
+/** Where a first model is chosen, while there is none. */
+export function memorySearchChooses(): string {
+  return mayOpenMemorySearch() ? "Choose one in Cluster > Settings > Memory search." : "A cluster owner chooses one.";
+}
+
+/** What a machine's board says about the embeddings task it keeps locked. */
 export function memorySearchKeeps(model: string): string {
-  return holds("read", "app:cluster/memorysearch")
-    ? `Memory search keeps ${model}. Change it in Cluster > Settings > Memory search.`
-    : `Memory search keeps ${model}. A cluster owner can change it.`;
+  return `Memory search keeps ${model}. ${memorySearchWhere()}`;
 }
 
 export const MODEL_PURPOSES = [

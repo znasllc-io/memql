@@ -195,12 +195,17 @@ func ActiveEmbedderBinding() (EmbedderBinding, bool) {
 // IT NAMES THE FIX, because the alternative reads as a bug. "embedding provider
 // unavailable" sends an operator looking at credentials; what is actually true
 // is that nobody has chosen an embedder, and the place to choose one is a
-// screen they have probably not opened.
+// screen they have probably not opened. It says WHO as well as where, as
+// Fleet's model board does (memorySearchKeeps in MemQL OS): the reader of an
+// error may be anybody, and only a cluster owner can open Memory search and
+// choose. An embedding model on an owner's machine is also bound by itself
+// (autoBindEmbedder).
 var ErrNoEmbedderBound = fmt.Errorf(
 	"no embedder is bound: this cluster has no active %s row, so nothing can be embedded. "+
-		"Bind one from Fleet -> Models, or pull a catalog embeddings model onto a machine "+
-		"(qwen3-embedding:0.6b is the 16 GB default). There is deliberately no fallback: an "+
-		"embedder chosen for you would write vectors into a search space you did not pick",
+		"A cluster owner chooses one in Cluster > Settings > Memory search, or pulls an embeddings "+
+		"model onto one of their machines (qwen3-embedding:0.6b is the 16 GB default), which the "+
+		"cluster then binds by itself. There is deliberately no fallback: an embedder chosen for "+
+		"you would write vectors into a search space you did not pick",
 	EmbedderBindingConceptID,
 )
 

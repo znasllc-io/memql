@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // The embedder binding (epic memql#5137, D6).
@@ -83,6 +85,17 @@ func TestAnIncompleteBindingIsNotActive(t *testing.T) {
 	if _, ok := ActiveEmbedderBinding(); !ok {
 		t.Error("a complete binding must be active")
 	}
+}
+
+// With no model bound, an embedding says where one is chosen and by whom:
+// Memory search, in the Cluster app's settings, by a cluster owner. Fleet's
+// Models page is where a model is pulled onto a machine, not where memory
+// search's model is chosen, and a reader who cannot open Memory search learns
+// who can.
+func TestNoEmbedderBoundSaysWhereAndWhoChooses(t *testing.T) {
+	msg := ErrNoEmbedderBound.Error()
+	require.Contains(t, msg, "A cluster owner chooses one in Cluster > Settings > Memory search")
+	require.NotContains(t, msg, "Fleet")
 }
 
 // TestBindingForRefusesAModelTheCatalogDoesNotKnow is the cockpit session's
