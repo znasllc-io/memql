@@ -95,8 +95,6 @@ func TestRetiredIdsFollowTheTableHash(t *testing.T) {
 	require.Empty(t, RetiredEmbedderBindingID("fleet:a", 0))
 }
 
-// countingBinding installs a durable reader that answers b and counts reads,
-// as production's ReadEmbedderBinding is a database read on every call.
 // indexerOf is EmbeddingIndexerForCall for tests with no owner check installed,
 // where it cannot refuse.
 func indexerOf(t *testing.T, ctx context.Context, ref string) string {
@@ -106,6 +104,8 @@ func indexerOf(t *testing.T, ctx context.Context, ref string) string {
 	return got
 }
 
+// countingBinding installs a durable reader that answers b and counts reads,
+// as production's ReadEmbedderBinding is a database read on every call.
 func countingBinding(t *testing.T, b EmbedderBinding, err error) *int {
 	t.Helper()
 	reads := 0

@@ -3029,8 +3029,10 @@ by `EmbeddingVectorTable` before any table exists. Tests:
 `TestTheProbeRefusesAModelTooWideForTheIndexBeforeEmbedding`,
 `TestChoicesMarkVendorModelsAsPaidByTheCluster`.
 
-**The cleanup** (`memoryIndexRetentionSweep`, daily at 03:20 on the general cron
-leader, builtin `memoryIndexRetire`, refused without internal origin) runs under
+**The cleanup** (`memoryIndexRetentionSweep`, daily at 03:25 UTC on the general
+cron leader, five minutes after `logsRetentionSweep`'s 03:20 so the two nightly
+cleanups do not start in the same minute; builtin `memoryIndexRetire`, refused
+without internal origin) runs under
 the binding lock, so it never reads the protected set and then drops a table a
 switch or a flip made active meanwhile. It drops each retired table past its
 `retireAt` and records `droppedAt`, except the active model's table and a

@@ -329,7 +329,10 @@ automation memoryIndexTick {
 /// ON THE GENERAL CRON LEADER: dropping a table needs the database and no machine. The handler
 /// refuses any call without internal origin and works under the embedder binding's lock, so it
 /// never drops a table a switch or a flip on another replica is making active.
-@trigger(schedule="0 20 3 * * *")
+///
+/// AT 03:25 UTC, five minutes after logsRetentionSweep (03:20, dsl/observability), so the two
+/// nightly cleanups on the same leader do not start in the same minute.
+@trigger(schedule="0 25 3 * * *")
 automation memoryIndexRetentionSweep {
   builtin memoryIndexRetire()
 }
