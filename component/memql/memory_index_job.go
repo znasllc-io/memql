@@ -43,7 +43,9 @@ package memql
 // pool ends a session idle in a transaction after 60 s. The gate pool's
 // sessions may idle five minutes, and a tick stops by its budget plus
 // memoryIndexGrace (under a minute). A replica that dies drops its connection,
-// and PostgreSQL releases the lock with it.
+// and PostgreSQL releases the lock with it. The cost: the replica running the
+// job holds one of its gate connections for up to 55 s of every minute, which
+// db-connection-budget.md counts.
 //
 // The lock is not what keeps the run row right; the fence is. Every write of a
 // run row carries the version it read (writeMemoryIndexRun), so a write after

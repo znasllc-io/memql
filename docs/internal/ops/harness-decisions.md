@@ -2517,6 +2517,10 @@ on a write-gate connection and returns at once when another replica holds it.
 The transaction-scoped form on the gate pool, not a session lock on the request
 pool: a session lock does not survive a transaction pooler, and the request
 pool ends an idle transaction after 60 s. A replica that dies drops the lock.
+The cost is recorded in the connection budget
+([db-connection-budget.md](../../public/operate/db-connection-budget.md)): the
+replica running the job holds one of its four gate connections for up to 55 s
+of every minute, within the pool's cap.
 
 **State lives in Postgres, and every write is fenced.** Two run rows,
 `v1:platform:memoryIndexRun` at `switch` and `backfill`, carry the state, the

@@ -105,12 +105,27 @@ REQUIRE:  peak_connections  ≤  max_connections − reserved_connections
   lock with it. A connection is opened when a gate is taken and none is free; a
   connection given back is kept warm only while fewer than two are idle (any
   more close at once), and a warm one closes after two minutes unused. So an
-  idle process holds **no** gate connection, a busy one up to two between its
-  gates, and four is the burst. Four is enough for the bounded phases that hold
-  gates (a signup's thirty seconds, a welcome's send); a fifth caller waits up to
-  six seconds for a connection and then answers that coordination is busy,
-  which every caller treats as "nothing attempted, try later". Raise the size
-  only if the budget above has the room.
+  idle process holds **no** gate connection (but for the memory index job's
+  replica, below), a busy one up to two between its gates, and four is the
+  burst. Four is enough for the bounded phases that hold gates (a signup's
+  thirty seconds, a welcome's send); a fifth caller waits up to six seconds for
+  a connection and then answers that coordination is busy, which every caller
+  treats as "nothing attempted, try later". Raise the size only if the budget
+  above has the room.
+- **The memory index job holds one gate connection for most of every
+  minute** on the agent replica that runs it
+  ([memory search](memory-search.md#re-indexing)). Every minute a tick takes
+  the job's one-runner lock as a transaction-scoped advisory lock on a gate
+  connection, and keeps that transaction open for the whole tick, up to its
+  45-second budget plus a 10-second grace: a session lock taken on the request
+  pool would not survive a transaction pooler between two statements, and the
+  request pool ends a transaction left idle after sixty seconds, the lock with
+  it. So that one replica holds one of its four gate connections for up to 55
+  seconds of every minute, and its other gates share the remaining three. It
+  is one of the four, not a fifth: the budget above already counts the pool at
+  its cap. A tick that finds every gate connection busy attempts nothing and
+  the next one tries again; a tick on another replica finds the lock held and
+  returns at once, giving its connection back.
 - **The maintenance session** (`component/database/maintenance_session.go`) is
   one connection, opened on the direct endpoint for one run of the work that
   uses it and closed after, with no statement timeout and no client read
