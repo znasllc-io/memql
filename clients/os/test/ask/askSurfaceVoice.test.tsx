@@ -52,7 +52,7 @@ function mount(opts: { commit?: "send" | "review"; ports?: Partial<VoicePorts> }
     ...opts.ports,
   };
   render(
-    <AskSurface availability={READY_ASK}
+    <AskSurface access={{ canOpenFleet: true }} availability={READY_ASK}
       transport={new StubAskTransport(1)}
       voicePorts={ports}
       settings={{ ...DEFAULT_ASK_SETTINGS, commit: opts.commit ?? "send" }}

@@ -68,7 +68,7 @@ it("focuses an older question when Nexus opens its work, including from Activity
     {id:"newer",prompt:"Hello",answer:"Hello",state:"done" as const,startedAt:"2026-10-05T12:10:00Z",activity:[]}];
   const transport = {ask:vi.fn(),openWork:async()=>({id:"original",title:"Work"}),conversations:{read:async()=>turns,list:async()=>[],create:async()=>({id:"new",title:"New"})}};
   const session = new ConversationSession(transport);
-  render(<AskSurface transport={transport} conversation={session} variant="sheet" autoFocus availability={{state:"ready",message:"",refresh:vi.fn()}} />);
+  render(<AskSurface access={{ canOpenFleet: true }} transport={transport} conversation={session} variant="sheet" autoFocus availability={{state:"ready",message:"",refresh:vi.fn()}} />);
   await act(async () => { await session.select("original"); });
   fireEvent.click(screen.getAllByRole("button", { name: "Message actions" })[0]!);
   fireEvent.click(screen.getByRole("menuitem", { name: "View activity" }));

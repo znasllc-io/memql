@@ -42,7 +42,7 @@ function setup(turns: AskTurn[], { canDecide = true }: { canDecide?: boolean } =
 async function mount(turns: AskTurn[], options: { canDecide?: boolean } = {}) {
   const test = setup(turns, options);
   await test.session.select("chat");
-  render(<AskSurface conversation={test.session} transport={test.transport} variant="sheet" availability={READY_ASK} onOpenWork={vi.fn()} />);
+  render(<AskSurface access={{ canOpenFleet: true }} conversation={test.session} transport={test.transport} variant="sheet" availability={READY_ASK} onOpenWork={vi.fn()} />);
   return test;
 }
 const mine = (prompt: string) => screen.getByText(prompt).closest<HTMLElement>(".os-ask-message")!;

@@ -12,7 +12,7 @@ it.each([
   let callbacks: AskCallbacks;
   const ask = vi.fn((_prompt: string, _context: string | null, on: AskCallbacks) => { callbacks = on; return { cancel: vi.fn() }; });
   const openFleet = vi.fn();
-  render(<AskSurface transport={{ ask }} variant="sheet" availability={{ state:"ready",message:"",refresh:vi.fn() }} onOpenFleet={openFleet} />);
+  render(<AskSurface access={{ canOpenFleet: true }} transport={{ ask }} variant="sheet" availability={{ state:"ready",message:"",refresh:vi.fn() }} onOpenFleet={openFleet} />);
   fireEvent.change(screen.getByRole("textbox", {name:"Ask"}), {target:{value:"Create my requested artifact"}});
   fireEvent.click(screen.getByRole("button", {name:"Send"}));
   act(() => callbacks.error(message));

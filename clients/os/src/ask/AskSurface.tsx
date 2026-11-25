@@ -137,8 +137,12 @@ export function AskSurface({
   maximized?: boolean;
   availability?: AskAvailability;
   onOpenFleet?: () => void;
-  /** Who is asking, for recovery wording; absent is a person who can open Fleet. */
-  access?: AskAccess;
+  /** Who is asking, for recovery wording. Required: when it was optional an
+   * absent value read as a person who can open Fleet, so a new call site that
+   * forgot it would offer Fleet to people who cannot open it (design record
+   * 2026-11-24-desktop-access, section 5). Both shell call sites pass
+   * `useAskAccess()`. */
+  access: AskAccess;
   draft?: string;
   onDraftChange?: (draft: string) => void;
   /** Absent = this window has no voice wiring; the control says so. */

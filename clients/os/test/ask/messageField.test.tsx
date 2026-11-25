@@ -62,7 +62,7 @@ describe("the message field", () => {
   it("starts two rows tall, with the controls in a row inside the same frame", async () => {
     const { t } = transport();
     const { provider } = uploads();
-    render(<AskSurface transport={t} variant="sheet" availability={READY} uploads={provider} />);
+    render(<AskSurface access={{ canOpenFleet: true }} transport={t} variant="sheet" availability={READY} uploads={provider} />);
     await act(async () => {});
     const form = field().closest("form")!;
     expect(field().getAttribute("rows")).toBe("2");
@@ -78,12 +78,12 @@ describe("the message field", () => {
   });
 
   it("offers no Attach where the window has no upload path", () => {
-    render(<AskSurface transport={transport().t} variant="widget" availability={READY} />);
+    render(<AskSurface access={{ canOpenFleet: true }} transport={transport().t} variant="widget" availability={READY} />);
     expect(screen.queryByRole("button", { name: "Attach files" })).toBeNull();
   });
 
   it("grows with its text up to 40% of the surface, then scrolls inside", () => {
-    render(<AskSurface transport={transport().t} variant="sheet" availability={READY} />);
+    render(<AskSurface access={{ canOpenFleet: true }} transport={transport().t} variant="sheet" availability={READY} />);
     const surface = field().closest(".os-ask") as HTMLElement;
     Object.defineProperty(surface, "clientHeight", { configurable: true, value: 500 });
     let wanted = 120;
@@ -98,7 +98,7 @@ describe("the message field", () => {
   });
 
   it("keeps Send absent while there is nothing to send, holding its place", () => {
-    render(<AskSurface transport={transport().t} variant="sheet" availability={READY} />);
+    render(<AskSurface access={{ canOpenFleet: true }} transport={transport().t} variant="sheet" availability={READY} />);
     expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
     expect(document.querySelector(".os-ask-send-slot")).not.toBeNull();
     fireEvent.change(field(), { target: { value: "hello" } });
@@ -108,7 +108,7 @@ describe("the message field", () => {
   it("uploads attached files, shows their progress, waits for them, and sends their artifact ids", async () => {
     const { t, sent } = transport();
     const { provider, pending } = uploads();
-    render(<AskSurface transport={t} variant="sheet" availability={READY} uploads={provider} onOpenFile={vi.fn()} />);
+    render(<AskSurface access={{ canOpenFleet: true }} transport={t} variant="sheet" availability={READY} uploads={provider} onOpenFile={vi.fn()} />);
     const input = field().closest("form")!.querySelector('input[type="file"]') as HTMLInputElement;
     const file = new File(["# notes"], "notes.md", { type: "text/markdown" });
     fireEvent.change(input, { target: { files: [file] } });
@@ -132,7 +132,7 @@ describe("the message field", () => {
 
   it("says a failed upload in a few words and lets it be removed", async () => {
     const { provider, pending } = uploads();
-    render(<AskSurface transport={transport().t} variant="sheet" availability={READY} uploads={provider} />);
+    render(<AskSurface access={{ canOpenFleet: true }} transport={transport().t} variant="sheet" availability={READY} uploads={provider} />);
     const input = field().closest("form")!.querySelector('input[type="file"]') as HTMLInputElement;
     fireEvent.change(input, { target: { files: [new File(["x"], "big.bin")] } });
     await act(async () => { pending[0]!.reject(new Error("upload refused: 170 bytes would exceed this account's quota of 150 (MEMQL_LIBRARY_USER_QUOTA_BYTES)")); });
@@ -146,7 +146,7 @@ describe("the message field", () => {
 
   it("stops an upload still running when its file is removed", () => {
     const { provider, pending } = uploads();
-    render(<AskSurface transport={transport().t} variant="sheet" availability={READY} uploads={provider} />);
+    render(<AskSurface access={{ canOpenFleet: true }} transport={transport().t} variant="sheet" availability={READY} uploads={provider} />);
     const input = field().closest("form")!.querySelector('input[type="file"]') as HTMLInputElement;
     fireEvent.change(input, { target: { files: [new File(["x"], "draft.txt")] } });
     fireEvent.click(screen.getByRole("button", { name: "Remove draft.txt" }));
@@ -189,7 +189,7 @@ describe("the message field", () => {
 
   it("holds at most the files a message can carry", () => {
     const { provider, pending } = uploads();
-    render(<AskSurface transport={transport().t} variant="sheet" availability={READY} uploads={provider} />);
+    render(<AskSurface access={{ canOpenFleet: true }} transport={transport().t} variant="sheet" availability={READY} uploads={provider} />);
     const input = field().closest("form")!.querySelector('input[type="file"]') as HTMLInputElement;
     const files = Array.from({ length: MAX_ASK_ATTACHMENTS + 2 }, (_, i) => new File(["x"], `f${i}.txt`));
     fireEvent.change(input, { target: { files } });
@@ -200,7 +200,7 @@ describe("the message field", () => {
 
 describe("the route and Where menus", () => {
   it("lists Auto, Local and Apps, the person's own under Yours, and shows why a route is not ready", async () => {
-    render(<AskSurface transport={transport().t} variant="sheet" availability={READY} onManageRoutes={vi.fn()} />);
+    render(<AskSurface access={{ canOpenFleet: true }} transport={transport().t} variant="sheet" availability={READY} onManageRoutes={vi.fn()} />);
     await act(async () => {});
     fireEvent.click(screen.getByRole("combobox", { name: "Route" }));
     const list = screen.getByRole("listbox", { name: "Route" });
@@ -220,7 +220,7 @@ describe("the route and Where menus", () => {
       { id: "r1", name: "Emergency", kind: "custom", scope: "personal", ready: true },
     ] });
     const { t, sent } = transport(routes);
-    render(<AskSurface transport={t} variant="sheet" availability={READY} />);
+    render(<AskSurface access={{ canOpenFleet: true }} transport={t} variant="sheet" availability={READY} />);
     await act(async () => {});
     fireEvent.click(screen.getByRole("combobox", { name: "Route" }));
     const list = screen.getByRole("listbox", { name: "Route" });
@@ -245,7 +245,7 @@ describe("the route and Where menus", () => {
       { id: "api", name: "API", kind: "api", scope: "cluster", description: "Vendor models, paid by an API key", ready: true, reason: "" },
     ] });
     const { t, sent } = transport(routes);
-    render(<AskSurface transport={t} variant="sheet" availability={READY} />);
+    render(<AskSurface access={{ canOpenFleet: true }} transport={t} variant="sheet" availability={READY} />);
     await act(async () => {});
     choose("Route", "API");
     fireEvent.change(field(), { target: { value: "go" } });
@@ -261,7 +261,7 @@ describe("the route and Where menus", () => {
       { id: "local", name: "Local", kind: "local", scope: "cluster", ready: false, reason: "Needs an embedding model" },
     ] });
     const { t, sent } = transport(routes);
-    render(<AskSurface transport={t} variant="sheet" availability={READY} />);
+    render(<AskSurface access={{ canOpenFleet: true }} transport={t} variant="sheet" availability={READY} />);
     await act(async () => {});
     fireEvent.click(screen.getByRole("combobox", { name: "Route" }));
     const auto = within(screen.getByRole("listbox", { name: "Route" })).getByRole("option", { name: /Auto/ });
@@ -276,7 +276,7 @@ describe("the route and Where menus", () => {
 
   it("sends the chosen route and Where with the message", async () => {
     const { t, sent } = transport();
-    render(<AskSurface transport={t} variant="sheet" availability={READY} />);
+    render(<AskSurface access={{ canOpenFleet: true }} transport={t} variant="sheet" availability={READY} />);
     await act(async () => {});
     choose("Route", "Emergency");
     choose("Where", "Workbench");
@@ -288,7 +288,7 @@ describe("the route and Where menus", () => {
 
   it("sends nothing extra on Auto, as before", async () => {
     const { t, sent } = transport();
-    render(<AskSurface transport={t} variant="sheet" availability={READY} />);
+    render(<AskSurface access={{ canOpenFleet: true }} transport={t} variant="sheet" availability={READY} />);
     fireEvent.change(field(), { target: { value: "go" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await act(async () => {});
@@ -298,7 +298,7 @@ describe("the route and Where menus", () => {
   it.each(["sheet", "widget"] as const)("keeps Auto as the default when Apps is chosen in the %s", async variant => {
     const ready = ROUTES.map(route => route.id === "apps" ? { ...route, ready: true, reason: "" } : route);
     const { t, sent } = transport(ready);
-    render(<AskSurface transport={t} variant={variant} availability={READY} />);
+    render(<AskSurface access={{ canOpenFleet: true }} transport={t} variant={variant} availability={READY} />);
     await act(async () => {});
     choose("Route", "Apps");
     expect(screen.getByRole("combobox", { name: "Where" }).textContent).toBe("Auto");
@@ -310,7 +310,7 @@ describe("the route and Where menus", () => {
 
   it("preserves an explicit Computer choice when changing routes", async () => {
     const { t, sent } = transport(ROUTES.map(route => ({ ...route, ready: true, reason: "" })));
-    render(<AskSurface transport={t} variant="sheet" availability={READY} />);
+    render(<AskSurface access={{ canOpenFleet: true }} transport={t} variant="sheet" availability={READY} />);
     await act(async () => {});
     choose("Where", "Computer");
     for (const route of ["Apps", "Local", "Auto", "Apps"]) {
@@ -325,7 +325,7 @@ describe("the route and Where menus", () => {
 
   it("disables Apps with Workbench, preserves the draft, and keeps its description stable", async () => {
     const { t, sent } = transport(ROUTES.map(route => ({ ...route, ready: true, reason: "" })));
-    render(<AskSurface transport={t} variant="sheet" availability={READY} />);
+    render(<AskSurface access={{ canOpenFleet: true }} transport={t} variant="sheet" availability={READY} />);
     await act(async () => {});
     const routeMenu = screen.getByRole("combobox", { name: "Route" });
     fireEvent.click(routeMenu);
@@ -354,7 +354,7 @@ describe("the route and Where menus", () => {
   });
 
   it("disables Workbench with Apps while leaving Auto and Computer selectable", async () => {
-    render(<AskSurface transport={transport(ROUTES.map(route => ({ ...route, ready: true, reason: "" }))).t} variant="widget" availability={READY} />);
+    render(<AskSurface access={{ canOpenFleet: true }} transport={transport(ROUTES.map(route => ({ ...route, ready: true, reason: "" }))).t} variant="widget" availability={READY} />);
     await act(async () => {});
     const where = screen.getByRole("combobox", { name: "Where" });
     fireEvent.click(where);
@@ -382,7 +382,7 @@ describe("the route and Where menus", () => {
     const session = new ConversationSession(t);
     session.setRoutingDefault({ route: "apps", destination: "workbench" });
     session.setDraft("keep this draft");
-    render(<AskSurface conversation={session} transport={t} variant="sheet" availability={READY} />);
+    render(<AskSurface access={{ canOpenFleet: true }} conversation={session} transport={t} variant="sheet" availability={READY} />);
     await act(async () => {});
     expect(screen.getByRole("combobox", { name: "Where" }).textContent).toBe("Workbench");
     expect(screen.getByRole("combobox", { name: "Route" }).textContent).toBe("Apps");
@@ -401,7 +401,7 @@ describe("the route and Where menus", () => {
 
   it("opens Fleet's routes from Manage routes without changing the choice", async () => {
     const manage = vi.fn();
-    render(<AskSurface transport={transport().t} variant="sheet" availability={READY} onManageRoutes={manage} />);
+    render(<AskSurface access={{ canOpenFleet: true }} transport={transport().t} variant="sheet" availability={READY} onManageRoutes={manage} />);
     await act(async () => {});
     choose("Route", "Manage routes");
     expect(manage).toHaveBeenCalledOnce();
@@ -410,7 +410,7 @@ describe("the route and Where menus", () => {
 
   it("offers Auto alone when the cluster has no routes", async () => {
     const t: AskTransport = { ask: vi.fn(() => ({ cancel: vi.fn() })), routes: vi.fn(async () => { throw new Error("unknown builtin routesForActor"); }) };
-    render(<AskSurface transport={t} variant="sheet" availability={READY} />);
+    render(<AskSurface access={{ canOpenFleet: true }} transport={t} variant="sheet" availability={READY} />);
     await act(async () => {});
     fireEvent.click(screen.getByRole("combobox", { name: "Route" }));
     expect(within(screen.getByRole("listbox", { name: "Route" })).getAllByRole("option").map(option => option.querySelector(".os-select-option-label")?.textContent)).toEqual(["Auto"]);

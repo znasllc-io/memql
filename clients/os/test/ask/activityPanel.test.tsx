@@ -23,7 +23,7 @@ function setup() {
  const onClose = vi.fn();
  const ask = vi.fn((_p: string, _c: string | null, on: AskCallbacks) => { callbacks = on; return { cancel }; });
  const session = { config: UNKNOWN_RUNTIME_CONFIG, access: { userId: "user", primaryEmail: "znas@example.test", role: "owner", roleName: "Owner", rank: 400 } };
- render(<SessionProvider value={session}><AskSurface transport={{ ask }} variant="sheet" onClose={onClose} availability={{ state:"ready", message:"", refresh:vi.fn() }} /></SessionProvider>);
+ render(<SessionProvider value={session}><AskSurface access={{ canOpenFleet: true }} transport={{ ask }} variant="sheet" onClose={onClose} availability={{ state:"ready", message:"", refresh:vi.fn() }} /></SessionProvider>);
  return { ask, cancel, onClose, callbacks:()=>callbacks };
 }
 function draft(value:string) { fireEvent.change(screen.getByRole("textbox",{name:"Ask"}),{target:{value}}); }

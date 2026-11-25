@@ -32,7 +32,7 @@ async function setup(turns = [first, second], variant: "sheet" | "widget" = "she
   };
   const session = new ConversationSession(transport); sessions.push(session);
   await session.select("chat");
-  render(<AskSurface conversation={session} transport={transport} availability={READY_ASK} variant={variant} />);
+  render(<AskSurface access={{ canOpenFleet: true }} conversation={session} transport={transport} availability={READY_ASK} variant={variant} />);
   return { session, writeText, transport };
 }
 function actions(text: string) {

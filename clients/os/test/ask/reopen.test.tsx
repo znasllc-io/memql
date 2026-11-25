@@ -23,7 +23,7 @@ async function setup() {
   };
   function Harness() {
     controls = useAsk();
-    return <><button onClick={() => controls.openAsk()}>Open Ask</button>{controls.sheet.open && <AskSurface transport={transport} conversation={controls.conversation} availability={READY_ASK} variant="sheet" onClose={controls.closeAsk} onOpenWork={vi.fn()} />}</>;
+    return <><button onClick={() => controls.openAsk()}>Open Ask</button>{controls.sheet.open && <AskSurface access={{ canOpenFleet: true }} transport={transport} conversation={controls.conversation} availability={READY_ASK} variant="sheet" onClose={controls.closeAsk} onOpenWork={vi.fn()} />}</>;
   }
   render(<AskProvider transport={transport} availability={READY_ASK}><Harness /></AskProvider>);
   await act(async () => { await controls.conversation.select("chat"); });

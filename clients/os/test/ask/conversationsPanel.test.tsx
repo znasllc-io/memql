@@ -17,7 +17,7 @@ async function setup() {
  const session = new ConversationSession(transport);
  await session.select("current");
  const onClose = vi.fn();
- render(<AskSurface transport={transport} conversation={session} availability={READY_ASK} variant="sheet" onClose={onClose} />);
+ render(<AskSurface access={{ canOpenFleet: true }} transport={transport} conversation={session} availability={READY_ASK} variant="sheet" onClose={onClose} />);
  return { session, store, transport, cancel, onClose, callbacks: () => callbacks };
 }
 async function openList() { await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Conversations" })); }); }

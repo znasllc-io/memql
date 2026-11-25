@@ -23,7 +23,7 @@ it("stamps the delivered acknowledgment independently of the later result, inclu
     conversations: { create: async () => ({ id: "chat", title: "Chat" }), list: async () => [], read: async () => stored },
   };
   const session = new ConversationSession(transport);
-  const view = render(<AskSurface transport={transport} conversation={session} availability={READY_ASK} variant="sheet" />);
+  const view = render(<AskSurface access={{ canOpenFleet: true }} transport={transport} conversation={session} availability={READY_ASK} variant="sheet" />);
   fireEvent.change(screen.getByRole("textbox", { name: "Ask" }), { target: { value: task.prompt } });
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Send" })));
   act(() => { callbacks.activity?.(receipt); callbacks.delta(task.acknowledgement!); });
@@ -41,7 +41,7 @@ it("stamps the delivered acknowledgment independently of the later result, inclu
   // A new viewer has no local stream state; timing comes from durable receipts.
   const reopened = new ConversationSession(transport);
   await reopened.select("chat");
-  const restored = render(<AskSurface transport={transport} conversation={reopened} availability={READY_ASK} variant="sheet" />);
+  const restored = render(<AskSurface access={{ canOpenFleet: true }} transport={transport} conversation={reopened} availability={READY_ASK} variant="sheet" />);
   expect(timestamps()).toEqual([startedAt, acknowledgedAt, endedAt]);
   expect([...screen.getByRole("log").querySelectorAll("time")].at(-2)?.title).toContain("2026");
   restored.unmount(); reopened.dispose();
@@ -68,7 +68,7 @@ it("uses the saved acknowledgment time when classification finishes after the st
  const session = new ConversationSession(transport);
  await session.select("chat");
  const open = vi.fn();
- const view = render(<AskSurface transport={transport} conversation={session} availability={READY_ASK} variant="sheet" onOpenWork={open} />);
+ const view = render(<AskSurface access={{ canOpenFleet: true }} transport={transport} conversation={session} availability={READY_ASK} variant="sheet" onOpenWork={open} />);
  expect(timestamps()).toEqual([startedAt]);
  expect(screen.getByRole("log").querySelectorAll(".os-ask-avatar-memql")).toHaveLength(0);
  stored = [{...task, state:"queued", answer:task.acknowledgement!, acknowledgedAt:lateAt, endedAt:undefined, workStatus:"running"}];
@@ -86,7 +86,7 @@ it("keeps old work accessible on its result without a blank assistant entry", as
  const transport = {ask:()=>({cancel(){}}),conversations:{create:async()=>({id:"chat",title:"Chat"}),list:async()=>[],read:async()=>[{...task,acknowledgement:""}]}};
  const session = new ConversationSession(transport); await session.select("chat");
  const open = vi.fn();
- const view = render(<AskSurface transport={transport} conversation={session} availability={READY_ASK} variant="sheet" onOpenWork={open} />);
+ const view = render(<AskSurface access={{ canOpenFleet: true }} transport={transport} conversation={session} availability={READY_ASK} variant="sheet" onOpenWork={open} />);
  expect(screen.getByRole("log").querySelectorAll(".os-ask-avatar-memql")).toHaveLength(1);
  expect(timestamps()).toEqual([startedAt,endedAt]);
  fireEvent.click(screen.getByRole("button",{name:/View work:/}));

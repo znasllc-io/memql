@@ -11,7 +11,7 @@ describe("Ask's shared work record", () => {
       callbacks.delta("Done."); callbacks.done();
       return { cancel() {} };
     });
-    render(<AskSurface availability={READY_ASK} transport={{ ask }} variant="sheet" />);
+    render(<AskSurface access={{ canOpenFleet: true }} availability={READY_ASK} transport={{ ask }} variant="sheet" />);
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "Open Fleet" } });
     fireEvent.submit(screen.getByRole("textbox").closest("form")!);
     expect(await screen.findByText("Done.")).toBeTruthy();
