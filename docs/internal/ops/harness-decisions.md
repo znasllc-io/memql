@@ -3055,7 +3055,11 @@ screen's vendor cost line ("about N items", `confirmationLine` in
 estimate `indexed + backlog`, the whole index, so switching to a vendor model
 whose index is still kept (Switch back within its 30 days, or a cancelled
 switch chosen again) states more items than the cluster's account pays for:
-the walk embeds only what is missing there. Tests:
+the walk embeds only what is missing there. A machine that holds its stream
+but never answers leaves the run waiting "not answering", and no other owner
+can take over, because the take-over reads a held stream as online. Search
+embeds on that machine until it answers, or until an owner cancels a switch or
+switches to another model. Tests:
 `component/memql/memory_search_builtins_test.go` (the decisions, over the job's
 map world, the job's tick included) and
 `component/memql/memory_search_builtins_db_test.go` (two engines over one
