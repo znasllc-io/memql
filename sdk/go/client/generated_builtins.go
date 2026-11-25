@@ -6677,7 +6677,7 @@ func LogsTailBuild(args LogsTailArgs) string {
 	return b.String()
 }
 
-// MemorySearchCancel -- Cancel the switch in progress. Search keeps the current model, and the partly built index is kept for 30 days, so choosing the same model again resumes it. Refused once the switch has happened: switching back is a new switch.
+// MemorySearchCancel -- Cancel the switch in progress. Search keeps the current model, and the partly built index is kept for 30 days, so choosing the same model again resumes it. Refused once the switch has happened: switching back is a new switch. An active cluster owner only.
 type MemorySearchCancelArgs struct {
 }
 
@@ -6707,7 +6707,7 @@ func MemorySearchChoicesBuild(args MemorySearchChoicesArgs) string {
 	return "builtin memorySearchChoices()"
 }
 
-// MemorySearchConfirm -- Confirm a vendor model memory search was bound to without anybody choosing it: records the caller as its chooser, once.
+// MemorySearchConfirm -- Confirm a vendor model memory search was bound to without anybody choosing it: records the caller as its chooser, once. An active cluster owner only.
 type MemorySearchConfirmArgs struct {
 }
 
@@ -6722,7 +6722,7 @@ func MemorySearchConfirmBuild(args MemorySearchConfirmArgs) string {
 	return "builtin memorySearchConfirm()"
 }
 
-// MemorySearchStatus -- Memory search's model and index, as ONE row (id `current`): providerRef, kind (machine or vendor), label; indexedBy and indexedByName (whose machines embed for it; empty for a vendor model, which the cluster's account pays for), chosenBy, and needsConfirmation (a vendor model nobody chose); previousRef (the model it replaced, empty for the first); takeOver (its indexer cannot index it, and choosing it again would make the caller its indexer); indexed (the entries in its index); backlog (the items the backfill's last count found missing from it, counted even while indexing waits) with backlogCountedAt, and waitingReason; switch (state, targetRef, targetLabel, counts, startedAt, startedBy, waitingReason, estimatedTotal, an ESTIMATE: the active index plus the backlog, indexedBy and indexedByName, whose machines the rebuild embeds on, and takeOver: before the flip, its indexer cannot index the target, and choosing the target again would make the caller its indexer), or null; retained, the kept indexes as {providerRef, retireAt}.
+// MemorySearchStatus -- Memory search's model and index, as ONE row (id `current`): providerRef, kind (machine or vendor), label; indexedBy and indexedByName (whose machines embed for it; empty for a vendor model, which the cluster's account pays for), chosenBy, and needsConfirmation (a vendor model nobody chose); previousRef (the model it replaced, empty for the first); mayAct (whether the caller may act on memory search at all: an active cluster owner holding the part's execute); takeOver (its indexer cannot index it, and choosing it again would make the caller its indexer); indexed (the entries in its index); backlog (the items the backfill's last count found missing from it, counted even while indexing waits) with backlogCountedAt, and waitingReason; switch (state, targetRef, targetLabel, counts, startedAt, startedBy, waitingReason, estimatedTotal, an ESTIMATE: the active index plus the backlog, indexedBy and indexedByName, whose machines the rebuild embeds on, and takeOver: before the flip, its indexer cannot index the target, and choosing the target again would make the caller its indexer), or null; retained, the kept indexes as {providerRef, retireAt}.
 type MemorySearchStatusArgs struct {
 }
 
@@ -6737,7 +6737,7 @@ func MemorySearchStatusBuild(args MemorySearchStatusArgs) string {
 	return "builtin memorySearchStatus()"
 }
 
-// MemorySearchSwitch -- Choose memory search's model. With none bound it is bound at once. Choosing the model in use (or a running switch's own target) moves nothing, and takes over indexing it when its indexer is no longer an owner or has no machine offering it. Otherwise the whole index is rebuilt with the new model in the background while search keeps the current one, and search switches over by itself when the rebuild is complete; a machine model is indexed on the chooser's machines and the ones lent to them, a vendor model is paid by the cluster's vendor account. Refused while another switch runs, except once it has switched over: choosing another model then starts it.
+// MemorySearchSwitch -- Choose memory search's model. With none bound it is bound at once. Choosing the model in use (or a running switch's own target) moves nothing, and takes over indexing it when its indexer is no longer an owner or has no machine offering it. Otherwise the whole index is rebuilt with the new model in the background while search keeps the current one, and search switches over by itself when the rebuild is complete; a machine model is indexed on the chooser's machines and the ones lent to them, a vendor model is paid by the cluster's vendor account. Refused while another switch runs, except once it has switched over: choosing another model then starts it. Only an active cluster owner chooses.
 type MemorySearchSwitchArgs struct {
 	Provider string
 }
@@ -6757,7 +6757,7 @@ func MemorySearchSwitchBuild(args MemorySearchSwitchArgs) string {
 	return b.String()
 }
 
-// MemorySearchSwitchAnyway -- Switch over although some items failed or no source rebuilds them (a switch waiting for the owner's decision only). Those items drop out of search until they are written again or a later pass picks them up. The flip itself happens at the index job's next tick.
+// MemorySearchSwitchAnyway -- Switch over although some items failed or no source rebuilds them (a switch waiting for the owner's decision only). Those items drop out of search until they are written again or a later pass picks them up. The flip itself happens at the index job's next tick. An active cluster owner only.
 type MemorySearchSwitchAnywayArgs struct {
 }
 

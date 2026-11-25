@@ -144,6 +144,28 @@ func (f *memoryIndexDBFixture) memorySearchStatus(e *MemQLEngine) map[string]any
 	return row
 }
 
+// mayAct asks the gates an act passes, on a real engine: `execute` on the part
+// through the capability check the builtin path makes, and the owner set. An
+// owner holding the part may act; a caller whose role holds the part but who is
+// not an active owner may not, and neither may an owner signed in under a role
+// that does not hold it.
+func TestTheStatusAsksAnActsOwnGatesWhetherTheCallerMayAct(t *testing.T) {
+	f := newMemoryIndexDBFixture(t)
+	f.bind(f.ref("model", 3), f.owner)
+	mayAct := func(ac *auth.AccessContext) any {
+		t.Helper()
+		nodes, err := f.a.memorySearchStatusBuiltin(auth.ContextWithAccess(f.ctx, ac), nil, 0)
+		require.NoError(t, err)
+		require.Len(t, nodes, 1)
+		var row map[string]any
+		require.NoError(t, json.Unmarshal(nodes[0].Payload, &row))
+		return row["mayAct"]
+	}
+	assert.Equal(t, true, mayAct(&auth.AccessContext{UserId: f.owner, Role: auth.RoleOwner}))
+	assert.Equal(t, false, mayAct(&auth.AccessContext{UserId: "v1:identity:user:not-an-owner-" + f.token, Role: auth.RoleOwner}))
+	assert.Equal(t, false, mayAct(&auth.AccessContext{UserId: f.owner, Role: auth.RoleDeveloper}))
+}
+
 // Switching back within the 30 days reuses the kept index: the job embeds only
 // what was written since the switch away, and every item ends up in it.
 func TestSwitchingBackReusesTheKeptIndex(t *testing.T) {

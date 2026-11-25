@@ -11,14 +11,33 @@ package memql
 //   - memorySearchStatus and memorySearchChoices: `read` on
 //     app:cluster/memorysearch.
 //   - memorySearchSwitch, memorySearchCancel, memorySearchSwitchAnyway and
-//     memorySearchConfirm: `execute` on it.
+//     memorySearchConfirm: `execute` on it, and an active cluster owner
+//     (memorySearchOwnerGate).
 //   - memoryIndexRetire: the cleanup's own step. No part; the handler refuses a
 //     call without internal origin, as memoryIndexStep does.
 //
 // Both parts are seeded on the owner role and no other (dsl/rbac/seeds.memql),
-// and the builtin path checks them before a handler runs. An act is recorded
-// as a PERSON (memorySearchCaller): who started a switch, who chose a model,
-// whose machines index it. The cluster acting is nobody to record.
+// and the builtin path checks them before a handler runs.
+//
+// EVERY ACT ALSO NEEDS AN ACTIVE CLUSTER OWNER, whatever was granted (design
+// record, decision 2 and sections 2 and 8). TRIGGER: Settings > Access can
+// grant the parts to anybody, and every act decides whose machines receive
+// every person's memory text or what the cluster's vendor account pays for --
+// a vendor model bound, a vendor re-index started, a vendor model nobody chose
+// confirmed -- which the design leaves to an owner's choice alone. CHOSEN PATH:
+// the part stays the gate the builtin path checks, and each act first asks the
+// per-replica owner set the resolver and the index job ask (isActiveOwner),
+// before it reads or writes anything else. A person holding the parts who is
+// not an owner sees the page and its state -- the status's mayAct is false for
+// them, so the screen offers them nothing -- and every act refuses them in
+// plain words (errMemorySearchNotOwner). REJECTED: checking the owner for a
+// machine model only, because its chooser becomes its indexer; that let a
+// grantee bind a vendor model, start a vendor re-index or confirm one, and the
+// flip then named the grantee as its chooser, so no owner was ever asked. An
+// owner check that could not be made is reported as that, never read as "not
+// an owner" (indexerOwnerAnswer). An act is recorded as a PERSON
+// (memorySearchCaller): who started a switch, who chose a model, whose
+// machines index it. The cluster acting is nobody to record.
 //
 // # Who moves what
 //
@@ -124,6 +143,10 @@ const (
 	MemorySearchChoiceConcept = "v1:platform:memorySearchChoice"
 )
 
+// memorySearchResource is Memory search's part: `read` for the two reads,
+// `execute` for the acts (dsl/platform/builtins.memql).
+const memorySearchResource = "app:cluster/memorysearch"
+
 // memorySearchStateFailed is the design record's name for a switch that ended in
 // error. The job does not write it today (the concept's state enum has no such
 // value); it is named so that a switch in that state reads as over, not running.
@@ -137,6 +160,11 @@ var errMemorySearchChanged = errors.New("memory search changed meanwhile, try ag
 // failure to take it that is somebody else's change, and the one an owner is
 // told to try again after (memorySearchLock).
 var errMemorySearchBusy = errors.New("memory search's model is being changed elsewhere right now; try again in a moment")
+
+// errMemorySearchNotOwner is an act refused because its caller is not an
+// active cluster owner (memorySearchOwnerGate), said plainly: holding the part
+// shows memory search, and only an owner acts on it.
+var errMemorySearchNotOwner = errors.New("only an active cluster owner can change memory search, and you are not one")
 
 // retiredMemoryIndex is one retired model's row (RetiredEmbedderBindingID): its
 // index is kept until RetireAt, and DroppedAt says when it was dropped.
@@ -177,6 +205,9 @@ type memorySearchWorld interface {
 	recordRetired(ctx context.Context, r retiredMemoryIndex) error
 	dropTable(ctx context.Context, table string) error
 	isActiveOwner(ctx context.Context, userId string) (bool, error)
+	// mayExecute reports whether the caller holds `execute` on the part, as the
+	// builtin path judges an act's call.
+	mayExecute(ctx context.Context) bool
 	// catalog is a person's machine models: their own machines and the ones lent to them.
 	catalog(ctx context.Context, userId string) ([]FleetModel, error)
 	// vendorEmbedders are the vendor embedding records the cluster's own account pays for.
@@ -352,6 +383,21 @@ func memorySearchTakesOver(ctx context.Context, w memorySearchWorld, caller, ind
 	return memorySearchOffers(mine, model), nil
 }
 
+// memorySearchOwnerGate is every act's owner check (the header's "every act
+// also needs an active cluster owner"), made before the act reads or writes
+// anything else: caller must be an active user whose stored role is `owner`. A
+// check that could not be made is said as that, never as "not an owner".
+func memorySearchOwnerGate(ctx context.Context, w memorySearchWorld, caller string) error {
+	owner, err := w.isActiveOwner(ctx, caller)
+	if err != nil {
+		return fmt.Errorf("memory search could not check that you are an active cluster owner: %w", err)
+	}
+	if !owner {
+		return errMemorySearchNotOwner
+	}
+	return nil
+}
+
 // memorySearchCaller is the person an owner's act is recorded as. The cluster
 // acting (a sweep, an automation's system actor) is refused: a switch it
 // started, or a model it chose, would name nobody.
@@ -389,24 +435,20 @@ func memorySearchCaller(ctx context.Context) (string, error) {
 //     `switching` when the active index holds no vector (nothing to rebuild
 //     first; the tick flips it).
 //
-// A machine model is indexed on the chooser's machines and the ones lent to
-// them, so the chooser must be an active owner (the indexer rule, R5). A vendor
-// model is paid by the cluster's account and indexed on nobody's machines.
+// Only an active owner chooses (memorySearchOwnerGate), whatever the model. A
+// machine model is indexed on the chooser's machines and the ones lent to
+// them; a vendor model is paid by the cluster's account and indexed on
+// nobody's machines.
 func memorySearchSwitch(ctx context.Context, w memorySearchWorld, caller, provider string) error {
 	provider = strings.TrimSpace(provider)
 	if provider == "" {
 		return fmt.Errorf("choose an embedding model")
 	}
-	_, fleet := IsFleetReference(provider)
+	if err := memorySearchOwnerGate(ctx, w, caller); err != nil {
+		return err
+	}
 	indexer := ""
-	if fleet {
-		owner, err := w.isActiveOwner(ctx, caller)
-		if err != nil {
-			return fmt.Errorf("memory search could not check that you are an active cluster owner: %w", err)
-		}
-		if !owner {
-			return fmt.Errorf("a machine model indexes memory search on a cluster owner's machines, and you are not an active cluster owner")
-		}
+	if _, fleet := IsFleetReference(provider); fleet {
 		indexer = caller
 	}
 	sw, _, has, err := w.readRun(ctx, memoryIndexKindSwitch)
@@ -589,14 +631,18 @@ func memorySearchTakeOverRun(ctx context.Context, w memorySearchWorld, caller st
 	return err
 }
 
-// memorySearchCancel stops the switch in progress. Under the binding lock: a
+// memorySearchCancel stops the switch in progress, an active owner's act
+// (memorySearchOwnerGate). Under the binding lock: a
 // switch whose target the binding already names has happened, and is refused
 // (switching back is a new switch). Otherwise the target is recorded retired
 // with retireAt = now + 30 days FIRST -- once the run says cancelled nothing
 // else would ever date the partial index, and the cleanup drops only dated
 // ones -- and then the run is written `cancelled`, fenced. Choosing the same
 // model again reuses what was built.
-func memorySearchCancel(ctx context.Context, w memorySearchWorld) error {
+func memorySearchCancel(ctx context.Context, w memorySearchWorld, caller string) error {
+	if err := memorySearchOwnerGate(ctx, w, caller); err != nil {
+		return err
+	}
 	unlock, err := memorySearchLock(ctx, w)
 	if err != nil {
 		return err
@@ -630,11 +676,15 @@ func memorySearchCancel(ctx context.Context, w memorySearchWorld) error {
 	return err
 }
 
-// memorySearchSwitchAnyway is the owner's answer to a switch held in
-// needsDecision for items that failed or that no source rebuilds: the run is
+// memorySearchSwitchAnyway is an active owner's answer (memorySearchOwnerGate)
+// to a switch held in needsDecision for items that failed or that no source
+// rebuilds: the run is
 // written `switching`, fenced, and the job's next tick flips. Those items drop
 // out of search until they are written again or a later walk picks them up.
-func memorySearchSwitchAnyway(ctx context.Context, w memorySearchWorld) error {
+func memorySearchSwitchAnyway(ctx context.Context, w memorySearchWorld, caller string) error {
+	if err := memorySearchOwnerGate(ctx, w, caller); err != nil {
+		return err
+	}
 	sw, version, has, err := w.readRun(ctx, memoryIndexKindSwitch)
 	if err != nil {
 		return err
@@ -648,11 +698,14 @@ func memorySearchSwitchAnyway(ctx context.Context, w memorySearchWorld) error {
 	return err
 }
 
-// memorySearchConfirm is an owner confirming a VENDOR model nobody chose (bound
-// by the vendor fallback the design removed): under the binding lock it records
-// the caller as its chooser. Once: a vendor model with a chooser is left as it
+// memorySearchConfirm is an active owner (memorySearchOwnerGate) confirming a
+// VENDOR model nobody chose (bound by the vendor fallback the design removed):
+// under the binding lock it records the caller as its chooser. Once: a vendor model with a chooser is left as it
 // is. A machine model is never put to an owner this way.
 func memorySearchConfirm(ctx context.Context, w memorySearchWorld, caller string) error {
+	if err := memorySearchOwnerGate(ctx, w, caller); err != nil {
+		return err
+	}
 	unlock, err := memorySearchLock(ctx, w)
 	if err != nil {
 		return err
@@ -793,11 +846,11 @@ func (e *MemQLEngine) memorySearchSwitchBuiltin(ctx context.Context, args map[st
 }
 
 func (e *MemQLEngine) memorySearchCancelBuiltin(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	return e.memorySearchAct(ctx, func(w memorySearchWorld, _ string) error { return memorySearchCancel(ctx, w) })
+	return e.memorySearchAct(ctx, func(w memorySearchWorld, caller string) error { return memorySearchCancel(ctx, w, caller) })
 }
 
 func (e *MemQLEngine) memorySearchSwitchAnywayBuiltin(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	return e.memorySearchAct(ctx, func(w memorySearchWorld, _ string) error { return memorySearchSwitchAnyway(ctx, w) })
+	return e.memorySearchAct(ctx, func(w memorySearchWorld, caller string) error { return memorySearchSwitchAnyway(ctx, w, caller) })
 }
 
 func (e *MemQLEngine) memorySearchConfirmBuiltin(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {

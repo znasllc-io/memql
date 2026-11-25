@@ -201,6 +201,16 @@ func (w engineMemorySearchWorld) isActiveOwner(ctx context.Context, userId strin
 // way ownerEmbeddingCandidates reads an owner's: the take-over reads the
 // indexer's catalog as well as the caller's, and the answer must not depend on
 // whose session asked.
+// mayExecute asks the question the builtin path asks of an act's call
+// (refuseBelowRequiredCapability): `execute` on Memory search's part, for the
+// verified caller and the groups and grants they hold (auth.CapableFor). The
+// status's mayAct rests on it, so the screen offers an act only to a caller
+// the act's own gate admits.
+func (w engineMemorySearchWorld) mayExecute(ctx context.Context) bool {
+	subject, ok := w.e.subjectFor(ctx)
+	return ok && auth.CapableFor(ctx, subject, auth.VerbExecute, memorySearchResource)
+}
+
 func (w engineMemorySearchWorld) catalog(ctx context.Context, userId string) ([]FleetModel, error) {
 	if w.e.providers == nil {
 		return nil, nil

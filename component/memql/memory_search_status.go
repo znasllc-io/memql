@@ -13,28 +13,43 @@ import (
 	"time"
 )
 
+// memorySearchMayAct is the status's `mayAct`: whether caller may act on memory
+// search at all, asked from the caller's side -- `execute` on the part, as the
+// builtin path judges an act's call, AND an active cluster owner, as every act
+// requires (memorySearchOwnerGate). The screen offers no act where it is false:
+// a person granted the part who is not an owner sees the page and its state,
+// and is offered nothing the engine would refuse. The cluster asking (no
+// caller) may not act. An owner check that cannot be made answers false,
+// logged, rather than failing the status: the next read asks again.
+func memorySearchMayAct(ctx context.Context, w memorySearchWorld, caller string) bool {
+	if strings.TrimSpace(caller) == "" || !w.mayExecute(ctx) {
+		return false
+	}
+	owner, err := w.isActiveOwner(ctx, caller)
+	if err != nil {
+		w.logger().Warn("memory search: could not tell whether the caller is an active cluster owner", "error", err)
+		return false
+	}
+	return owner
+}
+
 // memorySearchOffersTakeOver is a status `takeOver`: whether caller, choosing
 // ref again, would become its indexer in place of indexer -- memorySearchSwitch's
 // own take-over (memorySearchTakesOver), asked without writing. It is asked of
 // the model in use and the BINDING's indexer (the row's takeOver, ruling R13),
 // and of a running switch's target and the RUN's indexer (the switch summary's,
-// ruling R14). A machine model is indexed only by an active owner, so a caller
-// who is not one takes over nothing; the cluster asking (no caller) takes over
-// nothing either.
+// ruling R14), and only of a caller who may act (mayAct): to anybody else
+// choosing again is refused, so it takes over nothing.
 //
-// A catalog or an owner check that cannot be read answers false, logged, rather
-// than failing the status: the screen then withholds the act for that read and
-// still shows what is in use, and the next read asks again. An act offered on a
-// guess would be one the engine might answer by doing nothing.
+// A catalog that cannot be read answers false, logged, rather than failing the
+// status: the screen then withholds the act for that read and still shows what
+// is in use, and the next read asks again. An act offered on a guess would be
+// one the engine might answer by doing nothing.
 func memorySearchOffersTakeOver(ctx context.Context, w memorySearchWorld, caller, indexer, ref string) bool {
-	if _, fleet := IsFleetReference(ref); !fleet || strings.TrimSpace(caller) == "" {
+	if _, fleet := IsFleetReference(ref); !fleet {
 		return false
 	}
-	owner, err := w.isActiveOwner(ctx, caller)
-	takeOver := false
-	if err == nil && owner {
-		takeOver, err = memorySearchTakesOver(ctx, w, caller, indexer, ref)
-	}
+	takeOver, err := memorySearchTakesOver(ctx, w, caller, indexer, ref)
 	if err != nil {
 		w.logger().Warn("memory search: could not tell whether choosing a model again would take over its indexing", "provider", ref, "error", err)
 		return false
@@ -51,6 +66,9 @@ func memorySearchOffersTakeOver(ctx context.Context, w memorySearchWorld, caller
 //     (empty for a cluster's first model), which is the index Switch back names
 //     -- `retained` also holds a cancelled switch's partial index, which was
 //     never in use.
+//   - mayAct: whether caller may act on memory search at all
+//     (memorySearchMayAct): an active cluster owner holding the part's
+//     `execute`. Nobody else is offered an act, a take-over included.
 //   - takeOver: whether caller, choosing the model in use again, would become
 //     its indexer (memorySearchOffersTakeOver; ruling R13). It is how the status
 //     says the binding's indexer cannot index the model, asked from the caller's
@@ -81,9 +99,10 @@ func memorySearchOffersTakeOver(ctx context.Context, w memorySearchWorld, caller
 //     date. A row naming the active model or a running switch's target is not
 //     one: that table is in use.
 func memorySearchStatus(ctx context.Context, w memorySearchWorld, caller string) (map[string]any, error) {
+	mayAct := memorySearchMayAct(ctx, w, caller)
 	row := map[string]any{"providerRef": "", "kind": "", "label": "", "indexedBy": "", "indexedByName": "", "chosenBy": "",
-		"needsConfirmation": false, "previousRef": "", "takeOver": false, "indexed": 0, "backlog": 0, "backlogCountedAt": "",
-		"waitingReason": "", "switch": nil, "retained": []any{}}
+		"needsConfirmation": false, "previousRef": "", "mayAct": mayAct, "takeOver": false, "indexed": 0, "backlog": 0,
+		"backlogCountedAt": "", "waitingReason": "", "switch": nil, "retained": []any{}}
 	active, err := w.binding(ctx)
 	if err != nil && !errors.Is(err, ErrNoEmbedderBound) {
 		return nil, err
@@ -104,7 +123,7 @@ func memorySearchStatus(ctx context.Context, w memorySearchWorld, caller string)
 		row["chosenBy"] = strings.TrimSpace(active.ChosenBy)
 		row["needsConfirmation"] = !fleet && strings.TrimSpace(active.ChosenBy) == ""
 		row["previousRef"] = strings.TrimSpace(active.PreviousRef)
-		row["takeOver"] = memorySearchOffersTakeOver(ctx, w, caller, indexer, active.ProviderRef)
+		row["takeOver"] = mayAct && memorySearchOffersTakeOver(ctx, w, caller, indexer, active.ProviderRef)
 		activeTable, err := EmbeddingVectorTable(active.ProviderRef, active.Dimensions)
 		if err != nil {
 			return nil, err
@@ -142,7 +161,7 @@ func memorySearchStatus(ctx context.Context, w memorySearchWorld, caller string)
 		} else if runIndexer != "" {
 			runIndexerName = w.displayName(ctx, runIndexer)
 		}
-		takeOver := !memorySearchSwitchOver(sw.State) && !(bound && memorySearchFlipped(sw, active)) &&
+		takeOver := mayAct && !memorySearchSwitchOver(sw.State) && !(bound && memorySearchFlipped(sw, active)) &&
 			memorySearchOffersTakeOver(ctx, w, caller, runIndexer, sw.TargetRef)
 		row["switch"] = map[string]any{
 			"state": sw.State, "targetRef": sw.TargetRef, "targetLabel": memorySearchLabel(w, sw.TargetRef),

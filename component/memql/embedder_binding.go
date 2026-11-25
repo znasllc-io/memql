@@ -89,10 +89,10 @@ type EmbedderBinding struct {
 	// which runs on no one's machines, and on a fleet binding made before
 	// indexers existed, whose embeddings then resolve for their caller.
 	IndexedBy string
-	// ChosenBy is the person who chose this model: an owner, or, for a vendor
-	// model, somebody granted Memory search's part (memorySearchSwitch). Empty
-	// when it was bound automatically, which is what lets an owner be asked
-	// once to confirm a vendor model nobody chose.
+	// ChosenBy is the cluster owner who chose this model: only an active owner
+	// chooses, whatever the model (memorySearchOwnerGate). Empty when it was
+	// bound automatically, which is what lets an owner be asked once to confirm
+	// a vendor model nobody chose.
 	ChosenBy string
 	// RetireAt is set on a RETIRED model's row (RetiredEmbedderBindingID): its
 	// index is kept until then, so switching back is quick, and dropped after.

@@ -44,6 +44,7 @@ type memorySearchFake struct {
 	ensureErr  error
 	bindErr    error
 	ownerErr   error
+	noExecute  bool // the caller does not hold `execute` on the part
 	counted    int
 
 	events      []string
@@ -188,6 +189,8 @@ func (f *memorySearchFake) isActiveOwner(_ context.Context, userId string) (bool
 	return f.job.owners[userId], nil
 }
 
+func (f *memorySearchFake) mayExecute(context.Context) bool { return !f.noExecute }
+
 func (f *memorySearchFake) catalog(_ context.Context, userId string) ([]FleetModel, error) {
 	if f.catalogErr != nil {
 		return nil, f.catalogErr
@@ -255,6 +258,114 @@ func TestOnlyTheOwnerHoldsTheMemorySearchParts(t *testing.T) {
 
 	_, err := e.memoryIndexRetireBuiltin(auth.ContextWithClientOrigin(asCaller("owner")), nil, 0)
 	require.ErrorContains(t, err, "daily cleanup")
+}
+
+// Every act is an ACTIVE CLUSTER OWNER's (design record, decision 2 and
+// sections 2 and 8: a vendor model is bound only by an owner choosing it, and
+// Memory search is owners only), on top of the part the builtin path checks. A
+// person granted the part who is not an owner -- or an owner who stopped being
+// one -- chooses no model of either kind, takes nothing over, confirms nothing,
+// cancels nothing and switches nothing anyway, and is told why in plain words.
+func TestEveryActIsAnActiveOwners(t *testing.T) {
+	ctx := context.Background()
+	const vendor, granted = "embedding3Small", "v1:identity:user:granted"
+	refused := func(t *testing.T, err error) {
+		t.Helper()
+		require.ErrorIs(t, err, errMemorySearchNotOwner)
+		require.EqualError(t, err, "only an active cluster owner can change memory search, and you are not one")
+	}
+	nothingDone := func(t *testing.T, f *memorySearchFake) {
+		t.Helper()
+		require.Zero(t, f.runAttempts, "no run written")
+		require.Empty(t, f.probes, "nothing probed, so nothing spent")
+		require.Empty(t, f.binds, "nothing bound")
+		require.Empty(t, f.choices, "no indexer or chooser recorded")
+		require.Empty(t, f.retiredRows, "no index dated")
+	}
+
+	// A vendor model, which the cluster's account would pay for on a choice no
+	// owner made: as a switch, and as a cluster's first model.
+	f := newMemorySearchFake(3).noSwitch()
+	f.job.fill(fakeOldRef, 4)
+	f.widths[vendor] = 1536
+	refused(t, memorySearchSwitch(ctx, f, granted, vendor))
+	nothingDone(t, f)
+	f = newMemorySearchFake(3).noSwitch()
+	f.job.active = EmbedderBinding{}
+	f.widths[vendor] = 1536
+	refused(t, memorySearchSwitch(ctx, f, granted, vendor))
+	nothingDone(t, f)
+
+	// A machine model, and choosing the model in use again where an owner's
+	// choice would take its indexing over.
+	f = newMemorySearchFake(3).noSwitch()
+	f.job.fill(fakeOldRef, 4)
+	f.job.active.IndexedBy = ""
+	refused(t, memorySearchSwitch(ctx, f, granted, fakeNewRef))
+	refused(t, memorySearchSwitch(ctx, f, granted, fakeOldRef))
+	nothingDone(t, f)
+	require.Empty(t, f.job.active.IndexedBy)
+
+	// Keep: a vendor model nobody chose stays unconfirmed.
+	f = newMemorySearchFake(2).noSwitch()
+	f.job.active = EmbedderBinding{ProviderRef: vendor, Dimensions: 1536, ActivatedAt: "2026-10-01T00:00:00Z"}
+	refused(t, memorySearchConfirm(ctx, f, granted))
+	nothingDone(t, f)
+	require.Empty(t, f.job.active.ChosenBy)
+
+	// Cancel and Switch anyway, by a grantee and by an owner who was demoted.
+	f = newMemorySearchFake(3)
+	refused(t, memorySearchCancel(ctx, f, granted))
+	f.setSwitchState(memoryIndexStateNeedsDecision)
+	refused(t, memorySearchSwitchAnyway(ctx, f, granted))
+	delete(f.job.owners, fakeOwner)
+	refused(t, memorySearchCancel(ctx, f, fakeOwner))
+	refused(t, memorySearchSwitchAnyway(ctx, f, fakeOwner))
+	nothingDone(t, f)
+	require.Equal(t, memoryIndexStateNeedsDecision, f.job.runs[memoryIndexKindSwitch].State)
+}
+
+// The status says from the caller's side whether they may act at all
+// (`mayAct`): an active cluster owner who holds the part's `execute`, and
+// nobody else, so the screen offers nobody else an act. Neither take-over is
+// offered where acting is not: choosing again would be refused.
+func TestStatusSaysWhetherTheCallerMayAct(t *testing.T) {
+	ctx := context.Background()
+	const granted = "v1:identity:user:granted"
+	for _, tc := range []struct {
+		name, caller string
+		arrange      func(f *memorySearchFake)
+		want         bool
+	}{
+		{"an active owner holding the part", memorySearchOtherOwner, nil, true},
+		{"an owner whose part lacks execute", memorySearchOtherOwner, func(f *memorySearchFake) { f.noExecute = true }, false},
+		{"somebody granted the part who is not an owner", granted, nil, false},
+		{"an owner who stopped being one", memorySearchOtherOwner, func(f *memorySearchFake) { delete(f.job.owners, memorySearchOtherOwner) }, false},
+		{"an owner check that cannot be made", memorySearchOtherOwner, func(f *memorySearchFake) {
+			f.ownerErr = errors.New("the cluster's owners could not be read: database unavailable")
+		}, false},
+		{"the cluster asking", "", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Nobody indexes the model in use or the switch's target, so an owner
+			// choosing either again would take it over.
+			f := newMemorySearchFake(2)
+			f.job.active.IndexedBy = ""
+			run := f.job.runs[memoryIndexKindSwitch]
+			run.IndexedBy = ""
+			f.job.runs[memoryIndexKindSwitch] = run
+			f.job.owners[memorySearchOtherOwner] = true
+			if tc.arrange != nil {
+				tc.arrange(f)
+			}
+			row, err := memorySearchStatus(ctx, f, tc.caller)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, row["mayAct"])
+			require.Equal(t, tc.want, row["takeOver"], "the take-over of the model in use")
+			require.Equal(t, tc.want, row["switch"].(map[string]any)["takeOver"], "the take-over of the switch")
+			require.Zero(t, f.runAttempts, "a status writes nothing")
+		})
+	}
 }
 
 // A cluster with no model binds the first one at once: nothing is indexed under
@@ -358,13 +469,13 @@ func TestASecondSwitchIsRefusedWhileOneRuns(t *testing.T) {
 		})
 	}
 
-	// A machine model is indexed on an active owner's machines, so a caller who
-	// is not one (a grant of the part, say) cannot start one.
+	// A caller who is not an active owner (a grant of the part, say) starts
+	// nothing (TestEveryActIsAnActiveOwners has every act).
 	f := newMemorySearchFake(3).noSwitch()
 	f.job.fill(fakeOldRef, 4)
 	f.widths[third] = 4
 	err := memorySearchSwitch(ctx, f, memorySearchOtherOwner, third)
-	require.ErrorContains(t, err, "not an active cluster owner")
+	require.ErrorIs(t, err, errMemorySearchNotOwner)
 	require.Zero(t, f.runAttempts)
 
 	// A write refused by the fence is answered, never retried.
@@ -487,7 +598,7 @@ func TestAFlippedSwitchWhoseIndexerCannotIndexIsTakenOverByChoosingItAgain(t *te
 		require.NoError(t, runMemoryIndexTick(ctx, f.job, time.Hour))
 		require.Equal(t, memoryIndexStateWaiting, f.job.runs[memoryIndexKindSwitch].State)
 		require.Equal(t, memoryIndexOwnerReason, f.job.runs[memoryIndexKindSwitch].WaitingReason)
-		require.ErrorContains(t, memorySearchCancel(ctx, f), "already happened")
+		require.ErrorContains(t, memorySearchCancel(ctx, f, other), "already happened")
 
 		require.NoError(t, memorySearchSwitch(ctx, f, other, fakeNewRef))
 		require.Equal(t, other, f.job.active.IndexedBy)
@@ -652,7 +763,7 @@ func TestOnlyALockHeldElsewhereReadsAsBeingChangedElsewhere(t *testing.T) {
 	failed := fmt.Errorf("Ask: %w: it was built without one", ErrWriteGatePoolMissing)
 	for name, act := range map[string]func(f *memorySearchFake) error{
 		"switch":  func(f *memorySearchFake) error { return memorySearchSwitch(ctx, f, fakeOwner, third) },
-		"cancel":  func(f *memorySearchFake) error { return memorySearchCancel(ctx, f) },
+		"cancel":  func(f *memorySearchFake) error { return memorySearchCancel(ctx, f, fakeOwner) },
 		"confirm": func(f *memorySearchFake) error { return memorySearchConfirm(ctx, f, fakeOwner) },
 	} {
 		fake := func() *memorySearchFake {
@@ -770,7 +881,7 @@ func TestCancelKeepsThePartialIndexForThirtyDays(t *testing.T) {
 	run.WaitingReason = "none of the indexer's machines offering new-embedder is online"
 	f.job.runs[memoryIndexKindSwitch] = run
 
-	require.NoError(t, memorySearchCancel(ctx, f))
+	require.NoError(t, memorySearchCancel(ctx, f, fakeOwner))
 	cancelled := f.job.runs[memoryIndexKindSwitch]
 	require.Equal(t, memoryIndexStateCancelled, cancelled.State)
 	require.Empty(t, cancelled.WaitingReason)
@@ -788,13 +899,13 @@ func TestCancelKeepsThePartialIndexForThirtyDays(t *testing.T) {
 	require.Equal(t, fakeOldRef, f.job.active.ProviderRef)
 
 	// Nothing to cancel any more.
-	require.ErrorContains(t, memorySearchCancel(ctx, f), "no switch")
+	require.ErrorContains(t, memorySearchCancel(ctx, f, fakeOwner), "no switch")
 
 	// A switch whose binding already names its target has happened.
 	f = newMemorySearchFake(3)
 	f.setSwitchState(memoryIndexStateFinishing)
 	f.job.active = EmbedderBinding{ProviderRef: fakeNewRef, Dimensions: 4, IndexedBy: fakeOwner, ActivatedAt: "2026-11-24T00:00:00Z"}
-	err := memorySearchCancel(ctx, f)
+	err := memorySearchCancel(ctx, f, fakeOwner)
 	require.ErrorContains(t, err, "already happened")
 	require.Zero(t, f.runAttempts)
 	require.Empty(t, f.retiredRows)
@@ -802,14 +913,14 @@ func TestCancelKeepsThePartialIndexForThirtyDays(t *testing.T) {
 	// A run changed meanwhile is answered, never retried.
 	f = newMemorySearchFake(3)
 	f.writeErr = errMemoryIndexRunChanged
-	err = memorySearchCancel(ctx, f)
+	err = memorySearchCancel(ctx, f, fakeOwner)
 	require.ErrorIs(t, err, errMemorySearchChanged)
 	require.Equal(t, 1, f.runAttempts)
 
 	// The binding lock held elsewhere is a plain "try again".
 	f = newMemorySearchFake(3)
 	f.locked = true
-	require.ErrorContains(t, memorySearchCancel(ctx, f), "try again")
+	require.ErrorContains(t, memorySearchCancel(ctx, f, fakeOwner), "try again")
 	require.Zero(t, f.runAttempts)
 }
 
@@ -832,7 +943,7 @@ func TestSwitchAnywayFlipsWithTheHeldItems(t *testing.T) {
 	require.Equal(t, memoryIndexStateNeedsDecision, f.job.runs[memoryIndexKindSwitch].State)
 	require.Equal(t, 1, f.job.runs[memoryIndexKindSwitch].Counts.Failed)
 
-	require.NoError(t, memorySearchSwitchAnyway(ctx, f))
+	require.NoError(t, memorySearchSwitchAnyway(ctx, f, fakeOwner))
 	require.Equal(t, memoryIndexStateSwitching, f.job.runs[memoryIndexKindSwitch].State)
 	require.Equal(t, fakeOldRef, f.job.active.ProviderRef, "the builtin does not flip")
 	require.Zero(t, f.job.flips)
@@ -847,15 +958,15 @@ func TestSwitchAnywayFlipsWithTheHeldItems(t *testing.T) {
 		memoryIndexStateFinishing, memoryIndexStateWaiting, memoryIndexStateDone, memoryIndexStateCancelled} {
 		f := newMemorySearchFake(2)
 		f.setSwitchState(state)
-		require.ErrorContains(t, memorySearchSwitchAnyway(ctx, f), "waiting for your decision", state)
+		require.ErrorContains(t, memorySearchSwitchAnyway(ctx, f, fakeOwner), "waiting for your decision", state)
 		require.Zero(t, f.runAttempts, state)
 	}
-	require.ErrorContains(t, memorySearchSwitchAnyway(ctx, newMemorySearchFake(2).noSwitch()), "waiting for your decision")
+	require.ErrorContains(t, memorySearchSwitchAnyway(ctx, newMemorySearchFake(2).noSwitch(), fakeOwner), "waiting for your decision")
 
 	f = newMemorySearchFake(2)
 	f.setSwitchState(memoryIndexStateNeedsDecision)
 	f.writeErr = errMemoryIndexRunChanged
-	require.ErrorIs(t, memorySearchSwitchAnyway(ctx, f), errMemorySearchChanged)
+	require.ErrorIs(t, memorySearchSwitchAnyway(ctx, f, fakeOwner), errMemorySearchChanged)
 	require.Equal(t, 1, f.runAttempts)
 }
 
@@ -1136,7 +1247,8 @@ func TestAVendorBindingPickedBeforeAsksForConfirmationOnce(t *testing.T) {
 	require.Equal(t, false, row["needsConfirmation"])
 	require.Equal(t, fakeOwner, row["chosenBy"])
 
-	// Once: a second confirmation writes nothing.
+	// Once: a second confirmation, by another owner, writes nothing.
+	f.job.owners[memorySearchOtherOwner] = true
 	require.NoError(t, memorySearchConfirm(ctx, f, memorySearchOtherOwner))
 	require.Len(t, f.choices, 1)
 	require.Equal(t, fakeOwner, f.job.active.ChosenBy)

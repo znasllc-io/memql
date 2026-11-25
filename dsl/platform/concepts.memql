@@ -776,13 +776,12 @@ concept providerAuthStatus {
 /// everyone but the owner would make that unanswerable for the people most likely to ask.
 ///
 /// The fields memory search's switch added keep that answer. previousRef is a model id, as
-/// providerRef is. indexedBy names a cluster owner by id, and chosenBy the person who chose the
-/// model -- an owner, or for a vendor model somebody granted Memory search's part -- and any
-/// signed-in person can already resolve either id to a name (userDisplayById). indexedBy answers a
-/// question every person has a stake in: whose machines receive their memory text to embed.
-/// retireAt and droppedAt are dates on
-/// the retired rows, which share this concept and so its tier: when a replaced model's index is kept
-/// until, and when it was dropped.
+/// providerRef is. indexedBy and chosenBy each name a cluster owner by id -- whose machines index
+/// the model, and who chose it -- and any signed-in person can already resolve either id to a
+/// name (userDisplayById). indexedBy answers a question every person has a stake in: whose
+/// machines receive their memory text to embed. retireAt and droppedAt are dates on the retired
+/// rows, which share this concept and so its tier: when a replaced model's index is kept until,
+/// and when it was dropped.
 ///
 /// v1:platform:inferenceStatus and v1:models:modelProfile carry the same tier for the same reason.
 /// WRITING is a different question and is settled separately: every mutation is @serverOnly,
@@ -801,9 +800,9 @@ concept embedderBinding {
   /// it. Empty for a vendor model, which runs on no one's machines and is paid by the cluster's
   /// account, and on a fleet binding made before indexers existed.
   indexedBy     string
-  /// The person who chose this model: an owner, or, for a vendor model, somebody granted Memory
-  /// search's part. Empty when it was bound automatically, so a vendor model nobody chose can be
-  /// put to an owner once to confirm.
+  /// The cluster owner who chose this model: only an active owner chooses, whatever the model.
+  /// Empty when it was bound automatically, so a vendor model nobody chose can be put to an owner
+  /// once to confirm.
   chosenBy      string
   /// On a retired model's row (id `retired-<16 hex>`, after its vector table): its index is kept
   /// until this time, so switching back reuses it, and is dropped after. Empty on the active row.

@@ -638,8 +638,9 @@ const (
 	BuiltinExecutorMemoryIndexStep = "memoryIndexStep"
 	// The cluster owner's memory-search builtins (design record 2026-11-23,
 	// sections 3, 6 and 8): the status and choices are `read` on
-	// app:cluster/memorysearch, the four acts `execute` on it. None flips the
-	// model; the index job does. See memory_search_builtins.go.
+	// app:cluster/memorysearch, the four acts `execute` on it and an active
+	// cluster owner. None flips the model; the index job does. See
+	// memory_search_builtins.go.
 	BuiltinExecutorMemorySearchStatus       = "memorySearchStatus"
 	BuiltinExecutorMemorySearchChoices      = "memorySearchChoices"
 	BuiltinExecutorMemorySearchSwitch       = "memorySearchSwitch"

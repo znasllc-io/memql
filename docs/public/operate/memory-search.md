@@ -5,7 +5,7 @@ status: stable
 area: operate
 sinceVersion: 0.31.41
 owner: znas
-description: The one embedding model memory search uses, whose machines embed for it, and how it is chosen, switched and switched back.
+description: The one embedding model memory search uses, whose machines embed for it, and how an owner chooses it, switches it and switches back.
 ---
 
 # Memory search
@@ -22,8 +22,8 @@ of that model's own (`node_vectors_<dims>_<16 hex>`), and never the item's text,
 which is rebuilt from the row whenever it has to be embedded again. What each
 person may see in a result is decided by the row, as everywhere else.
 
-Owners, and anyone they grant it to, see and change it in **Cluster > Settings >
-Memory search**.
+Owners see and change it in **Cluster > Settings > Memory search**. Anyone else
+they grant it to sees it there and changes nothing.
 
 ## The model
 
@@ -35,8 +35,8 @@ id `active`). It is either:
   an owner's machines, and no vendor account pays; or
 - **a vendor model**, such as `embedding3Small` (OpenAI's
   text-embedding-3-small): the cluster's vendor account pays for every item and
-  every search, whoever wrote or runs it. Only a person's choice binds one,
-  never the automatic choice: an owner, or someone granted Memory search.
+  every search, whoever wrote or runs it. Only an active owner's choice binds
+  one, never the automatic choice.
 
 Every memory-search embedding names this model. It never falls back to another
 and never degrades ([AI routing](ai-routing.md)): a vector from another model
@@ -88,12 +88,12 @@ embeds nothing, the next pass tries again, and first-run setup says "Add an
 embedding model" ([What an owner sees first](first-run.md)).
 
 A cluster bound to a vendor model nobody chose -- by an earlier version's
-fallback, or by hand -- keeps working, and Memory search asks once, of anyone
-who may change the model (an owner, or someone granted Memory search): "This
-cluster uses text-embedding-3-small, paid by the cluster's vendor account. Keep
-it, or choose a model on your machines." **Keep** records whoever answers as its
-chooser. A model on a machine that was bound before indexers existed is given
-one at boot: the first active owner, by id, whose machines offer it.
+fallback, or by hand -- keeps working, and Memory search asks an owner once:
+"This cluster uses text-embedding-3-small, paid by the cluster's vendor
+account. Keep it, or choose a model on your machines." **Keep** records the
+owner who answers as its chooser. A model on a machine that was bound before
+indexers existed is given one at boot: the first active owner, by id, whose
+machines offer it.
 
 ## Choosing and switching
 
@@ -117,9 +117,9 @@ finishes, then switches by itself; and the current index is kept for 30 days in
 case you switch back.
 
 One switch at a time: until a switch's flip, no other model can be chosen, and
-Memory search offers **Cancel**. A model on a machine is chosen by an active
-owner, who becomes its indexer; a person granted Memory search who is not an
-owner can choose a vendor model only.
+Memory search offers **Cancel**. Every act on this page is an active owner's:
+choosing a model of either kind, a take-over, Keep, Cancel and Switch anyway.
+Whoever chooses a model on a machine becomes its indexer.
 
 ## Re-indexing
 
@@ -223,11 +223,10 @@ Memory search is the part `app:cluster/memorysearch`, seeded on the `owner` role
 alone; [Settings > Access](auth/access-model.md#grants-to-people-and-groups)
 can grant it to others.
 
-| Holds | Sees and does |
+| Who | Sees and does |
 |---|---|
-| `read` and `execute`, as an active owner | everything on this page |
-| `read` and `execute`, not an owner | everything but a model on a machine: choosing one is refused, and neither take-over is offered, because whoever chooses one becomes its indexer. A vendor model, Keep, Cancel and Switch anyway are theirs |
-| `read` only | the model, its indexer, the backlog and any switch; no act is offered |
+| an active owner holding `read` and `execute` | everything on this page |
+| anyone else holding `read`: somebody granted the part who is not an owner, or an owner without `execute` | the model, its indexer, the backlog and any switch. No act is offered, and every act is refused: where everyone's memory text goes, and what the cluster's vendor account pays for, are an owner's choice |
 | neither | no Memory search in the Cluster app |
 
 Fleet's model setup keeps the **Search & memory** task on the model memory
@@ -240,17 +239,19 @@ The page is six builtins, callable from the SDKs:
 
 | Builtin | Needs | Does |
 |---|---|---|
-| `memorySearchStatus` | `read` | the one status row: the model, its indexer, `takeOver`, the index's size, the backlog and why it waits, any switch (with its own `takeOver`), the kept indexes |
+| `memorySearchStatus` | `read` | the one status row: the model, its indexer, whether you may act (`mayAct`), `takeOver`, the index's size, the backlog and why it waits, any switch (with its own `takeOver`), the kept indexes |
 | `memorySearchChoices` | `read` | the models you may choose |
-| `memorySearchSwitch(provider)` | `execute` | choose a model: bind the first, start a switch, or take over; a model on a machine needs an active owner |
-| `memorySearchCancel` | `execute` | cancel the switch before its flip |
-| `memorySearchSwitchAnyway` | `execute` | flip a held switch, at the job's next tick |
-| `memorySearchConfirm` | `execute` | keep a vendor model nobody chose |
+| `memorySearchSwitch(provider)` | `execute`, as an active owner | choose a model: bind the first, start a switch, or take over |
+| `memorySearchCancel` | `execute`, as an active owner | cancel the switch before its flip |
+| `memorySearchSwitchAnyway` | `execute`, as an active owner | flip a held switch, at the job's next tick |
+| `memorySearchConfirm` | `execute`, as an active owner | keep a vendor model nobody chose |
 
 Each act answers the status after it. "memory search changed meanwhile, try
 again" means somebody else, or the job, moved it since you read it; "memory
 search's model is being changed elsewhere right now; try again in a moment"
-means another change is under way. Neither is retried for you.
+means another change is under way. Neither is retried for you. "only an active
+cluster owner can change memory search, and you are not one" is the answer to
+anybody else.
 
 ## Limits
 

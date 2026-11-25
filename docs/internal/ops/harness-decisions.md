@@ -2723,14 +2723,35 @@ are seeded on `owner` alone (`dsl/rbac/seeds.memql`, mirrored in
 `component/auth/rbac_model.go`): the model decides whose machines receive every
 person's memory text, or which vendor account pays for all of it. An act is
 recorded as a person (who started, who chose, who indexes), so the cluster
-acting is refused. A machine model must be chosen by an active owner, because
-the chooser becomes its indexer (R5); a person granted the part who is not an
-owner can still choose a vendor model. The check asks the per-replica owner set
-the resolver and the job ask, and a replica that has not read it yet (its reads
-failed, or the first is still running) reports that failure
+acting is refused.
+
+**Every act is an active owner's, on top of the part** (`memorySearchOwnerGate`).
+Trigger: Settings > Access can grant the parts to anybody, and the first cut
+checked for an owner only when a machine model was chosen, because its chooser
+becomes its indexer. A grantee could then bind a vendor model, start a vendor
+re-index or confirm a vendor model nobody chose, and the flip recorded the
+grantee as its chooser, so no owner was ever asked -- against design decision
+2 and sections 2 and 8 (a vendor model is bound only by an owner choosing it;
+owners only). Chosen path: the part stays the gate the builtin path checks, and
+every act -- a switch to any model, a take-over, Keep (Confirm), Cancel and
+Switch anyway -- first asks the per-replica owner set the resolver and the job
+ask, before it reads or writes anything else; a caller who is not an active
+owner is refused in plain words ("only an active cluster owner can change
+memory search, and you are not one"). A person granted the part sees the page
+and its state and acts on nothing: the status answers `mayAct` from the
+caller's side (`execute` on the part through the builtin path's own capability
+check, AND an active owner), both take-overs are offered only where it is true,
+and the screen draws no act where it is false. Rejected: keeping the grantee's
+vendor choice and documenting it, which made the docs match the engine instead
+of the design. The cost, if an owner wanted a deputy: the deputy can only watch,
+and relaxing it is one check. A replica that has not read the owner set yet
+(its reads failed, or the first is still running) reports that failure
 (`indexerOwnerAnswer`) instead of "you are not an active cluster owner", which
-would be a guess (`TestAnOwnerCheckThatFailedIsReportedAsAFailure`,
-`TestAnOwnerCheckWithNoSetToAnswerFromSaysWhy`).
+would be a guess. Tests: `TestEveryActIsAnActiveOwners`,
+`TestStatusSaysWhetherTheCallerMayAct`,
+`TestTheStatusAsksAnActsOwnGatesWhetherTheCallerMayAct` (db),
+`TestAnOwnerCheckThatFailedIsReportedAsAFailure`,
+`TestAnOwnerCheckWithNoSetToAnswerFromSaysWhy`.
 
 **No builtin flips.** The binding moves inside a builtin only for a cluster's
 FIRST model (`bindEmbedder`): nothing is indexed under another. Every other
@@ -2818,10 +2839,10 @@ leaving the refusal, which keeps search down for hours on a large corpus.
 **The status says when it applies** (`takeOver`): whether the caller, choosing
 the model in use again, would become its indexer -- the take-over rule asked
 from the caller's side (`memorySearchOffersTakeOver`), false for the indexer
-themself, a caller who is not an active owner, a vendor model, or no caller. So
-Memory search offers the act only where it changes something. A catalog or an
-owner check that cannot be read answers false, logged, and the next read asks
-again; the status itself still answers. Tests:
+themself, a caller who may not act (`mayAct`, above), a vendor model, or no
+caller. So Memory search offers the act only where it changes something. A
+catalog or an owner check that cannot be read answers false, logged, and the
+next read asks again; the status itself still answers. Tests:
 `TestChoosingTheModelInUseDuringASwitchTakesOverTheBindingsIndexer`,
 `TestStatusSaysWhenChoosingTheModelInUseTakesOver`.
 
@@ -2889,7 +2910,7 @@ poll. `retained` lists the retired indexes still kept, leaving out any row that
 names the active model or a running switch's target. `previousRef` is the model
 the binding replaced, which is the kept index Switch back names: `retained` also
 holds a cancelled switch's partial index, a model that was never in use.
-`takeOver` is above (R13), and so is the switch summary's (R14).
+`mayAct` is above, and so are `takeOver` (R13) and the switch summary's (R14).
 
 **The choices** are the embedding models of the caller's own catalog (their
 machines and the ones lent to them), counted by the machines that embed with
