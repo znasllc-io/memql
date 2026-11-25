@@ -536,6 +536,46 @@ mutation registration updateWorkerHardware {
   }
 }
 
+// ---- recordWorkerConnectionDrop ----
+//
+// One v1:worker:connectionDrop row: a machine's stream ended in a way that cannot have been
+// Cockpit's own choice (component/worker/connection_drop.go classifyStreamEnd). Written once, at
+// stream close, by the replica that held the stream.
+
+/// Record one dropped machine connection.
+/// NOT @serverOnly, for clearWorkerConnectedNode's reason: its caller is component/worker, which is
+/// not on call_origin.go's internal-origin allowlist and should not be -- every context in that
+/// package descends from a worker's own inbound stream. The concept's owner tier is the gate: the
+/// store stamps auth.ContextWithUserActor for the registration's owner, and ownerUserId comes from
+/// actor.userId and nothing else. The residue is that a signed-in person could add drop records for
+/// their own machine, which changes only where their own pipeline steps are placed.
+@actor
+mutation connectionDrop recordWorkerConnectionDrop {
+  args {
+    dropId          string!
+    registrationId  string!
+    droppedAt       string!
+    connectedAt     string
+    cause           enum("replaced", "workInFlight")!
+    workInFlight    int
+    nodeId          string
+    code            string
+    reason          string
+  }
+  insert {
+    accept { registrationId, droppedAt, cause }
+    stamp {
+      id: args.dropId
+      ownerUserId: actor.userId
+      connectedAt: args.connectedAt ?? ""
+      workInFlight: args.workInFlight ?? 0
+      nodeId: args.nodeId ?? ""
+      code: args.code ?? ""
+      reason: args.reason ?? ""
+    }
+  }
+}
+
 // ---- clearWorkerConnectedNode ----
 //
 // The disconnect half of connectedNodeId. Without it a machine whose

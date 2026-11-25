@@ -663,9 +663,11 @@ transaction, and **that is not free**:
   write to any chunk queues behind it. It then holds a `ShareLock` on one chunk at a
   time, so writes to the chunk being scanned wait.
 - **A build that outlives `MEMORY_NODES_DATABASE_MIGRATION_TIMEOUT_MS`** (30 s by
-  default) fails the migrate step. The build carries on server-side and finishes,
-  but the runner retains its lock, so every later attempt fails until somebody
-  [recovers it](../env-vars.md#database-tuning).
+  default) defers the migration to the next attempt. The build carries on
+  server-side, keeping the migration lock until it finishes, and the next attempt
+  verifies it, so the rollout finishes without help
+  ([how](../env-vars.md#database-tuning)). Whatever migrations follow wait until
+  it does.
 
 On a table whose heap will not scan inside that deadline, build the index first, in
 a session of your own with no client deadline, and let the migration verify it:

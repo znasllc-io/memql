@@ -95,5 +95,17 @@ classes: |
   # clustere2e package. The complete suite takes about 300s locally. Give it its
   # own isolated DB class and aggregate headroom; retain every operation timeout
   # and all exact cross-replica capacity assertions.
-  db      calls     integrations/calls  900s     serial    1
+  # By 2026-11-24 its passes on the bounded AKS runner took 673s to 882s, and
+  # four of main's last ten push runs exhausted the 900s alarm at 900.7s to
+  # 901.1s with no failing test. With this lane's flags all 366 tests take 820s
+  # on a laptop; where each alarm caught it the runner was 1.40 to 1.65 times
+  # slower, so a slow complete pass takes about 1150s to 1360s. (Unmeasured as
+  # the cause: the runner's database service holds only the namespace's
+  # default quarter-core request.) 1800s keeps 1.3 times the slowest. The
+  # db-tests step's timeout in memql-package.yaml must exceed this class plus
+  # the shard's setup, 555s on main's a734eb107 run: raise both together
+  # (pipeline_db_tests_test.py's
+  # test_db_step_timeout_outlasts_the_largest_class_and_its_shard_setup).
+  # Keep every test and its operation deadlines.
+  db      calls     integrations/calls  1800s    serial    1
   db      default   -                   180s     -         2

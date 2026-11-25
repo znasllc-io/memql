@@ -477,9 +477,18 @@ type streamSession struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	mu          sync.Mutex
-	pending     map[string]chan *memqlv1.ToolResult
-	toolSharing map[string]SharingSubjects
+	mu      sync.Mutex
+	pending map[string]chan *memqlv1.ToolResult
+	// callsLeftWithStream counts the calls that were waiting on the machine
+	// when this stream's context ended and that left pending BEFORE close
+	// counted it (dispatch's s.ctx.Done branch). A lost link ends the stream's
+	// context for the receive loop and for every waiting call at once, so a
+	// call can win that race, and a step lost with its machine's link would
+	// otherwise not count as work in flight (close, WorkInFlight). Counted
+	// only while pending is live, so a call close already counted is never
+	// counted twice. Covered by TestACallThatLeftWithTheStreamStillCountsAsWorkInFlight.
+	callsLeftWithStream int
+	toolSharing         map[string]SharingSubjects
 	// chunkSinks holds the per-call ToolStream callback, keyed by call id,
 	// under the SAME lock as pending because the two have the same
 	// lifetime: registered when a dispatch goes out, dropped when its
@@ -658,7 +667,13 @@ func (s *streamSession) close(cause error) {
 			s.server.registry.RemoveSession(s.worker)
 		}
 		s.mu.Lock()
-		pendingCount := len(s.pending)
+		// The calls still waiting, plus those that already left because the
+		// stream ended under them (callsLeftWithStream): a lost link wakes both
+		// at once, and either can get here first.
+		pendingCount := len(s.pending) + s.callsLeftWithStream
+		// Counted before failOpenAppSignIns empties the map below: an open
+		// sign-in is work Cockpit would not reconnect under (WorkInFlight).
+		openSignIns := len(s.appSignIns)
 		for _, ch := range s.pending {
 			close(ch)
 		}
@@ -718,6 +733,20 @@ func (s *streamSession) close(cause error) {
 		}
 		s.failOpenAppSignIns()
 		s.clearConnectedNode()
+		s.mu.Lock()
+		drainReason := s.drainReason
+		s.mu.Unlock()
+		code, reason := disconnectCodeReason(cause, drainReason)
+		// THE DROP RECORD (network-aware fleet selection): whether this end
+		// could have been Cockpit's own choice is decided here, from what only
+		// this replica knows -- the reason the cluster ended it, if any, and
+		// what was still in flight -- and recorded before the log line below,
+		// so the line and the row agree. See connection_drop.go.
+		inFlight := WorkInFlight{ToolCalls: pendingCount, AppSessions: len(liveSessions), AppSignIns: openSignIns, ModelCalls: len(liveCalls), ModelPulls: len(livePulls)}
+		dropCause, dropped := classifyStreamEnd(drainReason, inFlight)
+		if dropped {
+			s.recordDrop(dropCause, inFlight, code, reason)
+		}
 		// Log disconnect symmetrically to "worker registered" on the
 		// connect path. Without this the agent log was silent on
 		// disconnect -- the only signal was the absence of further
@@ -739,11 +768,10 @@ func (s *streamSession) close(cause error) {
 			if len(liveCalls) > 0 {
 				fields = append(fields, "model_calls_aborted", len(liveCalls))
 			}
-			s.mu.Lock()
-			drainReason := s.drainReason
-			s.mu.Unlock()
-			code, reason := disconnectCodeReason(cause, drainReason)
 			fields = append(fields, "code", code, "reason", reason)
+			if dropped {
+				fields = append(fields, "drop", dropCause)
+			}
 			s.server.logger.Info("worker disconnected", fields...)
 		}
 		// Emit an audit event mirroring "worker_registered" so downstream
@@ -775,6 +803,45 @@ func (s *streamSession) close(cause error) {
 			})
 		}
 	})
+}
+
+// recordDrop writes this stream's end as one v1:worker:connectionDrop row
+// through the store's ConnectionDropRecorder, when it has one (a store without
+// it records nothing, which leaves placement as it was before drops existed).
+//
+// ON A DETACHED CONTEXT, for the disconnect audit's reason: s.cancel fired on
+// the first line of close, so s.ctx is done and a write on it would fail before
+// any row existed. WithoutCancel keeps the stream's values; the timeout bounds a
+// teardown that must not hang on a slow database. A failed write is logged and
+// the stream's teardown goes on: a missing drop makes a machine read steadier
+// than it is, and failing the close over it would cost more than it saves.
+func (s *streamSession) recordDrop(cause string, inFlight WorkInFlight, code, reason string) {
+	if s == nil || s.server == nil || s.worker == nil {
+		return
+	}
+	recorder, ok := s.server.store.(ConnectionDropRecorder)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(s.ctx), 5*time.Second)
+	defer cancel()
+	if err := recorder.RecordConnectionDrop(ctx, ConnectionDrop{
+		RegistrationId: s.worker.RegistrationId,
+		OwnerUserId:    s.worker.OwnerUserId,
+		DroppedAt:      s.server.clock(),
+		ConnectedAt:    s.worker.ConnectedAt,
+		Cause:          cause,
+		WorkInFlight:   inFlight.Total(),
+		NodeId:         strings.TrimSpace(s.server.nodeId),
+		Code:           code,
+		Reason:         reason,
+	}); err != nil && s.server.logger != nil {
+		s.server.logger.Warn("worker: record connection drop failed",
+			"registration_id", s.worker.RegistrationId,
+			"cause", cause,
+			"error", err,
+		)
+	}
 }
 
 // clearConnectedNode blanks the registration's connectedNodeId now that this
@@ -904,8 +971,16 @@ func (s *streamSession) dispatch(ctx context.Context, dispatch *memqlv1.ToolDisp
 	}
 	s.mu.Unlock()
 
+	// leftWithStream is set only on the s.ctx.Done branch below: the call was
+	// sent and the stream ended under it. Tallied in the same critical section
+	// that drops the pending entry, so close sees the call exactly once, in
+	// one place or the other (callsLeftWithStream).
+	leftWithStream := false
 	defer func() {
 		s.mu.Lock()
+		if leftWithStream && s.pending != nil {
+			s.callsLeftWithStream++
+		}
 		delete(s.pending, dispatch.GetCallId())
 		delete(s.toolSharing, dispatch.GetCallId())
 		delete(s.chunkSinks, dispatch.GetCallId())
@@ -951,6 +1026,7 @@ func (s *streamSession) dispatch(ctx context.Context, dispatch *memqlv1.ToolDisp
 		// have the dispatcher run it a second time on another machine.
 		return nil, context.Cause(ctx)
 	case <-s.ctx.Done():
+		leftWithStream = true
 		return nil, ErrWorkerDisconnected
 	}
 }

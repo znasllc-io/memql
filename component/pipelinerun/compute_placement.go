@@ -39,7 +39,11 @@ import (
 // TestComputePlacementUsesCapturedPolicyAcrossReplicas.
 func (dr *runDriver) selectComputePlacement(ctx context.Context) (*pipelines.ComputePlacementPolicy, error) {
 	if dr.workflow == nil || dr.workflow.snapshot == nil || dr.workflow.snapshot.Phases["pipelineComputePlacementPolicy"] == "" {
-		return &pipelines.ComputePlacementPolicy{Retries: pipelines.DefaultRetryPolicy()}, nil
+		// The connection window takes its portable value here for the reason the
+		// retries do: "the installation named no window" is exactly the case the
+		// default is for, and answering "no preference" instead would make an
+		// installation that deletes its policy change where its steps run.
+		return &pipelines.ComputePlacementPolicy{Retries: pipelines.DefaultRetryPolicy(), Connection: pipelines.DefaultConnectionPolicy()}, nil
 	}
 	value, err := runPolicyPhase(ctx, dr.workflow.snapshot, "pipelineComputePlacementPolicy", map[string]any{
 		"repository": dr.run.Repository, "pipelineId": dr.run.PipelineID,
@@ -66,7 +70,7 @@ const (
 
 // computePolicyShape is what a policy must return, said once for every way it
 // can fail to.
-const computePolicyShape = "compute policy must return fleetWaitSeconds (integer 0..3600) and cloudFallback (boolean), and optionally retries, with no extra fields"
+const computePolicyShape = "compute policy must return fleetWaitSeconds (integer 0..3600) and cloudFallback (boolean), and optionally retries and connection, with no extra fields"
 
 // parseComputePlacement reads the policy a template returned, strictly: every
 // field typed exactly, the capacity half required, retries optional, no other
@@ -89,6 +93,9 @@ func parseComputePlacement(value any) (*pipelines.ComputePlacementPolicy, error)
 		// Raw, so that a retries of null can be told from an absent one: the
 		// decoder would read both as "no retries" if it decoded them in place.
 		Retries json.RawMessage `json:"retries"`
+		// Raw for the same reason: a connection of null is an author's mistake,
+		// not the portable window.
+		Connection json.RawMessage `json:"connection"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
@@ -107,7 +114,48 @@ func parseComputePlacement(value any) (*pipelines.ComputePlacementPolicy, error)
 			return nil, err
 		}
 	}
-	return &pipelines.ComputePlacementPolicy{FleetWaitSeconds: *fields.FleetWaitSeconds, CloudFallback: *fields.CloudFallback, Retries: retries}, nil
+	connection := pipelines.DefaultConnectionPolicy()
+	if fields.Connection != nil {
+		connection, err = parseConnectionPolicy(fields.Connection)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &pipelines.ComputePlacementPolicy{FleetWaitSeconds: *fields.FleetWaitSeconds, CloudFallback: *fields.CloudFallback, Retries: retries, Connection: connection}, nil
+}
+
+// parseConnectionPolicy reads a connection object that is present, as strictly
+// as parseRetryPolicy reads retries: an object whose only member is
+// unsteadyMinutes, an integer 0..pipelines.MaxUnsteadyMinutes. Absent means the
+// portable window (parseComputePlacement), so every policy installed before the
+// setting existed keeps working; a null, a fraction, text or another key is a
+// refusal naming the field, because a window quietly rounded or ignored would
+// move steps between machines on a number nobody wrote. Zero is a real answer:
+// the installation turned the preference off (network-aware fleet selection,
+// D4 and section 7).
+func parseConnectionPolicy(raw json.RawMessage) (pipelines.ConnectionPolicy, error) {
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &members); err != nil || members == nil {
+		return pipelines.ConnectionPolicy{}, fmt.Errorf("compute policy connection must be an object with unsteadyMinutes")
+	}
+	for _, key := range slices.Sorted(maps.Keys(members)) {
+		if key != "unsteadyMinutes" {
+			return pipelines.ConnectionPolicy{}, fmt.Errorf("compute policy connection.%s is not a connection setting; the only field is unsteadyMinutes", key)
+		}
+	}
+	shape := fmt.Sprintf("an integer 0..%d", pipelines.MaxUnsteadyMinutes)
+	value, present := members["unsteadyMinutes"]
+	if !present {
+		return pipelines.ConnectionPolicy{}, fmt.Errorf("compute policy connection.unsteadyMinutes is required when connection is given: %s", shape)
+	}
+	var minutes *int
+	if err := json.Unmarshal(value, &minutes); err != nil || minutes == nil {
+		return pipelines.ConnectionPolicy{}, fmt.Errorf("compute policy connection.unsteadyMinutes must be %s", shape)
+	}
+	if *minutes < 0 || *minutes > pipelines.MaxUnsteadyMinutes {
+		return pipelines.ConnectionPolicy{}, fmt.Errorf("compute policy connection.unsteadyMinutes must be %s, got %d", shape, *minutes)
+	}
+	return pipelines.ConnectionPolicy{UnsteadyMinutes: *minutes}, nil
 }
 
 // parseRetryPolicy reads a retries object that is present. All three limits are

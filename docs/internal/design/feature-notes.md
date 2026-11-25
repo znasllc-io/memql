@@ -484,6 +484,13 @@ workspace cannot do.
   `FirstPingDelay` after RegisterAck and every `PingInterval`, the Pong's
   round trip lands on the row at the next flush, and an ABSENT `rttAt` is
   "not measured" -- a cockpit predating the message -- never "slow".
+- **Connection drops (2026-11-24):** the replica holding a stream writes one
+  `v1:worker:connectionDrop` row when the stream is replaced before it saw it
+  end, or ends with work in flight (`component/worker/connection_drop.go`), and
+  pipeline placement prefers machines without a recent drop
+  (`integrations/agent/worker/connection.go`). Round trip still decides nothing.
+  The account is "Fleet steps prefer machines whose connection holds" in
+  `docs/internal/ops/harness-decisions.md`.
 - **Cross-node dispatch (memql#4352):** `connectedNodeId` names the replica
   holding the stream; any other replica forwards over `WorkerForward*`.
   `refused_before_start` is the re-pick predicate and the one wire field that

@@ -5,8 +5,11 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"errors"
+	"fmt"
+	"net"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/uptrace/bun"
 
@@ -266,5 +269,116 @@ func TestTryPingRunsPendingMigrationsWhenTheDatabaseIsReachable(t *testing.T) {
 	}
 	if d.migrationsPending() {
 		t.Error("migrations still pending after tryPing ran them successfully")
+	}
+}
+
+// phasedMigrator answers its first attempt with first, and holds every later
+// attempt until release is closed: a first attempt that deferred, and a second
+// as long as an index build.
+type phasedMigrator struct {
+	calls   atomic.Int32
+	first   error
+	release chan struct{}
+}
+
+func (m *phasedMigrator) Migrate(ctx context.Context, _ *bun.DB) error {
+	if m.calls.Add(1) == 1 {
+		return m.first
+	}
+	select {
+	case <-m.release:
+	case <-ctx.Done():
+	}
+	return nil
+}
+
+// startedRetryTestDB is newRetryTestDB started over a pool whose ping
+// succeeds, with a monitor tick short enough to watch.
+func startedRetryTestDB(t *testing.T, m Migrator) *Database {
+	t.Helper()
+	cfg := &Database{}
+	d, err := NewDatabase(common.ComponentName("test-migrate-startup"),
+		WithDSN("postgres://localhost:5432/test?sslmode=disable"),
+		cfg.WithMigrateOnStart(true),
+		cfg.WithMigrator(m),
+		cfg.WithSQLOpener(func(string, string) (*sql.DB, error) { return sql.OpenDB(pingableConnector{}), nil }),
+		// The constructor builds the monitor's ticker, so the interval is set here.
+		cfg.WithTickerInterval(20),
+	)
+	if err != nil {
+		t.Fatalf("NewDatabase: %v", err)
+	}
+	d.config.migrations = nil
+	d.Start(context.Background())
+	return d
+}
+
+// READY DOES NOT WAIT FOR A SECOND MIGRATION ATTEMPT (2026-11-25). Start runs
+// the first attempt before the engine's 30 s wait for Ready begins; when it
+// deferred, the run loop's first ping ran a second one before marking the
+// database ready, and the engine's deadline ended the process in the middle of
+// it with an index build running. An attempt that reached the database leaves a
+// schema the engine starts on, so the second attempt belongs to the first tick,
+// after Ready.
+func TestReadinessDoesNotWaitForASecondMigrationAttempt(t *testing.T) {
+	m := &phasedMigrator{first: fmt.Errorf("an index build outlived the attempt: %w", ErrMigrationDeferred), release: make(chan struct{})}
+	d := startedRetryTestDB(t, m)
+	released := false
+	defer func() {
+		if !released {
+			close(m.release)
+		}
+		d.Stop(context.Background())
+	}()
+
+	select {
+	case <-d.Ready():
+	case <-time.After(5 * time.Second):
+		t.Fatalf("the database was not ready 5 s after an attempt that reached it deferred: readiness is waiting on a "+
+			"second attempt (migrator calls %d), which the engine's deadline would end mid-migration", m.calls.Load())
+	}
+	if calls := m.calls.Load(); calls != 1 {
+		t.Fatalf("readiness came after %d migration attempts, want only Start's", calls)
+	}
+
+	// The deferred work resumes on a tick, after ready.
+	deadline := time.Now().Add(5 * time.Second)
+	for m.calls.Load() < 2 {
+		if time.Now().After(deadline) {
+			t.Fatal("no tick resumed the deferred migrations after the database was ready")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	close(m.release)
+	released = true
+	for d.migrationsPending() {
+		if time.Now().After(deadline) {
+			t.Fatal("migrations still pending after the resumed attempt finished")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// THE COLD START STILL MIGRATES BEFORE READY (memql#3879). A first attempt that
+// never reached the database -- the node started before Postgres -- may have
+// left no schema at all, so the first ping after the database answers must run
+// the migrations before the engine starts on it.
+func TestReadinessWaitsForMigrationsWhenNoAttemptReachedTheDatabase(t *testing.T) {
+	m := &phasedMigrator{first: &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connect: connection refused")}, release: make(chan struct{})}
+	close(m.release)
+	d := startedRetryTestDB(t, m)
+	defer d.Stop(context.Background())
+
+	select {
+	case <-d.Ready():
+	case <-time.After(5 * time.Second):
+		t.Fatal("the database never became ready")
+	}
+	if calls := m.calls.Load(); calls != 2 {
+		t.Fatalf("readiness came after %d migration attempts; the first never reached the database, so the startup ping "+
+			"must run the second before ready", calls)
+	}
+	if d.migrationsPending() {
+		t.Fatal("migrations still pending when the database was marked ready after a cold start")
 	}
 }

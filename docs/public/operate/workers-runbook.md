@@ -664,7 +664,25 @@ skewed clock on the machine cannot shape the figure. **An absent `rttAt` means
 NOT MEASURED, never slow**: no `Pong` has landed on this stream, which is what a
 cockpit predating the message looks like (its dispatcher ignores the `Ping`). The
 OS shows "round trip 12 ms, checked 40 s ago" beside the heartbeat, and shows
-nothing as a number while the pair is absent.
+nothing as a number while the pair is absent. The round trip decides no
+routing.
+
+**Connection drops are recorded, and pipeline placement reads them.** When a
+machine's stream ends, the agent replica that held it writes one
+`v1:worker:connectionDrop` row if the end cannot have been Cockpit's own choice:
+the stream was replaced by a new connection from the same machine before the
+replica saw it end (`cause: replaced`), or it ended with a tool call, app
+session, app sign-in, model call or model pull in flight (`cause:
+workInFlight`); Cockpit reconnects on purpose only when idle. A drain, a
+revocation or an expired token is never a drop. The replica's "worker
+disconnected" log line carries `drop=<cause>` whenever it classified the end as
+a drop; a failed write of the row is logged separately. Rows are the
+owner's (owner tier, cluster owners too), are read per machine by
+`myWorkerConnectionDrops`, and expire after seven days. Pipeline steps try
+machines without a drop in the run's window first ([Retries and
+failover](pipelines.md#retries-and-failover)); Fleet shows a machine's drops of
+the last day in its Details > Connection. A drop on an idle machine that the
+cluster noticed before the machine reconnected is not recorded.
 
 **A heartbeat replaces the registration's current observation; it does not add
 a version.** `lastSeenAt`, the connection fields (`lastConnectedFromIP`,

@@ -577,46 +577,79 @@ to an older engine requires a tested full-schema restore and its recovery
 window. The down migration refuses that downgrade. Before activation, schemas
 remain inline, but other release changes still need their own rollback checks.
 
-A migration runs only after acquiring the shared migration lock. A competing
-replica defers and retries later. If a connection or context deadline cuts off
-a statement inside a migration, the server may still be executing it: the runner
-retains the lock and reports the failure instead of starting overlapping
-attempts. An ordinary SQL error acknowledged by PostgreSQL releases the lock for
-retry.
+A migration runs only after acquiring the shared migration lock: a session
+advisory lock, held by the one database session the attempt runs every
+statement on. A competing replica defers and retries later, and its warning
+names the holder's backend, application and statement. The attempt's session
+is never replaced, so the backend holding the lock is the backend that ran the
+attempt's work, and the lock lasts exactly as long as that work:
 
-Two interruptions release the lock instead, because nothing can overlap. An
-attempt that ends between migrations records what finished and has not started
-what follows. An index build that outlives its attempt keeps running
-server-side, but its backend holds the table's build lock until it exits, and
-the next attempt takes that lock before anything else and then judges the index
-from the catalog. Both end with `deferred to the next migration attempt`. The
-migrations after them wait their turn, so a rollout carrying large index builds
-advances one index at a time, over as many attempts as each build takes.
+- The attempt ends normally: it releases the lock and closes its session.
+- The process ends while its session is idle, whatever ends it (a crash, an
+  out-of-memory kill, the engine's own startup deadline, a pod roll): the server
+  sees the connection close and the lock goes with it. A node lost without
+  closing its connections leaves an idle session that `idle_session_timeout`
+  ends within five minutes.
+- A statement is cut off while it still runs, by the attempt's deadline, a lost
+  connection or the process ending: the backend carries on with it and keeps
+  the lock until it ends, so nothing overlaps it. The next attempt on the same
+  node waits for it; another replica is refused until it ends, then migrates.
+  Nobody has to release anything.
 
-**A retained lock stops everything behind it while the cluster keeps serving.**
-No later migration or post-migration hook runs, every pod stays Ready, and the
-only other symptom is reads timing out on indexes that were never built. A node
-killed mid-attempt leaves the same row behind. A lock row that has outlasted any
-attempt (twice the migration timeout, at least five minutes) is logged at ERROR
-naming the next migration waiting, and
+While the lock is held, a row with a **negative** id in `bun_migration_locks`
+keeps out engines that lock by row (0.31.40 and earlier), which only know that
+table. The row outlives its session like any row, and the next attempt to take
+the lock clears it by itself. Do not delete a negative-id row by hand: while
+any session holds the lock, it is what keeps an older engine from migrating
+beside it.
+
+Two interruptions end an attempt early as progress. An attempt that ends
+between migrations records what finished and has not started what follows. An
+index build that outlives its attempt keeps running server-side, holding the
+lock, and the next attempt judges the index from the catalog once it ends. Both
+end with `deferred to the next migration attempt`. The migrations after them
+wait their turn, so a rollout carrying large index builds advances one index at
+a time, over as many attempts as each build takes.
+
+**A stalled holder stops everything behind it while the cluster keeps
+serving.** No later migration or post-migration hook runs, every pod stays
+Ready, and the only other symptom is reads timing out on indexes that were never
+built. A holder that has stood stalled in the way for longer than any attempt
+(twice the migration timeout, at least five minutes) is logged at ERROR naming
+it and the next migration waiting, and
 `memql_database_migration_lock_held_seconds` reads how long the node has seen
-that row. Neither releases anything, because the row names no holder to check.
+it. A holder running a statement never counts: it releases the lock when the
+statement ends. Neither the log nor the gauge releases anything.
 
-To recover a retained lock, first suspend migration attempts on every writer.
-Inspect `pg_stat_activity` using the identity node's `application_name`; wait
-for or cancel the abandoned migration and verify that it has stopped. Only
-then remove the matching `bun_migrations` row from `bun_migration_locks` and
-resume attempts. Check the failed migration's transaction and idempotency
-before retrying. Never clear a live migration's lock or mark a migration
-applied without completing its work. Increasing the migration context timeout
-alone does not change pgdriver's socket read deadline.
+- **A session that is connected but running no statement** belongs to a process
+  that stopped migrating and kept its session. Restarting that pod ends the
+  session and the lock with it; `pg_terminate_backend(<pid>)`, with the pid the
+  log names, does the same.
+- **A row with a positive id** in `bun_migration_locks` was written by an engine
+  that locks by row, during a rollout or after a rollback to one, and nothing
+  can tell from the row whether its holder has stopped. To recover it, first
+  suspend migration attempts on every writer. Inspect `pg_stat_activity` using
+  the identity node's `application_name`; wait for or cancel the abandoned
+  migration and verify that it has stopped. Only then remove that row from
+  `bun_migration_locks` by its id and resume attempts. Check the failed
+  migration's transaction and idempotency before retrying. Never clear a live
+  migration's lock or mark a migration applied without completing its work.
+
+**Startup does not wait on a second attempt.** A node runs its first attempt
+while it starts, before the engine's 30-second wait for the database begins.
+When that attempt reached the database, the node becomes ready without running
+another, and the next monitor tick (`MEMORY_NODES_DATABASE_TICKER_INTERVAL_MS`)
+resumes deferred work while the engine starts. Only a node whose first attempt
+never reached the database, because it started before Postgres did, migrates
+again before it becomes ready.
 
 A migration with more work than one attempt holds splits it into bounded
 statements instead. The `v1:platform:moduleReadiness` history collapse
 (`20260921000000`) deletes in committed batches and ends an attempt with
-nothing of its own left running: before the attempt's deadline, when the
-attempt is cancelled, or once the backend of a step whose connection was cut
-has no transaction open. It then releases the lock. A node resumes it on its
+nothing of its own left running: before the attempt's deadline, or when the
+attempt is cancelled, after which it releases the lock. A step whose connection
+was cut ends the attempt at once, and that step's backend keeps the lock until
+its transaction ends, committed or rolled back whole. A node resumes it on its
 next monitor tick, and `memql migrate` starts the next attempt itself, up to 20
 of them, so the migrate Job's retries are not spent on progress. On an upgrade
 carrying a large readiness history, expect a few attempts to end with

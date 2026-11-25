@@ -141,8 +141,9 @@ import (
 // backend's pid, and that its transaction can only end whole, because the
 // driver closed the connection its COMMIT would have come on -- so it waits
 // until that backend has no transaction open and then defers, instead of
-// handing the runner a transport error it must keep its lock for (awaitOrphan,
-// and THE MIGRATION ATTEMPT below). At a load average of
+// ending the attempt on a transport error (awaitOrphan, and THE MIGRATION
+// ATTEMPT below). On the migration session it defers at once: that backend holds
+// the migration lock until its transaction ends (migration_session.go). At a load average of
 // 72 the whole 791,770-version walk took three runs, two of them ended this
 // way after a five-second wait, and between them the three deleted exactly the
 // 791,630 versions that were not their id's newest.
@@ -201,13 +202,15 @@ import (
 // ===========================================================================
 // The runner gives a whole attempt MIGRATION_TIMEOUT_MS (30 s by default), and
 // at production volume the collapse can need more than one attempt. What it
-// hands the runner when an attempt ends is the whole question, because the
-// runner reads a context or transport error as "the statement may still be
-// running" and keeps its lock for an operator (migrationMayStillBeRunning) --
-// right for a statement cut off in flight, and wrong for an attempt that
-// stopped with nothing outstanding, which would strand the lock until someone
-// cleared it by hand. So the collapse returns errReadinessCollapseDeferred,
-// which is neither, whenever nothing of its own is left running:
+// hands the runner when an attempt ends was once the whole question: the runner
+// read a context or transport error as "the statement may still be running" and
+// kept its lock row for an operator, which stranded the lock whenever an attempt
+// stopped with nothing outstanding. The migration lock is now the migration
+// session's and ends with it whatever the error (migration_session.go). The
+// answer still decides whether the attempt reads as progress -- the migrate
+// subcommand starts the next one at once on a deferral and fails on anything
+// else, and a deferral logs at WARN rather than ERROR -- so the collapse returns
+// errReadinessCollapseDeferred whenever nothing of its own is left running:
 //
 //   - A step runs on a context of its own: the attempt's values without its
 //     cancellation, and a deadline of the step's own, under the read deadline.
@@ -265,8 +268,9 @@ const (
 	// readinessCollapseStepTimeout is the client-side bound on a whole step:
 	// the deadline of the step's own context, which the attempt's cancellation
 	// does not reach. The statement bound plus room for the step's other round
-	// trips, and still under the 10 s read deadline, so the deadline the driver
-	// reads by is the step's.
+	// trips, and still under pgdriver's default 10 s read deadline, so the
+	// deadline the driver reads by is the step's. On the migration session,
+	// which has no read deadline of its own, it is the only one.
 	readinessCollapseStepTimeout = readinessCollapseStatementTimeout + 2*time.Second
 
 	// readinessCollapseBookkeeping is the end of the attempt the runner needs
@@ -519,14 +523,16 @@ const readinessCollapseOrphanSQL = `SELECT pg_backend_pid() = ?,
 // awaitOrphan answers a step that ended without a reply it can trust: a read
 // deadline, a cut connection, a context the step outlived. The step's backend
 // may still be running a statement, so the attempt cannot yet say nothing is
-// outstanding -- which is the runner's reason to keep its lock for an operator.
-// But that backend's transaction can only end whole: either the driver closed
-// the connection, so no COMMIT can follow, or database/sql rolled it back. So
-// the batch committed with its cursor move (when the COMMIT itself was the
-// statement cut off) or rolled back with it, and once the backend has no
+// outstanding. But that backend's transaction can only end whole: either the
+// driver closed the connection, so no COMMIT can follow, or database/sql rolled
+// it back. So the batch committed with its cursor move (when the COMMIT itself
+// was the statement cut off) or rolled back with it, and once the backend has no
 // transaction open the next attempt resumes from whatever the progress row
-// says. Wait for that, bounded, and defer; a backend still busy at the bound is
-// left to the runner's rule, with the error the runner reads it by.
+// says. Wait for that, bounded, and defer; a backend still busy at the bound
+// ends the attempt as a failure, which the next attempt retries. On the
+// migration session there is no connection left to ask on, and no need: the
+// backend holds the migration lock until its transaction ends, so it defers at
+// once (TestACutCollapseStepOnTheMigrationSessionDefers).
 func (c *readinessCollapse) awaitOrphan(backend int64, cause error) error {
 	c.logger.Warn("module readiness history collapse: a step ended without a reply it can trust; waiting until its backend has no transaction open",
 		"migration", readinessCollapseMigrationName, "backend", backend, "cursor", c.cursor, "error", cause)
@@ -539,6 +545,15 @@ func (c *readinessCollapse) awaitOrphan(backend int64, cause error) error {
 		if err == nil && (self || !busy) {
 			return c.deferred(fmt.Sprintf("a step ended without a reply it could trust (%v); its backend %d has no transaction open any more, "+
 				"so its batch and cursor move committed or rolled back together and nothing is left running", cause, backend))
+		}
+		if errors.Is(err, errMigrationSessionEnded) {
+			// The collapse runs on the migration session, which never opens a
+			// second connection to ask on. Nothing needs asking: backend holds
+			// the migration lock until its transaction ends, so the next attempt
+			// cannot start before it (migration_session.go).
+			return c.deferred(fmt.Sprintf("a step ended without a reply it could trust (%v) and took the migration session with it; "+
+				"its backend %d holds the migration lock until its transaction ends, so the next attempt resumes from the cursor "+
+				"after it", cause, backend))
 		}
 		select {
 		case <-ctx.Done():

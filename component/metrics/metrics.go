@@ -239,15 +239,16 @@ var (
 		Help:      "EVERY NODE TYPE exports this series, but only the node that ran the nightly retention sweep (the cron leader, or an owner calling logsSweep by hand) ever moves it; the rest export a constant 0. Log lines the sweep wrote into the archive container as logs/<day>/<nodeType>.ndjson.gz before deleting them. On a cluster with an archive container a non-zero daily step is the sweep working; a FLAT ZERO on every node for more than a day means the sweep is not running or is refusing, and the store grows past its retention. On a cluster with NO archive container the sweep refuses by design and this stays at 0.",
 	})
 
-	// migrationLockHeldSeconds is how long the migrating node has found one row
-	// in bun's lock table in its way. It answers from a source the app registers
-	// (RegisterMigrationLockHeldSource) because component/database sits below
-	// this module's dependents and carries no metrics of its own.
+	// migrationLockHeldSeconds is how long the migrating node has found the same
+	// stalled holder of the migration lock in its way. It answers from a source
+	// the app registers (RegisterMigrationLockHeldSource) because
+	// component/database sits below this module's dependents and carries no
+	// metrics of its own.
 	migrationLockHeldSeconds = prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 		Namespace: namespace,
 		Subsystem: "database",
 		Name:      "migration_lock_held_seconds",
-		Help:      "Only a node that migrates (identity, as deployed) ever moves this series; the rest export a constant 0. How long this node has found the SAME row in bun's migration lock table in the way of its attempts. Each attempt inserts a new row and is bounded by its deadline, so a brief non-zero is a sibling replica migrating. A value past a few attempt deadlines is a stranded lock: no migration or post-migration hook runs on this cluster until an operator verifies the holder has stopped and releases it (docs/public/operate/env-vars.md, Database tuning), while every pod stays Ready and reads run without whatever indexes the blocked migrations were to build.",
+		Help:      "Only a node that migrates (identity, as deployed) ever moves this series; the rest export a constant 0. How long this node has found the SAME stalled holder of the migration lock in the way of its attempts: another engine's migration session that is connected but running no statement, or a row in bun_migration_locks written by an engine that locks by row. A holder running a statement does not count, because its session releases the lock when the statement ends. Each attempt opens a new session and is bounded by its deadline, so a brief non-zero is a sibling replica migrating. A value past a few attempt deadlines is a stopped migration: no migration or post-migration hook runs on this cluster until the holding process ends its session, or, for a row, until an operator verifies its holder has stopped and releases it (docs/public/operate/env-vars.md, Database tuning), while every pod stays Ready and reads run without whatever indexes the blocked migrations were to build.",
 	}, func() float64 {
 		if source := migrationLockHeldSource.Load(); source != nil {
 			return (*source)().Seconds()
@@ -836,8 +837,9 @@ func LogsDeleted(n int64) {
 var migrationLockHeldSource atomic.Pointer[func() time.Duration]
 
 // RegisterMigrationLockHeldSource wires the database's reading of how long one
-// lock row has stood into the /metrics scrape. A nil fn unregisters (tests). It
-// is called on every scrape, so it must read no database.
+// stalled holder of the migration lock has stood in its way into the /metrics
+// scrape. A nil fn unregisters (tests). It is called on every scrape, so it
+// must read no database.
 func RegisterMigrationLockHeldSource(fn func() time.Duration) {
 	if fn == nil {
 		migrationLockHeldSource.Store(nil)

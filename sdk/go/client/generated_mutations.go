@@ -9490,6 +9490,88 @@ func RecordWarmupStateBuild(args RecordWarmupStateArgs) string {
 	return b.String()
 }
 
+// RecordWorkerConnectionDrop -- Record one dropped machine connection. NOT @serverOnly, for clearWorkerConnectedNode's reason: its caller is component/worker, which is not on call_origin.go's internal-origin allowlist and should not be -- every context in that package descends from a worker's own inbound stream. The concept's owner tier is the gate: the store stamps auth.ContextWithUserActor for the registration's owner, and ownerUserId comes from actor.userId and nothing else. The residue is that a signed-in person could add drop records for their own machine, which changes only where their own pipeline steps are placed.
+//
+// Bound concept: v1:worker:connectionDrop (machine-readable: BoundConcepts["recordWorkerConnectionDrop"] in generated_concepts.go).
+type RecordWorkerConnectionDropArgs struct {
+	DropId         string
+	RegistrationId string
+	DroppedAt      string
+	ConnectedAt    string
+	// Enum: replaced | workInFlight
+	Cause           string
+	WorkInFlight    int
+	WorkInFlightSet bool // set true to send an explicit zero; nonzero values are always sent
+	NodeId          string
+	Code            string
+	Reason          string
+}
+
+// RecordWorkerConnectionDrop calls the engine mutation recordWorkerConnectionDrop.
+func (qc *QueryClient) RecordWorkerConnectionDrop(ctx context.Context, args RecordWorkerConnectionDropArgs) (*Result, error) {
+	call := RecordWorkerConnectionDropBuild(args)
+	return qc.executeNamed(ctx, "recordWorkerConnectionDrop", call)
+}
+
+func RecordWorkerConnectionDropBuild(args RecordWorkerConnectionDropArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation recordWorkerConnectionDrop(")
+	b.WriteString("dropId: ")
+	b.WriteString(quoteMemQL(args.DropId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("registrationId: ")
+	b.WriteString(quoteMemQL(args.RegistrationId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("droppedAt: ")
+	b.WriteString(quoteMemQL(args.DroppedAt))
+	if args.ConnectedAt != "" {
+		if b.Len() > 36 {
+			b.WriteString(", ")
+		}
+		b.WriteString("connectedAt: ")
+		b.WriteString(quoteMemQL(args.ConnectedAt))
+	}
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("cause: ")
+	b.WriteString(quoteMemQL(args.Cause))
+	if args.WorkInFlightSet || args.WorkInFlight != 0 {
+		if b.Len() > 36 {
+			b.WriteString(", ")
+		}
+		b.WriteString("workInFlight: ")
+		b.WriteString(fmt.Sprintf("%v", args.WorkInFlight))
+	}
+	if args.NodeId != "" {
+		if b.Len() > 36 {
+			b.WriteString(", ")
+		}
+		b.WriteString("nodeId: ")
+		b.WriteString(quoteMemQL(args.NodeId))
+	}
+	if args.Code != "" {
+		if b.Len() > 36 {
+			b.WriteString(", ")
+		}
+		b.WriteString("code: ")
+		b.WriteString(quoteMemQL(args.Code))
+	}
+	if args.Reason != "" {
+		if b.Len() > 36 {
+			b.WriteString(", ")
+		}
+		b.WriteString("reason: ")
+		b.WriteString(quoteMemQL(args.Reason))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // RedeemDeviceCode -- Mark an approved device authorization redeemed. Single-use: the handler stamps this BEFORE minting tokens, so a concurrent second poll finds status=redeemed and is refused.
 //
 // Bound concept: v1:identity:deviceCode (machine-readable: BoundConcepts["redeemDeviceCode"] in generated_concepts.go).

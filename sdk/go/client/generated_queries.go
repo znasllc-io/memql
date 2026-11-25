@@ -7214,6 +7214,35 @@ func MyRoutingPoliciesBuild(args MyRoutingPoliciesArgs) string {
 	return "query myRoutingPolicies()"
 }
 
+// MyWorkerConnectionDrops -- One of the caller's machines' dropped connections since a moment, newest first (network-aware fleet selection). Placement asks it once per candidate machine for the run's window, and Fleet asks it for a machine's last day. One machine per read, so a machine that drops in a loop cannot push another machine's drops past a shared cap and make it read steady. At most 100 rows: a machine with that many in a window is unsteady either way, and its count reads "100 or more". @cache(0) because the rows are written by the agent replica that held the machine's stream and read by whichever replica places the next step: a cached answer would miss a drop another replica wrote a moment ago, the reason myWorkersWithStatus reads live.
+//
+// Bound concept: v1:worker:connectionDrop (machine-readable: BoundConcepts["myWorkerConnectionDrops"] in generated_concepts.go).
+type MyWorkerConnectionDropsArgs struct {
+	RegistrationId string
+	// RFC3339 time; drops at or after it are returned.
+	Since string
+}
+
+// MyWorkerConnectionDrops calls the engine query myWorkerConnectionDrops.
+func (qc *QueryClient) MyWorkerConnectionDrops(ctx context.Context, args MyWorkerConnectionDropsArgs) (*Result, error) {
+	call := MyWorkerConnectionDropsBuild(args)
+	return qc.executeNamed(ctx, "myWorkerConnectionDrops", call)
+}
+
+func MyWorkerConnectionDropsBuild(args MyWorkerConnectionDropsArgs) string {
+	var b strings.Builder
+	b.WriteString("query myWorkerConnectionDrops(")
+	b.WriteString("registrationId: ")
+	b.WriteString(quoteMemQL(args.RegistrationId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
 // MyWorkersWithStatus -- The caller's own machines, with everything the router orders and filters on.
 // ONE QUERY FOR TWO READERS, and that is the point. The design had a separate `workersForOwnerWithStatus(ownerUserId)` for the router, @serverOnly because a caller-supplied owner id is not a caller check. It is not needed: the router has no caller of its own -- it dispatches on behalf of the session's owner -- and therefore already runs under auth.ContextWithUserActor for that owner. Reading `actor.userId` is then both simpler and strictly safer than accepting an argument: there is no id to supply, so there is nothing to enumerate, and no @serverOnly annotation to keep honest. Read heartbeats live: the default 60-second cache outlives the 30-second online window, and a heartbeat written by another replica must keep its machine eligible immediately.
 //

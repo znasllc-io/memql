@@ -45,16 +45,16 @@ func TestACustomOpenerOwnsTheMigrationPoolToo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDatabase: %v", err)
 	}
-	if base.config.migrationOpener == nil {
-		t.Fatalf("the default config must carry a migration opener")
+	if base.config.migrationConnector == nil {
+		t.Fatalf("the default config must carry a migration connector")
 	}
 	d, err := NewDatabase(common.ComponentName("test-opener"), WithDSN("postgres://user:pass@localhost:5432/db?sslmode=disable"),
 		base.WithSQLOpener(func(driverName, dsn string) (*sql.DB, error) { return nil, nil }))
 	if err != nil {
 		t.Fatalf("NewDatabase: %v", err)
 	}
-	if d.config.migrationOpener != nil {
-		t.Fatalf("a custom sqlOpener must clear the default migration opener, or migrations would dial a real DSN a test never meant to open")
+	if d.config.migrationConnector != nil {
+		t.Fatalf("a custom sqlOpener must clear the default migration connector, or migrations would dial a real DSN a test never meant to open")
 	}
 }
 

@@ -7,16 +7,17 @@ package dbtest
 // TestMain died in 0.1s with "migration lock: migrate: migrations table is
 // already locked (duplicate key ... bun_migration_locks_table_name_key)", no
 // test having run. EnsureSchema's advisory lock serializes EnsureSchema callers
-// and nothing else, while bun's lock row is taken by EVERY Database.Start --
+// and nothing else, while the migration lock is taken by EVERY Database.Start --
 // including the db-gated tests that boot their own memory-nodes database
-// mid-run (component/grpc's openWireTestDB, the pack live-e2e suites). bun's
-// Lock is a try-lock, so a TestMain that landed inside one of those windows
+// mid-run (component/grpc's openWireTestDB, the pack live-e2e suites). That
+// lock is a try-lock, so a TestMain that landed inside one of those windows
 // read the refusal as a migration failure.
 //
-// The foreign holder here is a bare bun migrator on the same lock row, which is
-// exactly what a sibling's Database.Start is for the moment it holds it. Every
+// The foreign holder here is a bare bun migrator on bun's lock row: an engine
+// that locks by row, which a Database.Start refuses exactly as it refuses a
+// sibling's migration session (component/database/migration_session.go). Every
 // case runs on a scratch database of its own: holding the SHARED database's
-// lock row would stall every other package in the lane.
+// lock would stall every other package in the lane.
 
 import (
 	"context"
@@ -200,10 +201,10 @@ func TestEnsureSchema_ConcurrentCallersWaitOutAForeignMigrationLock(t *testing.T
 }
 
 // TestEnsureSchema_StrandedMigrationLockIsABoundedError pins the other half of
-// waiting: a lock row nobody releases -- one component/database keeps on
-// purpose after a migration's connection died mid-flight -- must end in an
-// error that says so, within the bound, rather than a TestMain that hangs until
-// the lane's timeout names nothing.
+// waiting: a lock row nobody releases -- one an engine that locks by row left
+// behind when its process ended -- must end in an error that says so, within
+// the bound, rather than a TestMain that hangs until the lane's timeout names
+// nothing.
 func TestEnsureSchema_StrandedMigrationLockIsABoundedError(t *testing.T) {
 	scratch := lockRaceScratchDatabase(t)
 	dsnEnvSandbox(t)

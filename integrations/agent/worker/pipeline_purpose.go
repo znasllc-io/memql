@@ -209,12 +209,23 @@ func purposeBinding(purpose, tool, action, agentId string) (code, msg string) {
 // depend on how the machine was picked. Regression tests:
 // TestPinAndExcludeAreRefusedOutsideThePipelinePurpose.
 func machineNarrowingBinding(req Request) (code, msg string) {
-	if req.Purpose == PurposePipeline || (req.PinRegistration == "" && len(req.ExcludeRegistrations) == 0) {
+	if req.Purpose == PurposePipeline {
 		return "", ""
 	}
-	return codeDeniedPipelinePurpose,
-		"only a pipeline step's retry may pin a dispatch to a machine or exclude machines from it: " +
-			"a call states what its work needs and the owner's routing policy decides which machine"
+	if req.PinRegistration != "" || len(req.ExcludeRegistrations) != 0 {
+		return codeDeniedPipelinePurpose,
+			"only a pipeline step's retry may pin a dispatch to a machine or exclude machines from it: " +
+				"a call states what its work needs and the owner's routing policy decides which machine"
+	}
+	// The connection preference (network-aware fleet selection, D7) is the
+	// fleet executor's, from a run's captured policy, and orders and holds
+	// machines by their drops: an agent's call keeps the owner's strategy, so
+	// a request carrying it on any other purpose is refused as a pin is.
+	if req.Connection.set() {
+		return codeDeniedPipelinePurpose,
+			"only a pipeline step may ask for placement by connection: an agent's call is routed by the owner's routing policy"
+	}
+	return "", ""
 }
 
 // purposeRefusal is purposeBinding, then machineNarrowingBinding, as a gate

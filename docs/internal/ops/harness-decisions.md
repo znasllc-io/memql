@@ -5221,6 +5221,8 @@ past a larger table, and the startup probe bounds it. Releasing a stale lock
 automatically: the row names no holder and the migration pool's `application_name`
 is the node's own, shared with its request pool, so the catalog cannot establish
 that the holder stopped. That is the runbook's to do until a holder has an identity.
+(Since 2026-11-25 it has one: see
+[The migration lock is the migration session](#the-migration-lock-is-the-migration-session-2026-11-25).)
 Booting a check of the read registries against the catalog: reads would be no
 faster for it, and the stuck lock is what needed reporting.
 
@@ -5228,12 +5230,16 @@ faster for it, and the stuck lock is what needed reporting.
 deadline or a lost connection keeps the lock, because nothing knows what an
 arbitrary migration left running
 (`TestMigrationReadTimeoutRetainsLockWhileBackendRuns`). A pod killed mid-attempt
-leaves its row. Both are now reported rather than silent.
+leaves its row. Both are now reported rather than silent. (Superseded on
+2026-11-25: both now keep the lock only while the statement runs; see
+[The migration lock is the migration session](#the-migration-lock-is-the-migration-session-2026-11-25).)
 
-**Regression evidence.** In `component/database/migration_lock_db_test.go`,
-`TestAnIndexBuildThatOutlivesItsAttemptReleasesTheLock` holds a real build past two
-attempts and pins the released lock, no second build, nothing in the ledger and no
-hooks until the orphan finishes. `TestAnAttemptWaitingOnAnOperatorsBuildReleasesTheLock`
+**Regression evidence.** In `component/database/migration_lock_db_test.go`, a test
+then named `TestAnIndexBuildThatOutlivesItsAttemptReleasesTheLock` held a real build
+past two attempts and pinned the released lock, no second build, nothing in the
+ledger and no hooks until the orphan finished; since 2026-11-25 it is
+`TestAnIndexBuildThatOutlivesItsAttemptHoldsTheLockUntilItEnds`, with the session
+lock's rules. `TestAnAttemptWaitingOnAnOperatorsBuildReleasesTheLock`
 covers a build started by hand, `TestAnAttemptEndingBetweenMigrationsRecordsWhatFinishedAndReleasesTheLock`
 the gap, by deadline and by cancellation, and `TestALockThatOutlastsAnyAttemptIsReportedAsStuck`
 the report. All need `MEMQL_REQUIRE_DB=1`.
@@ -5265,6 +5271,138 @@ versions. That is bounded, and no longer the history. `workSignedRunsForOwner`
 reject what a walk finds. The same sweep's `workAutomationStepsForOwner` and
 `workGoalsForOwner` read concepts with no owner index at all, so bounding the
 run read alone would not let the sweep finish.
+
+## The migration lock is the migration session (2026-11-25)
+
+**Trigger.** Production's migrations stopped a third time during the 0.31.40 roll,
+after 2026-09-26 and 2026-10-30. Identity replica `identity-65888dcfb-z9bzd` held
+lock row 16971 when its process exited at 01:39:30Z ("database did not become
+ready before engine init: context deadline exceeded"). Its CREATE INDEX for
+`20261119120000` ran on server-side; writes on every pod failed with `lock timeout`
+from 01:40 to 01:48Z while it finished. Both replicas then refused every attempt
+and reported "the migration lock has outlasted any attempt". Four migrations waited
+until an operator built six indexes by hand and deleted row 16971 at 02:14:48Z.
+
+**Two causes.**
+- *The lock.* bun's lock is a row in `bun_migration_locks`: `Lock` is a try-INSERT
+  and `Unlock` a DELETE by `table_name`. A row lasts until something deletes it, and
+  a process that ends without running its deferred `Unlock` (`os.Exit`, SIGKILL, an
+  OOM kill, a lost node) leaves it forever. memql#6419 stopped the runner keeping
+  the row on purpose after a build; nothing could stop a dead process keeping it.
+- *The trigger.* `app/engine.go` waits a fixed 30 s for the database's `Ready`.
+  `Database.Start` runs the first attempt synchronously in `prepareForRun`, before
+  that wait begins, bounded by `MIGRATION_TIMEOUT_MS` (180 s on production's
+  identity). When it deferred, the run loop's first ping ran a second attempt
+  before `markStarted`, and the engine's 30 s ran out in the middle of it. The
+  ledger dates it: the first attempt ran 01:36:00 to 01:39:00 (it recorded
+  `20261117120000` at 01:38:41 and deferred inside `20261118120000`); the second,
+  a new migration group, took row 16971, recorded `20261118120000` at 01:39:06,
+  started the open-room build and was ended at 01:39:30.
+
+**Chosen path.**
+- *The lock is the session* (`component/database/migration_session.go`). An attempt
+  runs every statement on ONE database session and holds the migration lock, a
+  session advisory lock keyed by the schema bun's tables live in, on it. The
+  session's pool can never open a second connection (`migrationSessionConnector`),
+  so the backend holding the lock is the backend that ran the attempt's work. It
+  releases the lock only by unlocking or exiting: at once when the process ends
+  with the session idle; when the statement ends, when a cut-off statement still
+  runs, so nothing overlaps the orphan and nobody releases anything; at the end of
+  a normal attempt. The session dials the direct endpoint when one is configured,
+  because a transaction pooler would spread its statements over other backends.
+- *No driver read deadline on the session.* Every statement it sends carries a
+  context deadline instead: the attempt's, the ledger's (now the attempt's plus
+  five seconds) or a cleanup's. pgdriver's 10 s default would cut every long
+  build, and with no second connection a cut ends the attempt.
+- *A fence keeps engines that lock by row out.* 0.31.40 and earlier know only the
+  row. While the session lock is held, the attempt also writes bun's row with a
+  NEGATIVE id (`-nextval` of the table's sequence), which no older engine's row can
+  carry, so an older replica's `Lock` fails on the unique key. An attempt holding
+  the session lock that finds a negative-id row knows its writer's session, and
+  every statement that session ran, is over, and clears it. A positive-id row is an
+  older engine's: refused, reported once stuck, and released by the runbook, as
+  before.
+- *This node's own statement is waited for.* An attempt that finds the lock held by
+  a backend this process's migrations ran on (pid and backend start) waits for it
+  within the attempt and defers if the attempt ends first, which keeps
+  `memql migrate` progressing. Any other holder refuses at once, as bun's try-lock
+  did, so a starting replica never spends an attempt waiting for a sibling.
+- *Startup does not wait on a second attempt* (`startupPing`,
+  `component/database/database.go`). The run loop's first ping runs no pending
+  attempt when the attempt `Start` just ran reached the database; the next tick
+  resumes after `Ready`, while the engine starts, as a replica refused by a
+  sibling's lock always has. A first attempt that never reached the database (a
+  node started before Postgres) still migrates before `Ready` (memql#3879).
+- *The stuck watch keys on the holder.* The ERROR and
+  `memql_database_migration_lock_held_seconds` count only a stalled holder: a
+  session connected but running no statement (a process that stopped migrating
+  and kept its session; restarting it releases the lock) or a positive-id row. A
+  holder running a statement starts the clock again, so the gauge keeps the
+  meaning memql-znas's release gates read it by: migrations stopped until someone
+  acts. A dead replica's eight-minute build no longer reads as stuck.
+
+**Invariants.** At most one attempt among this engine's replicas holds the lock; no
+statement an attempt started runs while another attempt holds it; the lock never
+outlives the server-side work of the attempt that took it.
+
+**Rejected.**
+- *The lock on a dedicated holder connection* beside a pool that runs the
+  statements: the holder dies with the process while an orphaned statement on
+  another backend runs on, so the next attempt overlaps it. A shared lock on every
+  working connection closes that, but database/sql retries a dead connection on a
+  new one, which then runs a statement holding nothing.
+- *A lease row with an expiry and a heartbeat:* a clock and a renewal loop, and it
+  still cannot say whether a dead holder's statement is still running.
+- *Clearing old rows after a timeout:* the row names no holder, which is why it was
+  kept on purpose.
+- *A longer engine-init wait:* it hides the second attempt instead of taking it off
+  the readiness path, and the startup probe bounds it anyway.
+
+**What survives a retry, a pause or a replica change.** Only the ledger, the fence
+row and the server's lock are shared. A restarted process has no claim on its
+predecessor's statements (`migrationBackends` is per process), so it is refused by
+them like any replica until they end. The fence is temporary: written per attempt,
+deleted at a normal end, cleared by the next attempt otherwise. A failed or
+deferred attempt records an error, so no post-migration hook runs behind it.
+
+**Known limits.**
+- A session whose backend is ended from outside while its process lives
+  (`pg_terminate_backend`, a server restart or failover) or sits idle five minutes
+  (`idle_session_timeout`) loses the lock; the attempt can then touch the database
+  no more and fails. Post-migration hooks run on another pool, so a session lost
+  during them leaves them running beside the next attempt. They are short and
+  idempotent.
+- With `MIGRATION_TIMEOUT_MS=0` a statement's read has no bound but TCP keepalive.
+- `memql migrate` still fails at once when another engine's session holds the lock,
+  as it did when another engine's row did.
+- A database with no DSN or migration connector (a custom `WithSQLOpener`, tests
+  only) runs no migration (`errNoMigrationSession`) rather than one over a shared
+  pool.
+- A build still blocks writes to the chunk it scans. That, not the lock, is why
+  writes failed from 01:40 to 01:48Z, and this change does not touch it.
+- Not run on production yet: it ships in the release after 0.31.40. During that
+  rollout the 0.31.40 replicas lock by row; the fence keeps them out, and a row one
+  of them strands still needs the runbook.
+
+**Regression evidence.** `TestAHolderKilledMidBuildIsRecoveredOnceItsStatementEnds`
+(`component/database/migration_lock_killed_holder_db_test.go`) runs a replica in a
+child process and SIGKILLs it while its CREATE INDEX waits on a writer's lock, then
+pins no overlap while the dead holder's build runs and recovery with no operator
+once it ends. On 0.31.40's runner it failed with the 23505 refusal production
+logged. In `migration_lock_db_test.go`,
+`TestAnIndexBuildThatOutlivesItsAttemptHoldsTheLockUntilItEnds` covers the build
+(the fence, a refused sibling, this node waiting for its own build),
+`TestMigrationReadTimeoutRetainsLockWhileBackendRuns` a plain statement, and
+`TestASessionHolderIsReportedStuckOnlyWhileItRunsNothing` with
+`TestALockThatOutlastsAnyAttemptIsReportedAsStuck` the two halves of the stuck
+report. `TestReadinessDoesNotWaitForASecondMigrationAttempt` and
+`TestReadinessWaitsForMigrationsWhenNoAttemptReachedTheDatabase`
+(`migration_retry_test.go`) pin the startup rule; the first fails with the old
+rule restored. `TestAMigrationSessionNeverOpensASecondConnection` and
+`TestACutCollapseStepOnTheMigrationSessionDefers` (`migration_session_test.go`)
+cover the connector and the readiness collapse on it. The database cases need
+`MEMQL_REQUIRE_DB=1`. [The runbook](../../public/operate/env-vars.md#database-tuning)
+says what an operator sees and does.
 
 ## A read since a watermark collapses only the versions since (2026-11-08)
 
@@ -6082,6 +6220,165 @@ tag).
 **Not verified.** These tests prove the source contract and in-process replica
 hops. Live fleet-to-cloud failover and a production maintenance window for the
 contract-5 switch are not verified.
+
+## Fleet steps prefer machines whose connection holds (2026-11-24)
+
+A fleet or pool step tries machines whose connection to the cluster has not
+dropped recently first, and a fleet step waits for a steady machine that is
+busy with work rather than start on one whose connection dropped. Design record:
+`docs/superpowers/specs/2026-11-24-network-aware-fleet-selection-design.md`
+(decisions D1 to D11). What owners see is in
+[Retries and failover](../../public/operate/pipelines.md#retries-and-failover);
+the record itself in the workers runbook's "Connection drops" paragraph.
+
+**Trigger.** A pipeline step's dispatch whose request carries a connection
+window (`worker.Request.Connection`), which the fleet executor sets from the
+run's captured compute placement policy (`connection.unsteadyMinutes`, default
+120, `pipelines.ConnectionPolicy`). Only the pipeline purpose may carry it:
+`machineNarrowingBinding` refuses it on every other purpose, as it refuses a
+pin, so an agent's call keeps the owner's routing strategy untouched.
+
+**Evidence: the cluster's own drop records, nothing else.** On 2026-11-24 the
+one Mac allowing pipeline steps, on 2.4 GHz Wi-Fi, lost its stream eight times
+in an hour and a half and failed the macOS lanes twice (`pipeline_node_lost`,
+not retried for a step that is not `repeatable`). Round trip did not tell the
+machines apart (the dropping Mac 299 ms, the other 360 ms), and the cluster's
+own disconnect reasons do not separate a lost link from Cockpit reconnecting on
+purpose: both log as `context canceled` or `superseded`. What does separate
+them is known only to the replica holding the stream when it ends: whether a
+new connection replaced it before the end was seen (`drainReason ==
+superseded`), and whether work was in flight (Cockpit's `Runner.busy()` guard
+means it never reconnects on purpose then). `classifyStreamEnd`
+(`component/worker/connection_drop.go`) turns those into a drop; the replica
+writes one append-only `v1:worker:connectionDrop` row (`streamSession.recordDrop`,
+`component/worker/server.go`). A lost link wakes the receive loop and every call
+waiting on the machine at once, so a call can leave its pending entry before the
+closing stream counts it; it is tallied as it leaves (`callsLeftWithStream`),
+after a loaded runner recorded no drop for a lost step on 2026-11-25
+(`TestACallThatLeftWithTheStreamStillCountsAsWorkInFlight`). On that afternoon the rule counts seven of the
+eight lost links, including the one that failed the lanes, and none of the
+deliberate reconnects.
+
+**Chosen path.** The dispatcher reads each candidate's drops inside the window
+(`myWorkerConnectionDrops`, one read per machine, `@cache(0)`, through the
+optional `ConnectionDropReader` on its store) after every consent and
+narrowing, and `RoutePlan.ApplyConnection` orders steady machines first in the
+strategy's order, then unsteady ones by fewest drops, then oldest last drop.
+With `WaitForSteady` (every step but a pool step, `connectionPreference` in
+`integrations/pipelinesteps/fleet_connection.go`) the candidate loop returns the
+first steady machine's `pipeline_capacity_busy` refusal on reaching an unsteady
+candidate, when that steady machine has work in flight (`hasWorkInFlight`: this
+replica's live count when it holds the stream, else the registration's
+`activeCount`, and then a RUNNING pipeline-step `v1:worker:activity` row, which
+the replica sending a call writes before the call leaves -- the row count lags a
+heartbeat batch, up to about 30 s, both ways: a run's fleet lanes are refused busy
+seconds after the first takes the slot, and a machine whose step just finished
+still reads busy), so the executor's capacity wait asks again; the unsteady machines ride on
+`Result.PassedOver`, and the step's log names them. A placed attempt whose
+bounded wait runs out while passing a machine over dispatches once more without
+the wait before `waitRanOut`. The executor writes the reason into the step's log
+-- for a step placed on an unsteady machine, above its own lines, because the
+dispatcher calls `Request.OnStarted` on an attempt's first output, the one proof
+before the result that the call started there (`attempt_started.go`); after the
+step only for one that wrote nothing until it ended -- and, for a node loss on an
+unsteady machine, into the failure. Fleet reads the
+same rows for the machine's Details > Connection.
+
+**Alternatives rejected.** Cockpit reporting how each connection ended (exact,
+but a Cockpit release and every machine updated before it measures anything)
+and Wi-Fi band and signal (a leading indicator, the most to build, a new kind of
+data leaving the machine); waiting on every busy refusal (Cockpit says busy for
+low disk and memory too, so one steady machine with a full disk would hold every
+step a free machine could run); a list of drops on the registration row (the
+drop is written as the replacing connection writes that row, and a read-merge
+loses one of the two); the security audit trail as the source; round trip as a
+signal; pool steps waiting and then going to the cloud (the owner chose no
+extra cloud spend: the Linux machines drop about once a day).
+
+**Stop conditions.** The preference never fails a step, and holds one only to
+wait for a steady machine that is busy with work (D1): a failed drop read counts
+that machine steady, a failed read of running steps counts no work, a step whose
+only eligible machines are unsteady runs on the best of them, a pool step only
+orders, a steady machine that refused for anything but busy-with-work is passed
+as before, and a bounded wait ends with one try on the machines it passed over.
+A first attempt's wait for a busy steady machine is bounded by the run's
+ceiling, as every capacity wait is. The shipped placement template leaves
+`connection` out (absence is 120): a run captures the template's source and a
+re-run reuses it, so a template writing the key would make every run opened on
+this release unrunnable again after a rollback to an engine that refuses it.
+
+**Invariants.** It orders what the plan's consents, labels and contracts
+admitted and admits nothing. Nothing a model writes can set it. A drop is never
+filed for the cluster's own decision (drain, revocation, expiry). Every machine
+a log line or failure names is named by its owner's display name or
+`pl.MachineWords`, never its reported hostname, because those sentences reach
+check runs. The model-probe exclusion from the work-in-flight set mirrors
+Cockpit's `busy()`; if that guard changes, `WorkInFlight` must change with it.
+
+**What survives a replica change.** Everything that decides: the drop rows (in
+the database, written by the replica that held the stream, read by whichever
+places the step) and the window (in the run's captured policy). The plan's
+health and the passed-over list live for one dispatch on the dispatching
+replica and are written to the invocation's routing record (`connection`,
+`passedOver`). Nothing in memory crosses the mesh.
+
+**Known limitations.** A lost link on an idle machine that the cluster noticed
+before the machine reconnected is not recorded (one of eight on 2026-11-24). A
+front-door restart that closes every stream at once records a drop for every
+machine with work in flight at that moment. A machine that slept for less than
+the keepalive window reads as replaced, and so does a re-pair or reclaim while
+the old process is still connected. Cockpit stopping or restarting with work in
+flight (SIGTERM, a service restart, an upgrade: `Runner.Close` does not wait for
+`busy()`) is filed as a `workInFlight` drop, and so is an idle deliberate
+reconnect that races a call the cluster registered as pending just before
+sending it. With one eligible machine nothing is avoided; the step only says
+why. A busy steady machine can hold a fleet step's first attempt until the
+run's ceiling. A step that writes nothing until it ends gets its placement notice
+after its output rather than above it. The window and the order compare stored
+text, which is why every drop time is written at one width
+(`workerservice.DropTimeLayout`, nine fraction digits) and a reader states its
+window's start the same way; a row written in another width would order wrongly
+inside one second.
+
+**Not verified.** The classification on real streams in the cluster, and the
+seven-of-eight figure beyond one afternoon of one Mac. The Fleet fact has
+component tests and no browser check.
+
+**Regression tests.** `TestConnectionPolicyParsesStrictly`,
+`TestEveryRunGetsAPolicyEvenWithoutPoolSteps`, `TestRetriesParseStrictly`
+(shipped template) in `component/pipelinerun/compute_placement_test.go`;
+`TestConnectionDropsRoundTripAcrossReplicasAndOwners`
+(`component/worker/fleetcatalog`, db); `TestClassifyStreamEnd`,
+`TestAReplacedStreamRecordsOneDrop`,
+`TestAStreamReplacedOnAnotherReplicaRecordsOneDrop`,
+`TestAStreamLostWithWorkInFlightRecordsOneDrop`,
+`TestAnIdleCloseAndADrainRecordNoDrop`,
+`TestACallThatLeftWithTheStreamStillCountsAsWorkInFlight`,
+`TestAStreamEndingWithOnlyAProbeRecordsNoDrop` (`component/worker`);
+`TestConnectionDropsInOneSecondReadInTimeOrder` (`component/worker/fleetcatalog`,
+db); the
+`ConnectionHealth` and `ApplyConnection` cases, `TestPipelineTriesASteadyMachineBeforeAnUnsteadyOne`,
+`TestPipelineDoesNotWaitForASteadyMachineThatCannotFreeUp`,
+`TestAPoolStepDoesNotWaitForASteadyMachine`, `TestAllUnsteadyMachinesRunFewestDropsFirst`,
+`TestAPinnedRetryIsNotReorderedButCarriesItsHealth`, `TestAFailedDropReadLeavesTheOwnersOrder`,
+`TestNoDropsAndNoWindowRouteExactlyAsBefore`,
+`TestConnectionPreferenceIsRefusedOutsideThePipelinePurpose`,
+`TestPipelineDoesNotWaitOnAStaleCountForAMachineHeldHere`,
+`TestPipelineWaitsForAMachineHeldHereThatIsRunningWork`,
+`TestAPassedOverMachineIsNeverNamedByItsHostname`,
+`TestTheFirstOutputSaysWhereTheStepStarted` and, across the hop,
+`TestTheFirstOutputAcrossTheHopSaysWhereTheCallStarted`, and the hop test
+`TestPipelineWaitsForASteadyMachineBusyWithWork` and
+`TestPipelineWaitsForASteadyMachineRunningWorkTheOtherReplicaAdmitted` (the
+row's count still 0, the sibling really running the first lane), and
+`TestRunningPipelineStepsCountsAnotherReplicasRunningStep` (db)
+(`integrations/agent/worker`);
+`TestTheConnectionWindowReachesTheRequest`, `TestTheWaitNamesThePassedOverMachineOnce`,
+`TestABoundedWaitEndsOnTheFreeMachine`, `TestAStepOnAnUnsteadyMachineSaysSo`,
+`TestAStepOnAnUnsteadyMachineSaysSoBeforeItsOutput`, `TestDropCountsAreWordedAsTheyWereRead`,
+`TestANodeLossOnAnUnsteadyMachineSaysItsConnectionHadDropped`,
+`TestUnsteadyNoticesNameAnUnnamedMachineByItsId` (`integrations/pipelinesteps`);
+`clients/os/test/fleet/connectionDrops.test.tsx`.
 
 ## A pipeline's work run is not beaten (2026-11-08)
 
