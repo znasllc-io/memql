@@ -24,8 +24,10 @@ import "./memorySearch.css";
 // CLUSTER > SETTINGS > MEMORY SEARCH (design record
 // docs/superpowers/specs/2026-11-23-memory-search-model-switch-design.md,
 // section 8): the model memory search uses, whose machines index it, and the
-// owner's acts on it. Owners only, by the part's seed; the engine refuses the
-// builtins to everybody else, and this page draws nothing it would refuse.
+// owner's acts on it. The part's seed gives the page to owners; somebody granted
+// the part reads it too. EVERY ACT IS AN ACTIVE OWNER'S, which a grant cannot
+// say: the engine answers it from the reader's side (the status's mayAct), and
+// the page draws no act where mayAct is false -- it would be refused.
 //
 // WHAT FOLLOWS THE STATE (DESIGN.md rule 12): an act that is not legal is
 // absent. While a switch runs before its flip, no other model is offered (one
@@ -122,7 +124,7 @@ export function MemorySearchSection({ visible = true }: { visible?: boolean }) {
     return <div className="os-cluster"><Head title="Memory search" /><Notice sentence="A cluster owner chooses memory search's model." /></div>;
   }
   return <MemorySearchPage key={access?.userId ?? ""} query={connection?.query ?? null} connected={status === "connected"} visible={visible}
-    me={bareId(access?.userId ?? "")} mayChange={holds("execute", MEMORY_SEARCH_RESOURCE)} />;
+    me={bareId(access?.userId ?? "")} />;
 }
 
 type Place = "inUse" | "change";
@@ -145,17 +147,17 @@ function focusAfterLoss(page: HTMLElement | null): HTMLElement | null {
     ?? page.querySelector<HTMLElement>("[data-change-model]");
 }
 
-export function MemorySearchPage({ query, connected, visible, me, mayChange }: {
+export function MemorySearchPage({ query, connected, visible, me }: {
   query: MemorySearchQueries | null;
   connected: boolean;
   visible: boolean;
   /** The reader's user id, bare. */
   me: string;
-  /** `execute` on the part: without it every act is absent. */
-  mayChange: boolean;
 }) {
   const search = useMemorySearch(query, { visible, connected });
   const status = search.status;
+  // Whether any act is drawn: the engine's word (mayAct), never the grant's.
+  const mayChange = status?.mayAct === true;
   // The model a confirmation is open for, and the state it was picked over: a
   // read with another state drops it (changeModelState), in the same render.
   const [draft, setDraft] = useState<{ ref: string; over: string } | null>(null);

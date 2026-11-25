@@ -2938,10 +2938,14 @@ search; anybody else reads that a cluster owner can change it (ruling R15:
 `memorySearchKeeps`, `src/apps/fleet/machines/modelSetup.ts`, says it for the
 board's caption, its refusal and the Models page's help).
 
-- **THE PART IS THE GATE.** The section and the link row require
-  `app:cluster/memorysearch`, seeded on the owner alone, which the six
-  `memorySearch*` builtins check themselves; a person without it reads nothing
-  and is offered nothing. The Start page does not offer the section: it is a page
+- **THE PART IS THE GATE, AND ONLY AN OWNER ACTS.** The section and the link
+  row require `app:cluster/memorysearch`, seeded on the owner alone, which the
+  engine's builtin path checks before any of the six `memorySearch*` builtins
+  runs; a person without it reads nothing and is offered nothing. Every act is
+  also an active cluster owner's, whatever was granted: the status's `mayAct`
+  says from the reader's side whether they may act, and the page draws no act
+  where it is false, so somebody granted the part sees the page and its state
+  and acts on nothing. The Start page does not offer the section: it is a page
   of Settings.
 - **POLLED, NEVER SUBSCRIBED.** The status is a row the engine computes per call
   and the index job's run rows broadcast nothing (ruling R3), so the page reads it

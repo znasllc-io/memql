@@ -64,6 +64,8 @@ export interface MemorySearchStatus {
   needsConfirmation: boolean;
   /** The model the binding replaced: the kept index Switch back names. */
   previousRef: string;
+  /** Whether the reader may act at all: an active cluster owner holding the part's execute (the engine's answer). */
+  mayAct: boolean;
   /** Choosing the model in use again would make the caller its indexer (ruling R13). */
   takeOver: boolean;
   indexed: number;
@@ -158,6 +160,7 @@ export function readMemorySearchStatus(raw: Row | null): MemorySearchStatus {
     chosenBy: text(row.chosenBy),
     needsConfirmation: row.needsConfirmation === true,
     previousRef: text(row.previousRef),
+    mayAct: row.mayAct === true,
     takeOver: row.takeOver === true,
     indexed: whole(row.indexed),
     backlog: whole(row.backlog),

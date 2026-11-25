@@ -38,7 +38,7 @@ function status(over: Row = {}): Row {
   return {
     id: "current", providerRef: QWEN, kind: "machine", label: "qwen3-embedding:0.6b",
     indexedBy: "u-me", indexedByName: "Ana Owner", chosenBy: "u-me", needsConfirmation: false,
-    previousRef: "", takeOver: false, indexed: 8310, backlog: 0, backlogCountedAt: "", waitingReason: "",
+    previousRef: "", mayAct: true, takeOver: false, indexed: 8310, backlog: 0, backlogCountedAt: "", waitingReason: "",
     switch: null, retained: [], ...over,
   };
 }

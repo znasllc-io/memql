@@ -50,6 +50,7 @@ function statusRow(over: Partial<Row> = {}): Row {
     chosenBy: "me",
     needsConfirmation: false,
     previousRef: "",
+    mayAct: true,
     takeOver: false,
     indexed: 8310,
     backlog: 0,
@@ -337,10 +338,12 @@ describe("Cluster > Settings > Memory search", () => {
     expect(screen.queryByText(/^Everything is/)).toBeNull();
   });
 
-  it("with read but not execute on the part, everything is shown and nothing is offered", async () => {
-    setEffectiveCapabilities(seededAccessFor("owner").filter((c) => !(c.verb === "execute" && c.resource === "app:cluster/memorysearch")));
-
-    mount("memorysearch", memorySearchQuery(statusRow({ indexedBy: "ana", indexedByName: "Ana Owner", takeOver: true, backlog: 3,
+  it("a reader who may not act sees everything and is offered nothing", async () => {
+    // Who may act is the engine's answer (the status's mayAct): an active
+    // cluster owner holding the part's execute. This reader holds execute, as
+    // somebody granted the part does, and is not an active owner.
+    const mayNot = { mayAct: false };
+    mount("memorysearch", memorySearchQuery(statusRow({ ...mayNot, indexedBy: "ana", indexedByName: "Ana Owner", takeOver: true, backlog: 3,
       waitingReason: "none of the indexer's machines offering qwen3-embedding:0.6b is online" })));
     expect(await screen.findByText("Indexed on Ana Owner's machines")).toBeTruthy();
     expect(screen.getByText("3 items waiting: none of Ana Owner's machines offering qwen3-embedding:0.6b is online")).toBeTruthy();
@@ -349,22 +352,30 @@ describe("Cluster > Settings > Memory search", () => {
     cleanup();
 
     // A vendor model nobody chose: said as what pays for it, and not put to this reader.
-    mount("memorysearch", memorySearchQuery(statusRow({ providerRef: VENDOR, kind: "vendor", label: "text-embedding-3-small", indexedBy: "", indexedByName: "", chosenBy: "", needsConfirmation: true })));
+    mount("memorysearch", memorySearchQuery(statusRow({ ...mayNot, providerRef: VENDOR, kind: "vendor", label: "text-embedding-3-small", indexedBy: "", indexedByName: "", chosenBy: "", needsConfirmation: true })));
     expect(await screen.findByText("Paid by the cluster's vendor account")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Keep" })).toBeNull();
     cleanup();
 
     // A switch, with its progress and its take-over's reason in view, and no act.
-    mount("memorysearch", memorySearchQuery(statusRow({ switch: switchRun({ indexedBy: "bo", indexedByName: "Bo Owner", takeOver: true }) })));
+    mount("memorysearch", memorySearchQuery(statusRow({ ...mayNot, switch: switchRun({ indexedBy: "bo", indexedByName: "Bo Owner", takeOver: true }) })));
     expect(await screen.findByRole("progressbar")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Re-index on my machines" })).toBeNull();
     cleanup();
 
-    mount("memorysearch", memorySearchQuery(statusRow({ switch: switchRun({ state: "needsDecision", counts: { total: 8310, done: 8305, skipped: 0, unsourced: 2, failed: 3 } }) })));
+    mount("memorysearch", memorySearchQuery(statusRow({ ...mayNot, switch: switchRun({ state: "needsDecision", counts: { total: 8310, done: 8305, skipped: 0, unsourced: 2, failed: 3 } }) })));
     expect(await screen.findByText("5 items could not be indexed (3 failed, 2 cannot be rebuilt).")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Switch anyway" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    cleanup();
+
+    // Without execute on the part the engine says the same, and the page draws the same.
+    setEffectiveCapabilities(seededAccessFor("owner").filter((c) => !(c.verb === "execute" && c.resource === "app:cluster/memorysearch")));
+    mount("memorysearch", memorySearchQuery(statusRow({ ...mayNot, indexedBy: "ana", indexedByName: "Ana Owner", takeOver: true })));
+    expect(await screen.findByText("Indexed on Ana Owner's machines")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Index on my machines" })).toBeNull();
+    expect(screen.queryByRole("radiogroup", { name: "Memory search model" })).toBeNull();
   });
 
   it("a vendor binding picked before asks once", async () => {
