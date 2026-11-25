@@ -63,6 +63,12 @@ type ConnectionDrop struct {
 // does not cover them, so a deliberate reconnect can happen during one, and
 // counting them would file Cockpit's own reconnect as a dropped link. If
 // busy() ever changes, this set must change with it.
+//
+// ToolCalls includes a call that had already left pending because the stream
+// ended under it (streamSession.callsLeftWithStream): a lost link wakes the
+// waiting call and the receive loop at once, and on a loaded replica the call
+// can get there first, which is how a step lost with its machine's link went
+// unrecorded on 2026-11-25.
 type WorkInFlight struct {
 	ToolCalls, AppSessions, AppSignIns, ModelCalls, ModelPulls int
 }

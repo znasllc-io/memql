@@ -5430,7 +5430,11 @@ superseded`), and whether work was in flight (Cockpit's `Runner.busy()` guard
 means it never reconnects on purpose then). `classifyStreamEnd`
 (`component/worker/connection_drop.go`) turns those into a drop; the replica
 writes one append-only `v1:worker:connectionDrop` row (`streamSession.recordDrop`,
-`component/worker/server.go`). On that afternoon the rule counts seven of the
+`component/worker/server.go`). A lost link wakes the receive loop and every call
+waiting on the machine at once, so a call can leave its pending entry before the
+closing stream counts it; it is tallied as it leaves (`callsLeftWithStream`),
+after a loaded runner recorded no drop for a lost step on 2026-11-25
+(`TestACallThatLeftWithTheStreamStillCountsAsWorkInFlight`). On that afternoon the rule counts seven of the
 eight lost links, including the one that failed the lanes, and none of the
 deliberate reconnects.
 

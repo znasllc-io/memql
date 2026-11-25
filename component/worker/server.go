@@ -477,9 +477,18 @@ type streamSession struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	mu          sync.Mutex
-	pending     map[string]chan *memqlv1.ToolResult
-	toolSharing map[string]SharingSubjects
+	mu      sync.Mutex
+	pending map[string]chan *memqlv1.ToolResult
+	// callsLeftWithStream counts the calls that were waiting on the machine
+	// when this stream's context ended and that left pending BEFORE close
+	// counted it (dispatch's s.ctx.Done branch). A lost link ends the stream's
+	// context for the receive loop and for every waiting call at once, so a
+	// call can win that race, and a step lost with its machine's link would
+	// otherwise not count as work in flight (close, WorkInFlight). Counted
+	// only while pending is live, so a call close already counted is never
+	// counted twice. Covered by TestACallThatLeftWithTheStreamStillCountsAsWorkInFlight.
+	callsLeftWithStream int
+	toolSharing         map[string]SharingSubjects
 	// chunkSinks holds the per-call ToolStream callback, keyed by call id,
 	// under the SAME lock as pending because the two have the same
 	// lifetime: registered when a dispatch goes out, dropped when its
@@ -658,7 +667,10 @@ func (s *streamSession) close(cause error) {
 			s.server.registry.RemoveSession(s.worker)
 		}
 		s.mu.Lock()
-		pendingCount := len(s.pending)
+		// The calls still waiting, plus those that already left because the
+		// stream ended under them (callsLeftWithStream): a lost link wakes both
+		// at once, and either can get here first.
+		pendingCount := len(s.pending) + s.callsLeftWithStream
 		// Counted before failOpenAppSignIns empties the map below: an open
 		// sign-in is work Cockpit would not reconnect under (WorkInFlight).
 		openSignIns := len(s.appSignIns)
@@ -959,8 +971,16 @@ func (s *streamSession) dispatch(ctx context.Context, dispatch *memqlv1.ToolDisp
 	}
 	s.mu.Unlock()
 
+	// leftWithStream is set only on the s.ctx.Done branch below: the call was
+	// sent and the stream ended under it. Tallied in the same critical section
+	// that drops the pending entry, so close sees the call exactly once, in
+	// one place or the other (callsLeftWithStream).
+	leftWithStream := false
 	defer func() {
 		s.mu.Lock()
+		if leftWithStream && s.pending != nil {
+			s.callsLeftWithStream++
+		}
 		delete(s.pending, dispatch.GetCallId())
 		delete(s.toolSharing, dispatch.GetCallId())
 		delete(s.chunkSinks, dispatch.GetCallId())
@@ -1006,6 +1026,7 @@ func (s *streamSession) dispatch(ctx context.Context, dispatch *memqlv1.ToolDisp
 		// have the dispatcher run it a second time on another machine.
 		return nil, context.Cause(ctx)
 	case <-s.ctx.Done():
+		leftWithStream = true
 		return nil, ErrWorkerDisconnected
 	}
 }

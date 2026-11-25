@@ -3,6 +3,7 @@ package worker
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -116,6 +117,58 @@ func TestAStreamLostWithWorkInFlightRecordsOneDrop(t *testing.T) {
 	drops := f.store.recorded()
 	if len(drops) != 1 || drops[0].Cause != DropCauseWorkInFlight || drops[0].WorkInFlight != 1 {
 		t.Fatalf("recorded %+v, want one work-in-flight drop with one call", drops)
+	}
+}
+
+// THE RACE A LOST LINK RUNS (failed main's push run for 6c533397a on a loaded
+// runner, 2026-11-25). When a link dies, the stream's context ends for the
+// receive loop and for every call waiting on the machine at once, and a call
+// that wakes first leaves pending before close counts it. Here the call leaves
+// first, deterministically: the stream's context ends, the call returns, and
+// only then does the session close. It is still work the stream was carrying.
+func TestACallThatLeftWithTheStreamStillCountsAsWorkInFlight(t *testing.T) {
+	store, log := &dropStore{}, &lockedBuffer{}
+	srv := newServer(slog.New(slog.NewTextHandler(log, nil)), store, NewRegistry(nil, time.Now), nil, time.Now, "agent-a")
+	stream := &fakeWorkerStream{}
+	w := &Worker{RegistrationId: "reg-1", OwnerUserId: "owner"}
+	ctx, cancel := context.WithCancel(context.Background())
+	session := newStreamSession(srv, stream, w, ctx, cancel)
+	w.SetDispatchFunc(session.dispatch, cancel)
+
+	callDone := make(chan error, 1)
+	go func() {
+		_, err := w.Dispatch(context.Background(), &memqlv1.ToolDispatch{CallId: "running-step"})
+		callDone <- err
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		stream.mu.Lock()
+		sent := len(stream.sent)
+		stream.mu.Unlock()
+		if sent == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the call was never sent to the machine")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	cancel() // the link is lost: the stream's context ends under the waiting call
+	select {
+	case err := <-callDone:
+		if !errors.Is(err, ErrWorkerDisconnected) {
+			t.Fatalf("the waiting call ended with %v, want ErrWorkerDisconnected", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the waiting call did not end with the stream")
+	}
+	session.close(io.EOF) // the receive loop gets there second
+	drops := store.recorded()
+	if len(drops) != 1 || drops[0].Cause != DropCauseWorkInFlight || drops[0].WorkInFlight != 1 {
+		t.Fatalf("recorded %+v, want one work-in-flight drop with the call that left with the stream", drops)
+	}
+	if got := log.count("pending_calls_aborted=1"); got != 1 {
+		t.Fatalf("the disconnect line counts the call %d times, want once", got)
 	}
 }
 
