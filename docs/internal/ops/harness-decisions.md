@@ -2819,7 +2819,18 @@ asks. A healthy indexer keeps it, and only an empty chooser is filled; a vendor
 model has no indexer and only an empty chooser is filled (which also confirms
 it). Rejected: replacing a healthy indexer, which would move every person's
 text to another owner's machines for nothing, and taking over when neither
-catalog offers the model, which would leave nobody able to index. Tests:
+catalog offers the model, which would leave nobody able to index.
+**It applies too when the indexer's machines are only offline**: none of the
+indexer's machines offering the model is online while one of the caller's is.
+Trigger: with catalog presence alone, an indexer whose laptop slept kept every
+other owner from taking over while search by meaning failed for everybody,
+against design section 1's pause and section 8's example ("none of your
+machines offering ... is online"). Evidence: the fleet catalog's own online
+flag on a machine that embeds with the model (`FleetMachine.Online`, which
+`fleetcatalog.Project` sets while a replica holds the machine's stream, the
+flag the router and the choices read; `memorySearchOffering`). Cost: an owner
+whose machine merely slept finds another owner indexing when it wakes, after an
+explicit act on the same model that re-indexes nothing. Tests:
 `TestChoosingTheModelInUseTakesOverAnIndexerWhoCannotIndex`,
 `TestAFlippedSwitchWhoseIndexerCannotIndexIsTakenOverByChoosingItAgain`,
 `TestChoosingTheRunningSwitchsTargetAgainTakesItOver`,

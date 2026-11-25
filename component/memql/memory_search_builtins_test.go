@@ -489,10 +489,18 @@ func TestASecondSwitchIsRefusedWhileOneRuns(t *testing.T) {
 	require.Equal(t, 1, f.runAttempts)
 }
 
-// offeredFor is a catalog with one model, embedding or not, on one machine.
+// offeredFor is a catalog with one model, embedding or not, on one machine
+// that is offline.
 func offeredFor(model string, embeds bool) []FleetModel {
 	return []FleetModel{{ModelId: model, Embeddings: embeds, Machines: []FleetMachine{{RegistrationId: "m-" + model,
 		Capabilities: FleetModelCapabilities{Embeddings: embeds}}}}}
+}
+
+// onlineFor is a catalog with one embedding model on one machine that is
+// online: a replica holds its stream (the fleet catalog's online rule).
+func onlineFor(model string) []FleetModel {
+	return []FleetModel{{ModelId: model, Embeddings: true, Machines: []FleetMachine{{RegistrationId: "m-" + model,
+		Capabilities: FleetModelCapabilities{Embeddings: true}, Online: true}}}}
 }
 
 // tickUntil runs the index job one step a tick until its switch is in state.
@@ -536,6 +544,23 @@ func TestChoosingTheModelInUseTakesOverAnIndexerWhoCannotIndex(t *testing.T) {
 			f.catalogs[fakeOwner] = offeredFor(model, true)
 			f.catalogs[other] = offeredFor(model, true)
 		}, fakeOwner, fakeOwner},
+		// Design section 1's pause and section 8's example: while the
+		// indexer's laptop sleeps, search waits for everybody, so an owner
+		// whose machine is awake takes over.
+		{"the indexer's machines offering it are all offline, and one of the caller's is online", func(f *memorySearchFake) {
+			f.catalogs[fakeOwner] = offeredFor(model, true)
+			f.catalogs[other] = onlineFor(model)
+		}, other, other},
+		{"the indexer's machine offering it is online", func(f *memorySearchFake) {
+			f.catalogs[fakeOwner] = onlineFor(model)
+			f.catalogs[other] = onlineFor(model)
+		}, fakeOwner, fakeOwner},
+		{"an online machine of the indexer's that offers it for something other than embeddings is not one offering it", func(f *memorySearchFake) {
+			f.catalogs[fakeOwner] = []FleetModel{{ModelId: model, Embeddings: true, Machines: []FleetMachine{
+				{RegistrationId: "m-embeds", Capabilities: FleetModelCapabilities{Embeddings: true}},
+				{RegistrationId: "m-chats", Online: true}}}}
+			f.catalogs[other] = onlineFor(model)
+		}, other, other},
 		{"the indexer's machines offer it and nobody chose it", func(f *memorySearchFake) {
 			f.job.active.ChosenBy = ""
 			f.catalogs[fakeOwner] = offeredFor(model, true)
@@ -1088,6 +1113,14 @@ func TestStatusSaysWhenChoosingTheModelInUseTakesOver(t *testing.T) {
 		{"no machine of the indexer's offers it, and one of the caller's does", other, func(f *memorySearchFake) {
 			f.catalogs[other] = offeredFor(model, true)
 		}, true},
+		{"the indexer's machines offering it are offline, and one of the caller's is online", other, func(f *memorySearchFake) {
+			f.catalogs[fakeOwner] = offeredFor(model, true)
+			f.catalogs[other] = onlineFor(model)
+		}, true},
+		{"the indexer's machines offering it are offline, and so are the caller's", other, func(f *memorySearchFake) {
+			f.catalogs[fakeOwner] = offeredFor(model, true)
+			f.catalogs[other] = offeredFor(model, true)
+		}, false},
 		// The same, with the catalogs unreadable: the act is withheld for that
 		// read rather than offered on a guess, and the status still answers.
 		{"a catalog that cannot be read", other, func(f *memorySearchFake) {

@@ -57,10 +57,10 @@ package memql
 //
 // Choosing the model in use again is how an owner TAKES OVER indexing it
 // (design record section 1, ruling R9; memorySearchTakesOver): when its indexer
-// is missing, is no longer an active owner, or has no machine -- own or lent,
-// embeddings only -- offering the model while one of the caller's does, the
-// caller becomes its indexer and chooser. Otherwise only an empty chooser is
-// filled. Choosing a running switch's own target is the same take-over of the
+// is missing, is no longer an active owner, has no machine -- own or lent,
+// embeddings only -- offering the model while one of the caller's does, or has
+// none online while one of the caller's is, the caller becomes its indexer and
+// chooser. Otherwise only an empty chooser is filled. Choosing a running switch's own target is the same take-over of the
 // RUN's indexer. Choosing the model in use while a switch runs, before its flip,
 // is still the take-over of the BINDING's (ruling R13): search queries and every
 // writer embed as the binding's indexer for the whole rebuild, and refusing it
@@ -334,26 +334,47 @@ func memorySearchStartsASwitch(sw MemoryIndexRun, has bool, active EmbedderBindi
 	return bound && provider != active.ProviderRef
 }
 
-// memorySearchOffers reports whether a catalog holds model for embeddings, on
-// any of its machines, online or not: an offline machine still holds the model
-// (adoptEmbedderIndexer's reading).
-func memorySearchOffers(models []FleetModel, model string) bool {
+// memorySearchOffering reads one person's catalog -- their machines and the
+// ones lent to them -- for model, embeddings only: whether any machine offers
+// it, online or not (an offline machine still holds the model, as
+// adoptEmbedderIndexer reads it), and whether one that offers it is ONLINE. The
+// online reading is the fleet catalog's own (FleetMachine.Online, which
+// fleetcatalog.Project sets while a replica holds the machine's stream), the
+// flag the router and the choices read too; nothing here decides it again.
+func memorySearchOffering(models []FleetModel, model string) (offers, online bool) {
 	for _, m := range models {
-		if m.ModelId == model && m.Embeddings {
-			return true
+		if m.ModelId != model || !m.Embeddings {
+			continue
+		}
+		offers = true
+		for _, mm := range m.Machines {
+			if mm.Capabilities.Embeddings && mm.Online {
+				return true, true
+			}
 		}
 	}
-	return false
+	return offers, false
 }
 
 // memorySearchTakesOver is the TAKE-OVER rule (design record section 1, ruling
 // R9): whether caller, choosing ref again, becomes its indexer in place of
-// indexer. A machine model's indexer is replaced when it is empty, is no longer
-// an active owner, or has no machine -- own or lent, embeddings only -- offering
-// the model while one of the caller's does; replacing an indexer whose machines
-// offer it, or with a caller whose machines do not either, would make nothing
-// index. A vendor model has no indexer, and the caller never takes over from
-// themself.
+// indexer. A machine model's indexer is replaced when it
+//
+//   - is empty, or no longer an active owner;
+//   - has no machine -- own or lent, embeddings only -- offering the model while
+//     one of the caller's does; or
+//   - has machines offering it, none of them online, while one of the caller's
+//     is online. TRIGGER: the indexer's laptop asleep. Search by meaning then
+//     waits for everybody (design section 1's pause, section 8's "none of your
+//     machines offering ... is online"), and counting catalog presence as
+//     enough left a second owner no way to take over while it slept.
+//
+// Never otherwise: replacing an indexer with a machine online that offers the
+// model, or with a caller who would serve no better, would move every person's
+// memory text for nothing. The cost of the third trigger: an owner whose
+// machine merely slept a while finds another owner indexing when it wakes,
+// after an explicit act on the same model that re-indexes nothing. A vendor
+// model has no indexer, and the caller never takes over from themself.
 func memorySearchTakesOver(ctx context.Context, w memorySearchWorld, caller, indexer, ref string) (bool, error) {
 	model, fleet := IsFleetReference(ref)
 	if !fleet || BareShortId(indexer) == BareShortId(caller) {
@@ -373,14 +394,16 @@ func memorySearchTakesOver(ctx context.Context, w memorySearchWorld, caller, ind
 	if err != nil {
 		return false, fmt.Errorf("reading whose machines offer %s: %w", model, err)
 	}
-	if memorySearchOffers(theirs, model) {
+	theyOffer, theyServe := memorySearchOffering(theirs, model)
+	if theyServe {
 		return false, nil
 	}
 	mine, err := w.catalog(ctx, caller)
 	if err != nil {
 		return false, fmt.Errorf("reading whose machines offer %s: %w", model, err)
 	}
-	return memorySearchOffers(mine, model), nil
+	iOffer, iServe := memorySearchOffering(mine, model)
+	return (!theyOffer && iOffer) || iServe, nil
 }
 
 // memorySearchOwnerGate is every act's owner check (the header's "every act

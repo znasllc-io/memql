@@ -5006,7 +5006,7 @@ QueryClient.prototype.memorySearchStatus = function (this: QueryClient, args: Me
   return this.executeNamed("memorySearchStatus", buildMemorySearchStatus(args), opts);
 };
 
-/** Choose memory search's model. With none bound it is bound at once. Choosing the model in use (or a running switch's own target) moves nothing, and takes over indexing it when its indexer is no longer an owner or has no machine offering it. Otherwise the whole index is rebuilt with the new model in the background while search keeps the current one, and search switches over by itself when the rebuild is complete; a machine model is indexed on the chooser's machines and the ones lent to them, a vendor model is paid by the cluster's vendor account. Refused while another switch runs, except once it has switched over: choosing another model then starts it. Only an active cluster owner chooses. */
+/** Choose memory search's model. With none bound it is bound at once. Choosing the model in use (or a running switch's own target) moves nothing, and takes over indexing it when its indexer is no longer an owner, has no machine offering it, or has none of those online while one of the caller's is. Otherwise the whole index is rebuilt with the new model in the background while search keeps the current one, and search switches over by itself when the rebuild is complete; a machine model is indexed on the chooser's machines and the ones lent to them, a vendor model is paid by the cluster's vendor account. Refused while another switch runs, except once it has switched over: choosing another model then starts it. Only an active cluster owner chooses. */
 export interface MemorySearchSwitchArgs {
   provider: string;
 }

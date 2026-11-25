@@ -68,11 +68,13 @@ qwen3-embedding:0.6b is online").
 
 **An owner takes over by choosing the model again.** When the indexer is
 missing, or is no longer an active owner, or none of their machines (their own
-or lent to them) offers the model while one of yours does, Memory search offers
-an active owner **Index on my machines**, and choosing it makes them the
-indexer. It is offered only where it changes something: a healthy indexer is
-never replaced, and a machine that is only offline still counts as offering the
-model, so an asleep laptop is waited for rather than taken over.
+or lent to them) offers the model while one of yours does, or none of theirs
+offering it is online while one of yours is, Memory search offers an active
+owner **Index on my machines**, and choosing it makes them the indexer. It is
+offered only where it changes something: an indexer with a machine online that
+offers the model is never replaced. While the indexer's laptop sleeps, an owner
+whose machine is awake can take over, rather than every search waiting for it
+to wake.
 
 A vendor model has no indexer.
 
