@@ -122,7 +122,9 @@ package memql
 //     is scoped to the model that embedded it, ai_semantic_cache.go), and the
 //     run still says `switching` with no previous model; the next tick sees
 //     the binding already moved, writes no binding, empties the cache and
-//     records `finishing`, taking the previous model from the binding.
+//     records `finishing`, taking the previous model from the binding. A run
+//     parked as `waiting` here (a tick that lost the job lock wrote its wait
+//     meanwhile) resumes to `switching` and does the same.
 //  4. The cache emptied, `finishing` not yet recorded: as 3, and the DELETE
 //     runs again.
 //  5. `finishing` recorded: the flip is over, and the walk after it follows.
@@ -384,10 +386,22 @@ func memoryIndexSwitchActive(state string) bool {
 // finishing; one whose first walk ended (lastPassAt) was catching up, and a
 // switch that waited on its way to the flip walks once more before it, which
 // costs one walk of presence checks; otherwise it was indexing.
+//
+// A SWITCH WHOSE BINDING NAMES ITS TARGET BUT WHOSE RUN NAMES NO PREVIOUS MODEL
+// resumes to `switching`. The flip records the previous model together with
+// `finishing` (flipMemoryIndex), so such a run never recorded the end of its
+// flip: a tick that had lost the job lock wrote its wait between another
+// tick's binding write and that `finishing`, and the other tick's write was
+// refused by the fence. Resumed as `finishing`, the rest of the flip -- the
+// semantic answer cache emptied, the previous model recorded -- would never
+// run; resumed as `switching`, it runs (ruling R6), and work takes it without
+// the indexer check.
 func memoryIndexResumeState(run MemoryIndexRun, active EmbedderBinding) string {
 	switch {
 	case run.Kind != memoryIndexKindSwitch:
 		return memoryIndexStateIndexing
+	case active.ProviderRef == run.TargetRef && active.Dimensions == run.TargetDimensions && strings.TrimSpace(run.PreviousRef) == "":
+		return memoryIndexStateSwitching
 	case active.ProviderRef == run.TargetRef && active.Dimensions == run.TargetDimensions:
 		return memoryIndexStateFinishing
 	case !run.LastPassAt.IsZero():
@@ -541,9 +555,11 @@ func (t *memoryIndexTick) pick(ctx context.Context) (bool, error) {
 // and stopped before recording `finishing` has left only steps that embed
 // nothing and choose no machine -- emptying the semantic answer cache,
 // recording `finishing` and the model replaced -- so they run whatever the
-// indexer's standing. Parked instead, the run would resume as `finishing`
-// (memoryIndexResumeState) and those steps would never run. The walk after the
-// flip is checked as usual, and waits for an owner.
+// indexer's standing. Parked instead, those steps would wait for an owner
+// they do not need. So a run in `switching` with the binding moved takes them
+// at once, and so does a run parked as `waiting` in that state, which resumes
+// to `switching` (memoryIndexResumeState). The walk after the flip is checked
+// as usual, and waits for an owner.
 func (t *memoryIndexTick) work(ctx context.Context) error {
 	// The sources and the table first: a waiting backfill still counts its
 	// backlog over them (count).
@@ -555,12 +571,15 @@ func (t *memoryIndexTick) work(ctx context.Context) error {
 	}
 	t.table, t.run.TargetTable = table, table
 	if t.run.State == memoryIndexStateWaiting {
-		// Still refused: the run waits on, unchanged (save writes nothing).
-		if reason, wait := t.indexerWait(ctx); wait {
-			return t.wait(ctx, reason)
+		resume := memoryIndexResumeState(t.run, t.active)
+		// Still refused: the run waits on, unchanged (save writes nothing). The
+		// rest of a flip whose binding moved is not refused (above).
+		if resume != memoryIndexStateSwitching {
+			if reason, wait := t.indexerWait(ctx); wait {
+				return t.wait(ctx, reason)
+			}
 		}
-		t.run.State = memoryIndexResumeState(t.run, t.active)
-		t.run.WaitingReason = ""
+		t.run.State, t.run.WaitingReason = resume, ""
 	}
 	checked := false
 	check := func() (string, bool) {

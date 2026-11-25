@@ -2627,14 +2627,22 @@ leaves:
    `semantic_ai_cache`, and records `finishing` with the previous model taken
    from the binding. It does so even when the indexer is no longer an owner:
    nothing in those steps embeds or chooses a machine, so the run is not
-   parked (parked, it would resume as `finishing` and skip them); only the walk
-   after the flip waits.
+   parked; only the walk after the flip waits. A run that WAS parked here, as
+   `waiting` with no previous model (a tick that had lost the job lock wrote
+   its wait between another tick's binding write and its `finishing`, which
+   the fence then refused), resumes to `switching` rather than `finishing`
+   (`memoryIndexResumeState`), and takes the same steps without the indexer
+   check: resumed as `finishing`, the cache delete and the previous model
+   would never come.
 4. The cache emptied, `finishing` not yet recorded: as 3, and the DELETE runs
    again.
 5. `finishing` recorded: the flip is over, and the walk after it follows.
 
-Tests: `TestAResumedFlipFinishesFromTheBinding` (another replica; the indexer
-no longer an owner).
+Only a `switching` run flips: `flipMemoryIndex` refuses `needsDecision`, which
+Switch anyway leaves by writing `switching` for the tick to flip. Tests:
+`TestAResumedFlipFinishesFromTheBinding` (another replica; the indexer no
+longer an owner; parked as waiting after the binding moved),
+`TestAWaitingRunResumesTheWalkItWasIn`, `TestOnlyASwitchingRunFlips`.
 
 **The semantic answer cache follows the binding (ruling R8).** It was wired once
 at boot with the model bound then (`WireSemanticCache`), so after a flip every

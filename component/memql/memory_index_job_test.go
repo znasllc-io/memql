@@ -432,6 +432,33 @@ func TestAHeldSwitchLeavesTheBackfillRunning(t *testing.T) {
 	require.Greater(t, len(f.saves), saves, "past ten minutes the backfill walks again")
 }
 
+// A waiting run returns to the walk it was in. A switch whose binding already
+// names its target was past the flip -- unless no previous model is recorded on
+// the run, which the flip records together with `finishing`: then the binding
+// moved and the rest of the flip never ran (a tick that lost the job lock wrote
+// its wait meanwhile), and the run resumes to `switching` so that rest runs.
+func TestAWaitingRunResumesTheWalkItWasIn(t *testing.T) {
+	old := EmbedderBinding{ProviderRef: fakeOldRef, Dimensions: 4}
+	flipped := EmbedderBinding{ProviderRef: fakeNewRef, Dimensions: 4, PreviousRef: fakeOldRef}
+	sw := MemoryIndexRun{Kind: memoryIndexKindSwitch, State: memoryIndexStateWaiting, TargetRef: fakeNewRef, TargetDimensions: 4}
+	for _, tc := range []struct {
+		name   string
+		run    func(MemoryIndexRun) MemoryIndexRun
+		active EmbedderBinding
+		want   string
+	}{
+		{"a backfill", func(r MemoryIndexRun) MemoryIndexRun { r.Kind = memoryIndexKindBackfill; return r }, old, memoryIndexStateIndexing},
+		{"a switch in its first walk", func(r MemoryIndexRun) MemoryIndexRun { return r }, old, memoryIndexStateIndexing},
+		{"a switch on its way to the flip", func(r MemoryIndexRun) MemoryIndexRun { r.LastPassAt = time.Now(); return r }, old, memoryIndexStateCatchingUp},
+		{"a switch past its flip", func(r MemoryIndexRun) MemoryIndexRun { r.PreviousRef = fakeOldRef; return r }, flipped, memoryIndexStateFinishing},
+		{"a switch whose binding moved before the flip was recorded", func(r MemoryIndexRun) MemoryIndexRun { r.LastPassAt = time.Now(); return r }, flipped, memoryIndexStateSwitching},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, memoryIndexResumeState(tc.run(sw), tc.active))
+		})
+	}
+}
+
 // The step is the job's own: a client cannot run it.
 func TestTheIndexStepRefusesACallWithoutInternalOrigin(t *testing.T) {
 	e := auditTestEngine(t)

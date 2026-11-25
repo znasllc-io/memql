@@ -844,6 +844,51 @@ func TestAResumedFlipFinishesFromTheBinding(t *testing.T) {
 		require.Equal(t, oldRef, got.PreviousRef)
 		require.Len(t, f.present(newRef), 3)
 	})
+
+	// A tick that lost the job lock can write its wait between another tick's
+	// binding write and its `finishing`: the run then says `waiting` with no
+	// previous model while the binding names the target. It resumes to
+	// `switching`, and the rest of the flip runs with the indexer unable to
+	// index, as above; only the walk after it waits.
+	t.Run("parked as waiting after the binding moved", func(t *testing.T) {
+		f, oldRef, newRef := crashedFlip(t)
+		cached := f.semanticCacheRow()
+		f.setRun(f.a, func(r *MemoryIndexRun) { r.State, r.WaitingReason = memoryIndexStateWaiting, memoryIndexOwnerReason })
+		f.setOwners()
+		f.tick(f.b, 45*time.Second)
+		got := f.run(memoryIndexKindSwitch)
+		require.Equal(t, oldRef, got.PreviousRef, "the rest of the flip ran")
+		require.Zero(t, cached(), "the semantic answer cache is emptied")
+		require.Equal(t, memoryIndexStateWaiting, got.State, "the walk after the flip waits for an owner")
+		require.Empty(t, f.present(newRef), "nothing is embedded on a former owner's machines")
+
+		f.setOwners(f.owner)
+		f.tick(f.b, 45*time.Second)
+		got = f.run(memoryIndexKindSwitch)
+		require.Equal(t, memoryIndexStateDone, got.State)
+		require.Equal(t, oldRef, got.PreviousRef)
+		require.Len(t, f.present(newRef), 3)
+	})
+}
+
+// Only a `switching` run flips. Switch anyway writes `switching` and the tick
+// flips it (ruling R2 as amended), so a switch still held in needsDecision is
+// the owner's to decide, and a flip asked of it moves nothing.
+func TestOnlyASwitchingRunFlips(t *testing.T) {
+	f := newMemoryIndexDBFixture(t)
+	oldRef, newRef := f.ref("old", 8), f.ref("new", 8)
+	f.bind(oldRef, f.owner)
+	f.startSwitch(newRef, f.owner)
+	f.setRun(f.a, func(r *MemoryIndexRun) { r.State = memoryIndexStateNeedsDecision })
+	held := f.run(memoryIndexKindSwitch)
+
+	require.ErrorContains(t, f.a.flipMemoryIndex(f.ctx, held), "from switching")
+	require.Equal(t, oldRef, f.binding().ProviderRef, "the binding is not moved")
+	require.Equal(t, memoryIndexStateNeedsDecision, f.run(memoryIndexKindSwitch).State)
+
+	f.setRun(f.a, func(r *MemoryIndexRun) { r.State = memoryIndexStateSwitching })
+	require.NoError(t, f.a.flipMemoryIndex(f.ctx, f.run(memoryIndexKindSwitch)), "the reachable positive")
+	require.Equal(t, newRef, f.binding().ProviderRef)
 }
 
 // An indexer who is no longer an active owner makes the run wait with a plain

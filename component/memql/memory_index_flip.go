@@ -23,13 +23,15 @@ import (
 // anywhere in it is finished by the next tick.
 //
 // run is the switch the caller read; the flip happens only for that switch
-// (same target, same start) in `switching` -- the job's -- or `needsDecision`
-// (an owner's Switch anyway). The binding lock (lockAskConversationKind
-// "active", "embedder-binding") is held around the fresh reads and every
-// write, and the binding write is fenced to the version read under it, so a
-// concurrent binding writer on another replica is never reverted and the new
-// version is stamped after the one read (memql#5431). Every id it writes is
-// derived here (RetiredEmbedderBindingID), never taken from input.
+// (same target, same start) in `switching`. An owner's Switch anyway writes
+// `switching` too, and the next tick flips it (memorySearchSwitchAnyway): a
+// run held in needsDecision is the owner's to decide, and is refused here.
+// The binding lock (lockAskConversationKind "active", "embedder-binding") is
+// held around the fresh reads and every write, and the binding write is
+// fenced to the version read under it, so a concurrent binding writer on
+// another replica is never reverted and the new version is stamped after the
+// one read (memql#5431). Every id it writes is derived here
+// (RetiredEmbedderBindingID), never taken from input.
 func (e *MemQLEngine) flipMemoryIndex(ctx context.Context, run MemoryIndexRun) error {
 	if run.Kind != memoryIndexKindSwitch {
 		return fmt.Errorf("memory index: only a switch flips the model, not a %q run", run.Kind)
@@ -46,8 +48,8 @@ func (e *MemQLEngine) flipMemoryIndex(ctx context.Context, run MemoryIndexRun) e
 	if !ok || current.TargetRef != run.TargetRef || current.TargetDimensions != run.TargetDimensions || !current.StartedAt.Equal(run.StartedAt) {
 		return errMemoryIndexRunChanged
 	}
-	if current.State != memoryIndexStateSwitching && current.State != memoryIndexStateNeedsDecision {
-		return fmt.Errorf("memory index: a switch flips from switching or needsDecision, not from %s", current.State)
+	if current.State != memoryIndexStateSwitching {
+		return fmt.Errorf("memory index: a switch flips from switching, not from %s", current.State)
 	}
 	if _, err := EmbeddingVectorTable(current.TargetRef, current.TargetDimensions); err != nil {
 		return err
