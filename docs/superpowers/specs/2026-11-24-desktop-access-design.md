@@ -1,6 +1,15 @@
 # Desktop access: nobody enters MemQL OS without model access
 
-Design record, 2026-11-24. Status: approved by the owner 2026-11-24, built.
+Design record, 2026-11-24. Status: approved by the owner 2026-11-24, built
+(release 0.31.41), and **replaced in part on 2026-11-25** by
+[who gets into MemQL OS](2026-11-25-who-gets-into-memql-os-design.md): the
+owner's rule is that everybody enters a cluster that is set up, and a person
+with no model access gets no Ask. Replaced: decisions 1 and 3, the first
+anti-goal, section 4 and the acceptance tests "Held, with the reference",
+"Lifting" and "No desktop while held". Each is marked where it stands. The
+rest of this record is current: what counts as model access (section 1), who
+is exempt (section 2) and the engine's check (section 3) are what the new rule
+reads to decide Ask.
 The operator's guide is `docs/public/operate/auth/access-model.md`, "Who gets
 into MemQL OS".
 Follows the vendor accounts work
@@ -27,13 +36,17 @@ developers.
 
 The owner's decisions (2026-11-24):
 
-1. Everyone except the primary owners and developers needs model access to
-   enter MemQL OS, whatever apps their role gives them ("Everyone needs it").
-   The reason: model work happens outside Ask too, on the person's own access.
+1. **Replaced 2026-11-25:** nobody needs model access to enter; it is needed
+   for Ask. As decided then: everyone except the primary owners and developers
+   needs model access to enter MemQL OS, whatever apps their role gives them
+   ("Everyone needs it"). The reason: model work happens outside Ask too, on
+   the person's own access.
 2. Access that is SET UP counts even when it cannot answer right now, such as a
    lent laptop that is asleep ("Set up counts").
-3. The page tells the person to ask an administrator and shows a reference. The
-   reference goes into the logs with what is missing, and can be searched there.
+3. **Replaced 2026-11-25:** no page is shown to a person; the log line is
+   still written. As decided then: the page tells the person to ask an
+   administrator and shows a reference. The reference goes into the logs with
+   what is missing, and can be searched there.
 4. The exemption is for the primary owners and developers: the people who
    configure and own the cluster, not the owners or developers of one account.
    Account-level roles are approved but not built (accounts program P27 and P28,
@@ -58,8 +71,9 @@ Non-goals:
 
 Anti-goals, each of which makes the work a failure:
 
-- A person with nothing set up reaches the desktop. The one exception is a
-  check that cannot be answered at all (section 4).
+- **Replaced 2026-11-25:** this is now the rule, and such a person has no Ask.
+  As decided then: a person with nothing set up reaches the desktop. The one
+  exception is a check that cannot be answered at all (section 4).
 - A person whose access is set up is locked out because a machine is asleep or
   a key ran out of credit.
 - An owner or developer is locked out of the cluster they set up.
@@ -246,6 +260,15 @@ error answers "unknown", not "held".
 
 ### 4. The page (OS)
 
+**Replaced 2026-11-25.** The page is removed. A person the check finds no model
+access for enters the desktop and has no Ask; the page for a cluster that is
+not set up is "MemQL is not set up yet" again
+([2026-11-25 record](2026-11-25-who-gets-into-memql-os-design.md)). What
+follows is the design as it was built for 0.31.41, kept as history. Two parts
+of "How it behaves" carry over with a new effect: the check still asks again on
+focus, on reconnect and every 30 seconds, and an "unknown" answer still takes
+nothing away.
+
 The page is shown instead of the desktop when the check holds the person: not
 exempt, and nothing set up. It replaces today's "MemQL is not set up yet" page
 for everyone but owners and developers. It holds whether or not the cluster as
@@ -350,7 +373,8 @@ interim rule for search.
 
 ## Tests and acceptance
 
-- **Held, with the reference.** A person with nothing set up is held, and the
+- **Held, with the reference** (replaced 2026-11-25: there is no page; the
+  line and its search still hold). A person with nothing set up is held, and the
   page shows the reference. One log line carries the reference and each reason,
   and `logsSearch` with the reference finds it.
 - **Set up but not answering is admitted.** This covers a lent machine that is
@@ -363,13 +387,15 @@ interim rule for search.
 - **The exemption.** An owner or developer with nothing set up is admitted. An
   admin with nothing set up is held. A role scoped to an account is held,
   whatever it is called.
-- **Lifting.** The page lifts by itself within 30 seconds of an administrator
+- **Lifting** (replaced 2026-11-25: Ask appears by itself the same way). The
+  page lifts by itself within 30 seconds of an administrator
   lending a machine while the person watches it, when the window regains
   focus, and after a key is added on the page.
 - **One reference per showing.** Checking again while the page is shown
   returns the same reference and writes no new line; changed reasons write a
   new line under the same reference.
-- **No desktop while held.** Adding a key on the page never draws the dock,
+- **No desktop while held** (replaced 2026-11-25: removed with the page).
+  Adding a key on the page never draws the dock,
   the launcher or any app.
 - **Failure.** A check that fails lets the person in and writes no reference.
   A log line that cannot be stored holds the person with no reference shown.
