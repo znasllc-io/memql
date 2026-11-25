@@ -1429,35 +1429,44 @@ snapshots include `fundingMode` (`unfunded`, `simulation`, or `legacy`), integer
 expiry, total/day remaining seconds and UTC daily reset. `canHost` is the server's
 current decision. A pass remains visible until expiry even when exhausted.
 
-Two bounded `POST /_memql/calls/account` actions are available only to a current
-credential-backed, claimed guest key; legacy operator keys cannot mix in this
-simulated ledger. Both require `accountId` matching the authenticated cookie,
-plus a 16–128 character `idempotencyKey` containing only letters, digits, `_`,
-or `-`. The expected account is a stale-tab guard, never authority to choose a
-different key. `simulate_topup` takes integer `amountCents` of at least 1000;
-the resulting balance cannot exceed 50000. `activate_pass` takes only the
+Simulated credit only comes from a payment result in the purchase-first
+commerce lifecycle (see
+[Purchase-first adult verification](#purchase-first-adult-verification-and-provider-test-modes)):
+a simulated checkout applied with the installation's tester password in `mock`
+mode, or a provider test payment in `sandbox`. The earlier direct
+`simulate_topup` action is retired: it is refused with `checkout_required` in
+every configuration, and existing simulated balances and receipts remain.
+
+One bounded `POST /_memql/calls/account` action, `activate_pass`, spends existing
+credit. It is available only to a current credential-backed, claimed guest key;
+legacy operator keys cannot mix in this simulated ledger. It requires `accountId`
+matching the authenticated cookie, plus a 16–128 character `idempotencyKey`
+containing only letters, digits, `_`, or `-`. The expected account is a stale-tab
+guard, never authority to choose a different key. It takes only the
 server-catalog `plan`: `day` costs 150 cents for 24 hours and three room-hours;
 `month` costs 800 cents for thirty days, twenty room-hours total and three per
 UTC day. Both allow eight total participants, including the host and AI guests.
 No recurring billing, overage, referral award or discount is simulated.
 
-Top-ups preserve the current pass and its deadlines. Activation debits once and
-refuses an unexpired pass or any still-open hosted room. One immutable, private
-entry contains both the resulting wallet state and its receipt. Account/key
-gates serialize concurrent requests across replicas; the version-fenced operation
-identity makes retries durable across restart or a lost response. Repeating the
-same operation and payload returns its original receipt with `replayed: true`
-and the **latest** account snapshot, whose balance can differ from the historical
-receipt. Reusing an operation for changed payload returns `idempotency_conflict`.
+Added credit preserves the current pass and its deadlines. Activation debits once
+and refuses an unexpired pass or any still-open hosted room. One immutable,
+private entry contains both the resulting wallet state and its receipt.
+Account/key gates serialize concurrent requests across replicas; the
+version-fenced operation identity makes retries durable across restart or a lost
+response. Repeating the same operation and payload returns its original receipt
+with `replayed: true` and the **latest** account snapshot, whose balance can
+differ from the historical receipt. Reusing an operation for changed payload
+returns `idempotency_conflict`.
 
 Clients retain the same operation after an uncertain network/server response.
-Receipt lookup precedes `active_pass`, `insufficient_balance`, `balance_limit`
-and `hosted_room_open`, so those refusals prove the requested operation was not
+Receipt lookup precedes `active_pass`, `insufficient_balance` and
+`hosted_room_open`, so those refusals prove the requested operation was not
 applied. Prechecks such as `account_changed`, `simulation_disabled` and lost
 authentication do not prove that an earlier attempt failed. Local credit has no
 cash value and cannot become real payment credit. Stripe and financial compliance
-remain separate work. Funding regression tests cover receipt replay, lost replies,
-concurrent caps/debits, account isolation, expiry and logout/sign-in persistence.
+remain separate work. Funding regression tests cover activation replay, lost
+replies, concurrent debits, account isolation, expiry and logout/sign-in
+persistence.
 
 
 ### Bounded usage preview
@@ -1472,7 +1481,7 @@ processor, or a production commercial entitlement.
 The account capability `usagePreview` is true only while both flags are enabled.
 A claimed, active key with a live passkey and positive simulated balance receives
 `hostingMode: "usage_preview"` and can start or schedule without buying a calendar
-pass. Top-ups retain their existing receipts and idempotency contract. Preview
+pass. Credit arrives only through payment results. Preview
 calls never debit balance, activate a pass, or write estimated history costs.
 The UI must distinguish illustrative usage estimates from charged amounts.
 
@@ -1480,7 +1489,7 @@ A preview admits at most eight total participants and one open room per payer ke
 Each room stores immutable `fundingMode: "usage_preview"`, its participant ceiling
 and a deadline at most 180 minutes after creation. A scheduled preview is at most
 180 minutes, and ordinary booking-end and host-left limits still apply. Queueing,
-refresh, rejoin, top-up, process retry and host transfer cannot extend that ceiling.
+refresh, rejoin, added credit, process retry and host transfer cannot extend that ceiling.
 The original payer gate serializes openings across replicas, including a guest
 opening a scheduled call. A retained pending room therefore reserves that key's
 single preview slot until normal cleanup or its deadline.
@@ -1498,7 +1507,7 @@ New preview rooms consume no old pass allowance. Disabling preview prevents new
 preview openings while existing bounded rooms retain their stored deadline;
 valid old passes remain usable when simulated funding is still enabled.
 
-`usage_preview_db_test.go` exercises persisted top-up and sign-in, bounded
+`usage_preview_db_test.go` exercises persisted credit and sign-in, bounded
 admission, cross-replica opening races, booking limits, deadline and cleanup
 failures, first-admission repair, unchanged balance/history cost, old pass
 compatibility and host-left cleanup. Actual participant billing and optional
@@ -1625,6 +1634,52 @@ endpoint for `checkout_begin`, `checkout_refresh`, `verification_begin` and
 `verification_refresh`. Local-only outcome operations are rejected in sandbox.
 A browser redirect only resumes the interface: provider reads determine results.
 
+### Simulated results and the tester password
+
+In `mock` mode a simulated provider page is replaced by two account actions:
+`mock_checkout_complete` (`paid`, `declined`, `requires_action`, `pending`,
+`cancelled`) and `mock_verification_complete` (`approved`, `underage`,
+`declined`, `in_review`, `abandoned`, `expired`), each with the operation's
+`operationId` and an `outcome`. Every result except backing out needs the
+installation's tester password in `testerPassword` (at most 64 bytes): backing
+out, a `cancelled` checkout or an `abandoned` age check, is always allowed, as
+leaving Stripe's or Didit's own page is, and must not carry a password. The
+password is checked by the bff, never only by the client. It is never stored,
+digested or logged.
+
+| Refusal | HTTP | Meaning |
+| --- | --- | --- |
+| `tester_access_unavailable` | 403 | No valid hash is configured, so every gated result is refused. Nothing is applied or counted. |
+| `tester_password_required` | 400 | The gated result carried no password. Not counted. |
+| `tester_password_incorrect` | 403 | Wrong password; the reply's `attemptsLeft` (4 to 1) says how many remain. |
+| `tester_password_paused` | 429 | The fifth wrong password within 15 minutes paused this account's simulated results for 15 minutes from that fifth; `retryAfterMs` and `Retry-After` say when. A correct password is refused too while paused. |
+
+The count is per account, kept in its commerce state, so replicas and restarts
+share it; there is no installation-wide limit, so a stranger cannot lock every
+tester out. The per-address account budget at the edge stays in front of it, and
+answers its own 429 with reason `rate`. A correct password clears the count and
+applies the result under the unchanged rules: a repeated `paid` credits once.
+In `sandbox` the actions are refused with `simulation_disabled` before any
+password is looked at.
+
+Two other effects change in `mock` mode only. A pending simulated checkout holds
+no verification slot or fulfillment liability, since only a tester's result can
+finish it; a password-checked `paid` checks the room instead and is refused with
+`business_reserve` or `verification_capacity`, crediting nothing, when there is
+none. And automatic top-ups are refused with `automatic_topup_unavailable`,
+because nobody is present to type the password (see
+[agent top-ups](#agent-authority-and-utcp)).
+
+Make a password with `go run ./cmd/memql-calls-tester-password
+--password-file=PATH --hash-file=PATH`. It writes a generated 100-bit password
+(four groups of five characters) and its hash line to two new 0600 files and
+prints neither. Store the hash line as `MEMQL_CALLS_TESTER_PASSWORD_HASH` on the
+bff, keep the password where operators look it up, give it to testers directly,
+and delete both files. The bff reads the value only when it starts. To rotate,
+make a new pair, replace the value and restart the bff: the old password stops
+working at once. The hash is a salted SHA-256 of a generated secret, so a leaked
+hash reveals nothing usable; the helper refuses chosen passwords.
+
 Before an initial checkout, the visitor declares adulthood and accepts the
 verification disclosure. A server check reserves verification capacity for up to
 15 minutes before opening checkout; pending purchases also reserve their maximum
@@ -1682,6 +1737,11 @@ or supply `Service.SetCommerceConfig` from an installed operator controller:
 | `MAX_VERIFICATION_ATTEMPTS` | Per-account maximum, 1–20. |
 | `MAX_OPEN_CALLS` | Simultaneously open room ceiling. |
 | `MAX_PARTICIPANTS` | Total configured participant capacity committed to open rooms. |
+
+`MEMQL_CALLS_TESTER_PASSWORD_HASH` is deliberately outside this envelope: it
+gates simulated results in `mock` mode, refreshing the envelope never rotates
+it, and a missing or malformed value refuses every gated result without closing
+the envelope.
 
 The server requires all values in mock and sandbox modes. Values are not a
 profit forecast or proof of hardware capacity. The global PostgreSQL gate spans
@@ -1758,6 +1818,19 @@ validity window. The site's `simulatedFunding` and `callConfiguration` policies
 must already be enabled. The helper does not enlarge or reduce existing site
 limits; a configuration above the global or physical capacity is refused.
 
+Install a tester password on the same cluster without touching the envelope:
+
+```bash
+go run ./cmd/memql-calls-tester-password --password-file="$HOME/.memql/calls-tester-password" --hash-file="$HOME/.memql/calls-tester-password.hash"
+bash scripts/k3d/calls-mock.sh --cluster=memql --namespace=memql --tester-password-hash-file="$HOME/.memql/calls-tester-password.hash" --apply
+```
+
+The option changes only `MEMQL_CALLS_TESTER_PASSWORD_HASH`, with the same
+context, version and preservation guards, refuses combination with
+`--valid-days` or `--family`, and reports the key without its value. Restart the
+bff replicas afterwards. Until a hash is installed, the local simulation refuses
+every gated result.
+
 On an HTTPS calls site, local checkout and verification controls use the same
 origin account endpoint. They need neither external hosted URLs nor provider
 credentials. The interface exposes these controls only when the authenticated
@@ -1828,6 +1901,10 @@ and buying credit never replenishes its usage allowance. A checkout must save a
 method before a grant can enable top-ups. Pending charges prevent another charge;
 replacing that saved method requires a new human-approved grant before charging it.
 SCA, decline or an uncertain result pauses funding for reconciliation/attention.
+While payments are simulated (`mock` mode) automatic top-ups are refused with
+`automatic_topup_unavailable` before any mandate is reserved, and a delegated
+start does not top up: it proceeds on existing credit and meets the ordinary
+funding refusal when that is short.
 
 Reservations and native effects recheck durable authority across replicas. Revoking
 a grant prevents new funded effects and attempts to end its active call and cancel
