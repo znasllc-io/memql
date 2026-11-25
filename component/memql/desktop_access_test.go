@@ -61,6 +61,16 @@ func TestTheirOwnOnlineMachineIsReady(t *testing.T) {
 	wantSources(t, sources, []AccessSource{{Kind: AccessSourceMachine, State: AccessReady, Own: true, Label: "mine"}})
 }
 
+// A model that chats and also embeds counts (ruling R-D5); only one that
+// cannot answer structured output is out.
+func TestAModelThatAlsoEmbedsStillCounts(t *testing.T) {
+	m := accessModel(accessMachine("mine", "ana", true))
+	m.Embeddings = true
+	e := engineWithFleet([]FleetModel{m})
+	sources, _ := accessSourcesFor(t, e, "ana")
+	wantSources(t, sources, []AccessSource{{Kind: AccessSourceMachine, State: AccessReady, Own: true, Label: "mine"}})
+}
+
 func TestAnEmbeddingOnlyModelIsNotAccess(t *testing.T) {
 	m := accessModel(accessMachine("mine", "ana", true))
 	m.Embeddings, m.StructuredOutput = true, false
@@ -92,26 +102,6 @@ func TestAnAppOnAnOfflineMachineCountsAsSetUp(t *testing.T) {
 		if strings.Contains(r, "no app") {
 			t.Fatalf("reasons = %q, want none about apps", reasons)
 		}
-	}
-}
-
-// Out of usage is a state an app comes back from, like a machine asleep, so it
-// counts (ruling R-D2); a later message depends on telling it from asleep.
-func TestAnAppOutOfUsageCountsAsSetUp(t *testing.T) {
-	e := appEngine(AppDoor{AppId: appIdCodex, Machines: []AppMachine{{RegistrationId: "laptop", Name: "laptop", Online: true, OutOfUsage: true}}})
-	sources, reasons := accessSourcesFor(t, e, "ana")
-	wantSources(t, sources, []AccessSource{{Kind: AccessSourceApp, State: AccessOutOfUsage, Own: true, Label: "codex on laptop"}})
-	for _, r := range reasons {
-		if strings.Contains(r, "no app") {
-			t.Fatalf("reasons = %q, want none about apps", reasons)
-		}
-	}
-}
-
-func TestAnOutOfUsageMachineIsNotReachableByTheChatDoor(t *testing.T) {
-	d := AppDoor{AppId: appIdCodex, Machines: []AppMachine{{RegistrationId: "laptop", Online: true, LocalStream: true, StructuredResult: true, OutOfUsage: true}}}
-	if d.Reachable() || d.Runnable() || d.SupportsStructured() {
-		t.Fatal("an app that is out of usage must not be reachable, runnable or structured")
 	}
 }
 

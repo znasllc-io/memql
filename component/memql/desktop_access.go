@@ -29,9 +29,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
+
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // The kinds of source a person can have set up.
@@ -115,7 +118,11 @@ func (e *MemQLEngine) desktopAccessSources(ctx context.Context, actingUserId str
 		why("no machine of theirs or lent to them offers a chat model")
 	}
 
-	// Apps: AppDoors keeps own machines only and keeps them offline.
+	// Apps: AppDoors keeps own machines only and keeps them offline, but it
+	// leaves out an app measured out of usage, because routing must never pick
+	// one (TestAnAppTheMachineMeasuredAsOutOfUsageGetsNoDoor). Those come from
+	// the person's own registrations below, read separately (ruling R-D4).
+	have := map[string]bool{}
 	doors, err := e.providers.AppDoors(ctx, actingUserId)
 	if err != nil {
 		return nil, nil, err
@@ -124,14 +131,22 @@ func (e *MemQLEngine) desktopAccessSources(ctx context.Context, actingUserId str
 	for _, door := range doors {
 		for _, machine := range door.Machines {
 			state := AccessReady
-			switch {
-			case machine.OutOfUsage:
-				state = AccessOutOfUsage
-			case !machine.Online:
+			if !machine.Online {
 				state = AccessAsleep
 			}
+			have[door.AppId+"@"+machine.RegistrationId] = true
 			add(AccessSource{Kind: AccessSourceApp, State: state, Own: true,
 				Label: door.AppId + " on " + accessAppMachineLabel(machine)})
+			apps++
+		}
+	}
+	empty, err := e.appsOutOfUsage(ctx, actingUserId)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, s := range empty {
+		if !have[s.key] {
+			add(s.AccessSource)
 			apps++
 		}
 	}
@@ -177,6 +192,65 @@ func (e *MemQLEngine) desktopAccessSources(ctx context.Context, actingUserId str
 	sortAccessSources(sources)
 	sort.Strings(reasons)
 	return sources, reasons, nil
+}
+
+type outOfUsageApp struct {
+	AccessSource
+	key string
+}
+
+// appsOutOfUsage reads the person's OWN worker registrations (the rows
+// AppDoors projects from) for apps allowed and signed in on a machine that
+// measured them as out of usage. It exists because that state counts as set
+// up here and must never be a routing door: AppDoors, projectAppDoors and the
+// selection code are untouched, so no call can be placed on one of these.
+// The same row tests the routing side applies are applied: the machine is not
+// revoked, its owner has not switched apps off, and the person's own app
+// routing allows the app. "Signed out" and "unknown" are not set up and are
+// left out. Regression test: TestAnAppOutOfUsageOnARegistrationCountsAsSetUp.
+func (e *MemQLEngine) appsOutOfUsage(ctx context.Context, actingUserId string) ([]outOfUsageApp, error) {
+	if strings.TrimSpace(actingUserId) == "" {
+		return nil, nil
+	}
+	res, err := e.Execute(ContextWithFreshRead(ctx), "workersForUser(ownerUserId: "+langparser.QuoteString(actingUserId)+")")
+	if errors.Is(err, ErrEngineNotInitialized) {
+		// An engine with no store has no registrations to read; this is the
+		// unit-test engine and a node that never booted one, not a failed read.
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []outOfUsageApp
+	for _, row := range modelPullRows(res.OutputPayload()) {
+		if !sameRowAuthzOwner(mapString(row, "ownerUserId"), actingUserId) || mapString(row, "revokedAt") != "" {
+			continue
+		}
+		if features, _ := row["ownerFeatures"].(map[string]any); features["apps"] == false {
+			continue
+		}
+		policy := AppRoutingPolicyFrom(row["appRouting"])
+		entries, _ := row["apps"].([]any)
+		for _, raw := range entries {
+			entry, _ := raw.(map[string]any)
+			id := mapString(entry, "id")
+			// The closed runnable set (docs/public/operate/local-apps.md): an id
+			// outside it is stored and never driven.
+			if (id != "claude-code" && id != "codex") || !policy.allows(id) ||
+				entry["allowed"] != true || entry["signedIn"] != true || mapString(entry, "readiness") != "out_of_usage" {
+				continue
+			}
+			label := mapString(row, "displayName")
+			if label == "" {
+				label = mapString(row, "name")
+			}
+			out = append(out, outOfUsageApp{
+				AccessSource: AccessSource{Kind: AccessSourceApp, State: AccessOutOfUsage, Own: true, Label: id + " on " + label},
+				key:          id + "@" + trimConceptPrefix(mapString(row, "id")),
+			})
+		}
+	}
+	return out, nil
 }
 
 // keySource is a key that counts. A key's label is its vendor and never
