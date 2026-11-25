@@ -255,3 +255,7 @@ means another change is under way. Neither is retried for you.
   counted again while a switch runs.
 - Memory-search embeddings write no router decision (`v1:router:call`), so the
   router's decision log does not show them.
+- The answer cache stores vectors 1536 wide only (`embedding3Small`'s width).
+  Under a model of any other width, such as `qwen3-embedding:0.6b` at 1024, an
+  enabled namespace stores nothing and every lookup falls through to a fresh
+  call.
