@@ -1084,10 +1084,14 @@ cannot answer right now:
 
 | Source | Counts | Does not count |
 |---|---|---|
-| Machine, theirs or lent to them (directly or through a group) | a chat model with structured output and a context window of at least `MinimumContextWindow` (8192), online or asleep | a model that only makes embeddings, a model below the minimum, a revoked machine |
+| Machine, theirs or lent to them (directly or through a group) | a chat model with structured output and a context window of at least `MinimumContextWindow` (8192) on that machine, online or asleep | a model that only makes embeddings, a model below the minimum, a revoked machine |
 | App (Claude Code or Codex) on their own machine | allowed by the machine, signed in, allowed by their own app routing, and ready, unmeasured, asleep or out of usage | measured signed out, or an app the machine or their routing disallows |
 | API key, theirs or lent | usable (including not yet checked), or held for lack of credit | paused, refused, or its owner inactive |
-| The cluster's vendor account | where the cluster's account pays for them | everything else |
+| The cluster's vendor account | where the cluster's account pays for them | no permission to use it (`execute app:settings/clusteraccount`), or the permission and no account set up |
+
+A machine is judged by what it advertises for a model itself. A model's
+figures across every machine are not used, because they include revoked
+machines.
 
 An app closed by the engaged computer-use kill switch still counts as set up:
 the switch is a temporary stop, and the check does not read it.
@@ -1109,6 +1113,25 @@ is the person's bare user id, and its attributes are `reference` and
 A re-check that passes back its reference with the same reasons writes
 nothing and keeps the reference; changed reasons write a new line under the
 same reference. A reference is never shared by two people.
+
+**The reasons a line can carry.** One sentence per distinct cause. Several
+can appear together, always in the same (sorted) order, so a line changes only
+when what is behind it changes. `<id>` is a lender's bare user id, named only
+for something lent to this person; no machine or key is ever named.
+
+| Cause | Reason |
+|---|---|
+| no machine at all, theirs or lent (a registered machine that offers no model looks the same to the check) | `no machine of theirs or lent to them offers a model` |
+| a revoked machine of theirs | `a machine of theirs is revoked` |
+| a revoked machine lent to them | `a machine lent by <id> is revoked` |
+| every model on their machines and the lent ones only makes embeddings | `the machines theirs or lent to them offer only embedding models` |
+| chat models, none with structured output and an 8192 context on its machine | `no model on the machines theirs or lent to them has structured output and a context of at least 8192` |
+| no app on their machines is allowed and signed in | `no app on their machines is allowed and signed in` |
+| no API key at all | `no API key of theirs or lent to them` |
+| a key of theirs that does not count | `their own key was refused by <vendor>`, or `their own key cannot be used` |
+| a key lent to them that does not count | `the key lent by <id> is paused by its owner`, `... was refused by <vendor>`, `... belongs to someone who is no longer an active user`, or `... cannot be used` |
+| no permission to the cluster's account | `may not use the cluster's account` |
+| the permission, and no account set up | `may use the cluster's account, but none is set up` |
 
 **What it does when it cannot tell.**
 

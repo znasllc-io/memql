@@ -10,18 +10,27 @@ package memql
 // lent laptop that is closed, an app out of usage, a key whose vendor account
 // is out of credit all come back, and keeping a person out of MemQL OS while
 // they wait would send them to a setup page for a thing already set up. The
-// two share their predicates (chatModelMeetsMinimum, the app row tests in
+// two share their predicates (meetsChatMinimum, the app row tests in
 // app_selection.go and core/airoute, the resolver's reasons) and drop only the
-// "is it awake" tests, so they cannot drift apart in anything else. What does
-// NOT count: a model that only embeds, a model below the context floor, a
-// revoked machine, a key that was refused or paused or whose owner left, an
-// app measured signed out or whose last session was refused as signed out.
+// "is it awake" tests, so they cannot drift apart in anything else. One difference is deliberate: a
+// machine is judged by what IT advertised for a model (chatMachineMeetsMinimum),
+// as per-call eligibility judges the machine that would serve, and never by
+// the model's union over every machine behind it, revoked ones included, which
+// could let a machine below the floor count because a revoked machine
+// qualified its model (final review, minor 3). What does NOT count: a model
+// that only embeds, a model below the context floor, a revoked machine, a key
+// that was refused or paused or whose owner left, an app measured signed out
+// or whose last session was refused as signed out.
 //
-// EVERY SOURCE THAT DOES NOT COUNT ADDS ONE PLAIN REASON, so the page's
-// reference can be tied to why a person was held. A reason names a lender's id
-// only for something lent to this person, and never a key, a machine name or
-// a vendor's words. Reasons are digested (accessReasonsDigest) so a re-check
-// that finds the same reasons can reuse the reference it already logged.
+// ONE PLAIN REASON PER DISTINCT CAUSE, so the line under a held person's
+// reference says what is missing and never less (design section 3, "each
+// source checked with why it does not count"; the anti-goal "the log line
+// says less than what is missing"). The sentences are the accessReason*
+// values below and keyReason's; several can stand together. A reason names a
+// lender's id only for something lent to this person, and never a key, a
+// machine name or a vendor's words. Reasons are sorted, so one state always
+// reads and digests the same (accessReasonsDigest), and a re-check that finds
+// the same reasons can reuse the reference it already logged.
 //
 // THE HOLD (desktopAccess, below) puts it together:
 //   - Exempt: the person's STORED role passes auth.MayManageFleet (owner or
@@ -95,6 +104,44 @@ const (
 	AccessOutOfUsage  = "outOfUsage"
 )
 
+// The hold line's reasons, one per distinct cause (final review, Important 3).
+// Each is checked only once nothing of its kind counts, and each names no
+// machine or key.
+const (
+	// No machine at all, theirs or lent. The catalog lists a machine only
+	// under a model it offers, so a registered machine that offers no model
+	// reads the same; "offers a model" keeps the sentence true for both.
+	accessReasonNoMachine = "no machine of theirs or lent to them offers a model"
+	// A revoked registration of theirs (a revoked lent machine names its
+	// lender: accessReasonLentMachineRevoked).
+	accessReasonMachineRevoked = "a machine of theirs is revoked"
+	// Every model on their live machines and the ones lent to them only
+	// makes embeddings.
+	accessReasonEmbeddingsOnly = "the machines theirs or lent to them offer only embedding models"
+	// No app on their own machines is allowed and signed in.
+	accessReasonNoApp = "no app on their machines is allowed and signed in"
+	// The key reads found no key at all, theirs or lent. A key that exists
+	// and does not count says why in its own sentence (keyReason).
+	accessReasonNoKey = "no API key of theirs or lent to them"
+	// The cluster's account is closed to them: they lack the permission
+	// (execute app:settings/clusteraccount), whether or not an account is set
+	// up. Granting it is the administrator's fix.
+	accessReasonNoClusterPermission = "may not use the cluster's account"
+	// They hold the permission and the cluster has no account to pay with.
+	accessReasonNoClusterAccount = "may use the cluster's account, but none is set up"
+)
+
+// accessReasonBelowFloor: chat models on their live machines, none of which
+// has structured output and a context window of at least MinimumContextWindow
+// on that machine.
+var accessReasonBelowFloor = fmt.Sprintf("no model on the machines theirs or lent to them has structured output and a context of at least %d", MinimumContextWindow)
+
+// accessReasonLentMachineRevoked is a revoked machine lent to them, naming its
+// lender by bare id, the spelling the hold line uses for everybody.
+func accessReasonLentMachineRevoked(lenderUserId string) string {
+	return fmt.Sprintf("a machine lent by %s is revoked", BareShortId(lenderUserId))
+}
+
 // AccessSource is one model source a person has set up. LenderUserId is set
 // only for something lent to them; Own is true for their own machines, apps
 // and keys.
@@ -163,20 +210,48 @@ func (e *MemQLEngine) desktopAccessSources(ctx context.Context, actingUserId str
 	if err := readFailures.Err(); err != nil {
 		return nil, nil, fmt.Errorf("desktop access: the machines theirs or lent to them could not be read: %w", err)
 	}
-	seen := map[string]bool{}
-	machines := 0
+	//
+	// Each machine is judged by its OWN entry for a model, what that machine
+	// advertised (chatMachineMeetsMinimum), and not by the model's union over
+	// every machine behind it: the union counts revoked machines too, so a
+	// machine below the floor would count because a revoked one qualified the
+	// model (final review, minor 3). A machine appears once per model it
+	// offers; the reasons are decided over all of those entries.
+	var (
+		seen            = map[string]bool{}
+		machines        int  // machines that count
+		listed          bool // the catalog names any machine, revoked included
+		revokedOwn      bool
+		revokedLenders  = map[string]bool{}
+		live, embedOnly int // entries on machines not revoked, and those that only embed
+	)
 	for _, m := range models {
-		if !chatModelMeetsMinimum(m) {
-			continue
-		}
 		for _, machine := range m.Machines {
+			listed = true
+			own := strings.TrimSpace(machine.OwnerUserId) == "" || sameUserId(machine.OwnerUserId, actingUserId)
 			// A revoked registration stays in the catalog, marked offline; it is
 			// not a machine the person has set up.
-			if machine.Revoked || seen[machine.RegistrationId] {
+			if machine.Revoked {
+				if own {
+					revokedOwn = true
+				} else {
+					revokedLenders[BareShortId(machine.OwnerUserId)] = true
+				}
+				continue
+			}
+			live++
+			if !chatMachineMeetsMinimum(machine) {
+				// A model that chats and embeds counts (ruling R-D5); one that
+				// cannot answer structured output and embeds only embeds.
+				if machine.Capabilities.Embeddings && !machine.Capabilities.StructuredOutput {
+					embedOnly++
+				}
+				continue
+			}
+			if seen[machine.RegistrationId] {
 				continue
 			}
 			seen[machine.RegistrationId] = true
-			own := strings.TrimSpace(machine.OwnerUserId) == "" || sameUserId(machine.OwnerUserId, actingUserId)
 			s := AccessSource{Kind: AccessSourceMachine, State: AccessReady, Own: own, Label: accessLabel(machine.DisplayName, machine.Name, machine.RegistrationId)}
 			if !machine.Online {
 				s.State = AccessAsleep
@@ -189,7 +264,22 @@ func (e *MemQLEngine) desktopAccessSources(ctx context.Context, actingUserId str
 		}
 	}
 	if machines == 0 {
-		why("no machine of theirs or lent to them offers a chat model")
+		if !listed {
+			why(accessReasonNoMachine)
+		}
+		if revokedOwn {
+			why(accessReasonMachineRevoked)
+		}
+		for lender := range revokedLenders {
+			why(accessReasonLentMachineRevoked(lender))
+		}
+		switch {
+		case live == 0:
+		case embedOnly == live:
+			why(accessReasonEmbeddingsOnly)
+		default:
+			why(accessReasonBelowFloor)
+		}
 	}
 
 	// Apps: one read of the person's own registrations, through the same row
@@ -205,13 +295,17 @@ func (e *MemQLEngine) desktopAccessSources(ctx context.Context, actingUserId str
 		add(s)
 	}
 	if len(apps) == 0 {
-		why("no app on their machines is allowed and signed in")
+		why(accessReasonNoApp)
 	}
 
-	// Keys: asked once per vendor, as a route the person chooses.
+	// Keys: asked once per vendor, as a route the person chooses. A cluster
+	// with no vendor text record asks nothing and reads as no key, which is
+	// what it is for this check: nothing a key could pay at.
+	keys := 0
 	for _, vendor := range e.providers.textVendors() {
 		answer := e.providers.VendorKeysAt(ctx, VendorAccountQuery{Vendor: vendor, ActingUserId: actingUserId, Chosen: true})
 		for _, account := range answer.Usable {
+			keys++
 			add(keySource(account, AccessReady, actingUserId))
 		}
 		for _, passed := range answer.PassedOver {
@@ -225,6 +319,7 @@ func (e *MemQLEngine) desktopAccessSources(ctx context.Context, actingUserId str
 				// would be held. A check that fails is unknown, not held.
 				return nil, nil, fmt.Errorf("desktop access: the keys of %s could not be read", actingUserId)
 			}
+			keys++
 			account := passed.Account
 			if account.Vendor == "" {
 				account.Vendor = vendor
@@ -238,10 +333,17 @@ func (e *MemQLEngine) desktopAccessSources(ctx context.Context, actingUserId str
 			}
 		}
 	}
+	if keys == 0 {
+		why(accessReasonNoKey)
+	}
 
-	// The cluster's account counts where it pays for this person. Holding the
-	// permission with no account set up is a reason of its own, because the
-	// fix is the administrator's and not the person's.
+	// The cluster's account counts where it pays for this person. Where it
+	// does not, the reason says which half is missing, because the two fixes
+	// differ: a person without the permission needs it granted
+	// (accessReasonNoClusterPermission, whether or not an account is set up,
+	// since VendorDoorFor's Cluster is "set up and not closed to them"); a
+	// person holding it needs the administrator to set an account up
+	// (accessReasonNoClusterAccount).
 	//
 	// A grant or membership read that fails inside the gate falls back to the
 	// role's answer on purpose (grant_resolver.go), which for a person whose
@@ -266,7 +368,9 @@ func (e *MemQLEngine) desktopAccessSources(ctx context.Context, actingUserId str
 	case door.Cluster:
 		add(AccessSource{Kind: AccessSourceClusterAccount, State: AccessReady, Label: "the cluster's account"})
 	case !door.ClusterSetUp && clusterClosed == "":
-		why("may use the cluster's account, but none is set up")
+		why(accessReasonNoClusterAccount)
+	default:
+		why(accessReasonNoClusterPermission)
 	}
 
 	sortAccessSources(sources)

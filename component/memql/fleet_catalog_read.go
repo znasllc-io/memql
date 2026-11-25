@@ -216,17 +216,34 @@ type inferenceDoors struct {
 	Doors     []string
 }
 
-// chatModelMeetsMinimum is the minimum capability profile a model must have to
-// count as chat access: able to answer structured output, and a context window of at least MinimumContextWindow. It asks nothing about
-// whether a machine is awake. inferenceDoors adds the online test (a door that
-// can answer now) and desktopAccessSources does not (a machine that is asleep
-// is still set up), and both read this one predicate so the two never drift
-// apart in anything else. It deliberately does NOT exclude Embeddings: a model
-// that chats and also embeds counts (ruling R-D5), and one that ONLY embeds is
-// already out because it cannot answer structured output. Regression tests:
+// meetsChatMinimum is the minimum capability profile for chat access: able to
+// answer structured output, and a context window of at least
+// MinimumContextWindow. It asks nothing about whether a machine is awake.
+// inferenceDoors adds the online test (a door that can answer now) and
+// desktopAccessSources does not (a machine that is asleep is still set up),
+// and both read this one profile so the two never drift apart in anything
+// else. It deliberately does NOT exclude Embeddings: a model that chats and
+// also embeds counts (ruling R-D5), and one that ONLY embeds is already out
+// because it cannot answer structured output. Regression tests:
 // TestAnEmbeddingOnlyModelIsNotAccess, TestAModelThatAlsoEmbedsStillCounts.
+func meetsChatMinimum(structuredOutput bool, contextWindow int) bool {
+	return structuredOutput && contextWindow >= MinimumContextWindow
+}
+
+// chatModelMeetsMinimum asks the profile of a model's union over every machine
+// behind it (fleetcatalog.Project), which is what inferenceDoors reads.
 func chatModelMeetsMinimum(m FleetModel) bool {
-	return m.StructuredOutput && m.ContextWindow >= MinimumContextWindow
+	return meetsChatMinimum(m.StructuredOutput, m.ContextWindow)
+}
+
+// chatMachineMeetsMinimum asks it of ONE machine's own entry for a model:
+// what that machine advertised, as per-call eligibility judges the machine
+// that would serve (FleetMachine.serves). desktopAccessSources reads this one,
+// because the union counts revoked machines too and a machine below the floor
+// must not count on a revoked machine's word
+// (TestARevokedQualifyingMachineDoesNotMakeAnotherCount).
+func chatMachineMeetsMinimum(mm FleetMachine) bool {
+	return meetsChatMinimum(mm.Capabilities.StructuredOutput, mm.ContextWindow)
 }
 
 func (e *MemQLEngine) inferenceDoors(ctx context.Context) inferenceDoors {

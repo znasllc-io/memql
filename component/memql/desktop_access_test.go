@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
@@ -51,15 +50,30 @@ func wantReason(t *testing.T, reasons []string, want string) {
 	t.Fatalf("reasons = %q, want one to be %q", reasons, want)
 }
 
+func noReason(t *testing.T, reasons []string, unwanted ...string) {
+	t.Helper()
+	for _, r := range reasons {
+		for _, u := range unwanted {
+			if r == u {
+				t.Fatalf("reasons = %q, want none to be %q", reasons, u)
+			}
+		}
+	}
+}
+
+// machineReasons are every sentence a machine can add.
+var machineReasons = []string{
+	"no machine of theirs or lent to them offers a model",
+	"a machine of theirs is revoked",
+	"the machines theirs or lent to them offer only embedding models",
+	"no model on the machines theirs or lent to them has structured output and a context of at least 8192",
+}
+
 func TestAnOfflineLentMachineCountsAsSetUp(t *testing.T) {
 	e := engineWithFleet([]FleetModel{accessModel(accessMachine("lent-laptop", "lender", false))})
 	sources, reasons := accessSourcesFor(t, e, "ana")
 	wantSources(t, sources, []AccessSource{{Kind: AccessSourceMachine, State: AccessAsleep, Own: false, LenderUserId: "lender", Label: "lent-laptop"}})
-	for _, r := range reasons {
-		if strings.Contains(r, "chat model") {
-			t.Fatalf("reasons = %q, want none about machines", reasons)
-		}
-	}
+	noReason(t, reasons, machineReasons...)
 }
 
 func TestTheirOwnOnlineMachineIsReady(t *testing.T) {
@@ -84,15 +98,72 @@ func TestAnEmbeddingOnlyModelIsNotAccess(t *testing.T) {
 	e := engineWithFleet([]FleetModel{m})
 	sources, reasons := accessSourcesFor(t, e, "ana")
 	wantSources(t, sources, nil)
-	wantReason(t, reasons, "no machine of theirs or lent to them offers a chat model")
+	wantReason(t, reasons, "the machines theirs or lent to them offer only embedding models")
+	noReason(t, reasons, "no machine of theirs or lent to them offers a model",
+		"no model on the machines theirs or lent to them has structured output and a context of at least 8192")
 }
 
 func TestAModelBelowTheContextFloorIsNotAccess(t *testing.T) {
 	m := accessModel(accessMachine("mine", "ana", true))
 	m.ContextWindow = 4096
 	e := engineWithFleet([]FleetModel{m})
-	sources, _ := accessSourcesFor(t, e, "ana")
+	sources, reasons := accessSourcesFor(t, e, "ana")
 	wantSources(t, sources, nil)
+	wantReason(t, reasons, "no model on the machines theirs or lent to them has structured output and a context of at least 8192")
+	noReason(t, reasons, "no machine of theirs or lent to them offers a model",
+		"the machines theirs or lent to them offer only embedding models")
+}
+
+// One machine with an embedding model and another with a chat model below
+// the floor: not every model only embeds, so the floor is the reason.
+func TestAChatModelBelowTheFloorBesideAnEmbedderIsTheFloorReason(t *testing.T) {
+	embedder := accessModel(accessMachine("indexer", "ana", true))
+	embedder.ModelId, embedder.Embeddings, embedder.StructuredOutput = "embed", true, false
+	small := accessModel(accessMachine("desk", "ana", true))
+	small.ModelId, small.ContextWindow = "small", 2048
+	_, reasons := accessSourcesFor(t, engineWithFleet([]FleetModel{embedder, small}), "ana")
+	wantReason(t, reasons, "no model on the machines theirs or lent to them has structured output and a context of at least 8192")
+	noReason(t, reasons, "the machines theirs or lent to them offer only embedding models")
+}
+
+// No machine at all, theirs or lent, is its own reason.
+func TestNoMachineAtAllIsItsOwnReason(t *testing.T) {
+	sources, reasons := accessSourcesFor(t, engineWithFleet(nil), "ana")
+	wantSources(t, sources, nil)
+	wantReason(t, reasons, "no machine of theirs or lent to them offers a model")
+	noReason(t, reasons, "a machine of theirs is revoked",
+		"the machines theirs or lent to them offer only embedding models",
+		"no model on the machines theirs or lent to them has structured output and a context of at least 8192")
+}
+
+// Final review, minor 3: each machine is judged by what IT advertised. The
+// model's union says 8192 and structured output because a REVOKED machine
+// said so; the live machine's own window is 4096, so it does not count.
+func TestARevokedQualifyingMachineDoesNotMakeAnotherCount(t *testing.T) {
+	qualifying := accessMachine("old", "ana", false)
+	qualifying.Revoked = true
+	qualifying.Capabilities, qualifying.ContextWindow = FleetModelCapabilities{StructuredOutput: true}, 8192
+	small := accessMachine("small", "ana", true)
+	small.Capabilities, small.ContextWindow = FleetModelCapabilities{StructuredOutput: true}, 4096
+	m := accessModel(qualifying, small)
+	if !chatModelMeetsMinimum(m) {
+		t.Fatal("fixture: the model's union must qualify, or the test proves nothing")
+	}
+	sources, reasons := accessSourcesFor(t, engineWithFleet([]FleetModel{m}), "ana")
+	wantSources(t, sources, nil)
+	wantReason(t, reasons, "a machine of theirs is revoked")
+	wantReason(t, reasons, "no model on the machines theirs or lent to them has structured output and a context of at least 8192")
+}
+
+// Final review, minor 10: one machine offering two qualifying models is one
+// source, not two.
+func TestAMachineOfferingTwoQualifyingModelsIsOneSource(t *testing.T) {
+	first := accessModel(accessMachine("desk", "ana", true))
+	first.ModelId = "first"
+	second := accessModel(accessMachine("desk", "ana", true))
+	second.ModelId = "second"
+	sources, _ := accessSourcesFor(t, engineWithFleet([]FleetModel{first, second}), "ana")
+	wantSources(t, sources, []AccessSource{{Kind: AccessSourceMachine, State: AccessReady, Own: true, Label: "desk"}})
 }
 
 // appRow is a worker registration as the app read sees it.
@@ -246,7 +317,20 @@ func TestARevokedMachineIsNotAMachineSetUp(t *testing.T) {
 	e := engineWithFleet([]FleetModel{accessModel(m)})
 	sources, reasons := accessSourcesFor(t, e, "ana")
 	wantSources(t, sources, nil)
-	wantReason(t, reasons, "no machine of theirs or lent to them offers a chat model")
+	wantReason(t, reasons, "a machine of theirs is revoked")
+	// The revoked machine is the whole story: it is not also "no machine".
+	noReason(t, reasons, "no machine of theirs or lent to them offers a model")
+}
+
+// A revoked machine lent to them names its lender, by bare id, as a key lent
+// to them does.
+func TestARevokedLentMachineNamesItsLender(t *testing.T) {
+	m := accessMachine("lent", "v1:identity:user:lender", true)
+	m.Revoked = true
+	sources, reasons := accessSourcesFor(t, engineWithFleet([]FleetModel{accessModel(m)}), "ana")
+	wantSources(t, sources, nil)
+	wantReason(t, reasons, "a machine lent by lender is revoked")
+	noReason(t, reasons, "a machine of theirs is revoked")
 }
 
 func TestAnEngineWithNoProvidersIsAnErrorNotNothingSetUp(t *testing.T) {
@@ -312,8 +396,22 @@ func TestAKeyThatCannotPayExplainsItself(t *testing.T) {
 
 func TestAUsableKeyIsReadyAndOwnWhenTheirs(t *testing.T) {
 	keys := keysHeldBy("ana", keyAccount(VendorAnthropic, "k1", "ana"))
-	sources, _ := accessSourcesFor(t, keyEngine("claude", keys), "ana")
+	sources, reasons := accessSourcesFor(t, keyEngine("claude", keys), "ana")
 	wantSources(t, sources, []AccessSource{{Kind: AccessSourceKey, State: AccessReady, Own: true, Label: "Anthropic"}})
+	noReason(t, reasons, "no API key of theirs or lent to them")
+}
+
+// No key at all, theirs or lent, is its own reason; a key that exists and does
+// not count says why in its own sentence instead.
+func TestNoKeyAtAllIsItsOwnReason(t *testing.T) {
+	_, reasons := accessSourcesFor(t, keyEngine("claude", noKeys()), "ana")
+	wantReason(t, reasons, "no API key of theirs or lent to them")
+
+	paused := newFakeVendorKeys()
+	paused.passedOver = []VendorAccountPassedOver{{Account: keyAccount(VendorAnthropic, "k1", "lender"), Reason: VendorKeyPausedReason}}
+	_, reasons = accessSourcesFor(t, keyEngine("claude", paused), "ana")
+	wantReason(t, reasons, "the key lent by lender is paused by its owner")
+	noReason(t, reasons, "no API key of theirs or lent to them")
 }
 
 func TestTheClusterAccountCountsWhereItPaysForThePerson(t *testing.T) {
@@ -331,16 +429,49 @@ func TestPermissionWithNoClusterAccountIsItsOwnReason(t *testing.T) {
 	sources, reasons := accessSourcesFor(t, e, "ana")
 	wantSources(t, sources, nil)
 	wantReason(t, reasons, "may use the cluster's account, but none is set up")
+	noReason(t, reasons, "may not use the cluster's account")
 }
 
-func TestNoPermissionToTheClusterAccountAddsNoReason(t *testing.T) {
+// Final review, Important 3: a person the cluster's account is closed to is
+// told so, whether or not an account is set up; granting the permission is
+// the administrator's fix.
+func TestNoPermissionToTheClusterAccountIsItsOwnReason(t *testing.T) {
+	closed := func(context.Context, string) bool { return false }
+
+	e := engineWithFleet(nil)
+	e.providers.SetClusterAccountGate(closed)
+	_, reasons := accessSourcesFor(t, e, "ana")
+	wantReason(t, reasons, "may not use the cluster's account")
+	noReason(t, reasons, "may use the cluster's account, but none is set up")
+
+	// An account set up, and closed to them.
+	e = engineWithFleet(nil)
+	e.providers.setEntry(federatedOpenAI(vendorRecord("gpt", VendorOpenAI, true, "")))
+	e.providers.SetVendorKeys(noKeys())
+	e.providers.SetClusterAccountGate(closed)
+	sources, reasons := accessSourcesFor(t, e, "ana")
+	wantSources(t, sources, nil)
+	wantReason(t, reasons, "may not use the cluster's account")
+}
+
+// Several causes stand together, in one order, so the same state always reads
+// and digests the same.
+func TestSeveralCausesStandTogetherInOneOrder(t *testing.T) {
 	e := engineWithFleet(nil)
 	e.providers.SetClusterAccountGate(func(context.Context, string) bool { return false })
-	_, reasons := accessSourcesFor(t, e, "ana")
-	for _, r := range reasons {
-		if strings.Contains(r, "cluster") {
-			t.Fatalf("reasons = %q, want none about the cluster's account", reasons)
-		}
+	_, first := accessSourcesFor(t, e, "ana")
+	want := []string{
+		"may not use the cluster's account",
+		"no API key of theirs or lent to them",
+		"no app on their machines is allowed and signed in",
+		"no machine of theirs or lent to them offers a model",
+	}
+	if !reflect.DeepEqual(first, want) {
+		t.Fatalf("reasons = %q, want %q", first, want)
+	}
+	_, again := accessSourcesFor(t, e, "ana")
+	if !reflect.DeepEqual(first, again) || accessReasonsDigest(first) != accessReasonsDigest(again) {
+		t.Fatalf("the same state read %q, then %q", first, again)
 	}
 }
 

@@ -109,8 +109,14 @@ and the page opens if the key counts.
 **The reference is what an administrator looks up.** It is `ERR-` and six hex
 characters. Before the page shows it, the cluster writes one line under it to
 the log store, naming the person and each source it checked with why it does
-not count. An administrator, or anyone of higher rank, searches the reference
-in Logs and finds that line
+not count, one sentence per cause: no machine of theirs or lent to them, a
+revoked machine, machines that offer only embedding models or no model with
+structured output and a context of at least 8192, no app allowed and signed
+in, no API key or a key that cannot be used (and why), and no permission to
+the cluster's account or no account set up. The full list is in
+[Who gets into MemQL OS](auth/access-model.md#who-gets-into-memql-os). An
+administrator, or anyone of higher rank, searches the reference in Logs and
+finds that line
 ([the held person's reference](logs.md#the-one-line-that-is-never-dropped-a-held-persons-reference)).
 A check that still holds the person keeps the same reference. If the line could
 not be stored, the page shows no reference and does not ask for one.
