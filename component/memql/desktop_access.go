@@ -38,7 +38,7 @@ package memql
 //     can always be found in Logs. A failed write holds with NO reference
 //     rather than a reference nobody can look up. A re-check passing back its
 //     reference and an unchanged reasons digest writes nothing, so a page
-//     polling every few seconds adds one line, not one per poll; changed
+//     checking every 30 seconds adds one line, not one per poll; changed
 //     reasons write a new line under the SAME reference so the person keeps
 //     one number. A passed-back value that is not a reference is treated as
 //     absent and never written (a client must not be able to put its own text
@@ -49,7 +49,8 @@ package memql
 //     comes back as an error; the client reads that as "unknown" and lets the
 //     person in. A person is held only on an answer the engine is sure of.
 //
-// Tests: desktop_access_test.go (sources), desktop_access_hold_test.go (hold).
+// Tests: desktop_access_test.go (sources), desktop_access_hold_test.go (hold),
+// desktop_access_db_test.go (real rows: apps, the stored role, a scoped role).
 // Not verified here: the builtin that exposes it (task 3) and the recorder
 // that writes the line to the log store (task 4); until one is installed every
 // held answer carries no reference.
@@ -61,6 +62,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"sort"
 	"strings"
@@ -216,15 +218,25 @@ func (e *MemQLEngine) desktopAccessSources(ctx context.Context, actingUserId str
 	// only source is this account would read as "closed" and hold them on a
 	// transient database error (ruling R-D8). So the read runs under a failure
 	// holder and a noted failure is an error: unknown, not held.
+	//
+	// LIMIT (review minor 2): the holder hears only reads made through the
+	// person's own session. Off that path (personSubject, personRole and
+	// organizationUserRole, which swallows a failed principal read) R-D8 still
+	// fails closed. desktopAccess runs on the person's own session, so it is
+	// not affected; a caller on any other context would be.
 	doorCtx, readFailures := auth.ContextWithReadFailures(ctx)
 	door := e.providers.VendorDoorFor(doorCtx, actingUserId)
+	clusterClosed := ""
+	if !door.Cluster && !door.ClusterSetUp {
+		clusterClosed = e.providers.ClusterAccountClosedTo(doorCtx, actingUserId)
+	}
 	if err := readFailures.Err(); err != nil {
-		return nil, nil, fmt.Errorf("desktop access: the cluster account's permission could not be read: %w", err)
+		return nil, nil, fmt.Errorf("desktop access: what the person may use could not be read: %w", err)
 	}
 	switch {
 	case door.Cluster:
 		add(AccessSource{Kind: AccessSourceClusterAccount, State: AccessReady, Label: "the cluster's account"})
-	case !door.ClusterSetUp && e.providers.ClusterAccountClosedTo(ctx, actingUserId) == "":
+	case !door.ClusterSetUp && clusterClosed == "":
 		why("may use the cluster's account, but none is set up")
 	}
 
@@ -430,6 +442,11 @@ func accessReasonsDigest(reasons []string) string {
 	return hex.EncodeToString(sum[:])[:16]
 }
 
+// personAccessDigest is accessReasonsDigest bound to one person (ruling R-D9).
+func personAccessDigest(userId string, reasons []string) string {
+	return accessReasonsDigest(append([]string{"person:" + BareShortId(userId)}, reasons...))
+}
+
 // AccessHoldLine is what is written when a person is held: enough for an
 // administrator holding the reference to find the person and why.
 type AccessHoldLine struct {
@@ -470,11 +487,8 @@ var accessReferencePattern = regexp.MustCompile("^ERR-[0-9a-f]{6}$")
 // newAccessReference mints a reference from three random bytes.
 func newAccessReference() string {
 	var b [3]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		// crypto/rand does not fail on a supported platform; a zero reference
-		// still has the right shape and the line is written under it.
-		return "ERR-000000"
-	}
+	// crypto/rand.Read does not return an error on this Go version.
+	_, _ = rand.Read(b[:])
 	return "ERR-" + hex.EncodeToString(b[:])
 }
 
@@ -484,7 +498,7 @@ type DesktopAccess struct {
 	// Sources are what the person has set up, computed for the exempt too
 	// (Ask uses them).
 	Sources []AccessSource
-	// Reference and ReasonsDigest are set only on a held answer. Reference is
+	// Reference and ReasonsDigest are set only on a held answer. Both are
 	// empty when the line could not be written.
 	Reference, ReasonsDigest string
 }
@@ -515,7 +529,11 @@ func (e *MemQLEngine) desktopAccess(ctx context.Context, actingUserId, passedRef
 		return DesktopAccess{Admitted: true, Sources: sources}, nil
 	}
 
-	digest := accessReasonsDigest(reasons)
+	// The digest binds the person (ruling R-D9): a reference and digest carried
+	// across a sign-in change on one page never answer for a second person,
+	// whose first check finds a different digest and writes its own line.
+	// The line's Reasons stay the plain reasons.
+	digest := personAccessDigest(actingUserId, reasons)
 	answer := DesktopAccess{Sources: sources, ReasonsDigest: digest}
 	reference := ""
 	if accessReferencePattern.MatchString(passedReference) {
@@ -528,8 +546,13 @@ func (e *MemQLEngine) desktopAccess(ctx context.Context, actingUserId, passedRef
 		reference = newAccessReference()
 	}
 	// Written before the reference is returned. A failure answers held with
-	// no reference at all.
+	// no reference and no digest (nothing to compare a re-check against), and
+	// is logged: otherwise "no recorder installed" and "the log store refused
+	// the line" would both show only as a page with no reference.
 	if err := recordAccessHold(ctx, AccessHoldLine{Reference: reference, UserId: actingUserId, Reasons: reasons}); err != nil {
+		slog.Warn("desktop access: the hold line could not be written; the person is held with no reference",
+			"userId", actingUserId, "error", err)
+		answer.ReasonsDigest = ""
 		return answer, nil
 	}
 	answer.Reference = reference

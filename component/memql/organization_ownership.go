@@ -363,7 +363,9 @@ func (e *MemQLEngine) organizationUserRole(ctx context.Context, userID string) (
 // staged-data: MUST-NOT-GATE -- a current principal role is authorization state, not content visibility.
 func (e *MemQLEngine) storedUserRole(ctx context.Context, userID string) (auth.Role, bool, error) {
 	if e == nil || e.database() == nil {
-		return "", false, nil
+		// No database to ask is a failed read, not "no such person": an owner
+		// must not read as not-an-owner during boot or a disconnection.
+		return "", false, errors.New("the principal table is not available")
 	}
 	var rows []memorynodes.MemoryNode
 	err := e.database().NewSelect().Model(&rows).Where("concept = ?", conceptIdentityUser).

@@ -1,8 +1,10 @@
 package memql
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
@@ -73,30 +75,6 @@ func TestAnAdminWithNothingSetUpIsHeld(t *testing.T) {
 	}
 }
 
-// An owner or developer of ANOTHER account is, today, a person whose stored
-// cluster role is neither and who belongs to an account-kind group in an
-// owning capacity (ruling R-D1; design section 2: per-account roles arrive
-// later). Only the stored cluster role exempts.
-func TestAnAccountScopedRoleIsHeld(t *testing.T) {
-	installRecorder(t)
-	e := holdEngine(auth.RoleWriter)
-	got, err := e.desktopAccess(personContext("ana"), "ana", "", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Admitted || got.Exempt {
-		t.Fatalf("answer = %+v, want held: a group membership is not a cluster role", got)
-	}
-	// A scoped slug of the exempt roles is not exempt either (MayManageFleet).
-	scoped := holdEngine(auth.Role("owner@acct-1"))
-	scoped.storedRoleForTest = func(context.Context, string) (auth.Role, bool, error) {
-		return auth.Role("owner@acct-1"), true, nil
-	}
-	if got, err := scoped.desktopAccess(personContext("ana"), "ana", "", ""); err != nil || got.Admitted {
-		t.Fatalf("scoped role: answer = %+v, err = %v, want held", got, err)
-	}
-}
-
 func TestTheExemptionReadsTheStoredRoleNotAStandIn(t *testing.T) {
 	installRecorder(t)
 	ctx := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "ana", Role: auth.RoleOwner, RoleStandIn: true})
@@ -125,7 +103,7 @@ func TestAHeldAnswerWritesOneLineBeforeItReturnsTheReference(t *testing.T) {
 	if line.UserId != "ana" || len(line.Reasons) == 0 {
 		t.Fatalf("line = %+v, want the person and reasons", line)
 	}
-	if got.ReasonsDigest != accessReasonsDigest(line.Reasons) {
+	if got.ReasonsDigest != personAccessDigest("ana", line.Reasons) {
 		t.Fatalf("digest %q does not match the line's reasons", got.ReasonsDigest)
 	}
 }
@@ -148,7 +126,10 @@ func TestARecorderFailureHoldsWithNoReference(t *testing.T) {
 func TestCheckingAgainWithTheSameReasonsWritesNothing(t *testing.T) {
 	rec := installRecorder(t)
 	e := holdEngine(auth.RoleWriter)
-	first, _ := e.desktopAccess(personContext("ana"), "ana", "", "")
+	first, err := e.desktopAccess(personContext("ana"), "ana", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	second, err := e.desktopAccess(personContext("ana"), "ana", first.Reference, first.ReasonsDigest)
 	if err != nil {
 		t.Fatal(err)
@@ -161,7 +142,10 @@ func TestCheckingAgainWithTheSameReasonsWritesNothing(t *testing.T) {
 func TestChangedReasonsWriteANewLineUnderTheSameReference(t *testing.T) {
 	rec := installRecorder(t)
 	e := holdEngine(auth.RoleWriter)
-	first, _ := e.desktopAccess(personContext("ana"), "ana", "", "")
+	first, err := e.desktopAccess(personContext("ana"), "ana", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	e.providers.SetClusterAccountGate(func(context.Context, string) bool { return true })
 	second, err := e.desktopAccess(personContext("ana"), "ana", first.Reference, first.ReasonsDigest)
 	if err != nil {
@@ -177,9 +161,15 @@ func TestChangedReasonsWriteANewLineUnderTheSameReference(t *testing.T) {
 
 func TestAMalformedReferenceIsNeverWritten(t *testing.T) {
 	rec := installRecorder(t)
+	current, err := holdEngine(auth.RoleWriter).desktopAccess(personContext("ana"), "ana", "", "")
+	if err != nil || current.ReasonsDigest == "" {
+		t.Fatalf("first answer = %+v, err = %v", current, err)
+	}
 	for _, bad := range []string{"ERR-zzzz", "ERR-ABCDEF", "ERR-0123456", "err-abcdef", "x\nERR-abcdef"} {
 		rec.lines = nil
-		got, err := holdEngine(auth.RoleWriter).desktopAccess(personContext("ana"), "ana", bad, "whatever")
+		// Even with the CURRENT digest, a value that is not a reference is
+		// absent: nothing is returned as-is and a fresh one is written.
+		got, err := holdEngine(auth.RoleWriter).desktopAccess(personContext("ana"), "ana", bad, current.ReasonsDigest)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -217,7 +207,10 @@ func TestACallThatNamesNobodyIsRefused(t *testing.T) {
 
 func TestAnotherReplicaKeepsThePassedReference(t *testing.T) {
 	rec := installRecorder(t)
-	first, _ := holdEngine(auth.RoleWriter).desktopAccess(personContext("ana"), "ana", "", "")
+	first, err := holdEngine(auth.RoleWriter).desktopAccess(personContext("ana"), "ana", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	second, err := holdEngine(auth.RoleWriter).desktopAccess(personContext("ana"), "ana", first.Reference, first.ReasonsDigest)
 	if err != nil || second.Reference != first.Reference || len(rec.lines) != 1 {
 		t.Fatalf("second = %+v, err = %v, lines = %d, want the same reference and no new line", second, err, len(rec.lines))
@@ -259,10 +252,88 @@ func TestAFailedGrantReadBehindTheClusterAccountIsAnError(t *testing.T) {
 		return false
 	})
 	got, err := e.desktopAccess(personContext("ana"), "ana", "", "")
-	if err == nil || !strings.Contains(err.Error(), "could not be read") || got.Reference != "" {
+	if err == nil || !strings.Contains(err.Error(), "what the person may use could not be read") || !strings.Contains(err.Error(), "grants unreadable") || got.Reference != "" {
 		t.Fatalf("answer = %+v, err = %v, want an error", got, err)
 	}
 	if len(rec.lines) != 0 {
 		t.Fatalf("lines = %+v, want none", rec.lines)
+	}
+}
+
+// Sources are computed for the exempt too, because Ask uses them.
+func TestAnExemptPersonStillGetsTheirSources(t *testing.T) {
+	installRecorder(t)
+	e := engineWithFleet([]FleetModel{accessModel(accessMachine("mine", "ana", true))})
+	withAppRows(e)
+	e.storedRoleForTest = func(context.Context, string) (auth.Role, bool, error) { return auth.RoleOwner, true, nil }
+	got, err := e.desktopAccess(personContext("ana"), "ana", "", "")
+	if err != nil || !got.Exempt || len(got.Sources) != 1 || got.Sources[0].Kind != AccessSourceMachine {
+		t.Fatalf("answer = %+v, err = %v, want exempt with the machine", got, err)
+	}
+}
+
+// The stored role is read fresh, never from this node's result cache.
+func TestTheStoredRoleReadIsMarkedFresh(t *testing.T) {
+	installRecorder(t)
+	e := holdEngine(auth.RoleWriter)
+	fresh := false
+	e.storedRoleForTest = func(ctx context.Context, _ string) (auth.Role, bool, error) {
+		fresh = FreshReadFromContext(ctx)
+		return auth.RoleWriter, true, nil
+	}
+	if _, err := e.desktopAccess(personContext("ana"), "ana", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if !fresh {
+		t.Fatal("the stored-role read ran on a context not marked fresh")
+	}
+}
+
+// Ruling R-D9: the digest binds the person, so ana's reference and digest
+// carried to ben's check never answer for ben: his digest differs and his own
+// line is written.
+func TestTheDigestBindsThePerson(t *testing.T) {
+	rec := installRecorder(t)
+	first, err := holdEngine(auth.RoleWriter).desktopAccess(personContext("ana"), "ana", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := holdEngine(auth.RoleWriter).desktopAccess(personContext("ben"), "ben", first.Reference, first.ReasonsDigest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.ReasonsDigest == first.ReasonsDigest {
+		t.Fatalf("both people got digest %q", first.ReasonsDigest)
+	}
+	if len(rec.lines) != 2 || rec.lines[1].UserId != "ben" {
+		t.Fatalf("lines = %+v, want a second line for ben", rec.lines)
+	}
+}
+
+// A failed write is logged with the person and the error, and answers with no
+// reference and no digest.
+func TestAFailedHoldWriteIsLoggedAndCarriesNoDigest(t *testing.T) {
+	rec := installRecorder(t)
+	rec.err = errors.New("log store refused")
+	var buf bytes.Buffer
+	prior := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prior) })
+	got, err := holdEngine(auth.RoleWriter).desktopAccess(personContext("ana"), "ana", "", "")
+	if err != nil || got.Reference != "" || got.ReasonsDigest != "" {
+		t.Fatalf("answer = %+v, err = %v, want held with no reference and no digest", got, err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "level=WARN") || !strings.Contains(out, "userId=ana") || !strings.Contains(out, "log store refused") {
+		t.Fatalf("log = %q, want a warning naming the person and the error", out)
+	}
+}
+
+// With no database the principal table cannot be asked: that is a failed
+// read, never "no such person".
+func TestStoredRoleWithNoDatabaseIsAnError(t *testing.T) {
+	_, found, err := (&MemQLEngine{}).storedUserRole(context.Background(), "ana")
+	if err == nil || found {
+		t.Fatalf("found = %v, err = %v, want an error", found, err)
 	}
 }
