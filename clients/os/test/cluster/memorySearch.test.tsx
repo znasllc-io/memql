@@ -278,6 +278,12 @@ describe("Cluster > Settings > Memory search", () => {
     await readTheBar();
     fireEvent.click(screen.getByRole("button", { name: "Switch back" }));
     expect(screen.getByText(/^Everything is re-indexed in the background on your machines\./)).toBeTruthy();
+    // While its own question is open, Switch back has nothing more to offer.
+    expect(screen.queryByRole("button", { name: "Switch back" })).toBeNull();
+    await readTheBar();
+    fireEvent.click(screen.getByRole("button", { name: "Keep qwen3-embedding:0.6b" }));
+    await readTheBar();
+    fireEvent.click(screen.getByRole("button", { name: "Switch back" }));
     await readTheBar();
     fireEvent.click(screen.getByRole("button", { name: "Switch to nomic-embed-text" }));
     await settle();
@@ -405,6 +411,36 @@ describe("Cluster > Settings > Memory search", () => {
     fireEvent.click(screen.getByRole("button", { name: "Switch to nomic-embed-text" }));
     expect(await screen.findByText("memory search changed meanwhile, try again")).toBeTruthy();
     await waitFor(() => expect(query.memorySearchStatus.mock.calls.length).toBeGreaterThanOrEqual(2));
+  });
+
+  it("a press the cluster never answered says only what is known", async () => {
+    // The connection dropped: the act may or may not have happened, and while
+    // the cluster is away nothing has been read again.
+    const query = memorySearchQuery(statusRow());
+    query.memorySearchSwitch.mockRejectedValueOnce(Object.assign(new Error("the connection closed"), { reason: "transport" }));
+    mount("memorysearch", query);
+    fireEvent.click(await screen.findByRole("radio", { name: /nomic-embed-text/ }));
+    await readTheBar();
+    fireEvent.click(screen.getByRole("button", { name: "Switch to nomic-embed-text" }));
+    expect(await screen.findByText("The cluster did not answer, so it is not known whether this happened.")).toBeTruthy();
+    expect(screen.queryByText(/has been read again/)).toBeNull();
+  });
+
+  it("a later read that fails is said in the engine's words, as a first one is", async () => {
+    const advance = fakeClock();
+    try {
+      const query = memorySearchQuery(statusRow());
+      mount("memorysearch", query);
+      await advance(0);
+      query.memorySearchStatus.mockRejectedValueOnce(new Error("memorySearchStatus: memory search could not count its index"));
+      await advance(30_000);
+      const note = screen.getByText("Memory search could not be refreshed.").closest(".os-head-note");
+      expect(note?.getAttribute("title")).toBe("memory search could not count its index");
+      // The page stays: the last reading is still shown.
+      expect(screen.getByText("8,310 items indexed")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   // A switch started elsewhere, then cancelled: the reads a page left open

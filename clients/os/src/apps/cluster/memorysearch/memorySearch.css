@@ -1,17 +1,15 @@
 /* Memory search (Cluster > Settings), on the kit's details grid (kit/details.css).
- * Only what the grid does not say: how the parts of a section stack, the
- * measure of the choices and what is said under them, and the line a fact's
- * second sentence takes. */
-
-.os-memory-search .os-details-section-body {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
+ * Only what the grid does not say: how the parts of a setting's value stack,
+ * the measure of the choices and what is said under them, and the line a
+ * fact's second sentence takes. Each section's body holds one child (Facts, or
+ * one SettingRow), so the grid's own spacing is all it needs. */
 
 /* One column of the setting's value: the choices, the kept index's line, the
  * question, a refusal. A FIELD'S MEASURE (DESIGN.md rule 9, the kit's 34rem for
- * a field): a choice as wide as a maximised window reads as a banner. */
+ * a field): a choice as wide as a maximised window reads as a banner. It is
+ * also where focus goes when the page removed the control that held it and
+ * there is no model to give it to (data-change-model); the shell's focus ring
+ * then shows a keyboard user where they are. */
 .os-memory-search-stack {
   display: flex;
   flex-direction: column;

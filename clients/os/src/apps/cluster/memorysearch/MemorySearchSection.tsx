@@ -1,5 +1,4 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { refusalSentence } from "@znasllc-io/memql-sdk-core/client";
 import { useSession } from "../../../chrome/access";
 import { useConnectionStatus } from "../../../chrome/connection";
 import { useOsConnection } from "../../../live/connection";
@@ -185,7 +184,7 @@ export function MemorySearchPage({ query, connected, visible, me, mayChange }: {
   return <div className="os-cluster os-memory-search" ref={root} onFocus={(event) => { lastFocused.current = event.target as HTMLElement; }}>
     <Head title="Memory search" note={search.readError && status ? <HeadNote sentence="Memory search could not be refreshed." next="Showing the last reading." detail={search.readError} /> : null} />
     {status === null ? !connected ? <Notice sentence="Memory search loads when the cluster reconnects." />
-      : search.readError ? <ReadRefused sentence="Memory search could not be read." reason={refusalSentence(search.readError, "memorySearchStatus")} retry={search.retry} />
+      : search.readError ? <ReadRefused sentence="Memory search could not be read." reason={search.readError} retry={search.retry} />
       : <ContentSkeleton kind="detail" label="Loading memory search" />
     : <Details>
       <InUse status={status} me={me} search={search} mayChange={mayChange} refusal={actedIn === "inUse" ? search.error : ""} act={act} />
@@ -324,14 +323,16 @@ function ChangeModel({ status, search, draft, pick, refusal, act }: {
   // can work, which is where the engine can check it.
   const previous = status.previousRef === "" ? null : status.retained.find((kept) => kept.providerRef === status.previousRef) ?? null;
   const until = previous ? keptUntil(previous.retireAt) : "";
-  const back = previous ? choices?.find((choice) => choice.providerRef === previous.providerRef && choice.available) ?? null : null;
+  // Absent while its own question is open, which already asks what it offers.
+  const back = previous && target?.providerRef !== previous.providerRef
+    ? choices?.find((choice) => choice.providerRef === previous.providerRef && choice.available) ?? null : null;
   const bound = status.providerRef !== "";
   return <DetailsSection title="Change model">
     <SettingRow label="Model">
       <div className="os-memory-search-stack" data-change-model tabIndex={-1}>
         {choices === null
           ? search.choicesError
-            ? <ReadRefused sentence="The models you can choose could not be read." reason={refusalSentence(search.choicesError, "memorySearchChoices")} retry={search.retry} />
+            ? <ReadRefused sentence="The models you can choose could not be read." reason={search.choicesError} retry={search.retry} />
             : <ContentSkeleton kind="form" label="Loading the models you can choose" />
           : choices.length === 0
             ? <p className="os-caption">None of your machines offers an embedding model, and no vendor account is set up for one.</p>

@@ -93,8 +93,9 @@ export interface MemorySearch {
   choices: MemorySearchChoice[] | null;
   /** The last act's refusal, in the engine's words; "" when the last act went through, or once a read shows another state (changeModelState). */
   error: string;
-  /** Why the status could not be read, when the last read failed. */
+  /** Why the status could not be read, when the last read failed, in the engine's words (refusalSentence). */
   readError: string;
+  /** The same for the choices. */
   choicesError: string;
   retry: () => void;
   /** Each resolves whether the act happened, so a button never says it did when it did not. */
@@ -243,10 +244,11 @@ export function useMemorySearch(query: MemorySearchQueries | null, { visible = t
       return true;
     } catch (e) {
       // A dropped connection is not a refusal: what happened is unknown, and
-      // the read that follows says what the cluster holds now. The state is
-      // read as the answer arrived: a read that landed while the act was out
-      // is what the refusal answers.
-      const sentence = isTransportInterruption(e) ? "The cluster did not answer. What is shown here has been read again." : refusalSentence(e, name);
+      // the read that follows says what the cluster holds now -- at once, or,
+      // with the cluster away, once it answers, so the sentence promises no
+      // read. The state is read as the answer arrived: a read that landed
+      // while the act was out is what the refusal answers.
+      const sentence = isTransportInterruption(e) ? "The cluster did not answer, so it is not known whether this happened." : refusalSentence(e, name);
       setRefusal({ sentence, over: changeModelState(latestShown.current) });
       return false;
     } finally {
@@ -259,8 +261,10 @@ export function useMemorySearch(query: MemorySearchQueries | null, { visible = t
     status: shown,
     choices: choices ? choiceRead.value : null,
     error: refusal?.sentence ?? "",
-    readError: status.error,
-    choicesError: choices ? choiceRead.error : "",
+    // In the engine's words, once, for every place that shows them: a first
+    // read's notice and a later read's heading note say one thing.
+    readError: status.error ? refusalSentence(status.error, "memorySearchStatus") : "",
+    choicesError: choices && choiceRead.error ? refusalSentence(choiceRead.error, "memorySearchChoices") : "",
     retry: useCallback(() => { status.retry(); choiceRead.retry(); }, [status.retry, choiceRead.retry]),
     switchTo: useCallback((providerRef: string) => act("memorySearchSwitch", (q) => q.memorySearchSwitch({ provider: providerRef })), [act]),
     cancel: useCallback(() => act("memorySearchCancel", (q) => q.memorySearchCancel({})), [act]),
