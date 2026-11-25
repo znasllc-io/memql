@@ -735,3 +735,28 @@ concept messageRate {
  targetId string! @maxLength(128)
  rateData string! @maxLength(512)
 }
+
+/// Temporary moderated submissions. Native room/admission gates own all visibility and state transitions.
+// @no-displayCard: private question text is visible only through the native author/host/selected projection.
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@belongsTo(account, via="siteId", stays="signin")
+concept workflowQuestion {
+ siteId string!
+ ownerUserId string!
+ roomId string!
+ runId string!
+ authorKeyId string!
+ authorAdmission string! @maxLength(64)
+ submittedAt datetime!
+ roomDeadline datetime!
+ expiresAt datetime!
+ revision int!
+ status enum("pending", "selected", "withdrawn", "dismissed", "resolved")!
+ body string! @maxLength(2000) @secret
+ stateData string! @maxLength(8192)
+ accountId string
+ @relationship(type="references", as="questionSite", field="siteId", target=site, direction="outgoing")
+ @relationship(type="references", as="questionRoom", field="roomId", target=room, direction="outgoing")
+ @relationship(type="references", as="questionAuthorKey", field="authorKeyId", target=key, direction="outgoing")
+}

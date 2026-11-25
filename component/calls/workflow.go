@@ -75,6 +75,7 @@ type WorkflowBinding struct {
 }
 
 type WorkflowRequest struct {
+	Question         *QuestionRequest    `json:"question,omitempty"`
 	BookingID        string              `json:"bookingId,omitempty"`
 	Action           string              `json:"action"`
 	Definition       *WorkflowDefinition `json:"definition,omitempty"`
@@ -141,15 +142,17 @@ type WorkflowRun struct {
 	ServerNow           time.Time          `json:"serverNow"`
 }
 type WorkflowResult struct {
-	Effect      *WorkflowEffect      `json:"effect,omitempty"`
-	Binding     *WorkflowBinding     `json:"binding,omitempty"`
-	Catalog     []WorkflowDefinition `json:"catalog,omitempty"`
-	Definitions []WorkflowDefinition `json:"definitions,omitempty"`
-	Definition  *WorkflowDefinition  `json:"definition,omitempty"`
-	Issues      []WorkflowIssue      `json:"issues,omitempty"`
-	Simulation  *WorkflowSimulation  `json:"simulation,omitempty"`
-	Run         *WorkflowRun         `json:"run,omitempty"`
-	ServerNow   time.Time            `json:"serverNow"`
+	Questions       *Questions           `json:"questions,omitempty"`
+	QuestionReceipt *QuestionReceipt     `json:"questionReceipt,omitempty"`
+	Effect          *WorkflowEffect      `json:"effect,omitempty"`
+	Binding         *WorkflowBinding     `json:"binding,omitempty"`
+	Catalog         []WorkflowDefinition `json:"catalog,omitempty"`
+	Definitions     []WorkflowDefinition `json:"definitions,omitempty"`
+	Definition      *WorkflowDefinition  `json:"definition,omitempty"`
+	Issues          []WorkflowIssue      `json:"issues,omitempty"`
+	Simulation      *WorkflowSimulation  `json:"simulation,omitempty"`
+	Run             *WorkflowRun         `json:"run,omitempty"`
+	ServerNow       time.Time            `json:"serverNow"`
 }
 
 var workflowID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$`)

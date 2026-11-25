@@ -509,3 +509,38 @@ shape messageRate callsMessageRateFull {
  targetId
  rateData
 }
+
+@row
+shape workflowQuestion callsQuestionMetadata {
+ row.id
+ row.createdAt
+ siteId
+ roomId
+ runId
+ authorKeyId
+ authorAdmission
+ submittedAt
+ roomDeadline
+ expiresAt
+ revision
+ status
+ stateData
+}
+
+@row
+shape workflowQuestion callsQuestionFull {
+ row.id
+ row.createdAt
+ siteId
+ roomId
+ runId
+ authorKeyId
+ authorAdmission
+ submittedAt
+ roomDeadline
+ expiresAt
+ revision
+ status
+ stateData
+ body
+}
