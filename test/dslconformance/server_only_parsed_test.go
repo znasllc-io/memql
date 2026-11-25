@@ -1257,12 +1257,13 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// narrower version of this feature but an incoherent one, two users
 		// embedding into two geometries with `similarTo` comparing across them.
 		//
-		// activateEmbedderBinding carries a second argument of its own. Flipping
-		// the binding is the LAST of four steps -- create the new width's table,
-		// fill it, compare the counts, flip -- and a caller-reachable mutation
-		// would let somebody perform step four alone. The cluster would then
-		// read every vector in the old table through the new model's geometry:
-		// half a search space, ranked confidently, with no error anywhere.
+		// activateEmbedderBinding carries a second argument of its own. It is
+		// the LAST step of a cluster's first binding -- probe the model for its
+		// width, create its table, record the plan, activate -- and a
+		// caller-reachable mutation would let somebody take it alone: every
+		// search and every writer would then follow a model nobody checked,
+		// into a table that may not exist. A change of model is a switch, and
+		// only the memory index job finishes one (flipEmbedderBinding, below).
 		{Path: "platform/mutations.memql", Name: "recordEmbedderBindingPlan"}: true,
 		{Path: "platform/mutations.memql", Name: "activateEmbedderBinding"}:   true,
 		// The memory-search switch's writes (design record 2026-11-23), for the

@@ -3318,9 +3318,11 @@ mutation moduleReadiness recordModuleReadiness {
 // whose clock lags the last writer's still writes the newest version instead
 // of an older one every reader passes over.
 
-/// Record a binding that is being activated. Written before the re-embed starts, with
-/// `activatedAt` deliberately absent -- until the counts match this row is a PLAN, and a reader
-/// seeing a timestamp on it would read a switch that has not happened as one that has.
+/// Record the cluster's FIRST binding as a PLAN. bindEmbedder writes it once a probe has learned
+/// the model's width and the model's table exists, with `activatedAt` deliberately absent: a reader
+/// that sees the row before activateEmbedderBinding stamps it reads "no embedder is bound", never a
+/// model that is not active yet. A change of model never writes here; it is a switch, which the
+/// memory index job carries out and flipEmbedderBinding finishes.
 ///
 /// @serverOnly, AND actor.userId SCOPING IS NOT THE FIX, because there is no actor to scope to.
 /// The embedder is a property of the DEPLOYMENT: one binding, one vector space, everybody's rows in
@@ -3350,16 +3352,16 @@ mutation embedderBinding recordEmbedderBindingPlan {
   }
 }
 
-/// Flip the binding to active. Called only when the new width's vector count matches the old one's;
-/// `activatedAt` is what makes this row a state rather than a plan.
+/// Make the cluster's FIRST binding active: bindEmbedder stamps `activatedAt` on the plan it has
+/// just written, and the stamp is what makes the row a state rather than a plan. A first model has
+/// nothing to re-embed, because no item is indexed under another model.
 ///
 /// @serverOnly, AND actor.userId SCOPING IS NOT THE FIX -- same reason as the plan write above (no
-/// actor owns a deployment-wide vector space) plus one this write has on its own. Flipping the
-/// binding is the LAST of four steps: create the new width's table, fill it, compare the counts,
-/// flip. A caller-reachable mutation would let somebody perform step four alone, and the cluster
-/// would then read every vector in the old table through the new model's geometry -- half a search
-/// space, ranked confidently, with no error anywhere. The guard is that only the builtin that ran
-/// steps one to three can call this.
+/// actor owns a deployment-wide vector space) plus one this write has on its own. Activating is the
+/// LAST step of a first binding -- probe the model for its width, create its table, record the
+/// plan, activate -- and a caller-reachable mutation would let somebody take it alone: every search
+/// and every writer would then follow a model nobody checked, into a table that may not exist. The
+/// guard is that only the builtin that ran the steps before it can call this.
 @serverOnly
 mutation embedderBinding activateEmbedderBinding {
   args {

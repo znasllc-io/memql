@@ -127,6 +127,15 @@ func EmbeddingVectorTable(provider string, dimensions int) (string, error) {
 	return fmt.Sprintf("node_vectors_%d_%x", dimensions, hash[:8]), nil
 }
 
+// EnsureEmbeddingVectorTable creates a model's vector table (EmbeddingVectorTable)
+// if it does not exist, and answers its name. IDEMPOTENT BY CONSTRUCTION (`IF
+// NOT EXISTS` throughout, under an advisory lock on the table's name), because
+// every store and every tick of the memory index job calls it.
+//
+// DDL AT RUNTIME IS DELIBERATE, though this repo's convention is migrations: a
+// migration cannot express this table, because its model and width are not
+// known until an owner chooses one, and a migration per catalog model would
+// create empty tables on every cluster.
 func EnsureEmbeddingVectorTable(ctx context.Context, db *sql.DB, provider string, dimensions int) (string, error) {
 	table, err := EmbeddingVectorTable(provider, dimensions)
 	if err != nil {
