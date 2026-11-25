@@ -57,12 +57,15 @@ function indexerIsMe(indexer: Indexer, me: string): boolean {
   return me !== "" && bareId(indexer.indexedBy) === me;
 }
 
-/** Whose machines index the model, from the reader's side. */
+/**
+ * Whose machines index the model, from the reader's side: the indexer's own
+ * and the ones lent to them, which receive everyone's memory text too.
+ */
 function indexingLine(status: MemorySearchStatus, me: string): string {
   if (status.kind === "vendor") return "Paid by the cluster's vendor account";
   if (status.indexedBy === "") return "Nobody is named to index it yet";
-  if (indexerIsMe(status, me)) return "Indexed on your machines";
-  return status.indexedByName ? `Indexed on ${status.indexedByName}'s machines` : "Indexed on another owner's machines";
+  if (indexerIsMe(status, me)) return "Indexed on your machines and the ones lent to you";
+  return `Indexed on ${status.indexedByName ? `${status.indexedByName}'s` : "another owner's"} machines and the ones lent to them`;
 }
 
 /**
@@ -103,10 +106,13 @@ function switchTakeOverLine(sw: MemorySearchSwitch): string {
 /** What choosing `target` will do, said before it is done (the brief's confirmation). */
 function confirmationLine(status: MemorySearchStatus, target: MemorySearchChoice): string {
   const estimate = status.indexed + status.backlog;
+  // A machine model is indexed on the chooser's machines AND the ones lent to
+  // them, which receive everyone's memory text as well: said, not left out.
+  const machines = "on your machines and the ones lent to you";
   if (status.providerRef === "") {
-    return `Everything is indexed in the background ${target.kind === "vendor" ? "on the cluster's vendor account" : "on your machines"}. New items are indexed the same way from now on.`;
+    return `Everything is indexed in the background ${target.kind === "vendor" ? "on the cluster's vendor account" : machines}. New items are indexed the same way from now on.`;
   }
-  const where = target.kind === "vendor" ? `on the cluster's vendor account${estimate > 0 ? `, about ${items(estimate)}` : ""}` : "on your machines";
+  const where = target.kind === "vendor" ? `on the cluster's vendor account${estimate > 0 ? `, about ${items(estimate)}` : ""}` : machines;
   return `Everything is re-indexed in the background ${where}. New items are indexed the same way from now on. Search keeps using ${status.label} until the rebuild finishes, then switches by itself. The current index is kept for 30 days in case you switch back.`;
 }
 

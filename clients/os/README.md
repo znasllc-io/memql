@@ -2956,8 +2956,9 @@ job).
   once; a refusal is the engine's sentence beside the act, and the status is read
   again. No act is repeated.
 - **EVERY CHANGE ASKS FIRST**, in place (`InPlaceAsk`), saying what happens: the
-  whole index rebuilt in the background on your machines, or on the cluster's
-  vendor account with the estimated item count, search keeping the current model
+  whole index rebuilt in the background on your machines and the ones lent to
+  you (which receive everyone's memory text too), or on the cluster's vendor
+  account with the estimated item count, search keeping the current model
   until the rebuild finishes, and the current index kept for 30 days. While a
   switch runs before its flip, no other model and no Switch back is offered (one
   switch at a time); its progress shows the items done, clamped to the ESTIMATED

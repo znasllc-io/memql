@@ -141,7 +141,7 @@ describe("Cluster > Settings > Memory search", () => {
     const owner = memorySearchQuery(statusRow());
     mount("settings", owner);
     const link = await screen.findByRole("button", { name: "Memory search: qwen3-embedding:0.6b" });
-    expect(within(link).getByText("Indexed on your machines")).toBeTruthy();
+    expect(within(link).getByText("Indexed on your machines and the ones lent to you")).toBeTruthy();
     fireEvent.click(screen.getByRole("combobox", { name: "Open Cluster on" }));
     const starts = screen.getAllByRole("option").map((o) => o.textContent);
     expect(starts).toContain("Settings");
@@ -188,7 +188,7 @@ describe("Cluster > Settings > Memory search", () => {
     })));
     const inUse = await screen.findByRole("region", { name: "In use" });
     expect(within(inUse).getByText("qwen3-embedding:0.6b")).toBeTruthy();
-    expect(within(inUse).getByText("Indexed on your machines")).toBeTruthy();
+    expect(within(inUse).getByText("Indexed on your machines and the ones lent to you")).toBeTruthy();
     expect(within(inUse).getByText("8,310 items indexed")).toBeTruthy();
     expect(within(inUse).getByText("37 items waiting: none of your machines offering qwen3-embedding:0.6b is online")).toBeTruthy();
     cleanup();
@@ -196,7 +196,7 @@ describe("Cluster > Settings > Memory search", () => {
     // Another owner's machines, named; a vendor model, paid by the cluster.
     mount("memorysearch", memorySearchQuery(statusRow({ indexedBy: "ana", indexedByName: "Ana Owner", backlog: 1,
       waitingReason: "none of the indexer's machines offering qwen3-embedding:0.6b is online" })));
-    expect(await screen.findByText("Indexed on Ana Owner's machines")).toBeTruthy();
+    expect(await screen.findByText("Indexed on Ana Owner's machines and the ones lent to them")).toBeTruthy();
     expect(screen.getByText("1 item waiting: none of Ana Owner's machines offering qwen3-embedding:0.6b is online")).toBeTruthy();
     cleanup();
     mount("memorysearch", memorySearchQuery(statusRow({ providerRef: VENDOR, kind: "vendor", label: "text-embedding-3-small",
@@ -213,7 +213,7 @@ describe("Cluster > Settings > Memory search", () => {
     expect(within(models).getByRole("radio", { name: /text-embedding-3-small/ }).textContent).toContain("Paid by the cluster's vendor account");
 
     fireEvent.click(within(models).getByRole("radio", { name: /nomic-embed-text/ }));
-    expect(screen.getByText("Everything is re-indexed in the background on your machines. New items are indexed the same way from now on. Search keeps using qwen3-embedding:0.6b until the rebuild finishes, then switches by itself. The current index is kept for 30 days in case you switch back.")).toBeTruthy();
+    expect(screen.getByText("Everything is re-indexed in the background on your machines and the ones lent to you. New items are indexed the same way from now on. Search keeps using qwen3-embedding:0.6b until the rebuild finishes, then switches by itself. The current index is kept for 30 days in case you switch back.")).toBeTruthy();
     expect(query.memorySearchSwitch).not.toHaveBeenCalled();
 
     fireEvent.click(within(models).getByRole("radio", { name: /text-embedding-3-small/ }));
@@ -297,7 +297,7 @@ describe("Cluster > Settings > Memory search", () => {
     expect(await screen.findByText(`The previous model's index is kept until ${until}.`)).toBeTruthy();
     await readTheBar();
     fireEvent.click(screen.getByRole("button", { name: "Switch back" }));
-    expect(screen.getByText(/^Everything is re-indexed in the background on your machines\./)).toBeTruthy();
+    expect(screen.getByText(/^Everything is re-indexed in the background on your machines and the ones lent to you\./)).toBeTruthy();
     // While its own question is open, Switch back has nothing more to offer.
     expect(screen.queryByRole("button", { name: "Switch back" })).toBeNull();
     await readTheBar();
@@ -333,7 +333,7 @@ describe("Cluster > Settings > Memory search", () => {
 
     // Nothing is indexed under another model, so nothing is re-indexed: the short question.
     fireEvent.click(within(models).getByRole("radio", { name: /nomic-embed-text/ }));
-    expect(screen.getByText("Everything is indexed in the background on your machines. New items are indexed the same way from now on.")).toBeTruthy();
+    expect(screen.getByText("Everything is indexed in the background on your machines and the ones lent to you. New items are indexed the same way from now on.")).toBeTruthy();
     await readTheBar();
     fireEvent.click(screen.getByRole("button", { name: "Not now" }));
     expect(screen.queryByText(/^Everything is indexed/)).toBeNull();
@@ -360,7 +360,7 @@ describe("Cluster > Settings > Memory search", () => {
     const mayNot = { mayAct: false };
     mount("memorysearch", memorySearchQuery(statusRow({ ...mayNot, indexedBy: "ana", indexedByName: "Ana Owner", takeOver: true, backlog: 3,
       waitingReason: "none of the indexer's machines offering qwen3-embedding:0.6b is online" })));
-    expect(await screen.findByText("Indexed on Ana Owner's machines")).toBeTruthy();
+    expect(await screen.findByText("Indexed on Ana Owner's machines and the ones lent to them")).toBeTruthy();
     expect(screen.getByText("3 items waiting: none of Ana Owner's machines offering qwen3-embedding:0.6b is online")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Index on my machines" })).toBeNull();
     expect(screen.queryByRole("radiogroup", { name: "Memory search model" })).toBeNull();
@@ -388,7 +388,7 @@ describe("Cluster > Settings > Memory search", () => {
     // Without execute on the part the engine says the same, and the page draws the same.
     setEffectiveCapabilities(seededAccessFor("owner").filter((c) => !(c.verb === "execute" && c.resource === "app:cluster/memorysearch")));
     mount("memorysearch", memorySearchQuery(statusRow({ ...mayNot, indexedBy: "ana", indexedByName: "Ana Owner", takeOver: true })));
-    expect(await screen.findByText("Indexed on Ana Owner's machines")).toBeTruthy();
+    expect(await screen.findByText("Indexed on Ana Owner's machines and the ones lent to them")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Index on my machines" })).toBeNull();
     expect(screen.queryByRole("radiogroup", { name: "Memory search model" })).toBeNull();
   });
@@ -417,7 +417,7 @@ describe("Cluster > Settings > Memory search", () => {
     await settle();
     expect(query.memorySearchSwitch).toHaveBeenCalledWith({ provider: QWEN });
     expect(screen.queryByRole("button", { name: "Index on my machines" })).toBeNull();
-    expect(screen.getByText("Indexed on your machines")).toBeTruthy();
+    expect(screen.getByText("Indexed on your machines and the ones lent to you")).toBeTruthy();
     cleanup();
 
     // A switch in progress still offers it: search embeds as the binding's indexer until the flip.
@@ -426,7 +426,7 @@ describe("Cluster > Settings > Memory search", () => {
     cleanup();
 
     mount("memorysearch", memorySearchQuery(statusRow({ indexedBy: "ana", indexedByName: "Ana Owner", takeOver: false })));
-    await screen.findByText("Indexed on Ana Owner's machines");
+    await screen.findByText("Indexed on Ana Owner's machines and the ones lent to them");
     expect(screen.queryByRole("button", { name: "Index on my machines" })).toBeNull();
   });
 

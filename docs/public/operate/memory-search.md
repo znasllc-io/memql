@@ -118,11 +118,11 @@ Choosing asks first, in place. On a cluster with no model yet, the model is
 bound at once: one sentence is embedded to measure its vector width, its table
 is made, and every item is indexed with it from then on. Any other choice
 starts a **switch**, and the question says what will happen: everything is
-re-indexed in the background, on your machines or, for a vendor model, on the
-cluster's vendor account, with about how many items; new items are indexed the
-same way from then on; search keeps the current model until the rebuild
-finishes, then switches by itself; and the current index is kept for 30 days in
-case you switch back.
+re-indexed in the background, on your machines and the ones lent to you or, for
+a vendor model, on the cluster's vendor account, with about how many items; new
+items are indexed the same way from then on; search keeps the current model
+until the rebuild finishes, then switches by itself; and the current index is
+kept for 30 days in case you switch back.
 
 One switch at a time: until a switch's flip, no other model can be chosen, and
 Memory search offers **Cancel**. Every act on this page is an active owner's:
