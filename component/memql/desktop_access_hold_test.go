@@ -289,9 +289,9 @@ func TestTheStoredRoleReadIsMarkedFresh(t *testing.T) {
 	}
 }
 
-// Ruling R-D9: the digest binds the person, so ana's reference and digest
-// carried to ben's check never answer for ben: his digest differs and his own
-// line is written.
+// Ruling R-D9, amended: a reference is never shared by two people. Ana's
+// reference and digest carried to ben's check mint ben a new reference, and
+// his line names him.
 func TestTheDigestBindsThePerson(t *testing.T) {
 	rec := installRecorder(t)
 	first, err := holdEngine(auth.RoleWriter).desktopAccess(personContext("ana"), "ana", "", "")
@@ -302,11 +302,25 @@ func TestTheDigestBindsThePerson(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second.ReasonsDigest == first.ReasonsDigest {
-		t.Fatalf("both people got digest %q", first.ReasonsDigest)
+	if second.ReasonsDigest == first.ReasonsDigest || second.Reference == first.Reference || !accessReferencePattern.MatchString(second.Reference) {
+		t.Fatalf("first = %+v, second = %+v, want a different digest and reference", first, second)
 	}
-	if len(rec.lines) != 2 || rec.lines[1].UserId != "ben" {
-		t.Fatalf("lines = %+v, want a second line for ben", rec.lines)
+	if len(rec.lines) != 2 || rec.lines[1].UserId != "ben" || rec.lines[1].Reference != second.Reference {
+		t.Fatalf("lines = %+v, want a second line for ben under his own reference", rec.lines)
+	}
+}
+
+// A digest that does not parse never earns the passed reference back, even
+// beside a valid one.
+func TestADigestThatDoesNotParseMintsANewReference(t *testing.T) {
+	rec := installRecorder(t)
+	first, _ := holdEngine(auth.RoleWriter).desktopAccess(personContext("ana"), "ana", "", "")
+	for _, bad := range []string{"", "zz", first.ReasonsDigest[:10], first.ReasonsDigest + "00"} {
+		rec.lines = nil
+		got, err := holdEngine(auth.RoleWriter).desktopAccess(personContext("ana"), "ana", first.Reference, bad)
+		if err != nil || got.Reference == first.Reference || len(rec.lines) != 1 {
+			t.Fatalf("digest %q: answer = %+v, err = %v, lines = %d, want a new reference and one line", bad, got, err, len(rec.lines))
+		}
 	}
 }
 

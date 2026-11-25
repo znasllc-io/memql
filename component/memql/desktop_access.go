@@ -442,9 +442,34 @@ func accessReasonsDigest(reasons []string) string {
 	return hex.EncodeToString(sum[:])[:16]
 }
 
-// personAccessDigest is accessReasonsDigest bound to one person (ruling R-D9).
+// accessPersonPartLen is the length of the person part of a digest: the first
+// 8 hex characters of a sha256 of the person's bare id.
+const accessPersonPartLen = 8
+
+func accessPersonPart(userId string) string {
+	sum := sha256.Sum256([]byte(BareShortId(strings.TrimSpace(userId))))
+	return hex.EncodeToString(sum[:])[:accessPersonPartLen]
+}
+
+// personAccessDigest is the digest a held answer carries (ruling R-D9, as
+// amended): the person part, then the reasons digest. The person part lets a
+// later check tell "the same person, whose reference this is" from somebody
+// else on the same page after a sign-in change, who must never be handed the
+// first person's reference.
 func personAccessDigest(userId string, reasons []string) string {
-	return accessReasonsDigest(append([]string{"person:" + BareShortId(userId)}, reasons...))
+	return accessPersonPart(userId) + accessReasonsDigest(reasons)
+}
+
+// digestIsFor reports whether a passed digest parses (person part plus a
+// 16-hex reasons digest) and its person part is this person's.
+func digestIsFor(digest, userId string) bool {
+	if len(digest) != accessPersonPartLen+16 {
+		return false
+	}
+	if _, err := hex.DecodeString(digest); err != nil {
+		return false
+	}
+	return digest[:accessPersonPartLen] == accessPersonPart(userId)
 }
 
 // AccessHoldLine is what is written when a person is held: enough for an
@@ -530,13 +555,15 @@ func (e *MemQLEngine) desktopAccess(ctx context.Context, actingUserId, passedRef
 	}
 
 	// The digest binds the person (ruling R-D9): a reference and digest carried
-	// across a sign-in change on one page never answer for a second person,
-	// whose first check finds a different digest and writes its own line.
-	// The line's Reasons stay the plain reasons.
+	// across a sign-in change on one page never answer for a second person. A
+	// passed reference is reused only when the digest's person part is this
+	// person's; for anybody else, or a digest that does not parse, a new
+	// reference is minted and its line written, so a reference is never shared
+	// by two people. The line's Reasons stay the plain reasons.
 	digest := personAccessDigest(actingUserId, reasons)
 	answer := DesktopAccess{Sources: sources, ReasonsDigest: digest}
 	reference := ""
-	if accessReferencePattern.MatchString(passedReference) {
+	if accessReferencePattern.MatchString(passedReference) && digestIsFor(passedDigest, actingUserId) {
 		reference = passedReference
 		if passedDigest == digest {
 			answer.Reference = reference
