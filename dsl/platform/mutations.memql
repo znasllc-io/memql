@@ -3504,8 +3504,8 @@ mutation embedderBinding recordRetiredEmbedder {
 @serverOnly
 mutation memoryIndexRun recordMemoryIndexRun {
   args {
-    kind              string!  @enum("switch", "backfill")
-    state             string!  @enum("indexing", "catchingUp", "needsDecision", "switching", "finishing", "done", "cancelled", "waiting")
+    kind              enum("switch", "backfill")!
+    state             enum("indexing", "catchingUp", "needsDecision", "switching", "finishing", "done", "cancelled", "waiting")!
     targetRef         string
     targetDimensions  int      @minimum(0)
     targetTable       string
