@@ -11,10 +11,11 @@ description: The one embedding model memory search uses, whose machines embed fo
 # Memory search
 
 Memory search finds items by meaning: a Library file's passages, a knowledge
-domain's chunks, what a run observed, a conversation's evidence, the authoring
-catalog and the Training lessons. Each item's text is turned into a vector by an
-**embedding model**, a search's words are embedded by the same model, and the
-nearest vectors answer it.
+domain's chunks, what a run observed, a conversation's evidence, the
+acknowledgements of recent work requests, the authoring catalog and the Training
+lessons. Each item's text is turned into a vector by an **embedding model**, a
+search's words are embedded by the same model, and the nearest vectors answer
+it.
 
 It is built on the time-series memory graph. Every item it finds is a row of the
 graph; the index beside it keeps one vector per item for each model, in a table
