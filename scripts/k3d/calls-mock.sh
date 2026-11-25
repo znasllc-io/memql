@@ -14,20 +14,36 @@ cap_spec_param "cluster" "Existing local k3d cluster name (default: memql)"
 cap_spec_param "namespace" "Existing engine namespace (default: memql)"
 cap_spec_param "valid-days" "Observation validity, 1 to 30 days, simulation only (default: 30)"
 cap_spec_param "family" "Only change the family simulator: mock or disabled; preserves the existing commerce envelope"
+cap_spec_param "tester-password-hash-file" "Only install MEMQL_CALLS_TESTER_PASSWORD_HASH from this file (made by cmd/memql-calls-tester-password); preserves the envelope and never prints the hash"
 cap_spec_param "apply" "Apply the previewed mock values to memql-secrets (flag); default is read-only"
 
 function main() {
     cap_handle_meta "$@"
     cap_parse_flags "$@"
-    local cluster namespace days family current listing mode patch values applied=false
+    local cluster namespace days family tester tester_hash current listing mode patch values shown applied=false
     cluster="$(cap_param cluster memql)"
     namespace="$(cap_param namespace memql)"
     days="$(cap_param valid-days 30)"
     family="$(cap_param family '')"
+    tester="$(cap_param tester-password-hash-file '')"
     [[ -z "$family" || "$family" == mock || "$family" == disabled ]] \
         || cap_fail 2 "family must be mock or disabled"
     [[ -z "$family" || -z "$(cap_param valid-days '')" ]] \
         || cap_fail 2 "family changes preserve the envelope; do not combine family with valid-days"
+    [[ -z "$tester" || ( -z "$family" && -z "$(cap_param valid-days '')" ) ]] \
+        || cap_fail 2 "the tester password hash is installed on its own; do not combine it with family or valid-days"
+    if [[ -n "$tester" ]]; then
+        [[ -f "$tester" && -r "$tester" ]] || cap_fail 2 "tester-password-hash-file must be a readable file"
+        # Read without echoing; only the v1 hash line made by the helper is accepted.
+        tester_hash="$(python3 - "$tester" <<'PY'
+import re, sys
+line = open(sys.argv[1], encoding="ascii").read().strip()
+if not re.fullmatch(r"v1\$[A-Za-z0-9_-]{22}\$[A-Za-z0-9_-]{43}", line):
+    sys.exit(1)
+print(line)
+PY
+)" || cap_fail 2 "tester-password-hash-file does not hold a v1 hash line"
+    fi
     [[ "$cluster" =~ ^[a-z0-9][a-z0-9-]*$ && "$namespace" =~ ^[a-z0-9][a-z0-9-]*$ ]] \
         || cap_fail 2 "cluster and namespace must be local Kubernetes names"
     [[ "$days" =~ ^([1-9]|[12][0-9]|30)$ ]] || cap_fail 2 "valid-days must be between 1 and 30"
@@ -61,7 +77,14 @@ function main() {
     [[ "$family" != mock || "$mode" == mock ]] \
         || cap_fail 4 "family simulation requires an existing mock commerce envelope"
 
-    if [[ -n "$family" ]]; then
+    if [[ -n "$tester" ]]; then
+        # This independent value never renews the observation or touches any other key.
+        values="$(python3 - "$tester_hash" <<'PY'
+import json, sys
+print(json.dumps({"MEMQL_CALLS_TESTER_PASSWORD_HASH": sys.argv[1]}))
+PY
+)" || cap_fail 5 "could not construct the tester password hash value"
+    elif [[ -n "$family" ]]; then
         # This independent switch must never renew a stale observation, reset
         # current capacity/budgets or install real consent-provider credentials.
         values="$(python3 - "$family" <<'PY'
@@ -114,7 +137,10 @@ PY
     cap_result_set context "$current"
     cap_result_set namespace "$namespace"
     cap_result_set_raw applied "$applied"
-    cap_result_set_raw values "$values"
+    # The hash is Secret data: report which key changes, never its value.
+    shown="$values"
+    if [[ -n "$tester" ]]; then shown='{"MEMQL_CALLS_TESTER_PASSWORD_HASH":"<redacted>"}'; fi
+    cap_result_set_raw values "$shown"
     # No positional result argument: command flags have already been parsed.
     # shellcheck disable=SC2119
     cap_ok
