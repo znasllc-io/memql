@@ -163,9 +163,12 @@ export function Shell({
             {(uploads, desktopStore) => (
               <ShellRoster grid={grid} store={desktopStore} layout={layout}>
                 {/* THE CORE GATE, INSIDE the roster and around the layout (D1).
-                    While the `ai` verdict is `unconfigured` it renders in place
-                    of the desk, so nothing behind it -- no app, no dock, no
-                    launcher -- is mounted at all.
+                    It renders in place of the desk while the person's own
+                    access check holds them (`desktopAccess`: not exempt, and
+                    nothing set up; the held page) and, for the cluster's owners
+                    and developers, while the `ai` verdict is `unconfigured`
+                    (the setup screen). Either way nothing behind it -- no app,
+                    no dock, no launcher -- is mounted at all.
 
                     INSIDE rather than around `ShellRoster`, and the difference
                     is not cosmetic. The gate's stops offer their acts through

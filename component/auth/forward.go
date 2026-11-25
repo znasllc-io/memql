@@ -185,7 +185,9 @@ func ForwardedAuthorityFromContext(ctx context.Context) (ForwardedAuthority, boo
 //   - client origin: this work originated with a client request, not with a
 //     server-initiated sweep (#2889).
 //   - forwarded claims: TokenInfo for `createdBy` ATTRIBUTION only. Never an
-//     authorization input any more. This is also what carries the
+//     authorization input, with one exception: the local-dev marker
+//     (forwardedClaimLocalDev), which only a peer node can set and which
+//     RequirePersonSession and ServerMadeClusterOwner read. This is also what carries the
 //     provenance-only display name that component/metadata stamps as
 //     identity.displayName on every row a mutation writes (memql#3221).
 //   - access: THE authorization decision, and it comes from the verified

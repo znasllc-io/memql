@@ -20,7 +20,7 @@ async function setup() {
   await session.select("chat");
   expect(await session.discussApproval("approval")).toBe(true);
   session.setDraft("My unfinished guidance");
-  render(<AskSurface conversation={session} transport={transport} variant="sheet" availability={{ state: "ready", message: "", refresh: vi.fn() }} />);
+  render(<AskSurface access={{ canOpenFleet: true }} conversation={session} transport={transport} variant="sheet" availability={{ state: "ready", message: "", refresh: vi.fn() }} />);
   return { session, read, approvalMessage, transport };
 }
 

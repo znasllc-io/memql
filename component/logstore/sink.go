@@ -30,6 +30,12 @@ const (
 	DefaultMaxBatch      = 256
 	DefaultFlushInterval = time.Second
 
+	// DefaultInsertTimeout is how long one insert may take: a batch in the
+	// drain, and the one line InsertNow writes while its caller waits. One
+	// value for both, so a hung database costs a waiting caller no more than
+	// it costs the drain.
+	DefaultInsertTimeout = 5 * time.Second
+
 	// DefaultReportInterval is how often the sink says, in ONE warn line under
 	// component `logs`, how many lines it dropped and why. That line is itself
 	// stored, so the Logs app shows its own gaps.
@@ -116,6 +122,10 @@ type SinkOptions struct {
 
 	// Now is injectable for tests. Nil uses time.Now.
 	Now func() time.Time
+
+	// InsertTimeout bounds one insert (DefaultInsertTimeout when zero).
+	// Injectable so a test of a hung store does not wait five seconds.
+	InsertTimeout time.Duration
 }
 
 func (o SinkOptions) defaults() SinkOptions {
@@ -130,6 +140,9 @@ func (o SinkOptions) defaults() SinkOptions {
 	}
 	if o.ReportInterval <= 0 {
 		o.ReportInterval = DefaultReportInterval
+	}
+	if o.InsertTimeout <= 0 {
+		o.InsertTimeout = DefaultInsertTimeout
 	}
 	if o.MaxLinesPerSecond <= 0 {
 		o.MaxLinesPerSecond = MaxLinesPerSecond()
@@ -262,6 +275,34 @@ func (s *Sink) WriteStamped(l logger.Line, st Stamp) bool {
 	}
 }
 
+// InsertNow writes one line and returns only when the insert has answered, so
+// a caller that is about to SHOW somebody a reference to the line knows the
+// line can be found. It builds the row exactly as the queue path does, then
+// calls the sink's insert directly: no queue (a full queue cannot drop it),
+// no level floor and no rate bucket (a chatty second must not lose it), and
+// the insert's own error comes back unchanged so the caller decides what a
+// failed write means. The cost is that the caller waits on the database,
+// which Write never does: use it only where findability is the point, never
+// for ordinary logging. A nil sink returns ErrNoStore.
+//
+// The wait is bounded at the drain's per-insert limit (InsertTimeout, 5 s by
+// default): a hung database fails the write with the context's deadline
+// instead of keeping the caller's request open. desktopAccess answers such a
+// failure as held with no reference, so a held page whose check hung gets an
+// answer and can check again (TestInsertNowGivesUpOnAHungStore).
+func (s *Sink) InsertNow(ctx context.Context, l logger.Line, st Stamp) error {
+	if s == nil {
+		return ErrNoStore
+	}
+	row := rowFromLine(l, st, s.opts.NodeType, s.opts.Node)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, s.opts.InsertTimeout)
+	defer cancel()
+	return s.insert(ctx, []Row{row})
+}
+
 // Start begins the background drain. Idempotent.
 func (s *Sink) Start() {
 	s.startOnce.Do(func() { go s.run() })
@@ -328,7 +369,7 @@ func (s *Sink) run() {
 		if len(batch) == 0 {
 			return
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), s.opts.InsertTimeout)
 		err := s.insert(ctx, batch)
 		cancel()
 		if err != nil {

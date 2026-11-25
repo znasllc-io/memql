@@ -155,4 +155,16 @@ func (a *App) databaseAndConcepts() {
 	// a no-op sink and says so once; the console is untouched either way.
 	logsSink := logstore.NewSinkComponent(a.Logger, provider, logstore.SinkOptions{Logger: a.Logger}, 0)
 	a.Dependencies = append(a.Dependencies, logsSink)
+
+	// The hold line of desktopAccess (desktop-access design, section 3): the
+	// reference a held person reads out must be findable in Logs, so it is
+	// written through logstore.InsertNow, confirmed, never through the
+	// droppable queue. Installed beside the sink and under the same condition
+	// (every node type, because any node can answer desktopAccess), and it
+	// resolves logstore.Current() at call time. A node whose sink is the
+	// no-op one (no database) has no Current(), so the recorder reports
+	// ErrNoStore and that node's held answers carry NO reference: a page with
+	// nothing to look up is honest, a page naming a line nobody can find is
+	// not.
+	memql.SetAccessHoldRecorder(logstore.RecordAccessHold)
 }

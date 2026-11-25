@@ -75,7 +75,7 @@ if (scene === "workbench") { session.setDestination("workbench"); session.setDra
 
 createRoot(document.getElementById("root")!).render(
   <main style={{ margin: "20px auto", width: params.has("narrow") ? "min(100% - 24px, 360px)" : "min(100% - 24px, 720px)", height: params.has("widget") ? "420px" : "calc(100dvh - 40px)", border: "1px solid var(--os-line)", borderRadius: "var(--os-radius)", overflow: "hidden", background: "var(--os-glass-solid)" }}>
-    <AskSurface conversation={session} transport={transport} uploads={uploads} variant={params.has("widget") ? "widget" : "sheet"} availability={{ state: "ready", message: "", refresh() {} }} onOpenWork={() => {}} onOpenFile={() => {}} onManageRoutes={() => { document.title = "Manage routes"; }} />
+    <AskSurface access={{ canOpenFleet: true }} conversation={session} transport={transport} uploads={uploads} variant={params.has("widget") ? "widget" : "sheet"} availability={{ state: "ready", message: "", refresh() {} }} onOpenWork={() => {}} onOpenFile={() => {}} onManageRoutes={() => { document.title = "Manage routes"; }} />
   </main>,
 );
 

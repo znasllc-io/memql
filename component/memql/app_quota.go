@@ -69,6 +69,15 @@ func AppQuotaReset(message string, reportedAt time.Time) time.Time {
 	return reset
 }
 
+// appRefusalKinds says which refusals a session row records: a usage limit, a
+// login, or both. appRefusalUntil and desktop access read the same answer.
+func appRefusalKinds(row map[string]any) (quota, signedOut bool) {
+	message := mapString(row, "errorMessage")
+	quotaFlag, _ := row["quotaRefused"].(bool)
+	authFlag, _ := row["authRefused"].(bool)
+	return quotaFlag || IsAppQuotaRefusal(message), authFlag || IsAppAuthRefusal(message)
+}
+
 // appRefusalUntil is when a failed session's refusal stops blocking its app on
 // its machine, or zero for a row that is not a refusal.
 //
@@ -81,9 +90,7 @@ func AppQuotaReset(message string, reportedAt time.Time) time.Time {
 // early, and no block at all would have every call meet the refusal again.
 func appRefusalUntil(row map[string]any) time.Time {
 	message := mapString(row, "errorMessage")
-	quotaFlag, _ := row["quotaRefused"].(bool)
-	authFlag, _ := row["authRefused"].(bool)
-	quota, signedOut := quotaFlag || IsAppQuotaRefusal(message), authFlag || IsAppAuthRefusal(message)
+	quota, signedOut := appRefusalKinds(row)
 	if mapString(row, "status") != "failed" || (!quota && !signedOut) {
 		return time.Time{}
 	}
@@ -118,10 +125,19 @@ var appBlockedUntilMeasured = time.Date(9999, time.January, 1, 0, 0, 0, 0, time.
 // A Cockpit that predates the checks has only the clock (appRefusalUntil), so on it a
 // real call still finds out, and a refusal then moves on to the next app.
 func (e *MemQLEngine) appBlockedUntil(ctx context.Context, registration, app string, recent []map[string]any, measures bool, measuredReadyAt time.Time) (time.Time, error) {
+	until, _, err := e.appBlock(ctx, registration, app, recent, measures, measuredReadyAt)
+	return until, err
+}
+
+// appBlock is appBlockedUntil that also says whether the refusal behind the
+// block is a LOGIN (signed out) and not a usage limit, which desktop access
+// needs: a usage block still counts as set up, a login block does not. The
+// decision is the one appBlockedUntil makes; only the kind is added.
+func (e *MemQLEngine) appBlock(ctx context.Context, registration, app string, recent []map[string]any, measures bool, measuredReadyAt time.Time) (until time.Time, signedOut bool, err error) {
 	call, _ := parser.RenderCall("appAvailabilityEvidence", map[string]any{"workerId": registration, "app": app})
 	res, err := e.Execute(ContextWithFreshRead(ctx), "query "+call)
 	if err != nil {
-		return time.Time{}, err
+		return time.Time{}, false, err
 	}
 	rows := append([]map[string]any{}, MaterializeRows(res)...)
 	// Compatibility with sessions recorded before quotaRefused and authRefused
@@ -142,11 +158,13 @@ func (e *MemQLEngine) appBlockedUntil(ctx context.Context, registration, app str
 		}
 	}
 	if !measuredReadyAt.IsZero() && !measuredReadyAt.Before(latestAt) {
-		return time.Time{}, nil
+		return time.Time{}, false, nil
 	}
-	until := appRefusalUntil(latest)
+	until = appRefusalUntil(latest)
+	quota, login := appRefusalKinds(latest)
+	signedOut = login && !quota
 	if measures && !until.IsZero() {
-		return appBlockedUntilMeasured, nil
+		return appBlockedUntilMeasured, signedOut, nil
 	}
-	return until, nil
+	return until, signedOut, nil
 }

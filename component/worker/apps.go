@@ -55,10 +55,10 @@ const (
 	// them routing admits. Empty is a Cockpit that measures nothing, and unknown is
 	// one that measures and has no answer yet. A Cockpit that measures always sends
 	// a word, so the two cannot be confused.
-	AppReadinessReady      = "ready"
-	AppReadinessSignedOut  = "signed_out"
-	AppReadinessOutOfUsage = "out_of_usage"
-	AppReadinessUnknown    = "unknown"
+	AppReadinessReady      = airoute.AppReadinessReady
+	AppReadinessSignedOut  = airoute.AppReadinessSignedOut
+	AppReadinessOutOfUsage = airoute.AppReadinessOutOfUsage
+	AppReadinessUnknown    = airoute.AppReadinessUnknown
 
 	// appReadinessRowRefresh is how far a check's time may run ahead of the row
 	// before the row moves for it alone. A free check runs every five minutes on
@@ -112,8 +112,7 @@ type AppInfo struct {
 // replica that reads the row, and labels derived from it cannot go stale by
 // themselves.
 func (a AppInfo) Runnable() bool {
-	return IsKnownAppId(a.Id) && a.Allowed && a.SignedIn &&
-		(a.Readiness == "" || a.Readiness == AppReadinessReady)
+	return airoute.AppRuns(a.Id, a.Allowed, a.SignedIn, a.Readiness)
 }
 
 // NotRunnableReason says why Runnable is false, in words for a refusal.

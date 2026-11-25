@@ -35,10 +35,15 @@ view. The server reads the operator's `MEMQL_DEPLOY_PROVIDER`: only an exact
 and all subsequent local interactive sign-in uses passkeys; its contact email is
 not verified. `azure`, absent and unknown values retain hosted verification:
 email first, then mandatory passkey registration. Neither email verification nor
-an enrollment grant is an owner session. After both required steps, the existing
-`CoreGate` still controls inference onboarding and retains its owner/developer
-admission rules; it does not hold somebody whose own API key can pay
-(`inferenceStatus.keyAccount`, `chrome/keyLetsIn.ts`), and it offers adding one. Organization name is required; setup configures the existing
+an enrollment grant is an owner session. After both required steps, `CoreGate`
+decides who enters. Owners and developers get the inference setup screen while
+the cluster reaches no model, unless their own API key can pay
+(`inferenceStatus.keyAccount`, `chrome/keyLetsIn.ts`). Everybody else enters once
+model access is set up for them (`desktopAccess`, `chrome/useDesktopAccess.ts`).
+Until then they see the held page (`chrome/AccessHeld.tsx`), whether or not the
+cluster as a whole is set up. It shows a reference an administrator searches in
+Logs and runs the key wizard on the page
+([What an owner sees first](../../docs/public/operate/first-run.md)). Organization name is required; setup configures the existing
 `self` account, stamps its owner, and ensures its account group and owner
 membership before sealing the claim or issuing a session. Every step is
 idempotent under the same claim lock. The optional “Title in organization” is

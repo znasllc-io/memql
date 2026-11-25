@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { KeyRound } from "lucide-react";
 
 import { Caption, ChoiceStack, Field, Input, Notice } from "../../../kit";
@@ -37,7 +37,9 @@ import { nameProblem, vendorName, VENDORS, type KeyCard, type Vendor } from "./w
 // So Cancel, on the first three steps, is simply leaving. During the check the
 // way out is LEAVE and not Cancel: the request is with the cluster, the key may
 // be saved a moment later, and a control named Cancel would promise to undo
-// that. A person who leaves finds the key in the list if it was saved.
+// that. A person who leaves finds the key in the list if it was saved; on the
+// held page (`from` null), which has no list, the page's own next check counts
+// it.
 
 type Step = "vendor" | "name" | "key" | "check";
 
@@ -50,17 +52,37 @@ type Ending =
 
 const USE_ONLY_NOTE = "The vendor accepted this key, but it may not list models. It is checked by the calls it pays for.";
 
+/**
+ * What the held page says when the reply never came. The keys' own sentence
+ * ("Check the list before trying again") points at a list the held page does
+ * not have; what the page does instead is check again when Done is pressed,
+ * and open if the key was added.
+ */
+const UNANSWERED_ON_THE_HELD_PAGE = "If it was, this page opens by itself when you press Done.";
+
 export function AddKeyWizard({
   keys,
   taken,
   onCancel,
   onAdded,
+  from = "API keys",
+  leadingIcon,
 }: {
   keys: Pick<VendorKeys, "add">;
   /** The names of the person's own keys, which a new one may not repeat. */
   taken: readonly string[];
   onCancel: () => void;
   onAdded: (card: KeyCard | null) => void;
+  /**
+   * The page it was opened from, named in its trail and on the way back after
+   * a reply that never came. `null` for the held page (chrome/AccessHeld),
+   * which opens it in the entry frame: there is no list of keys to go back
+   * to, so it draws no trail, as the entry frame's other wizards draw none,
+   * and Cancel is the way back.
+   */
+  from?: string | null;
+  /** A mark before the key's own, as the entry frame's wizards lead with the MemQL mark. */
+  leadingIcon?: ReactNode;
 }) {
   const [step, setStep] = useState<Step>("vendor");
   const [vendor, setVendor] = useState<Vendor | "">("");
@@ -192,7 +214,7 @@ export function AddKeyWizard({
         ) : ending.kind === "useOnly" ? (
           <Notice tone="info" sentence="The key was added." next={ending.note} />
         ) : (
-          <Notice tone="warn" sentence="The key may have been added." next={ending.sentence} />
+          <Notice tone="warn" sentence="The key may have been added." next={from === null ? UNANSWERED_ON_THE_HELD_PAGE : ending.sentence} />
         ),
     },
   ];
@@ -201,7 +223,7 @@ export function AddKeyWizard({
     ending !== null
       ? ending.kind === "useOnly"
         ? { label: "Done", tone: "primary", onAct: () => onAdded(ending.card) }
-        : { label: "Back to API keys", tone: "primary", onAct: () => onAdded(null) }
+        : { label: from === null ? "Done" : `Back to ${from}`, tone: "primary", onAct: () => onAdded(null) }
       : step === "name"
         ? named
           ? { label: "Continue", tone: "primary", onAct: () => setStep("key") }
@@ -221,7 +243,7 @@ export function AddKeyWizard({
   const status = ending !== null
     ? ending.kind === "useOnly"
       ? { word: "Added", detail: "Checked by the calls it pays for" }
-      : { word: "Not known", detail: "Check the list" }
+      : { word: "Not known", detail: from === null ? "" : "Check the list" }
     : step === "vendor"
       ? { word: "Choose a vendor", detail: "" }
       : step === "name"
@@ -234,10 +256,11 @@ export function AddKeyWizard({
     <Wizard
       className="os-apikey-add"
       icon={<KeyRound aria-hidden />}
+      leadingIcon={leadingIcon}
       title="Add an API key"
       lead="Pay for Anthropic or OpenAI models with an account of your own."
-      breadcrumbs={[{ label: "API keys", onSelect: onCancel }, { label: "Add an API key" }]}
-      back={{ label: "API keys", onSelect: onCancel }}
+      breadcrumbs={from === null ? undefined : [{ label: from, onSelect: onCancel }, { label: "Add an API key" }]}
+      back={from === null ? undefined : { label: from, onSelect: onCancel }}
       label="Adding an API key"
       steps={steps}
       open={step}

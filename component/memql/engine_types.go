@@ -538,6 +538,10 @@ const (
 	// catalog and registry the router reads -- eligibility gets no second
 	// implementation. See fleet_catalog_read.go.
 	BuiltinExecutorInferenceStatus = "inferenceStatus"
+	// BuiltinExecutorDesktopAccess answers, in ONE row, whether the caller may
+	// enter MemQL OS yet: the sources of model access they have set up, or the
+	// exemption of a cluster owner or developer. See desktop_access.go.
+	BuiltinExecutorDesktopAccess = "desktopAccess"
 	// BuiltinExecutorFleetModelPull asks one of the CALLER'S machines to pull
 	// a model, and returns at once (epic memql#5103). The only fleet builtin
 	// that makes something happen on somebody's hardware: it decides, records

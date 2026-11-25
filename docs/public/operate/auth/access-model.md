@@ -1061,6 +1061,128 @@ set on sign-in, on window focus and after a grant write in that browser, and
 the engine honours a grant on the next request regardless -- so the lag is a
 hidden control appearing late, never one that works when it should not.
 
+## Who gets into MemQL OS
+
+Model access in MemQL is bring-your-own: a person's own machines, apps and API
+keys, the machines and keys others lend them, and the cluster's vendor account
+only where the cluster owner allows it. MemQL does not pay for anybody's
+inference on its own. A person with none of these would get a desktop whose
+features fail one at a time, so MemQL OS asks the cluster at sign-in whether
+model access is set up for them, and holds them on a page until it is. The
+check is the `desktopAccess` builtin on the stream (no HTTP endpoint); it
+spends no model call.
+
+**Who is exempt.** The cluster's own owners and developers, because they
+configure the cluster. The engine reads the person's STORED role, fresh, and
+asks `auth.MayManageFleet` of it. An `admin` is not exempt. Being the owner or
+developer of one account does not exempt anybody; only the cluster's own owner
+and developer roles do. A per-account exemption is approved but not built
+(accounts program, P27 and P28). The two cluster owners the server itself
+makes are exempt as well: the troubleshooting shim that admits every stream
+when sign-in is turned off (`MEMQL_IDENTITY_ENABLED=false`), and the operator
+credential's synthetic owner ([operator-credential.md](operator-credential.md)).
+They are recognised by what the server stamps on them, never by a role a token
+claims.
+
+**What counts as set up.** Anything the person has set up counts, even when it
+cannot answer right now:
+
+| Source | Counts | Does not count |
+|---|---|---|
+| Machine, theirs or lent to them (directly or through a group) | a chat model with structured output and a context window of at least `MinimumContextWindow` (8192) on that machine, online or asleep | a model that only makes embeddings, a model below the minimum, a revoked machine |
+| App (Claude Code or Codex) on their own machine | allowed by the machine, signed in, allowed by their own app routing, and ready, unmeasured, asleep or out of usage | measured signed out, or an app the machine or their routing disallows |
+| API key, theirs or lent | usable (including not yet checked), or held for lack of credit | paused, refused, or its owner inactive; any key at a vendor whose calls this cluster sends to another address, since no key is ever sent there |
+| The cluster's vendor account | where the cluster's account pays for them | no permission to use it (`execute app:settings/clusteraccount`), or the permission and no account set up |
+
+A machine is judged by what it advertises for a model itself. A model's
+figures across every machine are not used, because they include revoked
+machines.
+
+An app closed by the engaged computer-use kill switch still counts as set up:
+the switch is a temporary stop, and the check does not read it.
+
+**What the held person sees.** The held page ([first-run.md](../first-run.md#the-held-page-everybody-else))
+says their access is not set up and to ask an administrator, and shows a
+reference: `ERR-` and six lowercase hex characters. It lifts by itself once
+something is set up.
+
+**How an administrator finds out why.** Before the page shows the reference,
+the engine writes one line under it to the log store, naming the person and
+each source it checked with why it did not count. The line is written
+synchronously, and the page shows a reference only after the write succeeded.
+In Logs (an administrator, or anyone of higher rank), search the reference,
+for example `ERR-3fa90c`: the line is component `desktopAccess`, its subject
+is the person's bare user id, and its attributes are `reference` and
+`reasons`. See
+[the held person's reference](../logs.md#the-one-line-that-is-never-dropped-a-held-persons-reference).
+A re-check that passes back its reference with the same reasons writes
+nothing and keeps the reference; changed reasons write a new line under the
+same reference. Lines are bounded per person on each replica, three at once
+and then one a minute; past that a check writes nothing and answers with the
+reference the page already had, or with none.
+
+The engine checks a passed-back reference for its shape and binds it to the
+person it was made for, so MemQL OS never hands one person's reference to
+another. That does not make a reference unique to one person: a call crafted
+outside the OS can choose the `ERR-` value of its own line, including one
+somebody else was shown. It cannot put any other text in the line, every line
+names its person as the subject, and the bound above limits how many lines one
+caller can write. So after searching a reference, read each line's subject.
+
+**The reasons a line can carry.** One sentence per distinct cause. Several
+can appear together, always in the same (sorted) order, so a line changes only
+when what is behind it changes. `<id>` is a lender's bare user id, named only
+for something lent to this person; no machine or key is ever named.
+
+| Cause | Reason |
+|---|---|
+| no machine at all, theirs or lent (a registered machine that offers no model looks the same to the check) | `no machine of theirs or lent to them offers a model` |
+| a revoked machine of theirs | `a machine of theirs is revoked` |
+| a revoked machine lent to them | `a machine lent by <id> is revoked` |
+| every model on their machines and the lent ones only makes embeddings | `the machines theirs or lent to them offer only embedding models` |
+| chat models, none with structured output and an 8192 context on its machine | `no model on the machines theirs or lent to them has structured output and a context of at least 8192` |
+| no app on their machines is allowed and signed in | `no app on their machines is allowed and signed in` |
+| no API key at all | `no API key of theirs or lent to them` |
+| a key of theirs that does not count | `their own key was refused by <vendor>`, or `their own key cannot be used` |
+| a key lent to them that does not count | `the key lent by <id> is paused by its owner`, `... was refused by <vendor>`, `... belongs to someone who is no longer an active user`, or `... cannot be used` |
+| a vendor whose calls this cluster sends to another address | `this cluster sends <vendor> calls to another address, so API keys cannot be used here` |
+| no permission to the cluster's account | `may not use the cluster's account` |
+| the permission, and no account set up | `may use the cluster's account, but none is set up` |
+
+**What it does when it cannot tell.**
+
+- A check that fails lets the person in. An outage is not evidence that they
+  lack access, and the server refuses their model calls either way. A read the
+  engine could not complete (a machine, key or grant read that failed) is an
+  error, never a hold. That includes the reads routing answers around: when
+  the read of the machines lent to the person, or of the groups a machine is
+  lent through, fails, routing keeps their own machines and carries on, and
+  the check answers an error instead of holding them.
+- A failed RE-check keeps an already-held person held until a check
+  succeeds: the page stays up and the next answer decides.
+- A line that could not be stored holds the person with no reference, and the
+  page does not ask for one.
+- Open windows never keep a held person's desktop open: the page replaces it at
+  the next check.
+
+**Ask follows the same sources.** When a model call cannot be taken, Ask names
+what is offline (their machine, a lent machine, a lent key, their key, an app)
+and whom to ask, and offers Fleet only to somebody who can open it.
+
+**Limits.** Apps are read from the person's registrations through
+`workersForUser`, whose first page of 50 is all the check reads, so a person
+with more than 50 registered machines has only the apps on the 50 most
+recently written counted. Machines are not limited by it: they come through
+the catalog's own reads of the person's machines and of every machine lent to
+them, which page at 200. Through MemQL OS, a person holding a copy of somebody
+else's reference gets their own. The check does not close MemQL's API, the SDK
+or Cockpit to a held person; the server already refuses their model calls,
+and the rule is about MemQL OS. Code: `component/memql/desktop_access.go`,
+`component/logstore/access_hold.go`; client:
+`clients/os/src/chrome/useDesktopAccess.ts`, `AccessHeld.tsx`, `CoreGate.tsx`.
+The design record is
+`docs/superpowers/specs/2026-11-24-desktop-access-design.md`.
+
 ## Out of scope (deferred)
 
 - **Per-concept ACL beyond `@rowAuthz`.** Today access is at the granularity

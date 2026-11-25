@@ -28,7 +28,7 @@ function setup() {
   return { transport, session, setTurns: (value: AskTurn[]) => { turns = value; } };
 }
 function mount(session: ConversationSession, transport: ReturnType<typeof setup>["transport"]) {
-  return render(<AskSurface transport={transport} conversation={session} variant="sheet" availability={{ state: "ready", message: "", refresh: vi.fn() }} />);
+  return render(<AskSurface access={{ canOpenFleet: true }} transport={transport} conversation={session} variant="sheet" availability={{ state: "ready", message: "", refresh: vi.fn() }} />);
 }
 
 it("opens the original conversation, preserves its draft and issues no execution", async () => {

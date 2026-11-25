@@ -19,6 +19,55 @@ const PersonSessionRequired = "person_session_required"
 // flag, so the subject is the only thing that says nobody signed in.
 const LocalDevSubject = "local-dev"
 
+// OperatorSubject is the subject the operator credential's interceptor stamps
+// on a stream it admitted (component/grpc operator_stream_interceptor.go,
+// whose OperatorSubject is defined as this value), and OperatorClaimKey the
+// claim it stamps beside it once the presented key matched MEMQL_OPERATOR_KEY.
+// No token the identity service mints carries either: its user ids never start
+// `cluster:` (person_id.go), and it never signs this claim.
+const (
+	OperatorSubject  = "cluster:operator"
+	OperatorClaimKey = "identity.operator"
+)
+
+// isLocalDevShim reports whether id and claims are the no-auth troubleshooting
+// shim's: its subject, or the claim a forwarded hop carries for it
+// (ForwardedClaimsWithLocalDev). One recognition for both readers,
+// RequirePersonSession and ServerMadeClusterOwner.
+func isLocalDevShim(id string, claims map[string]any) bool {
+	return strings.EqualFold(id, LocalDevSubject) || claims[forwardedClaimLocalDev] != nil
+}
+
+// ServerMadeClusterOwner reports whether the actor on ctx, named id, is a
+// cluster owner the server itself made rather than a person: the no-auth
+// troubleshooting shim (MEMQL_IDENTITY_ENABLED=false, which admits every stream
+// as LocalDevSubject), or the operator credential's synthetic owner
+// (OperatorSubject with the OperatorClaimKey its interceptor stamps). Both are
+// owners by construction: they exist so a cluster can be reached when nobody
+// can sign in, and they have no user row and so no stored role.
+//
+// IT READS ONLY WHAT THE SERVER STAMPS, never a role claim. Both shims claim
+// role "owner", and so can any token; that claim decides nothing here, and a
+// person's standing comes only from their stored role. The ids must match, as
+// in ActsForNoPerson: a call naming somebody else under one of these contexts
+// is not about the shim.
+//
+// A forwarded operator hop carries no OperatorClaimKey (ForwardedAuthority's
+// class is chain-of-custody state, not an authorization input), so it is not
+// recognised here and its caller decides as for anybody else.
+func ServerMadeClusterOwner(ctx context.Context, id string) bool {
+	ac, ok := AccessFromContext(ctx)
+	if !ok || ac == nil || strings.TrimSpace(ac.UserId) != strings.TrimSpace(id) {
+		return false
+	}
+	claims, _ := ClaimsFromContext(ctx)
+	if isLocalDevShim(ac.UserId, claims) {
+		return true
+	}
+	_, stamped := claims[OperatorClaimKey]
+	return ac.UserId == OperatorSubject && stamped
+}
+
 var errPersonSessionRequired = errors.New(PersonSessionRequired)
 
 // IsPersonSessionRequired reports whether err is a RequirePersonSession refusal.
@@ -108,7 +157,7 @@ func RequirePersonSession(ctx context.Context) (string, error) {
 		return "", refusePersonSession("a connector is not a person")
 	case ac.Synthetic || ac.Unranked || ActsForNoPerson(ctx, id):
 		return "", refusePersonSession("this call is the cluster acting, not a person")
-	case strings.EqualFold(id, LocalDevSubject) || claims[forwardedClaimLocalDev] != nil:
+	case isLocalDevShim(id, claims):
 		return "", refusePersonSession("sign-in is turned off on this cluster")
 	case !hasClaims:
 		return "", refusePersonSession("this call carries no sign-in")

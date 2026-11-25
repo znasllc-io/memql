@@ -164,7 +164,7 @@ it.each([undefined, "quick"])("keeps a recovered %s conversation inline without 
  const stored = turn("greeting", { background: false, answer: "", workload, workStatus: "compiling" });
  const transport = { ask: vi.fn(() => ({ cancel() {} })), conversations: { list: async () => [], create: async () => ({id:"chat",title:"Chat"}), read: async () => [stored] } };
  const session = new ConversationSession(transport); await session.select("chat");
- render(<AskSurface conversation={session} transport={transport} variant="sheet" availability={{state:"ready",message:"",refresh(){}}} onOpenWork={vi.fn()} />);
+ render(<AskSurface access={{ canOpenFleet: true }} conversation={session} transport={transport} variant="sheet" availability={{state:"ready",message:"",refresh(){}}} onOpenWork={vi.fn()} />);
  expect(screen.getByLabelText("Waiting for your model")).toBeTruthy();
  expect(screen.queryByLabelText("Background work")).toBeNull();
  expect(screen.queryByRole("button", {name:/View work/})).toBeNull();
@@ -175,7 +175,7 @@ it("places the work shortcut after acknowledgement text and keeps only navigatio
  const stored = turn("task", { workload: "quick", acknowledgement: "I’ll compare the **reports**.", answer: "I’ll compare the **reports**." });
  const transport = { ask: vi.fn(() => ({cancel(){}})), conversations: { list: async()=>[], create:async()=>({id:"chat",title:"Chat"}), read:async()=>[stored] } };
  const session = new ConversationSession(transport); await session.select("chat"); const onOpen = vi.fn();
- const view = render(<AskSurface conversation={session} transport={transport} variant="sheet" availability={{state:"ready",message:"",refresh(){}}} onOpenWork={onOpen} />);
+ const view = render(<AskSurface access={{ canOpenFleet: true }} conversation={session} transport={transport} variant="sheet" availability={{state:"ready",message:"",refresh(){}}} onOpenWork={onOpen} />);
  const shortcut = screen.getByRole("button", {name:/View work: Work task/});
  expect(shortcut.parentElement?.classList.contains("os-ask-answer-with-link")).toBe(true);
  expect(shortcut.previousElementSibling?.textContent).toBe("I’ll compare the reports.");
@@ -201,7 +201,7 @@ it.each(["waiting", "queued"] as const)("recovers a durable %s handoff after mob
  const session = new ConversationSession(transport);
  session.send("Create the dog image", null); await Promise.resolve();
  const original = session.getSnapshot().turns[0]!;
- render(<AskSurface conversation={session} transport={transport} variant="sheet" availability={{state:"ready",message:"",refresh(){}}} onOpenWork={onOpenWork} />);
+ render(<AskSurface access={{ canOpenFleet: true }} conversation={session} transport={transport} variant="sheet" availability={{state:"ready",message:"",refresh(){}}} onOpenWork={onOpenWork} />);
  expect(screen.getByLabelText("Waiting for your model")).toBeTruthy();
  stored = [{...original, runId:"accepted-run", goalId:"goal", state, background:true, workTitle:"Create the dog image", workStatus:state === "waiting" ? "waiting" : "running", answer:"I’ll create the image.", acknowledgement:"I’ll create the image."}];
  await act(async () => { await vi.advanceTimersByTimeAsync(10000); });

@@ -226,3 +226,55 @@ func TestRequirePersonSessionRefusesRestoredWork(t *testing.T) {
 		}
 	}
 }
+
+// ServerMadeClusterOwner knows the two cluster owners the server itself makes
+// by what the server stamps on them, and nobody by a role a token claims.
+func TestServerMadeClusterOwnerReadsOnlyWhatTheServerStamps(t *testing.T) {
+	withAccess := func(id string, claims map[string]any) context.Context {
+		ctx := context.Background()
+		if claims != nil {
+			ctx = ContextWithClaims(ctx, claims)
+		}
+		return ContextWithAccess(ctx, &AccessContext{UserId: id, Role: RoleOwner})
+	}
+	made := map[string]struct {
+		ctx context.Context
+		id  string
+	}{
+		"the local-dev shim":        {withAccess(LocalDevSubject, map[string]any{"sub": LocalDevSubject, "role": "owner"}), LocalDevSubject},
+		"a forwarded local-dev hop": {withAccess(LocalDevSubject, map[string]any{"sub": LocalDevSubject, forwardedClaimLocalDev: "1"}), LocalDevSubject},
+		"the operator credential": {withAccess(OperatorSubject, map[string]any{"sub": OperatorSubject, "role": "owner",
+			OperatorClaimKey: map[string]any{"source": "operator_key"}}), OperatorSubject},
+	}
+	for name, tc := range made {
+		if !ServerMadeClusterOwner(tc.ctx, tc.id) {
+			t.Fatalf("%s: not recognised", name)
+		}
+	}
+	notMade := map[string]struct {
+		ctx context.Context
+		id  string
+	}{
+		"a person whose token claims owner":        {session("", nil), sessionPerson},
+		"the operator subject with no marker":      {withAccess(OperatorSubject, map[string]any{"sub": OperatorSubject, "role": "owner"}), OperatorSubject},
+		"the marker on somebody else":              {withAccess(sessionPerson, map[string]any{"sub": sessionPerson, OperatorClaimKey: map[string]any{}}), sessionPerson},
+		"a shim context asked about somebody else": {withAccess(LocalDevSubject, map[string]any{"sub": LocalDevSubject}), sessionPerson},
+		"no access context":                        {ContextWithClaims(context.Background(), map[string]any{"sub": LocalDevSubject}), LocalDevSubject},
+	}
+	for name, tc := range notMade {
+		if ServerMadeClusterOwner(tc.ctx, tc.id) {
+			t.Fatalf("%s: recognised as a server-made owner", name)
+		}
+	}
+}
+
+// The claim alone recognises the forwarded no-auth shim: the subject here is a
+// person's, and only the marker a peer node sets says otherwise
+// (isLocalDevShim's second branch).
+func TestServerMadeClusterOwnerRecognisesTheForwardedLocalDevClaimAlone(t *testing.T) {
+	ctx := ContextWithClaims(context.Background(), map[string]any{"sub": sessionPerson, forwardedClaimLocalDev: "1"})
+	ctx = ContextWithAccess(ctx, &AccessContext{UserId: sessionPerson, Role: RoleOwner})
+	if !ServerMadeClusterOwner(ctx, sessionPerson) {
+		t.Fatal("a forwarded context with the local-dev claim and a non-local-dev subject was not recognised")
+	}
+}

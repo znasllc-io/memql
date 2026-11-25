@@ -51,3 +51,31 @@ func IsRunnableApp(id string) bool {
 	}
 	return false
 }
+
+// What a machine measured about an app, the closed set (component/worker's
+// AppInfo.Readiness carries it). Empty is a Cockpit that measures nothing.
+const (
+	AppReadinessReady      = "ready"
+	AppReadinessSignedOut  = "signed_out"
+	AppReadinessOutOfUsage = "out_of_usage"
+	AppReadinessUnknown    = "unknown"
+)
+
+// AppRuns reports whether an app a machine reported can be DRIVEN now: the id
+// is in the closed set, the machine allows it, it is signed in, and the
+// machine measured it ready (or measures nothing, a Cockpit that predates the
+// checks). It is component/worker's AppInfo.Runnable, written once here so the
+// routing side and AppIsSetUp below read one set of tests.
+func AppRuns(id string, allowed, signedIn bool, readiness string) bool {
+	return IsRunnableApp(id) && allowed && signedIn &&
+		(readiness == "" || readiness == AppReadinessReady)
+}
+
+// AppIsSetUp reports whether a person can be said to have set an app up: it
+// is AppRuns with the tests about being ready right now dropped. "Not checked
+// yet" and "out of usage" count, because they come back; only a machine that
+// measured the app signed out does not. Desktop access reads this, so the two
+// differ in nothing but what is temporary.
+func AppIsSetUp(id string, allowed, signedIn bool, readiness string) bool {
+	return IsRunnableApp(id) && allowed && signedIn && readiness != AppReadinessSignedOut
+}

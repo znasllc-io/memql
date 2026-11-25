@@ -150,6 +150,10 @@ type FleetMachine struct {
 	RegistrationId string
 	Name           string
 	DisplayName    string
+	// Revoked: the registration was revoked. It stays in the catalog, offline,
+	// so an operator can see why a model is not used; a reader that asks
+	// whether a person has a machine set up must skip it (desktop access).
+	Revoked bool
 	// OwnerUserId is populated only on the cluster-wide (shared-inference)
 	// read; on a user's own catalog every machine is theirs.
 	OwnerUserId   string

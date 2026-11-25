@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"sync"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/auth"
 )
 
 // askingCatalog records every catalog a read asks the reader for.
@@ -21,7 +23,8 @@ func (c *askingCatalog) Catalog(_ context.Context, actingUserId string) ([]Fleet
 	return c.models, nil
 }
 
-// ONE CATALOG READ PER fleetModels / inferenceStatus ROW (memql#5660).
+// ONE CATALOG READ PER fleetModels / inferenceStatus / desktopAccess ROW
+// (memql#5660).
 //
 // fleetCatalogForCaller read the person's catalog and then the shared one and
 // merged them. Since design G8 the person's catalog already holds every
@@ -30,34 +33,51 @@ func (c *askingCatalog) Catalog(_ context.Context, actingUserId string) ([]Fleet
 // on every Providers page load and every first-run gate. Measured: a person's
 // read asked for two catalogs, which against fleetcatalog.Reader is three
 // registration reads (own + cross-owner, then cross-owner again); it now asks
-// for one, which is two.
+// for one, which is two. desktopAccess is held to it as well: a held person's
+// page asks every 30 seconds.
 func TestACallersCatalogReadAsksForOneCatalog(t *testing.T) {
-	reads := map[string]func(*MemQLEngine, context.Context) error{
-		"fleetModels": func(e *MemQLEngine, ctx context.Context) error {
+	type caller struct {
+		name string
+		ctx  context.Context
+		want []string
+		// refused: the read answers an error for this caller and asks for no
+		// catalog at all.
+		refused bool
+	}
+	person := caller{name: "a person", ctx: userCtx("alice"), want: []string{"alice"}}
+	// No acting person is system work: the shared set, and only it.
+	system := caller{name: "no acting person", ctx: context.Background(), want: []string{""}}
+	reads := []struct {
+		name    string
+		read    func(*MemQLEngine, context.Context) error
+		callers []caller
+	}{
+		{"fleetModels", func(e *MemQLEngine, ctx context.Context) error {
 			_, err := e.evaluateFleetModelsExpression(ctx)
 			return err
-		},
-		"inferenceStatus": func(e *MemQLEngine, ctx context.Context) error {
+		}, []caller{person, system}},
+		{"inferenceStatus", func(e *MemQLEngine, ctx context.Context) error {
 			_, err := e.evaluateInferenceStatusExpression(ctx)
 			return err
-		},
+		}, []caller{person, system}},
+		// desktopAccess answers for a person only: a call that names nobody
+		// is refused before it reads anything.
+		{"desktopAccess", func(e *MemQLEngine, ctx context.Context) error {
+			withAppRows(e)
+			e.storedRoleForTest = func(context.Context, string) (auth.Role, bool, error) { return auth.RoleWriter, true, nil }
+			_, err := e.evaluateDesktopAccess(ctx, nil, 0)
+			return err
+		}, []caller{person, {name: "no acting person", ctx: context.Background(), refused: true}}},
 	}
-	for name, read := range reads {
-		for _, tc := range []struct {
-			caller string
-			ctx    context.Context
-			want   []string
-		}{
-			{"a person", userCtx("alice"), []string{"alice"}},
-			// No acting person is system work: the shared set, and only it.
-			{"no acting person", context.Background(), []string{""}},
-		} {
-			t.Run(name+"/"+tc.caller, func(t *testing.T) {
+	for _, r := range reads {
+		for _, tc := range r.callers {
+			t.Run(r.name+"/"+tc.name, func(t *testing.T) {
 				catalog := &askingCatalog{models: []FleetModel{capable("llama3.1:8b")}}
-				r := newProviderRegistry()
-				r.SetFleetCatalog(catalog)
-				if err := read(&MemQLEngine{providers: r}, tc.ctx); err != nil {
-					t.Fatal(err)
+				registry := newProviderRegistry()
+				registry.SetFleetCatalog(catalog)
+				err := r.read(&MemQLEngine{providers: registry}, tc.ctx)
+				if tc.refused != (err != nil) {
+					t.Fatalf("err = %v, refused = %v", err, tc.refused)
 				}
 				if !reflect.DeepEqual(catalog.asked, tc.want) {
 					t.Fatalf("catalogs asked = %q, want %q: a person's catalog already holds the shared set", catalog.asked, tc.want)

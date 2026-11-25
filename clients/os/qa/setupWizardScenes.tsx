@@ -1,4 +1,5 @@
 import type { ComponentType, ReactNode } from "react";
+import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { AddMachinePage } from "../src/apps/fleet/addMachine/AddMachinePage";
 import {
@@ -187,6 +188,28 @@ const SCENES: Record<string, Scene> = {
   ])) },
 };
 
+/**
+ * THE HELD PAGE (design record 2026-11-24-desktop-access, section 4): a writer
+ * the access check holds, on a cluster that is otherwise set up, mounted the
+ * way Shell.tsx mounts the gate. `&click=Add an API key` opens the key wizard
+ * on the page.
+ */
+function heldScene(answer: Row) {
+  return {
+    connect: () => clusterConnection({ passkeysForSelf: [], desktopAccess: [answer] }),
+    wrap: (el: JSX.Element) => el,
+    render: () => {
+      installSeededAccess("writer");
+      return clusterSession(
+        <SetupFactsScope>
+          {withOs(<CoreGate onSignOut={() => {}}><p>desk</p></CoreGate>, "writer")}
+        </SetupFactsScope>,
+        { role: "writer", readiness: coreAt("configured", "configured", "configured") },
+      );
+    },
+  };
+}
+
 export function setupWizardScenes(Frame: Frame) {
   const views = Object.fromEntries(Object.entries(SCENES).map(([name, scene]) => [name, {
     wrap: (el: JSX.Element) => withSession(el, { role: "owner" }),
@@ -228,5 +251,8 @@ export function setupWizardScenes(Frame: Frame) {
         );
       },
     },
+    "access-held": heldScene({ id: "current", admitted: false, exempt: false, sources: [], reference: "ERR-3f9a1c", reasonsDigest: "p.r" }),
+    // The hold line could not be written: no reference to show or hand over.
+    "access-held-no-reference": heldScene({ id: "current", admitted: false, exempt: false, sources: [] }),
   };
 }

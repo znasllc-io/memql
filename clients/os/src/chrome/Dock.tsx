@@ -19,6 +19,7 @@ import type { OsAppManifest } from "../system/registry";
 import type { AppId } from "../system/windows";
 import { useConnectionStatus } from "./connection";
 import { connectionDotTone, connectionDotTooltip } from "../ask/useAskReadiness";
+import { useAskAccess } from "../ask/useAskAccess";
 import { ContextMenu, type MenuEntry } from "./ContextMenu";
 import { Mark } from "./Mark";
 import { AccountAvatar } from "./AccountAvatar";
@@ -237,8 +238,9 @@ export function Dock({
   const { state, actions, registry, accessEpoch, notice } = useOs();
   const { canAsk, openAsk, availability } = useAsk();
   const connection = useConnectionStatus();
+  const askAccess = useAskAccess();
   const connectionTone = canAsk ? connectionDotTone(connection, availability) : connection === "connected" ? "reachable" : connection === "disconnected" ? "off" : "unreachable";
-  const connectionTooltip = canAsk ? connectionDotTooltip(connectionTone) : connection === "connected" ? "Connected to the cluster." : connection === "disconnected" ? "Not connected to the cluster." : "Connecting to the cluster…";
+  const connectionTooltip = canAsk ? connectionDotTooltip(connectionTone, askAccess) : connection === "connected" ? "Connected to the cluster." : connection === "disconnected" ? "Not connected to the cluster." : "Connecting to the cluster…";
   const [menu, setMenu] = useState<{ x: number; y: number; appId: AppId } | null>(null);
   useEffect(() => { if (hidden) setMenu(null); }, [hidden]);
 

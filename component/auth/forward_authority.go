@@ -338,7 +338,9 @@ func (a ForwardedAuthority) WithDisplayName(first, last string) ForwardedAuthori
 
 // Principal derives the wire pair. The claims map exists only for `createdBy`
 // attribution (ActorFromContext -> TokenInfo); it is not an authorization input
-// on the receiver.
+// on the receiver, except the local-dev marker (forwardedClaimLocalDev), which
+// only a peer node can set and which RequirePersonSession and
+// ServerMadeClusterOwner read.
 func (a ForwardedAuthority) Principal() ForwardedPrincipal {
 	claims := map[string]string{
 		forwardedClaimSubject: a.Subject,

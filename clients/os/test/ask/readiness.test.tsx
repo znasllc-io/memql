@@ -119,3 +119,11 @@ it("connectionDotTone and tooltip reflect yellow/blue/red without banners", () =
   expect(connectionDotTooltip("failed")).toMatch(/Fleet/i);
   expect(connectionDotTooltip("off")).toMatch(/Not connected/i);
 });
+it("the dock dot's failed sentence for a person who cannot open Fleet names the asleep source", () => {
+  const sources = [{ kind: "machine", state: "asleep", own: true, label: "Desk" }];
+  const said = connectionDotTooltip("failed", { canOpenFleet: false, sources });
+  expect(said).toBe("Your machine Desk is offline. Ask works again when it is back.");
+  expect(said).not.toMatch(/Fleet/);
+  expect(connectionDotTooltip("failed", { canOpenFleet: false })).toBe("No model could take this request. Ask your administrator.");
+  expect(connectionDotTooltip("failed", { canOpenFleet: true, sources })).toMatch(/Open Fleet/);
+});
