@@ -16,7 +16,8 @@ const (
 )
 
 // RecordAccessHold is the memql.SetAccessHoldRecorder writer: it stores the
-// hold line on this node's sink and returns only once the insert answered.
+// hold line on this node's sink and returns only once the insert answered, or
+// failed at InsertNow's per-insert limit (5 s) when the database hangs.
 //
 // It does not go through the queue because the reference is shown to the
 // person the moment this returns, and a reference whose line was dropped for a

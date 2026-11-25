@@ -66,8 +66,10 @@ never broadcast, and are read only through the builtins below.
 When MemQL OS holds a person because no model access is set up, the page
 shows a reference (`ERR-` and six hex characters). The line it names is
 written through `Sink.InsertNow`, not the queue: it skips the queue, the
-level floor and the cap, and the caller waits for the insert to answer. A
-reference is shown only after that write succeeded, so searching Logs for it
+level floor and the cap, and the caller waits for the insert to answer, for
+at most five seconds (the drain's per-insert limit; a write that takes longer
+fails, and the person is held with no reference). A reference is shown only
+after that write succeeded, so searching Logs for it
 (component `desktopAccess`, subject the person's bare user id, attributes
 `reference` and `reasons`) always finds the line. A node with no log store, or
 a failed insert, holds the person with no reference rather than one nobody can

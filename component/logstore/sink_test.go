@@ -364,3 +364,31 @@ func TestRecordAccessHoldWithNoStoreFails(t *testing.T) {
 		t.Fatalf("err = %v, want ErrNoStore", err)
 	}
 }
+
+// A hung store fails InsertNow at the per-insert limit instead of keeping the
+// caller's request open, and so does the hold line written through it:
+// desktopAccess then answers held with no reference. The store here blocks
+// until its context ends, as the database driver does for a query that never
+// answers.
+func TestInsertNowGivesUpOnAHungStore(t *testing.T) {
+	if got := NewSink(nil, SinkOptions{Logger: discard()}).opts.InsertTimeout; got != 5*time.Second {
+		t.Fatalf("default insert timeout = %v, want the drain's 5s", got)
+	}
+	hung := func(ctx context.Context, _ []Row) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	s := NewSink(nil, SinkOptions{NodeType: "bff", Node: "n1", Logger: discard(), Insert: hung, InsertTimeout: 50 * time.Millisecond})
+	started := time.Now()
+	err := s.InsertNow(context.Background(), infoLine("x"), Stamp{})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want the deadline", err)
+	}
+	if waited := time.Since(started); waited > 2*time.Second {
+		t.Fatalf("InsertNow waited %v on a hung store", waited)
+	}
+	err = recordAccessHoldOn(context.Background(), s, memql.AccessHoldLine{Reference: "ERR-0a1b2c", UserId: "ana"})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("hold line err = %v, want the deadline", err)
+	}
+}
