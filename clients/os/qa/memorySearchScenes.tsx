@@ -9,9 +9,13 @@ import { ConnectionStatusContext, type ShellConnectionStatus } from "../src/chro
 // builtins are answered here, and an act changes nothing anywhere.
 //
 //   memory-search            the model in use on your machines, a backlog, the
-//                            choices, and the previous model's kept index.
-//                            `&click=nomic-embed-text` opens the confirmation;
-//                            `&click=text-embedding-3-small` shows its cost line.
+//                            choices (one with no machine online, one wider than
+//                            the index holds), and the previous model's kept
+//                            index. `&click=nomic-embed-text` opens the
+//                            confirmation; `&click=text-embedding-3-small` shows
+//                            its cost line.
+//   memory-search-readonly   the same read by somebody who may not act (granted
+//                            the part, not an owner): everything shown, no act
 //   memory-search-switching  a switch re-indexing, with Cancel
 //   memory-search-waiting    the same switch waiting for one of your machines
 //   memory-search-switch-takeover
@@ -57,6 +61,7 @@ const CHOICES: Row[] = [
   { id: NOMIC, providerRef: NOMIC, kind: "machine", label: "nomic-embed-text", machines: 1, paidByCluster: false, available: true, hint: "1 machine offering it is online" },
   { id: "fleet:bge-m3", providerRef: "fleet:bge-m3", kind: "machine", label: "bge-m3", machines: 1, paidByCluster: false, available: false, hint: "None of the machines offering it is online" },
   { id: VENDOR, providerRef: VENDOR, kind: "vendor", label: "text-embedding-3-small", machines: 0, paidByCluster: true, available: true, hint: "Paid by the cluster's vendor account" },
+  { id: "embedding3Large", providerRef: "embedding3Large", kind: "vendor", label: "text-embedding-3-large", machines: 0, paidByCluster: true, available: false, hint: "Its vectors are 3072 wide, and the index holds at most 2000" },
 ];
 
 const VENDOR_STATUS = { providerRef: VENDOR, kind: "vendor", label: "text-embedding-3-small", indexedBy: "", indexedByName: "", chosenBy: "" };
@@ -67,6 +72,8 @@ const SCENES: Record<string, { status: Answer; section?: string; connection?: Sh
   "memory-search": { status: status({ backlog: 37, waitingReason: "none of the indexer's machines offering qwen3-embedding:0.6b is online",
     previousRef: NOMIC, retained: [{ providerRef: NOMIC, retireAt: new Date(Date.now() + 29 * day).toISOString() }],
     switch: switchRun({ state: "done", targetRef: QWEN, targetLabel: "qwen3-embedding:0.6b" }) }) },
+  "memory-search-readonly": { status: status({ mayAct: false, indexedBy: "u-ana", indexedByName: "Ana Owner", backlog: 37,
+    waitingReason: "none of the indexer's machines offering qwen3-embedding:0.6b is online", switch: switchRun() }) },
   "memory-search-switching": { status: status({ switch: switchRun() }) },
   "memory-search-waiting": { status: status({ switch: switchRun({ state: "waiting", waitingReason: "none of the indexer's machines offering nomic-embed-text is online" }) }) },
   "memory-search-switch-takeover": { status: status({ switch: switchRun({ state: "waiting", indexedBy: "u-bo", indexedByName: "Bo Owner", takeOver: true,

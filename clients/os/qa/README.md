@@ -222,8 +222,11 @@ change.
 The `memory-search*` views are Cluster > Settings > Memory search
 (`memorySearchScenes.tsx`; design record 2026-11-23, section 8). `memory-search`
 is the control: the model on your machines, a backlog, the choices (one with no
-machine online) and the previous model's kept index; `&click=nomic-embed-text`
-opens the confirmation and `&click=text-embedding-3-small` its vendor cost line.
+machine online, one wider than the index holds) and the previous model's kept
+index; `&click=nomic-embed-text` opens the confirmation and
+`&click=text-embedding-3-small` its vendor cost line. `-readonly` is a switch and
+a backlog read by somebody granted the part who is not an owner: everything
+shown, no act offered.
 `-switching`, `-waiting` and `-decision` are a switch re-indexing, waiting for
 one of your machines and held for Switch anyway; `-switch-takeover` a switch
 whose own indexer, another owner, cannot index its target (Re-index on my
