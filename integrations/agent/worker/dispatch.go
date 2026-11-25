@@ -263,6 +263,15 @@ type Request struct {
 	// on a stream's receive goroutine either way, so it must not block.
 	OnStreamChunk func(*nodev1.WorkerForwardStream)
 
+	// OnStarted, when set, is called once per attempt, on the goroutine that
+	// delivers the machine's output, when that attempt's first chunk arrives and
+	// before the chunk reaches OnStreamChunk: where the call STARTED, known
+	// before its result (attempt_started.go). A call that writes nothing until it
+	// ends never calls it, and its Result still names the machine. Set only by
+	// the pipeline executor, to say above a step's own lines that it runs on an
+	// unsteady machine; like OnStreamChunk it must not block.
+	OnStarted func(AttemptStarted)
+
 	// ReroutedFrom records that this call is not where it was first sent:
 	// "workbench" when the workbench answered environment_mismatch
 	// (memql#4353), or "worker:<registrationId>" when a machine refused before
@@ -581,7 +590,12 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 		record.Attempts = idx + 1
 		record.SelectedBy = selectedBy(req, plan, idx)
 
-		res, outcome := d.attempt(ctx, req, gate.requiredCapability, cand, timeout)
+		var startedHealth *ConnectionHealth
+		if measured {
+			h := health
+			startedHealth = &h
+		}
+		res, outcome := d.attempt(ctx, startedOn(req, cand, startedHealth), gate.requiredCapability, cand, timeout)
 		if measured {
 			h := health
 			res.Connection = &h

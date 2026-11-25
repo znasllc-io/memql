@@ -42,6 +42,13 @@ func TestPipelineWaitsForASteadyMachineBusyWithWork(t *testing.T) {
 			}
 			unsteadyRan := 0
 			workers := map[string]*workerservice.Worker{"laptop": h.registry.WorkerById("laptop"), "desktop": dispatcher.registry.WorkerById("desktop")}
+			// The step the steady machine is running holds a slot on the
+			// replica holding its stream, as every call there does; that is
+			// the count the placing replica reads when it is that replica.
+			if err := workers[steady].Acquire(context.Background(), workerservice.CapabilityHeadless); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { workers[steady].Release(workerservice.CapabilityHeadless) })
 			workers[steady].SetDispatchFunc(pipelineCapacityReply("pipeline_capacity_busy", nil), func() {})
 			workers[unsteady].SetDispatchFunc(func(_ context.Context, d *memqlv1.ToolDispatch, _ func(*memqlv1.ToolStream)) (*memqlv1.ToolResult, error) {
 				unsteadyRan++

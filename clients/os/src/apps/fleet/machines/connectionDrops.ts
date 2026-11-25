@@ -26,6 +26,17 @@ const READ_CAP = 100;
 /** How far back the Details page looks. */
 const LOOKBACK_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * A time in the width the drop rows are written in (`DropTimeLayout` in
+ * component/worker): RFC 3339 in UTC with nine fraction digits. The window is
+ * a comparison of text, and `toISOString` writes three, so a window starting
+ * at "...:56.123Z" left out a row written "...:56.123456789Z" in that
+ * millisecond.
+ */
+export function dropTime(at: Date): string {
+  return at.toISOString().replace(/Z$/, "000000Z");
+}
+
 /** The summary of the rows `myWorkerConnectionDrops` answered with. */
 export function connectionDropsFromRows(rows: readonly Row[]): ConnectionDrops {
   let lastAt = "";
@@ -54,7 +65,7 @@ export function connectionDropsWords(drops: ConnectionDrops, now: Date): { value
 export function useConnectionDrops(workerId: string, enabled: boolean): { drops: ConnectionDrops; reread: () => void } {
   const connection = useOsConnection();
   const read = useCallback(async (signal: AbortSignal) => {
-    const since = new Date(Date.now() - LOOKBACK_MS).toISOString();
+    const since = dropTime(new Date(Date.now() - LOOKBACK_MS));
     const result = await connection!.query.myWorkerConnectionDrops({ registrationId: workerId, since }, { signal, priority: "background" });
     return connectionDropsFromRows(result.rows() as Row[]);
   }, [connection, workerId]);

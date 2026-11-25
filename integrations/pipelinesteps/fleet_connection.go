@@ -100,18 +100,23 @@ func waitingNotice(res worker.Result) string {
 	return strings.Join(parts, "; ")
 }
 
-// ranOnUnsteadyNotice is the log line of a step that ran on a machine whose
+// placedOnUnsteadyNotice is the log line of a step placed on a machine whose
 // connection had dropped inside the window: because no steady machine could
 // take it then, or, for a retry the driver pinned to its machine (D8), because
 // it was pinned -- a pinned plan has no other machine, steady or not, so
 // claiming none could take it would be a statement nobody checked.
-func ranOnUnsteadyNotice(res worker.Result, pinned bool) string {
+//
+// WRITTEN WHEN THE MACHINE'S FIRST OUTPUT ARRIVES (worker.Request.OnStarted),
+// above the step's own lines where a person watching it live reads it first,
+// and after the step only for one that wrote nothing until it ended. "Was
+// placed on" reads true at either point, as "ran on" would not above the lines.
+func placedOnUnsteadyNotice(machineName, workerId string, h worker.ConnectionHealth, pinned bool) string {
 	why := "no machine with a steady connection could take it"
 	if pinned {
 		why = "this retry was pinned to it"
 	}
-	return fmt.Sprintf("memql: the step ran on %s, whose connection %s; %s",
-		pl.MachineWords(res.MachineName, res.WorkerId), droppedWords(*res.Connection), why)
+	return fmt.Sprintf("memql: the step was placed on %s, whose connection %s; %s",
+		pl.MachineWords(machineName, workerId), droppedWords(h), why)
 }
 
 // nodeLossConnectionSentence is added to a node-lost failure on an unsteady

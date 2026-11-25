@@ -37,6 +37,21 @@ const (
 	DropCauseWorkInFlight = "workInFlight"
 )
 
+// DropTimeLayout is how a drop's times are written, and how a reader states the
+// start of its window: RFC 3339 in UTC with all nine fraction digits. The window
+// and the newest-first order are decided by comparing the stored text in byte
+// order (a payload string under `COLLATE "C"`, executor_filter.go), which agrees
+// with time order only when every value has the same width. RFC3339Nano drops
+// trailing zeros, so "...:56Z" sorted after "...:56.7Z" and a drop early in the
+// window's first second fell outside the window. Covered by
+// TestConnectionDropsInOneSecondReadInTimeOrder (fleetcatalog).
+const DropTimeLayout = "2006-01-02T15:04:05.000000000Z07:00"
+
+// FormatDropTime writes t in DropTimeLayout, in UTC, so the zone is always "Z".
+func FormatDropTime(t time.Time) string {
+	return t.UTC().Format(DropTimeLayout)
+}
+
 // ConnectionDrop is one dropped connection, as the replica that held the stream
 // records it and as a reader gets it back.
 type ConnectionDrop struct {
@@ -123,8 +138,9 @@ var _ ConnectionDropRecorder = (*EngineStore)(nil)
 // RecordConnectionDrop persists one v1:worker:connectionDrop row under the
 // machine owner's actor, as every registration write in this store runs
 // (ownerActor): the concept is owner-tiered, and the owner field is stamped from
-// the actor by the mutation, never passed as data. Times travel as RFC3339Nano
-// UTC; a zero ConnectedAt is left out rather than written as a fake instant.
+// the actor by the mutation, never passed as data. Times travel in
+// DropTimeLayout; a zero ConnectedAt is left out rather than written as a fake
+// instant.
 func (s *EngineStore) RecordConnectionDrop(ctx context.Context, drop ConnectionDrop) error {
 	if s == nil || s.Engine == nil {
 		return nil
@@ -136,7 +152,7 @@ func (s *EngineStore) RecordConnectionDrop(ctx context.Context, drop ConnectionD
 	args := map[string]any{
 		"dropId":         randomHex(12),
 		"registrationId": drop.RegistrationId,
-		"droppedAt":      drop.DroppedAt.UTC().Format(time.RFC3339Nano),
+		"droppedAt":      FormatDropTime(drop.DroppedAt),
 		"cause":          drop.Cause,
 		"workInFlight":   drop.WorkInFlight,
 		"nodeId":         drop.NodeId,
@@ -144,7 +160,7 @@ func (s *EngineStore) RecordConnectionDrop(ctx context.Context, drop ConnectionD
 		"reason":         drop.Reason,
 	}
 	if !drop.ConnectedAt.IsZero() {
-		args["connectedAt"] = drop.ConnectedAt.UTC().Format(time.RFC3339Nano)
+		args["connectedAt"] = FormatDropTime(drop.ConnectedAt)
 	}
 	query, err := langparser.RenderCall("recordWorkerConnectionDrop", args)
 	if err != nil {

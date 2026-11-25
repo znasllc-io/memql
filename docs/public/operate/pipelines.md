@@ -1790,7 +1790,8 @@ hours by default) is **unsteady**:
   steady machines are busy, a free unsteady one takes it, as before.
 
 The step's log says which steady machine it waited for and which machine it
-passed over, a step that ran on an unsteady machine says so, and a lost
+passed over, a step placed on an unsteady machine says so above its own output
+(after it, for a step that writes nothing until it ends), and a lost
 connection on one adds how many times the connection had dropped. Round trip
 time plays no part. A machine's drops of the last day are in Fleet, under the
 machine's Details > Connection.

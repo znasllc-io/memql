@@ -6,8 +6,12 @@
   builder's read of the first draft). The rest are the builder's calls, marked
   as such, and were approved with this record. Corrected during the build, after
   the final review, on two points, each with its reason below: D6's evidence of
-  work in flight (section 2) and the template's `connection` (section 7). The
-  maintained account is "Fleet steps prefer machines whose connection holds" in
+  work in flight (section 2) and the template's `connection` (section 7).
+  Corrected after it landed (2026-11-25) on four more: a call that left with
+  the stream still counts as work in flight, drop times are written at one
+  width so the window compares exactly, the replica holding a stream reads its
+  live count instead of the row (D6), and the start notice is written above the
+  step's output (section 6). The maintained account is "Fleet steps prefer machines whose connection holds" in
   `docs/internal/ops/harness-decisions.md`.
 - **What it is:** a fleet pipeline step goes to a machine whose connection to
   the cluster has not dropped recently, and waits for one that is busy running
@@ -157,7 +161,11 @@ the build:* the first draft named only the first two, and the final review
 found that the row's count is flushed only every heartbeat batch (up to about
 30 s), so a run's fleet lanes, refused busy seconds after the first took the
 steady machine's slot on the other replica, were not held. The replica sending
-a call writes the activity row before the call leaves, so it does not lag. Cockpit answers `pipeline_capacity_busy` for five different
+a call writes the activity row before the call leaves, so it does not lag.
+*Corrected after it landed:* the row lags the other way too, reading busy for a
+machine whose step just finished, so on the replica holding the stream the live
+count replaces the row (every call to the machine, a sibling's forwarded ones
+included, takes its slot there). Cockpit answers `pipeline_capacity_busy` for five different
 things (`cockpit/internal/worker/tools/pipeline_step.go`): all slots taken, a
 reconciliation under way, free disk below `min_free_disk_mib` (an invalid
 setting included), and memory or CPU headroom, before and after the clone.
@@ -378,13 +386,18 @@ sibling still re-checks the machine's consent and contract.
   `steady`, `2 drops, last 2026-11-24T19:44:56Z`, or `unavailable`) and
   `passedOver` (registration ids). They land on `v1:worker:invocation.routing`,
   which Fleet's machine activity already shows.
-- **Step log.** The fleet executor writes, with `capture.Notice`:
+- **Step log.** The fleet executor writes, with `capture.Notice` (wording
+  *corrected during the build and after it landed*: a passed-over machine was
+  never asked, so nothing says it is free, and the start notice is written when
+  the machine's first output arrives, above the step's own lines):
   - while waiting, once per change in who is passed over: "memql: waiting for
-    Box A, whose connection is steady; Box B is free, but its connection
+    Box A, whose connection is steady; passed over Box B, whose connection
     dropped 2 times in the last 2 hours (last at 19:44 UTC)";
-  - when the step starts on an unsteady machine: "memql: Box B's connection
-    dropped 2 times in the last 2 hours (last at 19:44 UTC); no machine with a
-    steady connection could take this step now".
+  - when the step starts on an unsteady machine, above its output, or after it
+    for a step that writes nothing until it ends: "memql: the step was placed
+    on Box B, whose connection dropped 2 times in the last 2 hours (last at
+    19:44 UTC); no machine with a steady connection could take it" (a retry
+    pinned to its machine ends "this retry was pinned to it").
 - **Failure.** When an attempt on an unsteady machine ends
   `pipeline_node_lost`, `classify` appends: "Its connection had dropped 2
   times in the 2 hours before the step started." That sentence is the step's

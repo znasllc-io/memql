@@ -3,6 +3,7 @@
 package worker
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"strings"
@@ -197,6 +198,62 @@ func TestPipelineDoesNotWaitForASteadyMachineThatCannotFreeUp(t *testing.T) {
 				t.Fatalf("result connection = %+v, want the laptop's one drop", res.Connection)
 			}
 		})
+	}
+}
+
+// A ROW THAT LAGS HIGH. The registration's activeCount is the holding
+// replica's count as of its last heartbeat flush, up to about 30 s old, and on
+// the replica that holds the stream the live count is the machine's own. A
+// steady machine whose step has finished, refusing busy for its disk or memory
+// headroom, is not waited for because of a count it no longer has.
+func TestPipelineDoesNotWaitOnAStaleCountForAMachineHeldHere(t *testing.T) {
+	f := connectionFleet(t, "desktop", "laptop")
+	f.store.fakeFleet.machines[0].ActiveCount = 2 // the last flush, before its steps finished
+	f.registry.WorkerById("desktop").SetDispatchFunc(pipelineCapacityReply("pipeline_capacity_busy", nil), func() {})
+	res, err := f.d.Dispatch(asPipelineExecutor(), connectionRequest(true))
+	if err != nil || !res.OK || res.WorkerId != "laptop" || len(res.PassedOver) != 0 {
+		t.Fatalf("result = %+v err = %v, want the step on the laptop: nothing runs on the desktop this replica holds", res, err)
+	}
+}
+
+// The live count is the evidence on the replica that holds the stream, before
+// any flush has reached the row.
+func TestPipelineWaitsForAMachineHeldHereThatIsRunningWork(t *testing.T) {
+	f := connectionFleet(t, "desktop", "laptop")
+	desktop := f.registry.WorkerById("desktop")
+	if err := desktop.Acquire(context.Background(), workerservice.CapabilityHeadless); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { desktop.Release(workerservice.CapabilityHeadless) })
+	desktop.SetDispatchFunc(pipelineCapacityReply("pipeline_capacity_busy", nil), func() {})
+	res, err := f.d.Dispatch(asPipelineExecutor(), connectionRequest(true))
+	if err != nil || res.OK || res.ErrorCode != "pipeline_capacity_busy" || res.WorkerId != "desktop" {
+		t.Fatalf("result = %+v err = %v, want the desktop's busy refusal so the step waits for it", res, err)
+	}
+	if len(res.PassedOver) != 1 || res.PassedOver[0].WorkerId != "laptop" || len(f.dispatched["laptop"]) != 0 {
+		t.Fatalf("passed over = %+v, laptop dispatches = %d, want the unsteady laptop passed over and not tried", res.PassedOver, len(f.dispatched["laptop"]))
+	}
+}
+
+// A MACHINE ITS OWNER NEVER NAMED. A passed-over machine is named in a step's
+// log, which can reach a public check run, so it carries the display name its
+// owner chose or none -- never the hostname its Cockpit reported.
+func TestAPassedOverMachineIsNeverNamedByItsHostname(t *testing.T) {
+	f := connectionFleet(t, "desktop", "laptop")
+	f.store.fakeFleet.machines[1].DisplayName = ""
+	f.store.fakeFleet.machines[1].Name = "joses-macbook-pro.local"
+	desktop := f.registry.WorkerById("desktop")
+	if err := desktop.Acquire(context.Background(), workerservice.CapabilityHeadless); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { desktop.Release(workerservice.CapabilityHeadless) })
+	desktop.SetDispatchFunc(pipelineCapacityReply("pipeline_capacity_busy", nil), func() {})
+	res, err := f.d.Dispatch(asPipelineExecutor(), connectionRequest(true))
+	if err != nil || len(res.PassedOver) != 1 || res.PassedOver[0].WorkerId != "laptop" {
+		t.Fatalf("result = %+v err = %v, want the laptop passed over", res, err)
+	}
+	if name := res.PassedOver[0].MachineName; name != "" {
+		t.Fatalf("the passed-over laptop is named %q, want no name: its owner chose none", name)
 	}
 }
 

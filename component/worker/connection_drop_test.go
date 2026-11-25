@@ -75,6 +75,9 @@ func TestAReplacedStreamRecordsOneDrop(t *testing.T) {
 	if d.Reason != DisconnectReasonSuperseded {
 		t.Fatalf("drop reason = %q, want the log line's %q", d.Reason, DisconnectReasonSuperseded)
 	}
+	if got := f.log.count("drop=replaced"); got != 1 {
+		t.Fatalf("the disconnect line says drop=replaced %d times, want once", got)
+	}
 }
 
 func TestAStreamReplacedOnAnotherReplicaRecordsOneDrop(t *testing.T) {
@@ -117,6 +120,9 @@ func TestAStreamLostWithWorkInFlightRecordsOneDrop(t *testing.T) {
 	drops := f.store.recorded()
 	if len(drops) != 1 || drops[0].Cause != DropCauseWorkInFlight || drops[0].WorkInFlight != 1 {
 		t.Fatalf("recorded %+v, want one work-in-flight drop with one call", drops)
+	}
+	if got := f.log.count("drop=workInFlight"); got != 1 {
+		t.Fatalf("the disconnect line says drop=workInFlight %d times, want once", got)
 	}
 }
 
@@ -186,6 +192,9 @@ func TestAnIdleCloseAndADrainRecordNoDrop(t *testing.T) {
 		if drops := f.store.recorded(); len(drops) != 0 {
 			t.Fatalf("an idle close recorded %+v", drops)
 		}
+		if got := f.log.count("drop="); got != 0 {
+			t.Fatalf("an idle close's disconnect line names a drop %d times", got)
+		}
 	})
 	t.Run("a revocation is the cluster's decision, whatever is in flight", func(t *testing.T) {
 		f := newDropFixture(t, "agent-a")
@@ -201,7 +210,33 @@ func TestAnIdleCloseAndADrainRecordNoDrop(t *testing.T) {
 		if drops := f.store.recorded(); len(drops) != 0 {
 			t.Fatalf("a revocation recorded %+v", drops)
 		}
+		if got := f.log.count("drop="); got != 0 {
+			t.Fatalf("a revocation's disconnect line names a drop %d times", got)
+		}
 	})
+}
+
+// A MODEL PROBE ALONE IS NOT WORK IN FLIGHT. Cockpit's Runner.busy() does not
+// cover probes, so it may close its own stream on purpose while one runs;
+// counting the probe would file that deliberate reconnect as a dropped link
+// (WorkInFlight).
+func TestAStreamEndingWithOnlyAProbeRecordsNoDrop(t *testing.T) {
+	store, log := &dropStore{}, &lockedBuffer{}
+	srv := newServer(slog.New(slog.NewTextHandler(log, nil)), store, NewRegistry(nil, time.Now), nil, time.Now, "agent-a")
+	w := &Worker{RegistrationId: "reg-1", OwnerUserId: "owner"}
+	ctx, cancel := context.WithCancel(context.Background())
+	session := newStreamSession(srv, &fakeWorkerStream{}, w, ctx, cancel)
+	if _, err := session.openModelProbe(context.Background(), ModelProbeRequest{RequestId: "probe-1", Model: "present:9b"}); err != nil {
+		t.Fatalf("open a probe: %v", err)
+	}
+	cancel()
+	session.close(io.EOF)
+	if drops := store.recorded(); len(drops) != 0 {
+		t.Fatalf("a stream ending with only a probe recorded %+v", drops)
+	}
+	if got := log.count(`msg="worker disconnected"`); got != 1 || log.count("drop=") != 0 {
+		t.Fatalf("disconnect lines = %d, drop fields = %d, want one line naming no drop", got, log.count("drop="))
+	}
 }
 
 // dropStore is terminationStore plus the drop recorder.

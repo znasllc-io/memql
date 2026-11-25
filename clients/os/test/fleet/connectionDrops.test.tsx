@@ -1,5 +1,6 @@
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, render, renderHook, screen, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 // A machine's Details > Connection shows its recent connection drops
 // (network-aware fleet selection): the rows the cluster records when the
@@ -7,10 +8,21 @@ import { afterEach, describe, expect, it } from "vitest";
 // status, so it is read and not copied (DESIGN.md, "Quiet copying"); a read
 // that failed says so rather than showing an invented zero.
 
-const { connectionDropsFromRows, connectionDropsWords } = await import("../../src/apps/fleet/machines/connectionDrops");
+const h = vi.hoisted(() => ({ connection: null as unknown }));
+
+// The connection is a module-level context read whose provider dials a real
+// socket; replacing the READ lets the real reading path run under jsdom, the
+// seam every other test in this directory uses.
+vi.mock("../../src/live/connection", () => ({
+  useOsConnection: () => h.connection,
+  bridgePathFor: (base: string) => base + "_memql/ws",
+  osBridgePath: "/_memql/ws",
+}));
+
+const { connectionDropsFromRows, connectionDropsWords, useConnectionDrops } = await import("../../src/apps/fleet/machines/connectionDrops");
 const { machineFromRow } = await import("../../src/apps/fleet/rows");
 const { MachineDetailsInfo } = await import("../../src/apps/fleet/machines/MachineDetailsInfo");
-const { machineRow } = await import("./harness");
+const { fakeConnection, machineRow, rowsResult, withSession } = await import("./harness");
 const { formatFreshness } = await import("../../src/kit/format");
 
 afterEach(() => cleanup());
@@ -44,5 +56,58 @@ describe("the Connection section", () => {
       drops={connectionDropsFromRows([drop("2026-11-24T19:44:56Z")])} />);
     expect(screen.getByText(`1 in the last day, last ${formatFreshness("2026-11-24T19:44:56Z", NOW)}`)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Copy Connection drops" })).toBeNull();
+  });
+});
+
+describe("one machine's drops", () => {
+  const session = ({ children }: { children: ReactNode }) => withSession(children, { userId: "me" });
+
+  it("asks for the machine it names over the last day, in the width the rows are written in", async () => {
+    const asked: Record<string, unknown>[] = [];
+    const last = "2026-11-24T19:44:56.123456789Z";
+    h.connection = fakeConnection({}, {
+      myWorkerConnectionDrops: async (args) => {
+        asked.push(args);
+        return rowsResult([drop(last), drop("2026-11-24T18:06:26.000000000Z")]);
+      },
+    });
+    const before = Date.now();
+    const view = renderHook(() => useConnectionDrops("reg-a", true), { wrapper: session });
+    await waitFor(() => expect(view.result.current.drops.state).toBe("read"));
+    expect(asked).toHaveLength(1);
+    const [first] = asked;
+    expect(first?.registrationId).toBe("reg-a");
+    // The window is compared as text, so its start has the rows' nine
+    // fraction digits (component/worker DropTimeLayout), not toISOString's three.
+    const since = String(first?.since);
+    expect(since).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{9}Z$/);
+    const lookback = before - Date.parse(since);
+    expect(lookback).toBeGreaterThan(24 * 60 * 60 * 1000 - 5_000);
+    expect(lookback).toBeLessThan(24 * 60 * 60 * 1000 + 5_000);
+    expect(view.result.current.drops).toEqual({ state: "read", count: 2, capped: false, lastAt: last });
+  });
+
+  it("says it could not read rather than showing an invented zero", async () => {
+    h.connection = fakeConnection({}, {
+      myWorkerConnectionDrops: async () => {
+        throw new Error("stream closed");
+      },
+    });
+    const view = renderHook(() => useConnectionDrops("reg-a", true), { wrapper: session });
+    await waitFor(() => expect(view.result.current.drops.state).toBe("unavailable"));
+  });
+
+  it("reads nothing while its section is closed", async () => {
+    const asked: unknown[] = [];
+    h.connection = fakeConnection({}, {
+      myWorkerConnectionDrops: async (args) => {
+        asked.push(args);
+        return rowsResult([]);
+      },
+    });
+    const view = renderHook(() => useConnectionDrops("reg-a", false), { wrapper: session });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(asked).toHaveLength(0);
+    expect(view.result.current.drops).toEqual({ state: "reading" });
   });
 });

@@ -5446,16 +5446,21 @@ strategy's order, then unsteady ones by fewest drops, then oldest last drop.
 With `WaitForSteady` (every step but a pool step, `connectionPreference` in
 `integrations/pipelinesteps/fleet_connection.go`) the candidate loop returns the
 first steady machine's `pipeline_capacity_busy` refusal on reaching an unsteady
-candidate, when that steady machine has work in flight (`hasWorkInFlight`: the
-registration's `activeCount`, this replica's live count, or a RUNNING
-pipeline-step `v1:worker:activity` row, which the replica sending a call writes
-before the call leaves -- the row count alone lags a heartbeat batch, up to about
-30 s, and a run's fleet lanes are refused busy seconds after the first takes the
-slot), so the executor's capacity wait asks again; the unsteady machines ride on
+candidate, when that steady machine has work in flight (`hasWorkInFlight`: this
+replica's live count when it holds the stream, else the registration's
+`activeCount`, and then a RUNNING pipeline-step `v1:worker:activity` row, which
+the replica sending a call writes before the call leaves -- the row count lags a
+heartbeat batch, up to about 30 s, both ways: a run's fleet lanes are refused busy
+seconds after the first takes the slot, and a machine whose step just finished
+still reads busy), so the executor's capacity wait asks again; the unsteady machines ride on
 `Result.PassedOver`, and the step's log names them. A placed attempt whose
 bounded wait runs out while passing a machine over dispatches once more without
 the wait before `waitRanOut`. The executor writes the reason into the step's log
-and, for a node loss on an unsteady machine, into the failure. Fleet reads the
+-- for a step placed on an unsteady machine, above its own lines, because the
+dispatcher calls `Request.OnStarted` on an attempt's first output, the one proof
+before the result that the call started there (`attempt_started.go`); after the
+step only for one that wrote nothing until it ended -- and, for a node loss on an
+unsteady machine, into the failure. Fleet reads the
 same rows for the machine's Details > Connection.
 
 **Alternatives rejected.** Cockpit reporting how each connection ended (exact,
@@ -5507,8 +5512,12 @@ flight (SIGTERM, a service restart, an upgrade: `Runner.Close` does not wait for
 reconnect that races a call the cluster registered as pending just before
 sending it. With one eligible machine nothing is avoided; the step only says
 why. A busy steady machine can hold a fleet step's first attempt until the
-run's ceiling. `droppedAt >= since` and the read's sort compare RFC3339Nano text,
-whose fraction length varies, so the window's start is exact to the second.
+run's ceiling. A step that writes nothing until it ends gets its placement notice
+after its output rather than above it. The window and the order compare stored
+text, which is why every drop time is written at one width
+(`workerservice.DropTimeLayout`, nine fraction digits) and a reader states its
+window's start the same way; a row written in another width would order wrongly
+inside one second.
 
 **Not verified.** The classification on real streams in the cluster, and the
 seven-of-eight figure beyond one afternoon of one Mac. The Fleet fact has
@@ -5522,13 +5531,22 @@ component tests and no browser check.
 `TestAReplacedStreamRecordsOneDrop`,
 `TestAStreamReplacedOnAnotherReplicaRecordsOneDrop`,
 `TestAStreamLostWithWorkInFlightRecordsOneDrop`,
-`TestAnIdleCloseAndADrainRecordNoDrop` (`component/worker`); the
+`TestAnIdleCloseAndADrainRecordNoDrop`,
+`TestACallThatLeftWithTheStreamStillCountsAsWorkInFlight`,
+`TestAStreamEndingWithOnlyAProbeRecordsNoDrop` (`component/worker`);
+`TestConnectionDropsInOneSecondReadInTimeOrder` (`component/worker/fleetcatalog`,
+db); the
 `ConnectionHealth` and `ApplyConnection` cases, `TestPipelineTriesASteadyMachineBeforeAnUnsteadyOne`,
 `TestPipelineDoesNotWaitForASteadyMachineThatCannotFreeUp`,
 `TestAPoolStepDoesNotWaitForASteadyMachine`, `TestAllUnsteadyMachinesRunFewestDropsFirst`,
 `TestAPinnedRetryIsNotReorderedButCarriesItsHealth`, `TestAFailedDropReadLeavesTheOwnersOrder`,
 `TestNoDropsAndNoWindowRouteExactlyAsBefore`,
-`TestConnectionPreferenceIsRefusedOutsideThePipelinePurpose` and the hop test
+`TestConnectionPreferenceIsRefusedOutsideThePipelinePurpose`,
+`TestPipelineDoesNotWaitOnAStaleCountForAMachineHeldHere`,
+`TestPipelineWaitsForAMachineHeldHereThatIsRunningWork`,
+`TestAPassedOverMachineIsNeverNamedByItsHostname`,
+`TestTheFirstOutputSaysWhereTheStepStarted` and, across the hop,
+`TestTheFirstOutputAcrossTheHopSaysWhereTheCallStarted`, and the hop test
 `TestPipelineWaitsForASteadyMachineBusyWithWork` and
 `TestPipelineWaitsForASteadyMachineRunningWorkTheOtherReplicaAdmitted` (the
 row's count still 0, the sibling really running the first lane), and
@@ -5536,6 +5554,7 @@ row's count still 0, the sibling really running the first lane), and
 (`integrations/agent/worker`);
 `TestTheConnectionWindowReachesTheRequest`, `TestTheWaitNamesThePassedOverMachineOnce`,
 `TestABoundedWaitEndsOnTheFreeMachine`, `TestAStepOnAnUnsteadyMachineSaysSo`,
+`TestAStepOnAnUnsteadyMachineSaysSoBeforeItsOutput`, `TestDropCountsAreWordedAsTheyWereRead`,
 `TestANodeLossOnAnUnsteadyMachineSaysItsConnectionHadDropped`,
 `TestUnsteadyNoticesNameAnUnnamedMachineByItsId` (`integrations/pipelinesteps`);
 `clients/os/test/fleet/connectionDrops.test.tsx`.

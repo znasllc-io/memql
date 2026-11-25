@@ -233,23 +233,36 @@ func (d *Dispatcher) readConnectionHealth(ctx context.Context, ownerUserId strin
 // pipeline_capacity_busy for low disk and memory headroom too, which waiting
 // does not fix when nothing of ours is running there.
 //
-// THREE SOURCES, because the obvious one lags. The registration's activeCount
-// is flushed by the replica holding the stream only every heartbeat batch (up to
-// about 30 s), and the case D1 exists for is a run's fleet lanes starting
-// together: the first takes the steady machine's slot and the rest are refused
-// busy seconds later, while the row still says 0. So: the row, this replica's
-// live count when it holds the stream, and then the durable activity rows the
-// sending replica writes before the call leaves (RunningStepReader) -- read only
-// on this rare path, and a failed read counts as no work, which passes the
-// machine over as before.
+// THE COUNT, then the activity rows, because a count lags. The registration's
+// activeCount is flushed by the replica holding the stream only every heartbeat
+// batch (up to about 30 s), in both directions: the case D1 exists for is a
+// run's fleet lanes starting together, the first taking the steady machine's
+// slot and the rest refused busy seconds later while the row still says 0; and a
+// machine whose step just finished still reads busy while it refuses for its
+// disk or memory headroom.
+//
+// On the replica that HOLDS the stream, its live count replaces the row: every
+// call to the machine takes its slot there, a sibling's forwarded calls and
+// model calls included (forward_handler.go, model_forward.go), so the row is only
+// this replica's own count, older. Anywhere else the row is the count there is.
+// Either way a zero then asks the durable activity rows the sending replica
+// writes before the call leaves (RunningStepReader), which is what covers a
+// sibling's call that has not reached the holding replica yet -- read only on
+// this rare path, and a failed read counts as no work, which passes the machine
+// over as before. Covered by TestPipelineDoesNotWaitOnAStaleCountForAMachineHeldHere
+// and TestPipelineWaitsForAMachineHeldHereThatIsRunningWork.
 func (d *Dispatcher) hasWorkInFlight(ctx context.Context, ownerUserId string, c Candidate) bool {
-	if c.ActiveCount > 0 {
-		return true
-	}
+	held := false
 	if d.registry != nil {
-		if w := d.registry.WorkerById(c.RegistrationId); w != nil && w.ActiveCount() > 0 {
-			return true
+		if w := d.registry.WorkerById(c.RegistrationId); w != nil {
+			if w.ActiveCount() > 0 {
+				return true
+			}
+			held = true
 		}
+	}
+	if !held && c.ActiveCount > 0 {
+		return true
 	}
 	if d.steps == nil {
 		return false

@@ -139,9 +139,11 @@ func (s *EngineStore) ConnectionDrops(ctx context.Context, ownerUserId, registra
 		}
 		readCtx = auth.ContextWithUserActor(ctx, ownerUserId)
 	}
+	// The window's start in the width the rows are written in
+	// (workerservice.DropTimeLayout): the comparison is on text.
 	call, err := langparser.RenderCall("myWorkerConnectionDrops", map[string]any{
 		"registrationId": registrationId,
-		"since":          since.UTC().Format(time.RFC3339Nano),
+		"since":          workerservice.FormatDropTime(since),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("fleet drops read: %w", err)

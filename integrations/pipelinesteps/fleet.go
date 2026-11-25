@@ -258,6 +258,16 @@ func (f *Fleet) runStep(ctx context.Context, req pl.StepRequest, run StepRun, se
 	// (pl.MaskSecrets: every form of every secret, overlaps as one span).
 	mask := capture.Mask
 	lines := &fleetLines{capture: capture, pending: map[string][]byte{}}
+	// Where the step started, said above its own lines when the machine it was
+	// placed on is unsteady (fleet_connection.go placedOnUnsteadyNotice). Called
+	// on the goroutine delivering the machine's output, before the first chunk
+	// reaches lines, so the notice is the first line the step shows.
+	pinned := run.PinWorker != ""
+	onStarted := func(s worker.AttemptStarted) {
+		if s.Connection != nil && !s.Connection.Steady() {
+			lines.noticeAtStart(placedOnUnsteadyNotice(s.MachineName, s.WorkerId, *s.Connection, pinned))
+		}
+	}
 	maxArtifactBytes := min(f.cfg.ArtifactMaxBytes, fleetArtifactArchiveBytes)
 	artifacts, err := newFleetArtifactStream(filepath.Join(dir, "artifacts.tar.gz"), maxArtifactBytes+maxArtifactBytes/64+extractStreamSlack)
 	if err != nil {
@@ -269,7 +279,7 @@ func (f *Fleet) runStep(ctx context.Context, req pl.StepRequest, run StepRun, se
 	result, stopped, err := f.dispatchWhenCapacityAvailable(ctx, req, &run, token, capture, func(message *nodev1.WorkerForwardStream) {
 		lines.chunk(message)
 		artifacts.chunk(message)
-	})
+	}, onStarted)
 	finished := f.now()
 	seen.result, seen.dispatched = result, stopped == nil && err == nil
 	// The machine's last partial lines are output; a chunk that arrives after
@@ -299,11 +309,12 @@ func (f *Fleet) runStep(ctx context.Context, req pl.StepRequest, run StepRun, se
 	if result.WorkerId != "" {
 		capture.Note(fmt.Sprintf("memql: the step ran on machine %s, held by replica %s", result.WorkerId, result.NodeId))
 	}
-	// A step that ran on a machine whose connection had dropped inside the
-	// window says so where the owner reads the step (network-aware fleet
-	// selection): no steady machine could take it then.
-	if unsteady(result) {
-		capture.Notice(ranOnUnsteadyNotice(result, run.PinWorker != ""))
+	// A step placed on a machine whose connection had dropped inside the window
+	// says so where the owner reads the step (network-aware fleet selection):
+	// above its lines when the machine's output said where it started, here when
+	// the step wrote nothing until it ended.
+	if unsteady(result) && !lines.saidAtStart() {
+		capture.Notice(placedOnUnsteadyNotice(result.MachineName, result.WorkerId, *result.Connection, pinned))
 	}
 
 	// The step's files reach the Library as a Job's do on the cluster
@@ -377,7 +388,7 @@ func (f *Fleet) cloneToken(ctx context.Context, run StepRun) (string, pl.StepRes
 // on that machine" after the fact. The last exclusion is the last machine tried
 // (the driver appends them in the order it tried them). A pin moves nothing and
 // says nothing.
-func (f *Fleet) dispatchStep(ctx context.Context, req pl.StepRequest, run StepRun, token string, pref worker.ConnectionPreference, onChunk func(*nodev1.WorkerForwardStream)) (worker.Result, error) {
+func (f *Fleet) dispatchStep(ctx context.Context, req pl.StepRequest, run StepRun, token string, pref worker.ConnectionPreference, onChunk func(*nodev1.WorkerForwardStream), onStarted func(worker.AttemptStarted)) (worker.Result, error) {
 	labels := worker.EnvironmentNeedsLabels(req.Step.Needs, "")
 	if labels == nil {
 		labels = map[string]string{}
@@ -407,6 +418,8 @@ func (f *Fleet) dispatchStep(ctx context.Context, req pl.StepRequest, run StepRu
 		// wait half when it runs out (D11).
 		Connection:    pref,
 		OnStreamChunk: onChunk,
+		// Where the step started, before its first line (fleet.go runStep).
+		OnStarted: onStarted,
 	}
 	if n := len(run.ExcludeWorkers); n > 0 {
 		request.ReroutedFrom = "worker:" + run.ExcludeWorkers[n-1]
@@ -710,6 +723,29 @@ type fleetLines struct {
 	capture *Capture
 	pending map[string][]byte
 	closed  bool
+	// said is whether noticeAtStart wrote the step's placement notice.
+	said bool
+}
+
+// noticeAtStart writes the step's placement notice once, under the lock the
+// machine's lines are written under, so it lands before the first chunk the
+// same goroutine delivers next. After the output is closed it writes nothing,
+// and the executor writes the notice itself (saidAtStart).
+func (l *fleetLines) noticeAtStart(text string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.closed || l.said {
+		return
+	}
+	l.said = true
+	l.capture.Notice(text)
+}
+
+// saidAtStart reports whether noticeAtStart wrote the notice.
+func (l *fleetLines) saidAtStart() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.said
 }
 
 func (l *fleetLines) chunk(m *nodev1.WorkerForwardStream) {

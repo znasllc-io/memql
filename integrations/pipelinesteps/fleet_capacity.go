@@ -43,7 +43,7 @@ import (
 //
 // None of these waits ever cancels or shortens a command that has started: a
 // wait is for admission, and a started command is bounded by its own timeout.
-func (f *Fleet) dispatchWhenCapacityAvailable(ctx context.Context, req pl.StepRequest, run *StepRun, token string, capture *Capture, chunk func(*nodev1.WorkerForwardStream)) (worker.Result, *pl.StepResult, error) {
+func (f *Fleet) dispatchWhenCapacityAvailable(ctx context.Context, req pl.StepRequest, run *StepRun, token string, capture *Capture, chunk func(*nodev1.WorkerForwardStream), started func(worker.AttemptStarted)) (worker.Result, *pl.StepResult, error) {
 	deadline, deadlineErr := time.Parse(time.RFC3339Nano, run.RunDeadline)
 	ownTimeout := run.TimeoutSeconds
 	tokenAt := f.now()
@@ -102,7 +102,7 @@ func (f *Fleet) dispatchWhenCapacityAvailable(ctx context.Context, req pl.StepRe
 			token, tokenAt = fresh, f.now()
 			capture.AddSecrets(secretValues(*run, token)...)
 		}
-		result, err := f.dispatchStep(ctx, req, *run, token, pref, chunk)
+		result, err := f.dispatchStep(ctx, req, *run, token, pref, chunk, started)
 		if err != nil || result.OK || !result.RefusedBeforeStart || result.RefusedByGate {
 			return result, nil, err
 		}
