@@ -202,7 +202,7 @@ func (s *Service) accountCommerce(ctx context.Context, site callrules.SiteRef, t
 		if gateErr != nil {
 			return callrules.AccountResult{}, gateErr
 		}
-		if err = s.completeMockCommerce(fresh, site, v, o, req); err != nil {
+		if err = s.completeMockCommerce(fresh, c, site, v, o, req); err != nil {
 			return callrules.AccountResult{}, err
 		}
 		if err = s.store.saveCommerce(fresh, site.OwnerUserID, v, s.now()); err != nil {
@@ -245,7 +245,7 @@ func mockOutcomeKnown(kind, outcome string) bool {
 	return false
 }
 
-func (s *Service) completeMockCommerce(ctx context.Context, site callrules.SiteRef, v *commerceState, o *commerceOperation, req callrules.AccountRequest) error {
+func (s *Service) completeMockCommerce(ctx context.Context, c CommerceConfig, site callrules.SiteRef, v *commerceState, o *commerceOperation, req callrules.AccountRequest) error {
 	if req.Action == "mock_checkout_complete" && o.Kind == "checkout" {
 		if !mockOutcomeKnown("checkout", req.Outcome) {
 			return callrules.ErrInvalid
@@ -255,6 +255,17 @@ func (s *Service) completeMockCommerce(ctx context.Context, site callrules.SiteR
 				return s.creditCommerceCheckout(ctx, site, v, o)
 			}
 			return fundingConflict("operation_finished")
+		}
+		if req.Outcome == "paid" {
+			// An unfinished mock checkout held nothing, so its room is checked now:
+			// the credit's fulfillment share and, before an age check, its cost.
+			verificationCost := c.VerificationUnitCents
+			if v.Adult.Status == "verified" {
+				verificationCost = 0
+			}
+			if err := s.commerceCapacity(ctx, c, verificationCost, 0, o.AmountCents, 0); err != nil {
+				return err
+			}
 		}
 		o.Status = req.Outcome
 		if req.Outcome == "paid" {

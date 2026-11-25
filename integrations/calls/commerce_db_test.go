@@ -188,16 +188,19 @@ func TestCommerceUnverifiedCallAndOldFundingCannotBypass(t *testing.T) {
 	require.Empty(t, cw.media.rooms(), "adult proof is checked before any media effect")
 }
 func TestCommerceCheckoutCapacityReservedBeforePurchase(t *testing.T) {
-	cw, one, c := commerceFixture(t, "commerce-checkout-cap")
+	// Sandbox keeps the hold: a real hosted checkout can still be paid. Mock mode
+	// holds nothing (TestCommerceMockCheckoutBeginHoldsNoVerificationSlot).
+	cw, one, c, _ := commerceSandboxFixture(t, "commerce-checkout-cap")
 	if cw == nil {
 		return
 	}
 	two := accountRegister(t, cw, newSoftwareAuthenticator(t))
 	c.MaxPendingVerifications = 1
-	pending := commerceDo(t, cw, one, callrules.AccountRequest{Action: "checkout_begin", AmountCents: 1000, IdempotencyKey: "commerce-hold-first", AdultDeclared: true, TermsAccepted: true})
-	_, err := cw.svc.Account(context.Background(), cw.ref, two.result.Session.Token, &callrules.AccountRequest{Action: "checkout_begin", AccountID: two.result.Account.AccountID, AmountCents: 1000, IdempotencyKey: "commerce-hold-second", AdultDeclared: true, TermsAccepted: true})
+	commerceDo(t, cw, one, callrules.AccountRequest{Action: "checkout_begin", AmountCents: 1000, IdempotencyKey: "commerce-hold-first", AdultDeclared: true, TermsAccepted: true})
+	_, err := cw.svc.Account(context.Background(), cw.ref, two.result.Session.Token, &callrules.AccountRequest{Action: "checkout_begin", AccountID: two.result.Account.AccountID, AmountCents: 1000, IdempotencyKey: "commerce-hold-blocked", AdultDeclared: true, TermsAccepted: true})
 	require.ErrorContains(t, err, "verification_capacity")
-	commerceDo(t, cw, one, callrules.AccountRequest{Action: "mock_checkout_complete", OperationID: pending.Lifecycle.Checkout.ID, Outcome: "cancelled"})
+	// The verification hold of an unpaid checkout lasts 15 minutes.
+	cw.clock.Advance(15 * time.Minute)
 	commerceDo(t, cw, two, callrules.AccountRequest{Action: "checkout_begin", AmountCents: 1000, IdempotencyKey: "commerce-hold-second", AdultDeclared: true, TermsAccepted: true})
 }
 

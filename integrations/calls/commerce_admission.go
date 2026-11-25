@@ -6,6 +6,7 @@ import (
 
 	callrules "github.com/znasllc-io/memql/component/calls"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/integrations/calls/providers"
 )
 
 func (s *Service) commerceAdultAllowed(ctx context.Context, site callrules.SiteRef, keyID string) error {
@@ -59,6 +60,12 @@ func (s *Service) commerceCapacity(ctx context.Context, c CommerceConfig, verifi
 		_, reserved, spent := v.verificationCosts()
 		verificationTotal += reserved + spent
 		for _, o := range v.Operations {
+			// In mock mode only a tester's result finishes a checkout, so one a
+			// stranger starts and abandons holds nothing; its room is checked when a
+			// password-checked successful payment applies (completeMockCommerce).
+			if c.Mode == providers.Mock && o.Kind == "checkout" && paymentPending(o.Status) {
+				continue
+			}
 			if o.Kind != "verification" && paymentPending(o.Status) {
 				liability += (o.AmountCents*c.FulfillmentReserveBPS + 9999) / 10000
 			}
