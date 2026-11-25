@@ -215,11 +215,9 @@ func (f *memoryIndexDBFixture) bind(ref string, indexer string) {
 		{"platform.setEmbedderBindingChoice", map[string]any{"bindingId": "active", "indexedBy": indexer, "chosenBy": indexer}},
 	}
 	for _, w := range writes {
-		if w.name == "platform.setEmbedderBindingChoice" {
-			// Stamped when written, after the activation (ruling R12): a version
-			// taken before it would read as the older one.
-			w.args["versionTime"] = time.Now().UTC().Format(time.RFC3339Nano)
-		}
+		// Each stamped when written, after the one before it (ruling R12): a
+		// version taken before an earlier write would read as the older one.
+		w.args["versionTime"] = time.Now().UTC().Format(time.RFC3339Nano)
 		call, err := parser.RenderCall(w.name, w.args)
 		require.NoError(f.t, err)
 		_, err = f.a.Execute(auth.ContextWithInternalOrigin(f.ctx), "mutation "+call)

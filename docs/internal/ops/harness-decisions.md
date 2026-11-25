@@ -2808,12 +2808,15 @@ these rows now carries a REQUIRED `versionTime`, stamped as its version:
 `VersionTimeAfter(<newest version read>, now)` (`latestRowVersion`, read under
 the binding lock where one is held). The writers: `writeMemoryIndexRun` (every
 run row, after the version it is fenced to), the flip (the binding after the
-version it fenced, the retired row after its own), `writeEmbedderChoice`
-(adoption, `bindEmbedder`, the take-over and Confirm), and the retired rows
-Cancel and the cleanup write. The run rows were already safe through the
-fence's own clock (`fenceWriteClock`); the binding choice and the retired rows
-were not. Test: `TestEveryWriteIsStampedAfterTheVersionItRead` (the last
-versions stamped an hour ahead).
+version it fenced, the retired row after its own), `bindEmbedder`'s plan and
+activation of a cluster's first model (each after the newest version, read
+under its lock), `writeEmbedderChoice` (adoption, `bindEmbedder`, the take-over
+and Confirm), and the retired rows Cancel and the cleanup write. The run rows
+were already safe through the fence's own clock (`fenceWriteClock`); the
+binding choice, the first binding's two writes and the retired rows were not.
+Tests: `TestEveryWriteIsStampedAfterTheVersionItRead`,
+`TestAFirstBindingIsStampedAfterTheVersionItRead` (the last versions stamped
+an hour ahead).
 
 **Cancel** holds the binding lock and is refused once the binding names the
 switch's target (the switch happened; going back is a new switch). Otherwise the

@@ -307,6 +307,28 @@ func TestEveryWriteIsStampedAfterTheVersionItRead(t *testing.T) {
 	assert.WithinDuration(t, time.Now().Add(30*24*time.Hour), monthAhead(replaced), time.Minute)
 }
 
+// A cluster's first model is bound by bindEmbedder, whose own writes -- the
+// plan and the activation -- are stamped after the binding's newest version,
+// as every other binding write is (ruling R12). Here a plan row was left an
+// hour ahead of this process's clock, as a replica whose clock runs ahead
+// leaves it: stamped at this clock, the activation would be an older version
+// than that plan, and the binding would read as never activated.
+func TestAFirstBindingIsStampedAfterTheVersionItRead(t *testing.T) {
+	f := newMemoryIndexDBFixture(t)
+	f.probeModels()
+	ref := f.ref("first", 3)
+	f.plantVersion(EmbedderBindingConceptID, EmbedderBindingConceptID+":"+ActiveEmbedderBindingID, time.Now().Add(time.Hour),
+		func(p map[string]any) { p["providerRef"], p["dimensions"] = ref, 3 })
+
+	_, err := f.a.memorySearchSwitchBuiltin(f.ownerCall(), map[string]any{"provider": ref}, 0)
+	require.NoError(t, err)
+	bound := f.binding()
+	require.Equal(t, ref, bound.ProviderRef)
+	require.NotEmpty(t, bound.ActivatedAt, "the activation is the current version")
+	require.Equal(t, f.owner, bound.IndexedBy)
+	require.Equal(t, f.owner, bound.ChosenBy)
+}
+
 // The switch asks the active index only whether it holds anything
 // (hasVectors, an EXISTS): a table that does not exist and an empty one hold
 // nothing, one entry is enough, and a name that is not a vector table's never

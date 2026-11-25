@@ -241,6 +241,15 @@ func (e *MemQLEngine) bindEmbedder(ctx context.Context, provider string, choice 
 		{"platform.recordEmbedderBindingPlan", map[string]any{"bindingId": "active", "providerRef": provider, "dimensions": dims}},
 		{"platform.activateEmbedderBinding", map[string]any{"bindingId": "active", "activatedAt": time.Now().UTC().Format(time.RFC3339Nano)}},
 	} {
+		// Each write is stamped after the binding's newest version, read here
+		// under the binding lock (ruling R12), as every other binding write is:
+		// a plan left by a replica whose clock runs ahead would otherwise stay
+		// the newest version, and the binding would read as never activated.
+		version, err := e.latestRowVersion(ctx, EmbedderBindingConceptID, ActiveEmbedderBindingID)
+		if err != nil {
+			return nil, err
+		}
+		write.args["versionTime"] = VersionTimeAfter(version, time.Now()).Format(time.RFC3339Nano)
 		call, _ := parser.RenderCall(write.name, write.args)
 		if _, err = e.Execute(internal, "mutation "+call); err != nil {
 			return nil, err

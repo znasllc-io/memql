@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
@@ -51,7 +52,7 @@ func TestEmbedderActivationProbesPersistsAndReadsAcrossReplicas(t *testing.T) {
 	require.ErrorContains(t, err, "cluster owner")
 	require.Zero(t, probe.calls)
 	// A dormant plan cannot be activated under another provider's name.
-	_, err = a.Execute(auth.ContextWithInternalOrigin(ownerCtx), `mutation platform.recordEmbedderBindingPlan(bindingId:"active",providerRef:"activation-probe",dimensions:1024)`)
+	_, err = a.Execute(auth.ContextWithInternalOrigin(ownerCtx), `mutation platform.recordEmbedderBindingPlan(bindingId:"active",providerRef:"activation-probe",dimensions:1024,versionTime:"`+time.Now().UTC().Format(time.RFC3339Nano)+`")`)
 	require.NoError(t, err)
 	_, err = b.ReadEmbedderBinding(ctx)
 	require.ErrorIs(t, err, ErrNoEmbedderBound)

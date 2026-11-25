@@ -3311,8 +3311,7 @@ mutation moduleReadiness recordModuleReadiness {
 // The act an operator performs is the BUILTIN that runs the steps. These are
 // what it writes with.
 //
-// flipEmbedderBinding, setEmbedderBindingChoice, recordRetiredEmbedder and
-// recordMemoryIndexRun take a REQUIRED `versionTime`, written as the row's
+// Every write below takes a REQUIRED `versionTime`, written as the row's
 // version: every caller stamps it after the newest version it read
 // (memql.VersionTimeAfter, ruling R12; memql#5431's third part), so a replica
 // whose clock lags the last writer's still writes the newest version instead
@@ -3343,11 +3342,13 @@ mutation embedderBinding recordEmbedderBindingPlan {
     dimensions    int!     @minimum(1)
     previousRef   string
     reembedRunId  string
+    versionTime   datetime!
   }
   insert {
     accept { providerRef, dimensions, previousRef, reembedRunId }
     stamp {
-      id: args.bindingId
+      id:         args.bindingId
+      createdAt:  args.versionTime
     }
   }
 }
@@ -3367,10 +3368,12 @@ mutation embedderBinding activateEmbedderBinding {
   args {
     bindingId    string!
     activatedAt  datetime!
+    versionTime  datetime!
   }
   update {
     id:           args.bindingId
     activatedAt:  args.activatedAt
+    createdAt:    args.versionTime
   }
 }
 

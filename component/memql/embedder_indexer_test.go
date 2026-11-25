@@ -269,14 +269,12 @@ func TestTheBindingWritesRecordWhoIndexesAndWhatWasRetired(t *testing.T) {
 		_, _ = db.DB.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE concept=$1`, EmbedderBindingConceptID)
 		_, _ = db.DB.ExecContext(context.Background(), `INSERT INTO "MemoryNodes" SELECT * FROM jsonb_populate_recordset(NULL::"MemoryNodes",$1::jsonb)`, saved)
 	})
-	// The binding's and the retired rows' writes are stamped with a version
-	// (ruling R12); this test writes them directly, so it stamps each itself.
-	stamped := map[string]bool{"platform.setEmbedderBindingChoice": true, "platform.flipEmbedderBinding": true, "platform.recordRetiredEmbedder": true}
+	// Every write of the binding and the retired rows is stamped with a
+	// version (ruling R12); this test writes them directly, so it stamps each
+	// itself.
 	write := func(name string, args map[string]any) {
 		t.Helper()
-		if stamped[name] {
-			args["versionTime"] = time.Now().UTC().Format(time.RFC3339Nano)
-		}
+		args["versionTime"] = time.Now().UTC().Format(time.RFC3339Nano)
 		call, err := parser.RenderCall(name, args)
 		require.NoError(t, err)
 		_, err = e.Execute(internal, "mutation "+call)
