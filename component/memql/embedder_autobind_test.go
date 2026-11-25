@@ -264,6 +264,27 @@ func TestTheOwnerLookupSurvivesAFailedRead(t *testing.T) {
 	require.Equal(t, 3, reads)
 }
 
+// A read of the owners that panics does not stop later reads. The panic goes on
+// to whoever recovers it, but the replica must read again on its next call:
+// left marked as reading, it would answer from the set it had -- or refuse
+// every indexer, with none -- for good.
+func TestAnOwnerReadThatPanicsDoesNotStopLaterReads(t *testing.T) {
+	e := &MemQLEngine{}
+	reads, panics := 0, true
+	e.indexerOwners.read = func(context.Context) ([]string, error) {
+		reads++
+		if panics {
+			panic("the owner read panicked")
+		}
+		return []string{"v1:identity:user:o1"}, nil
+	}
+	ctx := context.Background()
+	require.Panics(t, func() { e.IndexerIsActiveOwner(ctx, "o1") })
+	panics = false
+	require.True(t, e.IndexerIsActiveOwner(ctx, "o1"), "the next call reads again")
+	require.Equal(t, 2, reads)
+}
+
 // With no set to answer from, the owner check says why rather than answering
 // no (indexerOwnerAnswer): an owner's act on Memory search then reports a check
 // that could not be made, where "you are not an active cluster owner" would be

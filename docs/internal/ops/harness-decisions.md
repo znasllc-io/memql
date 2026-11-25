@@ -2472,6 +2472,9 @@ chooses the model. An EMPTY indexer is not refused: it is a binding made
 before indexers existed, resolved as its caller until `adoptEmbedderIndexer`
 names the first active owner whose catalog offers the model (boot readiness,
 `WriteModuleReadiness`). A lookup that fails and has no earlier answer refuses.
+One that panics clears the cache's reading mark on its way out, so the next
+call reads again rather than the replica never reading the owners again
+(`TestAnOwnerReadThatPanicsDoesNotStopLaterReads`).
 
 **The automatic first choice** (`autoBindEmbedder`) binds only an ONLINE
 embedding model of an active owner's catalog (their machines and the ones lent

@@ -583,7 +583,7 @@ func (e *MemQLEngine) indexerOwnerAnswer(ctx context.Context, userId string) (bo
 		if read == nil {
 			read = e.activeOwnerIds
 		}
-		ids, err := read(ctx)
+		ids, err := c.readOnce(ctx, read)
 		c.mu.Lock()
 		c.reading = false
 		if err != nil {
@@ -609,6 +609,27 @@ func (e *MemQLEngine) indexerOwnerAnswer(ctx context.Context, userId string) (bo
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.answer(userId)
+}
+
+// readOnce runs one read of the owner set for a caller that marked the cache
+// as reading. A read that PANICS clears the mark before the panic goes on to
+// whoever recovers it: left set, it would keep every later call on this
+// replica from reading again, so the replica would answer from the set it had
+// -- or refuse every indexer, with none -- for good. A read that returns
+// leaves the mark to the caller, which clears it with what it stores, under
+// one lock.
+func (c *ownerSetCache) readOnce(ctx context.Context, read func(context.Context) ([]string, error)) ([]string, error) {
+	returned := false
+	defer func() {
+		if !returned {
+			c.mu.Lock()
+			c.reading = false
+			c.mu.Unlock()
+		}
+	}()
+	ids, err := read(ctx)
+	returned = true
+	return ids, err
 }
 
 // answer is the set's word on userId, or, with no set read yet, why not. The
