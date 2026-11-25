@@ -229,7 +229,6 @@ func (e *MemQLEngine) desktopAccessSources(ctx context.Context, actingUserId str
 	if err := readFailures.Err(); err != nil {
 		return nil, nil, fmt.Errorf("desktop access: the machines theirs or lent to them could not be read: %w", err)
 	}
-	//
 	// Each machine is judged by its OWN entry for a model, what that machine
 	// advertised (chatMachineMeetsMinimum), and not by the model's union over
 	// every machine behind it: the union counts revoked machines too, so a
