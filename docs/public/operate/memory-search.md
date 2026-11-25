@@ -190,7 +190,14 @@ written, or one rewritten since. While indexing waits it still counts what is
 missing, at the same pace and embedding nothing, so the number is there when it
 matters: Memory search shows "37 items waiting: none of your machines offering
 qwen3-embedding:0.6b is online" under the index's size. The count is as fresh
-as its last walk, and is not taken again while a switch runs.
+as its last walk.
+
+While a switch is being rebuilt, the job works on the switch alone: the
+backfill neither fills what the current index is missing nor counts it. An item
+a writer could not embed meanwhile waits for the switch to end (the walk after
+the flip covers the new index), and the backlog shown is the one counted before
+the switch began. The backfill resumes once the switch is done or cancelled, and
+also while it waits for an owner's Switch anyway or Cancel.
 
 ## Retention
 
@@ -270,8 +277,10 @@ anybody else.
 - A switch's total is an estimate (above).
 - The index's size on the page may be up to 30 seconds behind the index: each
   replica counts it at most that often.
-- The backlog is as fresh as its last count, up to ten minutes old, and is not
-  counted again while a switch runs.
+- The backlog is as fresh as its last count, up to ten minutes old.
+- While a switch is being rebuilt, the backfill is suspended, not only its
+  counting: nothing missing from the current index is filled until the switch
+  is over or waits for an owner's decision (above).
 - Memory-search embeddings write no router decision (`v1:router:call`), so the
   router's decision log does not show them.
 - The answer cache stores vectors 1536 wide only (`embedding3Small`'s width).
