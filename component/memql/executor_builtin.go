@@ -126,6 +126,9 @@ func (e *MemQLEngine) initBuiltinExecutorHandlers() error {
 		BuiltinExecutorInferenceStatus: func(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			return e.evaluateInferenceStatusExpression(ctx)
 		},
+		BuiltinExecutorDesktopAccess: func(ctx context.Context, args map[string]any, n int) ([]memorynodes.MemoryNode, error) {
+			return e.evaluateDesktopAccess(ctx, args, n)
+		},
 		BuiltinExecutorFleetModelPull: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			return e.evaluateFleetModelPullExpression(ctx, args)
 		},

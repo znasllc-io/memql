@@ -60,6 +60,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -70,6 +71,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/airoute"
 )
@@ -591,4 +593,57 @@ func (e *MemQLEngine) accessStoredRole(ctx context.Context, userId string) (auth
 		return e.storedRoleForTest(ctx, userId)
 	}
 	return e.storedUserRole(ctx, userId)
+}
+
+// DesktopAccessConcept is the canonical id of the desktopAccess row.
+const DesktopAccessConcept = "v1:platform:desktopAccess"
+
+// evaluateDesktopAccess is the `desktopAccess` builtin: ONE row answering
+// whether the caller may enter MemQL OS (design section 3). Virtual, never
+// persisted (the answer is the caller's setup right now).
+//
+// THE PERSON IS THE ACTOR, NEVER AN ARGUMENT. The only arguments are the
+// reference and digest the client got from its previous held answer; nothing
+// can name another person, so the call cannot be used to read someone else's
+// setup, and it runs on the person's own session, which keeps the
+// cluster-account gate on its session path. A call that names nobody is an
+// error (desktopAccess refuses it).
+//
+// AN ERROR STAYS AN ERROR. The client reads a failed call as "unknown" and
+// lets the person in; dressing a read failure as a row would hold somebody
+// out of the console because a database blinked.
+func (e *MemQLEngine) evaluateDesktopAccess(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	reference, _ := args["reference"].(string)
+	digest, _ := args["reasonsDigest"].(string)
+	answer, err := e.desktopAccess(ctx, actingUserFromContext(ctx), reference, digest)
+	if err != nil {
+		return nil, err
+	}
+	sources := answer.Sources
+	if sources == nil {
+		sources = []AccessSource{}
+	}
+	payload := map[string]any{
+		"admitted": answer.Admitted,
+		"exempt":   answer.Exempt,
+		"sources":  sources,
+	}
+	// Absent, not empty, when nothing was held or the line could not be
+	// written: an empty reference is "no reference to show".
+	if answer.Reference != "" {
+		payload["reference"] = answer.Reference
+	}
+	if answer.ReasonsDigest != "" {
+		payload["reasonsDigest"] = answer.ReasonsDigest
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return []memorynodes.MemoryNode{{
+		ID:      "current",
+		Concept: DesktopAccessConcept,
+		Type:    memorynodes.NodeTypeObject,
+		Payload: raw,
+	}}, nil
 }

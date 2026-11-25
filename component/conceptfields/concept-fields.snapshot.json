@@ -5337,6 +5337,21 @@
       }
     },
     {
+      "concept": "v1:platform:desktopAccess",
+      "file": "platform/concepts.memql",
+      "fields": [
+        "admitted",
+        "exempt",
+        "reasonsDigest",
+        "reference",
+        "sources"
+      ],
+      "required": [
+        "admitted",
+        "exempt"
+      ]
+    },
+    {
       "concept": "v1:platform:embedderBinding",
       "file": "platform/concepts.memql",
       "fields": [

@@ -3470,6 +3470,38 @@ func DeployableDirectoryPageBuild(args DeployableDirectoryPageArgs) string {
 	return b.String()
 }
 
+// DesktopAccess -- Answer, in one row, whether the CALLER may enter MemQL OS yet: admitted when they hold the cluster owner or developer role, or have set up a source of model access (a machine that runs a usable model, an app on their own machine, an API key, or the cluster's own account where it pays for them). A person who has set up none is held, and the row names each source and why it does not count, plus a reference they can quote to an operator. Answers only for the caller and takes no person argument, so it needs no capability, like inferenceStatus. Backs the shell's entry page; a failed call reads as unknown and lets the person in.
+type DesktopAccessArgs struct {
+	// The reference the previous held answer returned, passed back so a re-check keeps it. Ignored unless it has the right shape.
+	Reference string
+	// The reasons digest the previous held answer returned, passed back so a re-check with unchanged reasons writes no new line.
+	ReasonsDigest string
+}
+
+// DesktopAccess calls the engine builtin desktopAccess.
+func (qc *QueryClient) DesktopAccess(ctx context.Context, args DesktopAccessArgs) (*Result, error) {
+	call := DesktopAccessBuild(args)
+	return qc.executeNamed(ctx, "desktopAccess", call)
+}
+
+func DesktopAccessBuild(args DesktopAccessArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin desktopAccess(")
+	if args.Reference != "" {
+		b.WriteString("reference: ")
+		b.WriteString(quoteMemQL(args.Reference))
+	}
+	if args.ReasonsDigest != "" {
+		if b.Len() > 22 {
+			b.WriteString(", ")
+		}
+		b.WriteString("reasonsDigest: ")
+		b.WriteString(quoteMemQL(args.ReasonsDigest))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // EditDocument -- Append a new version of a Library document with new content. Reads the current latest version, computes the next versionNumber + parentVersionId, appends an immutable v1:library:documentVersion snapshot (authorKind=user|assistant) and re-inserts the backing generatedOutput so the Library viewer reflects the edit. Optimistic concurrency via expectedVersion. The caller retains their own authority for reads and writes. Backs both the user edit (memql#1229) and the assistant editDocument tool (memql#1231).
 type EditDocumentArgs struct {
 	DocumentId   string

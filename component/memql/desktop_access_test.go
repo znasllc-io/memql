@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/znasllc-io/memql/component/auth"
 )
 
 // The sources a person has set up (desktop-access design, section 1). Each test
@@ -358,5 +360,62 @@ func TestTheDigestIgnoresReasonOrder(t *testing.T) {
 	}
 	if accessReasonsDigest([]string{a}) == one {
 		t.Fatal("different reasons must give a different digest")
+	}
+}
+
+// The builtin answers in ONE row (id "current"), for the caller alone: the
+// person comes from the actor, never from an argument (design section 3).
+func TestDesktopAccessIsExactlyOneRow(t *testing.T) {
+	installRecorder(t)
+	e := holdEngine(auth.RoleWriter)
+	nodes, err := e.evaluateDesktopAccess(personContext("ana"), nil, 0)
+	if err != nil {
+		t.Fatalf("desktopAccess: %v", err)
+	}
+	if len(nodes) != 1 || nodes[0].ID != "current" || nodes[0].Concept != DesktopAccessConcept {
+		t.Fatalf("nodes = %+v, want exactly one row with a constant id on %s", nodes, DesktopAccessConcept)
+	}
+	p := decodePayload(t, nodes[0].Payload)
+	if _, ok := p["admitted"]; !ok {
+		t.Fatalf("payload %v has no admitted", p)
+	}
+	if _, ok := p["exempt"]; !ok {
+		t.Fatalf("payload %v has no exempt", p)
+	}
+	if p["admitted"] != false || p["exempt"] != false {
+		t.Fatalf("payload %v, want a held writer", p)
+	}
+	if ref, _ := p["reference"].(string); ref == "" {
+		t.Fatalf("payload %v, want the held answer's reference", p)
+	}
+}
+
+// A call that names nobody is an error, and so is any error from the decision:
+// the client reads an error as unknown and lets the person in, so it must never
+// be dressed up as a row.
+func TestDesktopAccessWithNoPersonIsAnError(t *testing.T) {
+	e := holdEngine(auth.RoleWriter)
+	if nodes, err := e.evaluateDesktopAccess(context.Background(), nil, 0); err == nil {
+		t.Fatalf("nodes = %+v, want an error for a call that names nobody", nodes)
+	}
+}
+
+// The row never carries a person argument: an argument naming someone else is
+// ignored, the actor decides.
+func TestDesktopAccessIgnoresAnArgumentNamingAnotherPerson(t *testing.T) {
+	installRecorder(t)
+	e := holdEngine(auth.RoleWriter)
+	e.storedRoleForTest = func(_ context.Context, id string) (auth.Role, bool, error) {
+		if id == "boss" {
+			return auth.RoleOwner, true, nil
+		}
+		return auth.RoleWriter, true, nil
+	}
+	nodes, err := e.evaluateDesktopAccess(personContext("ana"), map[string]any{"userId": "boss", "actingUserId": "boss"}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := decodePayload(t, nodes[0].Payload); p["exempt"] != false {
+		t.Fatalf("payload %v: a named person must not change whose access is read", p)
 	}
 }

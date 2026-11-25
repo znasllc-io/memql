@@ -965,6 +965,21 @@ concept inferenceStatus {
   minimumContextWindow     int!     @description("The context floor localEligible applied, published so the gate's recommendation and its check cannot drift. It is a floor for the GATE; what enforces capability per CALL is the catalog gating the router applies.")
 }
 
+/// Virtual SINGLE-ROW answer to "may this caller enter MemQL OS yet" (desktop-access design,
+/// section 3). Never persisted. The OS entry page reads it through the `desktopAccess` builtin.
+///
+/// ONE ROW, FOR THE CALLER ALONE: the person is the acting user, never an argument, so no
+/// capability gate is needed, as for inferenceStatus. A failed call is an error, not a row.
+@displayCard(primary="admitted", secondary="exempt", tertiary="reference")
+@belongsTo(cluster)
+concept desktopAccess {
+  admitted       bool!    @description("Whether the caller may enter: exempt, or at least one source counts.")
+  exempt         bool!    @description("Whether the caller is a cluster owner or developer, by their STORED role read fresh. The exempt are admitted with nothing set up.")
+  reference      string   @description("ERR- plus six lowercase hex characters, present only on a held answer whose hold line was written. The person quotes it to an operator. Absent when the write failed.")
+  reasonsDigest  string   @description("The person part then the reasons digest of a held answer. The client passes it back with the reference so a re-check with unchanged reasons writes nothing. Absent when the write failed.")
+  sources        []object @description("What the caller has set up, for the exempt too: {kind, state, own, lenderUserId, label, app}. kind is machine | app | key | clusterAccount; app is the app id of an app source. A source whose state does not count is listed so a page can say why.")
+}
+
 /// Virtual single-row RESULT of an owner-only `providersReload` (epic memql#4440). Never persisted:
 /// an action's outcome is a reply, not a record. What IS recorded is the v1:identity:auditEvent line
 /// naming who asked.
