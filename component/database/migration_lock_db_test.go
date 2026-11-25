@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -42,17 +44,35 @@ func migrationLockDB(t *testing.T, readTimeout time.Duration) (*bun.DB, *bun.DB,
 	return db, admin, schema
 }
 
-func lockedMigrationRunner(t *testing.T, migrations *migrate.Migrations) *Database {
+// lockedMigrationRunner is a replica migrating one scratch schema: its
+// migration session is the production one, dialled on the test database with
+// the schema as its search_path and its application_name, so
+// migrationLockDB's cleanup reaches the session's backends too.
+func lockedMigrationRunner(t *testing.T, schema string, migrations *migrate.Migrations) *Database {
+	t.Helper()
+	return sessionMigrationRunner(t, schema, schema, migrations)
+}
+
+// sessionMigrationRunner is lockedMigrationRunner with the session's
+// application_name chosen, for a replica the test must tell apart.
+func sessionMigrationRunner(t *testing.T, schema, app string, migrations *migrate.Migrations) *Database {
 	t.Helper()
 	cfg := &Database{}
 	d := newMigrationTestDB(t, cfg.WithMigrateOnStart(true))
 	d.config.migrations = migrations
-	d.config.migrationOpener = nil
+	dsn := os.Getenv("MEMQL_DATABASE_DSN")
+	d.config.dsn = &dsn
+	d.config.migrationConnector = func(dsn string) (driver.Connector, error) {
+		params := migrationConnParams()
+		params["search_path"] = schema
+		return pgdriver.NewConnector(pgdriver.WithDSN(dsn), pgdriver.WithConnParams(params),
+			pgdriver.WithApplicationName(app), pgdriver.WithReadTimeout(0)), nil
+	}
 	return d
 }
 
 func TestMigrationLockBlocksAnotherReplicaAndAllowsRetry(t *testing.T) {
-	db, _, _ := migrationLockDB(t, time.Second)
+	db, _, schema := migrationLockDB(t, time.Second)
 	ctx := context.Background()
 	calls := 0
 	migrations := migrate.NewMigrations()
@@ -64,7 +84,7 @@ func TestMigrationLockBlocksAnotherReplicaAndAllowsRetry(t *testing.T) {
 	if err := owner.Lock(ctx); err != nil {
 		t.Fatal(err)
 	}
-	runner := lockedMigrationRunner(t, migrations)
+	runner := lockedMigrationRunner(t, schema, migrations)
 	runner.runMigrations(ctx, db)
 	if calls != 0 || runner.MigrationError() == nil || !runner.migrationsPending() {
 		t.Fatalf("ran without the other replica's lock: calls=%d err=%v", calls, runner.MigrationError())
@@ -84,7 +104,7 @@ func TestMigrationLockBlocksAnotherReplicaAndAllowsRetry(t *testing.T) {
 }
 
 func TestFailedMigrationDefersHooksAndAnotherReplicaCanFinish(t *testing.T) {
-	db, _, _ := migrationLockDB(t, time.Second)
+	db, _, schema := migrationLockDB(t, time.Second)
 	ctx := context.Background()
 	wantErr := errors.New("schema repair is not ready")
 	migrations := migrate.NewMigrations()
@@ -98,7 +118,7 @@ func TestFailedMigrationDefersHooksAndAnotherReplicaCanFinish(t *testing.T) {
 	}})
 	calls := 0
 	hook := func(context.Context, *bun.DB, *slog.Logger) error { calls++; return nil }
-	first := lockedMigrationRunner(t, migrations)
+	first := lockedMigrationRunner(t, schema, migrations)
 	first.config.postMigrationHooks = []PostMigrationHook{hook}
 	first.runMigrations(ctx, db)
 	if calls != 0 || !errors.Is(first.MigrationError(), wantErr) || !first.migrationsPending() {
@@ -112,7 +132,7 @@ func TestFailedMigrationDefersHooksAndAnotherReplicaCanFinish(t *testing.T) {
 		_, err := m.DB().ExecContext(ctx, `ALTER TABLE partial_schema ADD COLUMN ready bool`)
 		return err
 	}})
-	second := lockedMigrationRunner(t, repaired)
+	second := lockedMigrationRunner(t, schema, repaired)
 	second.config.postMigrationHooks = []PostMigrationHook{hook}
 	second.runMigrations(ctx, db)
 	if calls != 1 || second.MigrationError() != nil || second.migrationsPending() {
@@ -124,21 +144,29 @@ func TestFailedMigrationDefersHooksAndAnotherReplicaCanFinish(t *testing.T) {
 	}
 }
 
+// A STATEMENT CUT OFF INSIDE A MIGRATION HOLDS THE LOCK WHILE ITS BACKEND RUNS
+// IT, AND ONLY THAT LONG. Nothing knows what an arbitrary migration left
+// running, which is why the runner used to keep bun's row for an operator. The
+// statement ran on the attempt's session, and that session's backend holds the
+// migration lock, so no other replica overlaps it, and once it ends the next
+// attempt migrates without anyone clearing anything.
 func TestMigrationReadTimeoutRetainsLockWhileBackendRuns(t *testing.T) {
-	// Initialization and lock acquisition must finish before the injected
-	// timeout. A connection-wide 100ms timeout can fail CREATE TABLE on a
-	// loaded runner, never reaching the orphaned migration this test covers.
+	// The lock and bun's bookkeeping must finish before the Up's own 100 ms
+	// timeout, so the timeout lands on the statement this test is about.
 	db, admin, schema := migrationLockDB(t, 5*time.Second)
 	migrations := migrate.NewMigrations()
 	calls := 0
 	migrations.Add(migrate.Migration{Name: "20260925000000", Up: func(ctx context.Context, m *migrate.Migrator, _ *migrate.Migration) error {
 		calls++
+		if calls > 1 {
+			return nil
+		}
 		ctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 		defer cancel()
 		_, err := m.DB().ExecContext(ctx, "SELECT pg_sleep(3)")
 		return err
 	}})
-	runner := lockedMigrationRunner(t, migrations)
+	runner := lockedMigrationRunner(t, schema, migrations)
 	runner.runMigrations(context.Background(), db)
 	if runner.MigrationError() == nil {
 		t.Fatal("expected client timeout")
@@ -153,10 +181,26 @@ func TestMigrationReadTimeoutRetainsLockWhileBackendRuns(t *testing.T) {
 	if active != 1 {
 		t.Fatalf("expected abandoned backend still executing, got %d", active)
 	}
-	sibling := lockedMigrationRunner(t, migrations)
+	sibling := lockedMigrationRunner(t, schema, migrations)
 	sibling.runMigrations(context.Background(), db)
-	if calls != 1 || sibling.MigrationError() == nil || !strings.Contains(sibling.MigrationError().Error(), "migration lock") {
-		t.Fatalf("second replica overlapped orphan: calls=%d err=%v", calls, sibling.MigrationError())
+	if calls != 1 || !errors.Is(sibling.MigrationError(), ErrMigrationLockHeld) || !strings.Contains(sibling.MigrationError().Error(), "pg_sleep") {
+		t.Fatalf("second replica overlapped orphan, or was refused without naming it: calls=%d err=%v", calls, sibling.MigrationError())
+	}
+
+	// The statement ends, its backend with it, and the lock with the backend.
+	waitUntil(t, 15*time.Second, func() bool {
+		var running int
+		if err := admin.NewRaw("SELECT count(*) FROM pg_stat_activity WHERE application_name = ? AND query LIKE 'SELECT pg_sleep%'", schema).Scan(context.Background(), &running); err != nil {
+			t.Fatal(err)
+		}
+		return running == 0
+	}, func() string { return "the cut-off statement's backend never ended" })
+	sibling.runMigrations(context.Background(), db)
+	if calls != 2 || sibling.MigrationError() != nil {
+		t.Fatalf("the attempt after the cut-off statement ended did not migrate: calls=%d err=%v", calls, sibling.MigrationError())
+	}
+	if held := migrationLockRows(t, db); held != 0 {
+		t.Fatalf("the finishing attempt left %d lock rows", held)
 	}
 }
 
@@ -200,6 +244,12 @@ func lookupIndexMigration(t *testing.T, db *bun.DB, table, index string) *migrat
 		` (id text NOT NULL, concept text NOT NULL, "createdAt" timestamptz NOT NULL, payload jsonb)`); err != nil {
 		t.Fatal(err)
 	}
+	return lookupIndexMigrations(table, index)
+}
+
+// lookupIndexMigrations is lookupIndexMigration's migration alone, for a
+// process migrating a table another one created.
+func lookupIndexMigrations(table, index string) *migrate.Migrations {
 	migrations := migrate.NewMigrations()
 	migrations.Add(migrate.Migration{Name: "20260925000000", Up: func(ctx context.Context, m *migrate.Migrator, _ *migrate.Migration) error {
 		return ensurePayloadLookupIndex(ctx, m.DB(), nil, table, index, "field", []string{"v1:test:lock"})
@@ -219,33 +269,35 @@ func activeIndexBuilds(t *testing.T, admin *bun.DB, schema string) int {
 	return active
 }
 
-// A BUILD THAT OUTLIVES ITS ATTEMPT MUST NOT STRAND THE LOCK. Production's
-// migrations stopped on this for days: a CREATE INDEX over a large table
-// outlived the attempt's deadline, the runner kept bun's lock "until an operator
-// verifies the backend has stopped", no operator knew to, and every later
-// migration sat behind a build that had long since finished. The runner's rule
-// exists so that nothing overlaps an orphan -- and for an index build something
-// already prevents that: the orphan holds the build lock until its backend
-// exits, and the next attempt takes that lock before it does anything. So the
-// attempt defers, and the attempts after it wait their turn on the build lock
-// and judge the result from the catalog.
-func TestAnIndexBuildThatOutlivesItsAttemptReleasesTheLock(t *testing.T) {
+// A BUILD THAT OUTLIVES ITS ATTEMPT HOLDS THE LOCK FOR AS LONG AS IT RUNS, AND
+// NO LONGER. Production's migrations stopped on this for days: a CREATE INDEX
+// over a large table outlived the attempt's deadline, the runner kept bun's row
+// "until an operator verifies the backend has stopped", no operator knew to,
+// and every later migration sat behind a build that had long since finished.
+// Now the build's backend IS the lock: the attempt's one session ran the build,
+// so the migration lock goes when the build does. Until then nothing overlaps
+// it: another replica is refused, an engine that locks by row finds the fence,
+// and this node's own next attempt waits for its build instead of failing.
+func TestAnIndexBuildThatOutlivesItsAttemptHoldsTheLockUntilItEnds(t *testing.T) {
 	db, admin, schema := migrationLockDB(t, time.Second)
 	ctx := context.Background()
 	table, index := schema+"_nodes", "lock_"+schema[len("migration_lock_"):]+"_idx"
 	migrations := lookupIndexMigration(t, db, table, index)
 	hooks := 0
 	hook := func(context.Context, *bun.DB, *slog.Logger) error { hooks++; return nil }
-	attempt := func(timeoutMs int) *Database {
-		runner := lockedMigrationRunner(t, migrations)
-		runner.config.migrationTimeoutMs = timeoutMs
+	replica := func() *Database {
+		runner := lockedMigrationRunner(t, schema, migrations)
 		runner.config.postMigrationHooks = []PostMigrationHook{hook}
+		return runner
+	}
+	attempt := func(runner *Database, timeoutMs int) *Database {
+		runner.config.migrationTimeoutMs = timeoutMs
 		runner.runMigrations(ctx, db)
 		return runner
 	}
 
-	// An open writer holds the build on its ShareLock past both deadlines, the
-	// way a long scan would.
+	// An open writer holds the build on its ShareLock past every deadline below,
+	// the way a long scan would.
 	writer, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -255,34 +307,43 @@ func TestAnIndexBuildThatOutlivesItsAttemptReleasesTheLock(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	first := attempt(2500)
-	if !errors.Is(first.MigrationError(), ErrMigrationDeferred) {
-		t.Fatalf("an index build outliving its attempt did not defer: %v", first.MigrationError())
-	}
-	if migrationMayStillBeRunning(first.MigrationError()) {
-		t.Fatalf("the deferral still reads as an uncertain outcome, so the runner would keep its lock: %v", first.MigrationError())
-	}
-	if held := migrationLockRows(t, db); held != 0 {
-		t.Fatalf("the attempt stranded the lock: %d rows", held)
+	node := replica()
+	if err := attempt(node, 2500).MigrationError(); !errors.Is(err, ErrMigrationDeferred) {
+		t.Fatalf("an index build outliving its attempt did not defer: %v", err)
 	}
 	if active := activeIndexBuilds(t, admin, schema); active != 1 {
-		t.Fatalf("expected the orphaned build still running, got %d", active)
+		t.Fatalf("expected the cut-off build still running, got %d", active)
 	}
 
-	// The next attempt takes the released lock while the orphan runs. It must
-	// wait on the build lock, not start a second build, and leave the same way.
-	second := attempt(2500)
-	if !errors.Is(second.MigrationError(), ErrMigrationDeferred) {
-		t.Fatalf("an attempt finding the orphan did not defer: %v", second.MigrationError())
+	// The fence stays while the build runs, so an engine that locks by row
+	// keeps out: its Lock is bun's own.
+	var fence int64
+	if err := db.QueryRowContext(ctx, `SELECT id FROM bun_migration_locks`).Scan(&fence); err != nil || fence >= 0 {
+		t.Fatalf("expected the session's fence (a negative id) while the build runs: id=%d err=%v", fence, err)
 	}
-	if !strings.Contains(second.MigrationError().Error(), "build lock") {
-		t.Fatalf("the deferral does not say what it waited for: %v", second.MigrationError())
+	older := migrate.NewMigrator(db, migrations)
+	if err := older.Lock(ctx); err == nil {
+		_ = older.Unlock(ctx)
+		t.Fatal("an engine that locks by row took the lock while the build ran")
 	}
-	if held := migrationLockRows(t, db); held != 0 {
-		t.Fatalf("the second attempt stranded the lock: %d rows", held)
+
+	// Another replica is refused while the build runs, and is told what by.
+	other := attempt(replica(), 2500)
+	if err := other.MigrationError(); !errors.Is(err, ErrMigrationLockHeld) || !strings.Contains(err.Error(), "CREATE INDEX") {
+		t.Fatalf("another replica beside the running build was not refused naming it: %v", err)
 	}
 	if active := activeIndexBuilds(t, admin, schema); active != 1 {
-		t.Fatalf("an attempt overlapped the orphan: %d builds running", active)
+		t.Fatalf("an attempt overlapped the cut-off build: %d builds running", active)
+	}
+
+	// This node's next attempt waits for its own build and, when its attempt
+	// runs out first, defers rather than refusing itself.
+	err = attempt(node, 1500).MigrationError()
+	if !errors.Is(err, ErrMigrationDeferred) || !strings.Contains(err.Error(), "earlier migration statement") {
+		t.Fatalf("this node's attempt did not wait for its own running build: %v", err)
+	}
+	if active := activeIndexBuilds(t, admin, schema); active != 1 {
+		t.Fatalf("this node's attempt overlapped its own build: %d builds running", active)
 	}
 	if ledger := migrationLedgerNames(t, db); ledger != "" {
 		t.Fatalf("recorded a migration whose index has not finished: %q", ledger)
@@ -291,20 +352,13 @@ func TestAnIndexBuildThatOutlivesItsAttemptReleasesTheLock(t *testing.T) {
 		t.Fatalf("hooks ran over an unfinished schema: %d", hooks)
 	}
 
+	// The build ends. Nobody releases anything.
 	if err := writer.Commit(); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(15 * time.Second)
-	for activeIndexBuilds(t, admin, schema) != 0 {
-		if time.Now().After(deadline) {
-			t.Fatal("the orphaned build never finished")
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-
-	last := attempt(30000)
+	last := attempt(node, 30000)
 	if err := last.MigrationError(); err != nil {
-		t.Fatalf("the attempt after the orphan finished: %v", err)
+		t.Fatalf("the attempt once the build could finish: %v", err)
 	}
 	if last.migrationsPending() {
 		t.Fatal("migrations still pending once the index was verified")
@@ -361,7 +415,7 @@ func TestAnAttemptWaitingOnAnOperatorsBuildReleasesTheLock(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 
-	runner := lockedMigrationRunner(t, migrations)
+	runner := lockedMigrationRunner(t, schema, migrations)
 	runner.config.migrationTimeoutMs = 1500
 	runner.runMigrations(ctx, db)
 	if !errors.Is(runner.MigrationError(), ErrMigrationDeferred) {
@@ -390,7 +444,7 @@ func TestAnAttemptWaitingOnAnOperatorsBuildReleasesTheLock(t *testing.T) {
 func TestAnAttemptEndingBetweenMigrationsRecordsWhatFinishedAndReleasesTheLock(t *testing.T) {
 	for name, cancelled := range map[string]bool{"deadline": false, "cancelled": true} {
 		t.Run(name, func(t *testing.T) {
-			db, _, _ := migrationLockDB(t, 5*time.Second)
+			db, _, schema := migrationLockDB(t, 5*time.Second)
 			parent, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			first, second := 0, 0
@@ -407,7 +461,7 @@ func TestAnAttemptEndingBetweenMigrationsRecordsWhatFinishedAndReleasesTheLock(t
 				second++
 				return nil
 			}})
-			runner := lockedMigrationRunner(t, migrations)
+			runner := lockedMigrationRunner(t, schema, migrations)
 			runner.config.migrationTimeoutMs = 300
 			runner.runMigrations(parent, db)
 			if !errors.Is(runner.MigrationError(), ErrMigrationDeferred) {
@@ -446,7 +500,7 @@ func migrationLogs() (*slog.Logger, *bytes.Buffer) {
 // evidence: an attempt is bounded, and bun inserts a new row for each one, so
 // one id seen for longer than an attempt can last is no attempt.
 func TestALockThatOutlastsAnyAttemptIsReportedAsStuck(t *testing.T) {
-	db, _, _ := migrationLockDB(t, 5*time.Second)
+	db, _, schema := migrationLockDB(t, 5*time.Second)
 	ctx := context.Background()
 	migrations := migrate.NewMigrations()
 	migrations.Add(migrate.Migration{Name: "20260925000000", Up: func(context.Context, *migrate.Migrator, *migrate.Migration) error { return nil }})
@@ -458,7 +512,7 @@ func TestALockThatOutlastsAnyAttemptIsReportedAsStuck(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	runner := lockedMigrationRunner(t, migrations)
+	runner := lockedMigrationRunner(t, schema, migrations)
 	logger, logs := migrationLogs()
 	runner.Logger = logger
 
@@ -512,8 +566,85 @@ func TestALockThatOutlastsAnyAttemptIsReportedAsStuck(t *testing.T) {
 	}
 }
 
+// A SESSION HOLDING THE LOCK WHILE RUNNING NOTHING IS REPORTED; ONE RUNNING A
+// STATEMENT IS NOT. A session releases the lock when its process ends, so one
+// that has sat idle in the way for longer than any attempt is a process that
+// stopped migrating and kept its session: migrations are stopped until it ends,
+// which is what the ERROR and memql_database_migration_lock_held_seconds (and
+// the release gates reading it) mean. A session running a statement ends the
+// lock itself when the statement ends, as the dead replica's build did eight
+// minutes after 2026-11-25's stranding began, so it starts the clock again.
+func TestASessionHolderIsReportedStuckOnlyWhileItRunsNothing(t *testing.T) {
+	db, admin, schema := migrationLockDB(t, 5*time.Second)
+	ctx := context.Background()
+	migrations := migrate.NewMigrations()
+	migrations.Add(migrate.Migration{Name: "20260925000000", Up: func(context.Context, *migrate.Migrator, *migrate.Migration) error { return nil }})
+
+	key := migrationLockKey(schema)
+	holder, err := admin.DB.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Close()
+	var holderPid int64
+	if err := holder.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&holderPid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := holder.ExecContext(ctx, `SELECT pg_advisory_lock($1)`, key); err != nil {
+		t.Fatal(err)
+	}
+
+	runner := lockedMigrationRunner(t, schema, migrations)
+	logger, logs := migrationLogs()
+	runner.Logger = logger
+	runner.runMigrations(ctx, db)
+	if !errors.Is(runner.MigrationError(), ErrMigrationLockHeld) || strings.Contains(logs.String(), "level=ERROR") {
+		t.Fatalf("a session just found holding the lock is contention: err=%v logs=%s", runner.MigrationError(), logs)
+	}
+
+	// The same idle session, seen for longer than any attempt can hold it.
+	runner.heldLock.since = time.Now().Add(-migrationLockStuckAfter(runner.config.migrationTimeoutMs) - time.Minute)
+	logs.Reset()
+	runner.runMigrations(ctx, db)
+	if reported := logs.String(); !strings.Contains(reported, "level=ERROR") || !strings.Contains(reported, "running no statement") ||
+		!strings.Contains(reported, "env-vars.md") || !strings.Contains(reported, strconv.FormatInt(holderPid, 10)) {
+		t.Fatalf("an idle session holding the lock past any attempt was not reported naming it: %s", reported)
+	}
+	if heldFor := runner.MigrationLockHeldFor(); heldFor < time.Minute {
+		t.Fatalf("the node reports %s for an idle holder past its limit", heldFor)
+	}
+
+	// The holder runs a statement: it will end the lock itself.
+	slept := make(chan error, 1)
+	go func() { _, err := holder.ExecContext(ctx, `SELECT pg_sleep(2)`); slept <- err }()
+	waitUntil(t, 5*time.Second, func() bool {
+		var state string
+		_ = admin.NewRaw("SELECT COALESCE(state, '') FROM pg_stat_activity WHERE pid = ?", holderPid).Scan(ctx, &state)
+		return state == "active"
+	}, func() string { return "the holder never started its statement" })
+	logs.Reset()
+	runner.runMigrations(ctx, db)
+	if !errors.Is(runner.MigrationError(), ErrMigrationLockHeld) || strings.Contains(logs.String(), "level=ERROR") {
+		t.Fatalf("a holder running a statement was reported as stuck: err=%v logs=%s", runner.MigrationError(), logs)
+	}
+	if heldFor := runner.MigrationLockHeldFor(); heldFor != 0 {
+		t.Fatalf("the node reports %s for a holder running a statement", heldFor)
+	}
+	if err := <-slept; err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := holder.ExecContext(ctx, `SELECT pg_advisory_unlock($1)`, key); err != nil {
+		t.Fatal(err)
+	}
+	runner.runMigrations(ctx, db)
+	if err := runner.MigrationError(); err != nil {
+		t.Fatalf("once the session let go: %v", err)
+	}
+}
+
 func TestMigrationSQLFailureReleasesLockForRetry(t *testing.T) {
-	db, _, _ := migrationLockDB(t, time.Second)
+	db, _, schema := migrationLockDB(t, time.Second)
 	calls := 0
 	migrations := migrate.NewMigrations()
 	migrations.Add(migrate.Migration{Name: "20260925000000", Up: func(ctx context.Context, m *migrate.Migrator, _ *migrate.Migration) error {
@@ -524,7 +655,7 @@ func TestMigrationSQLFailureReleasesLockForRetry(t *testing.T) {
 		}
 		return nil
 	}})
-	runner := lockedMigrationRunner(t, migrations)
+	runner := lockedMigrationRunner(t, schema, migrations)
 	runner.runMigrations(context.Background(), db)
 	if runner.MigrationError() == nil {
 		t.Fatal("expected SQL error")
@@ -534,7 +665,7 @@ func TestMigrationSQLFailureReleasesLockForRetry(t *testing.T) {
 	if errors.Is(runner.MigrationError(), ErrMigrationLockHeld) {
 		t.Fatalf("a failed migration was classified as a held lock: %v", runner.MigrationError())
 	}
-	sibling := lockedMigrationRunner(t, migrations)
+	sibling := lockedMigrationRunner(t, schema, migrations)
 	sibling.runMigrations(context.Background(), db)
 	if calls != 2 || sibling.MigrationError() != nil {
 		t.Fatalf("acknowledged SQL failure stranded lock: calls=%d err=%v", calls, sibling.MigrationError())

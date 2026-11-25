@@ -332,7 +332,7 @@ func TestTheReadinessCollapseMigrationDeletesInBoundedStatements(t *testing.T) {
 	if len(only.Sorted()) != 1 {
 		t.Fatalf("the registered set carries %d migrations named 20260921000000, want 1", len(only.Sorted()))
 	}
-	runner := lockedMigrationRunner(t, only)
+	runner := lockedMigrationRunner(t, f.schema, only)
 	runner.runMigrations(context.Background(), f.db)
 	if err := runner.MigrationError(); err != nil {
 		t.Fatalf("the collapse migration failed: %v", err)
@@ -676,11 +676,14 @@ func TestReadinessCollapseDeferralReleasesTheRunnersLock(t *testing.T) {
 	f := newReadinessCollapseFixture(t, 23)
 	migrations := migrate.NewMigrations()
 	registerModuleReadinessHistoryCollapse(migrations, nil)
-	runner := lockedMigrationRunner(t, migrations)
+	runner := lockedMigrationRunner(t, f.schema, migrations)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	runner.runMigrations(ctx, f.db.WithQueryHook(&readinessCollapseRecorder{cancel: cancel, cancelAfterCommit: 2}))
+	// The recorder watches the migration session, where the collapse runs.
+	runner.config.bunOptions = []BunOption{func(db *bun.DB) { db.AddQueryHook(&readinessCollapseRecorder{cancel: cancel, cancelAfterCommit: 2}) }}
+	runner.runMigrations(ctx, f.db)
+	runner.config.bunOptions = nil
 	if err := runner.MigrationError(); !errors.Is(err, errReadinessCollapseDeferred) {
 		t.Fatalf("the first attempt must end deferred, got %v", err)
 	}
@@ -727,11 +730,13 @@ func TestReadinessCollapseCancelledMidStepReleasesTheRunnersLock(t *testing.T) {
 	f := newReadinessCollapseFixture(t, 23)
 	migrations := migrate.NewMigrations()
 	registerModuleReadinessHistoryCollapse(migrations, nil)
-	runner := lockedMigrationRunner(t, migrations)
+	runner := lockedMigrationRunner(t, f.schema, migrations)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	runner.runMigrations(ctx, f.db.WithQueryHook(&readinessCollapseRecorder{cancel: cancel, cancelBeforeCommit: 1}))
+	runner.config.bunOptions = []BunOption{func(db *bun.DB) { db.AddQueryHook(&readinessCollapseRecorder{cancel: cancel, cancelBeforeCommit: 1}) }}
+	runner.runMigrations(ctx, f.db)
+	runner.config.bunOptions = nil
 	if err := runner.MigrationError(); !errors.Is(err, errReadinessCollapseDeferred) {
 		t.Fatalf("an attempt cancelled midway through a step must end deferred, got %v", err)
 	}

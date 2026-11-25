@@ -201,8 +201,12 @@ spec:
           annotations:
             summary: "MemQL migrations are stopped behind a held lock ({{ $labels.namespace }})"
             description: >
-              A migrating node has found the same row in bun_migration_locks for
-              over 15 minutes, longer than any attempt lasts. No migration runs
-              until an operator verifies the holder has stopped and releases it:
-              docs/public/operate/env-vars.md, Database tuning. Identity's ERROR
-              log names the next migration waiting.
+              A migrating node has found the same stalled holder of the
+              migration lock in its way for over 15 minutes, longer than any
+              attempt lasts: a migration session connected but running no
+              statement, or a row an engine that locks by row left in
+              bun_migration_locks. A session holder lets go when its process
+              ends; a row waits for an operator to verify its holder has
+              stopped: docs/public/operate/env-vars.md, Database tuning.
+              Identity's ERROR log names the holder and the next migration
+              waiting.

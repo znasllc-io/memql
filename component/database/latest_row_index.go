@@ -107,46 +107,51 @@ import (
 // tries again.
 //
 // ===========================================================================
-// THE TEN-SECOND READ DEADLINE, AND WHY THE BUILD LOCK IS A SESSION LOCK
+// THE READ DEADLINE, AND WHY THE BUILD LOCK IS A SESSION LOCK
 // ===========================================================================
-// pgdriver gives every connection a 10 s read deadline (Config.ReadTimeout,
-// and nothing in this package's DSNs overrides it). Measured through the
-// migration pool: `SELECT pg_sleep(12)` fails at 10.0 s with "i/o timeout",
-// with or without a context deadline, and the backend keeps running; a context
-// deadline cuts the read the same way and sends no cancel either. The
-// migration pool dropping statement_timeout does not lift this: the deadline
-// is the CLIENT's. So an index build over a large table outlives its
-// statement, and the build carries on server-side as an orphan.
+// pgdriver gives a connection a 10 s read deadline by default
+// (Config.ReadTimeout). Measured through the old migration pool: `SELECT
+// pg_sleep(12)` fails at 10.0 s with "i/o timeout", with or without a context
+// deadline, and the backend keeps running; a context deadline cuts the read the
+// same way and sends no cancel either. Dropping statement_timeout does not lift
+// this: the deadline is the CLIENT's. The migration session has no read deadline
+// of its own (migration_session.go), so there an ensure's statement is cut only
+// when the attempt's deadline is reached, but any pool that keeps one cuts a
+// build over a large table the same way, and the build carries on server-side
+// as an orphan.
 //
 // The build lock is a SESSION advisory lock for exactly that reason: it lives
 // as long as the backend does, so an orphaned build still holds it, and the
-// next run -- this node's, or another node's migrating at the same moment --
-// waits for the build to finish instead of finding an invalid index and
-// dropping it mid-build. When a statement here is cut off, this run waits for
-// its own orphan the same way (the lock comes free when the backend exits) and
-// then lets the re-inspection say whether the build worked. The lock is taken
-// by POLLING pg_try_advisory_lock, because a blocking pg_advisory_lock is
-// itself a statement the read deadline cuts off, leaving one more orphan
-// waiting in the queue.
+// next run -- this node's, an engine's that locks migrations by row, or an
+// ensure run outside a migration -- waits for the build to finish instead of
+// finding an invalid index and dropping it mid-build. When a statement here is
+// cut off on a pool that can open another connection, this run waits for its
+// own orphan the same way (the lock comes free when the backend exits) and then
+// lets the re-inspection say whether the build worked. The lock is taken by
+// POLLING pg_try_advisory_lock, because a blocking pg_advisory_lock is itself a
+// statement a read deadline cuts off, leaving one more orphan waiting in the
+// queue.
 //
 // ===========================================================================
-// A BUILD THAT OUTLIVES THE ATTEMPT DEFERS; IT DOES NOT KEEP THE RUNNER'S LOCK
+// A BUILD THAT OUTLIVES THE ATTEMPT DEFERS, AND ITS BACKEND KEEPS THE LOCK
 // ===========================================================================
-// That wait is bounded by the attempt, and a build over a large table can outlive
-// any attempt. The runner keeps bun's lock when a migration ends on a context or
-// transport error, so that nothing overlaps a statement that may still be
-// running, and nothing ever released it: the September 26 rollout stranded it
-// until an operator noticed, and the October 30 rollout left it stranded for days
-// with every later migration behind it, the index it was building long finished.
+// A build over a large table can outlive any attempt. The runner used to keep
+// bun's lock row when a migration ended on a context or transport error, so that
+// nothing overlapped a statement that may still be running, and nothing ever
+// released it: the September 26 rollout stranded it until an operator noticed,
+// the October 30 rollout for days, the index it was building long finished.
 //
-// Overlap is what the build lock already rules out, so an ensure answers for
-// itself (deferInterruptedIndexWork): the attempt ends with
-// ErrMigrationDeferred, the runner releases its lock, and the next attempt waits
-// its turn here and re-inspects. Migrations after this one cannot start early,
-// because bun runs them in order and this one is not in the ledger until an
-// attempt has seen its index complete; and hooks cannot run, because a deferred
-// attempt records an error. A chain of builds therefore advances one index per
-// orphan, each over as many attempts as its build takes.
+// The migration lock is now the migration session's (migration_session.go): the
+// build runs on the session holding it, so an orphaned build keeps the
+// migration lock as well as the build lock until it ends, and then both go with
+// its backend. The ensure answers for itself (deferInterruptedIndexWork): the
+// attempt ends with ErrMigrationDeferred, which is progress, and the next
+// attempt -- this node's waits for its own build, another replica's is refused
+// until the build ends -- re-inspects. Migrations after this one cannot start
+// early, because bun runs them in order and this one is not in the ledger until
+// an attempt has seen its index complete; and hooks cannot run, because a
+// deferred attempt records an error. A chain of builds therefore advances one
+// index per orphan, each over as many attempts as its build takes.
 
 // latestRowIndexKey is the key the latest-row read needs, in order: equality on
 // concept, then the DISTINCT ON column, then the version order.
@@ -550,13 +555,14 @@ func ensureLatestRowIndex(ctx context.Context, db *bun.DB, logger *slog.Logger, 
 }
 
 // deferInterruptedIndexWork answers for an index ensure that a context or
-// transport failure, which the runner must otherwise treat as a statement that
-// may still be running, leaves nothing to overlap: every statement of an ensure
-// runs on the session holding the build lock, so a DROP or a build still going
-// holds it until its backend exits, and everything else the session sends only
-// reads the catalog or sets a session variable. See the header. The cause is
-// flattened into the message so the error stops being one the runner retains
-// its lock for, and the holder it names is still there to read.
+// transport failure, which says a statement may still be running, leaves nothing
+// to overlap: every statement of an ensure runs on the session holding the build
+// lock -- on the migration session, which also holds the migration lock -- so a
+// DROP or a build still going holds them until its backend exits, and everything
+// else the session sends only reads the catalog or sets a session variable. See
+// the header. The attempt ends as progress (ErrMigrationDeferred), which the
+// migrate subcommand answers with another attempt; the cause is flattened into
+// the message, and the holder it names is still there to read.
 func deferInterruptedIndexWork(err error) error {
 	if err == nil || !migrationMayStillBeRunning(err) {
 		return err
@@ -722,7 +728,9 @@ func (s *latestRowIndexSession) build(ctx context.Context, st latestRowIndexStat
 // holds the build lock: ddl waits for that backend to exit -- the lock comes
 // free when it does -- takes the lock again on a fresh connection, and returns
 // nil. Whether the statement did what it was for is then the re-inspection's
-// to say, never this return value's.
+// to say, never this return value's. On the migration session there is no fresh
+// connection (errMigrationSessionEnded), so the wait ends at once and the
+// attempt defers, its backend holding both locks until the statement ends.
 func (s *latestRowIndexSession) ddl(ctx context.Context, stmt string) error {
 	_, err := s.conn.ExecContext(ctx, stmt)
 	if err == nil || !isClientReadDeadline(err) {

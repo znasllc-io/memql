@@ -4538,6 +4538,8 @@ past a larger table, and the startup probe bounds it. Releasing a stale lock
 automatically: the row names no holder and the migration pool's `application_name`
 is the node's own, shared with its request pool, so the catalog cannot establish
 that the holder stopped. That is the runbook's to do until a holder has an identity.
+(Since 2026-11-25 it has one: see
+[The migration lock is the migration session](#the-migration-lock-is-the-migration-session-2026-11-25).)
 Booting a check of the read registries against the catalog: reads would be no
 faster for it, and the stuck lock is what needed reporting.
 
@@ -4545,12 +4547,16 @@ faster for it, and the stuck lock is what needed reporting.
 deadline or a lost connection keeps the lock, because nothing knows what an
 arbitrary migration left running
 (`TestMigrationReadTimeoutRetainsLockWhileBackendRuns`). A pod killed mid-attempt
-leaves its row. Both are now reported rather than silent.
+leaves its row. Both are now reported rather than silent. (Superseded on
+2026-11-25: both now keep the lock only while the statement runs; see
+[The migration lock is the migration session](#the-migration-lock-is-the-migration-session-2026-11-25).)
 
-**Regression evidence.** In `component/database/migration_lock_db_test.go`,
-`TestAnIndexBuildThatOutlivesItsAttemptReleasesTheLock` holds a real build past two
-attempts and pins the released lock, no second build, nothing in the ledger and no
-hooks until the orphan finishes. `TestAnAttemptWaitingOnAnOperatorsBuildReleasesTheLock`
+**Regression evidence.** In `component/database/migration_lock_db_test.go`, a test
+then named `TestAnIndexBuildThatOutlivesItsAttemptReleasesTheLock` held a real build
+past two attempts and pinned the released lock, no second build, nothing in the
+ledger and no hooks until the orphan finished; since 2026-11-25 it is
+`TestAnIndexBuildThatOutlivesItsAttemptHoldsTheLockUntilItEnds`, with the session
+lock's rules. `TestAnAttemptWaitingOnAnOperatorsBuildReleasesTheLock`
 covers a build started by hand, `TestAnAttemptEndingBetweenMigrationsRecordsWhatFinishedAndReleasesTheLock`
 the gap, by deadline and by cancellation, and `TestALockThatOutlastsAnyAttemptIsReportedAsStuck`
 the report. All need `MEMQL_REQUIRE_DB=1`.
@@ -4582,6 +4588,138 @@ versions. That is bounded, and no longer the history. `workSignedRunsForOwner`
 reject what a walk finds. The same sweep's `workAutomationStepsForOwner` and
 `workGoalsForOwner` read concepts with no owner index at all, so bounding the
 run read alone would not let the sweep finish.
+
+## The migration lock is the migration session (2026-11-25)
+
+**Trigger.** Production's migrations stopped a third time during the 0.31.40 roll,
+after 2026-09-26 and 2026-10-30. Identity replica `identity-65888dcfb-z9bzd` held
+lock row 16971 when its process exited at 01:39:30Z ("database did not become
+ready before engine init: context deadline exceeded"). Its CREATE INDEX for
+`20261119120000` ran on server-side; writes on every pod failed with `lock timeout`
+from 01:40 to 01:48Z while it finished. Both replicas then refused every attempt
+and reported "the migration lock has outlasted any attempt". Four migrations waited
+until an operator built six indexes by hand and deleted row 16971 at 02:14:48Z.
+
+**Two causes.**
+- *The lock.* bun's lock is a row in `bun_migration_locks`: `Lock` is a try-INSERT
+  and `Unlock` a DELETE by `table_name`. A row lasts until something deletes it, and
+  a process that ends without running its deferred `Unlock` (`os.Exit`, SIGKILL, an
+  OOM kill, a lost node) leaves it forever. memql#6419 stopped the runner keeping
+  the row on purpose after a build; nothing could stop a dead process keeping it.
+- *The trigger.* `app/engine.go` waits a fixed 30 s for the database's `Ready`.
+  `Database.Start` runs the first attempt synchronously in `prepareForRun`, before
+  that wait begins, bounded by `MIGRATION_TIMEOUT_MS` (180 s on production's
+  identity). When it deferred, the run loop's first ping ran a second attempt
+  before `markStarted`, and the engine's 30 s ran out in the middle of it. The
+  ledger dates it: the first attempt ran 01:36:00 to 01:39:00 (it recorded
+  `20261117120000` at 01:38:41 and deferred inside `20261118120000`); the second,
+  a new migration group, took row 16971, recorded `20261118120000` at 01:39:06,
+  started the open-room build and was ended at 01:39:30.
+
+**Chosen path.**
+- *The lock is the session* (`component/database/migration_session.go`). An attempt
+  runs every statement on ONE database session and holds the migration lock, a
+  session advisory lock keyed by the schema bun's tables live in, on it. The
+  session's pool can never open a second connection (`migrationSessionConnector`),
+  so the backend holding the lock is the backend that ran the attempt's work. It
+  releases the lock only by unlocking or exiting: at once when the process ends
+  with the session idle; when the statement ends, when a cut-off statement still
+  runs, so nothing overlaps the orphan and nobody releases anything; at the end of
+  a normal attempt. The session dials the direct endpoint when one is configured,
+  because a transaction pooler would spread its statements over other backends.
+- *No driver read deadline on the session.* Every statement it sends carries a
+  context deadline instead: the attempt's, the ledger's (now the attempt's plus
+  five seconds) or a cleanup's. pgdriver's 10 s default would cut every long
+  build, and with no second connection a cut ends the attempt.
+- *A fence keeps engines that lock by row out.* 0.31.40 and earlier know only the
+  row. While the session lock is held, the attempt also writes bun's row with a
+  NEGATIVE id (`-nextval` of the table's sequence), which no older engine's row can
+  carry, so an older replica's `Lock` fails on the unique key. An attempt holding
+  the session lock that finds a negative-id row knows its writer's session, and
+  every statement that session ran, is over, and clears it. A positive-id row is an
+  older engine's: refused, reported once stuck, and released by the runbook, as
+  before.
+- *This node's own statement is waited for.* An attempt that finds the lock held by
+  a backend this process's migrations ran on (pid and backend start) waits for it
+  within the attempt and defers if the attempt ends first, which keeps
+  `memql migrate` progressing. Any other holder refuses at once, as bun's try-lock
+  did, so a starting replica never spends an attempt waiting for a sibling.
+- *Startup does not wait on a second attempt* (`startupPing`,
+  `component/database/database.go`). The run loop's first ping runs no pending
+  attempt when the attempt `Start` just ran reached the database; the next tick
+  resumes after `Ready`, while the engine starts, as a replica refused by a
+  sibling's lock always has. A first attempt that never reached the database (a
+  node started before Postgres) still migrates before `Ready` (memql#3879).
+- *The stuck watch keys on the holder.* The ERROR and
+  `memql_database_migration_lock_held_seconds` count only a stalled holder: a
+  session connected but running no statement (a process that stopped migrating
+  and kept its session; restarting it releases the lock) or a positive-id row. A
+  holder running a statement starts the clock again, so the gauge keeps the
+  meaning memql-znas's release gates read it by: migrations stopped until someone
+  acts. A dead replica's eight-minute build no longer reads as stuck.
+
+**Invariants.** At most one attempt among this engine's replicas holds the lock; no
+statement an attempt started runs while another attempt holds it; the lock never
+outlives the server-side work of the attempt that took it.
+
+**Rejected.**
+- *The lock on a dedicated holder connection* beside a pool that runs the
+  statements: the holder dies with the process while an orphaned statement on
+  another backend runs on, so the next attempt overlaps it. A shared lock on every
+  working connection closes that, but database/sql retries a dead connection on a
+  new one, which then runs a statement holding nothing.
+- *A lease row with an expiry and a heartbeat:* a clock and a renewal loop, and it
+  still cannot say whether a dead holder's statement is still running.
+- *Clearing old rows after a timeout:* the row names no holder, which is why it was
+  kept on purpose.
+- *A longer engine-init wait:* it hides the second attempt instead of taking it off
+  the readiness path, and the startup probe bounds it anyway.
+
+**What survives a retry, a pause or a replica change.** Only the ledger, the fence
+row and the server's lock are shared. A restarted process has no claim on its
+predecessor's statements (`migrationBackends` is per process), so it is refused by
+them like any replica until they end. The fence is temporary: written per attempt,
+deleted at a normal end, cleared by the next attempt otherwise. A failed or
+deferred attempt records an error, so no post-migration hook runs behind it.
+
+**Known limits.**
+- A session whose backend is ended from outside while its process lives
+  (`pg_terminate_backend`, a server restart or failover) or sits idle five minutes
+  (`idle_session_timeout`) loses the lock; the attempt can then touch the database
+  no more and fails. Post-migration hooks run on another pool, so a session lost
+  during them leaves them running beside the next attempt. They are short and
+  idempotent.
+- With `MIGRATION_TIMEOUT_MS=0` a statement's read has no bound but TCP keepalive.
+- `memql migrate` still fails at once when another engine's session holds the lock,
+  as it did when another engine's row did.
+- A database with no DSN or migration connector (a custom `WithSQLOpener`, tests
+  only) runs no migration (`errNoMigrationSession`) rather than one over a shared
+  pool.
+- A build still blocks writes to the chunk it scans. That, not the lock, is why
+  writes failed from 01:40 to 01:48Z, and this change does not touch it.
+- Not run on production yet: it ships in the release after 0.31.40. During that
+  rollout the 0.31.40 replicas lock by row; the fence keeps them out, and a row one
+  of them strands still needs the runbook.
+
+**Regression evidence.** `TestAHolderKilledMidBuildIsRecoveredOnceItsStatementEnds`
+(`component/database/migration_lock_killed_holder_db_test.go`) runs a replica in a
+child process and SIGKILLs it while its CREATE INDEX waits on a writer's lock, then
+pins no overlap while the dead holder's build runs and recovery with no operator
+once it ends. On 0.31.40's runner it failed with the 23505 refusal production
+logged. In `migration_lock_db_test.go`,
+`TestAnIndexBuildThatOutlivesItsAttemptHoldsTheLockUntilItEnds` covers the build
+(the fence, a refused sibling, this node waiting for its own build),
+`TestMigrationReadTimeoutRetainsLockWhileBackendRuns` a plain statement, and
+`TestASessionHolderIsReportedStuckOnlyWhileItRunsNothing` with
+`TestALockThatOutlastsAnyAttemptIsReportedAsStuck` the two halves of the stuck
+report. `TestReadinessDoesNotWaitForASecondMigrationAttempt` and
+`TestReadinessWaitsForMigrationsWhenNoAttemptReachedTheDatabase`
+(`migration_retry_test.go`) pin the startup rule; the first fails with the old
+rule restored. `TestAMigrationSessionNeverOpensASecondConnection` and
+`TestACutCollapseStepOnTheMigrationSessionDefers` (`migration_session_test.go`)
+cover the connector and the readiness collapse on it. The database cases need
+`MEMQL_REQUIRE_DB=1`. [The runbook](../../public/operate/env-vars.md#database-tuning)
+says what an operator sees and does.
 
 ## A read since a watermark collapses only the versions since (2026-11-08)
 

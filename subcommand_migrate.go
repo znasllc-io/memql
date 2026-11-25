@@ -20,9 +20,10 @@ import (
 // so a schema change is applied exactly once, up front, and never races
 // old-version worker pods mid-rollout.
 //
-// Idempotent + concurrency-safe: the bun migrator takes a Postgres advisory
-// lock and marks-applied-on-success, so a re-run (or two Jobs) is a no-op
-// when the schema is already current.
+// Idempotent + concurrency-safe: the runner holds a session advisory lock on
+// the one session it migrates on, and marks-applied-on-success, so a re-run (or
+// two Jobs) is a no-op when the schema is already current
+// (component/database/migration_session.go).
 //
 // It starts the dependency chain in registration order up to AND INCLUDING
 // the database (config -> memoryNodesDB) and stops there -- the database's
