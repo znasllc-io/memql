@@ -525,6 +525,50 @@ func TestChoosingTheRunningSwitchsTargetAgainTakesItOver(t *testing.T) {
 	require.Equal(t, other, f.job.active.IndexedBy, "the binding is indexed as the run is")
 }
 
+// Before the flip, choosing the MODEL IN USE again is the take-over of the
+// BINDING's indexer (ruling R13, R9's rule): search and every writer embed as
+// that indexer for the whole rebuild, so one who cannot index would leave search
+// refused until the flip. The running switch is left as it is -- its state, its
+// indexer, its counts -- nothing is probed, and the choice is written under the
+// binding lock. An indexer who can index keeps it, and the switch is not refused
+// either.
+func TestChoosingTheModelInUseDuringASwitchTakesOverTheBindingsIndexer(t *testing.T) {
+	ctx := context.Background()
+	const other = memorySearchOtherOwner
+	for _, state := range []string{memoryIndexStateIndexing, memoryIndexStateCatchingUp, memoryIndexStateNeedsDecision,
+		memoryIndexStateSwitching, memoryIndexStateFinishing, memoryIndexStateWaiting} {
+		t.Run(state, func(t *testing.T) {
+			f := newMemorySearchFake(3)
+			f.job.fill(fakeOldRef, 4)
+			f.setSwitchState(state)
+			f.job.owners[other] = true
+			delete(f.job.owners, fakeOwner)
+			before := cloneMemoryIndexRun(f.job.runs[memoryIndexKindSwitch])
+
+			require.NoError(t, memorySearchSwitch(ctx, f, other, fakeOldRef))
+			require.Equal(t, other, f.job.active.IndexedBy, "search and the writers embed on the new indexer's machines")
+			require.Equal(t, other, f.job.active.ChosenBy)
+			require.Equal(t, fakeOldRef, f.job.active.ProviderRef, "nothing moves")
+			require.Zero(t, f.runAttempts, "the running switch is not written")
+			require.Equal(t, before, cloneMemoryIndexRun(f.job.runs[memoryIndexKindSwitch]), "and goes on as it was")
+			require.Empty(t, f.probes)
+			require.Equal(t, []string{"lock", "writeChoice locked=true", "unlock"}, f.events)
+		})
+	}
+
+	f := newMemorySearchFake(3)
+	f.job.fill(fakeOldRef, 4)
+	f.job.owners[other] = true
+	f.job.active.ChosenBy = fakeOwner
+	f.catalogs[fakeOwner] = offeredFor("old-embedder", true)
+	f.catalogs[other] = offeredFor("old-embedder", true)
+	require.NoError(t, memorySearchSwitch(ctx, f, other, fakeOldRef), "the model in use is not another model")
+	require.Equal(t, fakeOwner, f.job.active.IndexedBy, "an indexer whose machines offer it keeps it")
+	require.Empty(t, f.choices)
+	require.Zero(t, f.runAttempts)
+	require.Equal(t, memoryIndexStateIndexing, f.job.runs[memoryIndexKindSwitch].State)
+}
+
 // Choosing another model while the walk after a flip runs -- switching back
 // included -- closes the flipped switch as done, leaving its remaining walk to
 // the backfill, and starts the new switch (ruling R11 a).
@@ -656,7 +700,9 @@ func TestSwitchAnywayFlipsWithTheHeldItems(t *testing.T) {
 // The status says what is in use and who indexes it, how many items the index
 // holds, the backlog -- the items the backfill's last count found missing, with
 // when it was counted (ruling R10) -- and why it waits, the switch in progress
-// with an ESTIMATED total, and the indexes kept for switching back.
+// with an ESTIMATED total, the indexes kept for switching back, and which model
+// the binding replaced: the one Switch back names, which a cancelled switch's
+// kept target is not.
 func TestStatusReportsTheBacklogAndWhyItWaits(t *testing.T) {
 	ctx := context.Background()
 	f := newMemorySearchFake(10).noSwitch()
@@ -670,7 +716,7 @@ func TestStatusReportsTheBacklogAndWhyItWaits(t *testing.T) {
 		Counts: MemoryIndexCounts{Total: 6, Done: 1, Skipped: 3, Failed: 2}, Cursor: map[string]string{"alpha": memoryIndexItemId(6)},
 		Missing: 37, MissingAt: counted}
 
-	row, err := memorySearchStatus(ctx, f)
+	row, err := memorySearchStatus(ctx, f, fakeOwner)
 	require.NoError(t, err)
 	require.Equal(t, fakeOldRef, row["providerRef"])
 	require.Equal(t, "machine", row["kind"])
@@ -685,6 +731,13 @@ func TestStatusReportsTheBacklogAndWhyItWaits(t *testing.T) {
 	require.Equal(t, reason, row["waitingReason"])
 	require.Nil(t, row["switch"])
 	require.Equal(t, []any{}, row["retained"])
+	require.Equal(t, "", row["previousRef"], "a cluster's first model replaced none")
+	require.Equal(t, false, row["takeOver"], "the caller indexes it already")
+
+	f.job.active.PreviousRef = "fleet:third-embedder"
+	row, err = memorySearchStatus(ctx, f, fakeOwner)
+	require.NoError(t, err)
+	require.Equal(t, "fleet:third-embedder", row["previousRef"])
 
 	// A switch in progress, and what is kept.
 	started := f.job.clock.Add(-5 * time.Minute)
@@ -701,7 +754,7 @@ func TestStatusReportsTheBacklogAndWhyItWaits(t *testing.T) {
 	f.retiredRows[RetiredEmbedderBindingID("fleet:gone-embedder", 4)] = retiredMemoryIndex{ProviderRef: "fleet:gone-embedder", Dimensions: 4,
 		RetireAt: f.job.clock.Add(-time.Hour), DroppedAt: f.job.clock.Add(-time.Minute)}
 
-	row, err = memorySearchStatus(ctx, f)
+	row, err = memorySearchStatus(ctx, f, fakeOwner)
 	require.NoError(t, err)
 	require.Equal(t, map[string]any{
 		"state": memoryIndexStateIndexing, "targetRef": fakeNewRef, "targetLabel": "new-embedder",
@@ -718,7 +771,7 @@ func TestStatusReportsTheBacklogAndWhyItWaits(t *testing.T) {
 	bf := f.job.runs[memoryIndexKindBackfill]
 	bf.TargetRef = "fleet:previous-embedder"
 	f.job.runs[memoryIndexKindBackfill] = bf
-	row, err = memorySearchStatus(ctx, f)
+	row, err = memorySearchStatus(ctx, f, fakeOwner)
 	require.NoError(t, err)
 	require.Equal(t, 0, row["backlog"])
 	require.Equal(t, "", row["backlogCountedAt"])
@@ -727,11 +780,83 @@ func TestStatusReportsTheBacklogAndWhyItWaits(t *testing.T) {
 	// Nothing bound: one row, empty.
 	f = newMemorySearchFake(1).noSwitch()
 	f.job.active = EmbedderBinding{}
-	row, err = memorySearchStatus(ctx, f)
+	row, err = memorySearchStatus(ctx, f, fakeOwner)
 	require.NoError(t, err)
 	require.Equal(t, "", row["providerRef"])
 	require.Equal(t, "", row["kind"])
 	require.Equal(t, 0, row["indexed"])
+	require.Equal(t, false, row["takeOver"])
+}
+
+// The status says when the binding's indexer cannot index the model in use and
+// choosing it again would make the caller its indexer (ruling R13): `takeOver`.
+// It is the take-over rule itself (memorySearchTakesOver) asked for the caller,
+// who must be an active owner to index a machine model, so the screen offers the
+// act only where it changes something -- never to the indexer themself, never
+// when the indexer's machines offer the model, never when neither person's do.
+// A switch in progress does not change the answer: it is about the binding,
+// which search and every writer embed as until the flip. Taking over answers
+// false afterwards.
+func TestStatusSaysWhenChoosingTheModelInUseTakesOver(t *testing.T) {
+	ctx := context.Background()
+	const other, model = memorySearchOtherOwner, "old-embedder"
+	const granted = "v1:identity:user:granted"
+	for _, tc := range []struct {
+		name    string
+		caller  string
+		arrange func(f *memorySearchFake)
+		want    bool
+	}{
+		{"the indexer is no longer an owner", other, func(f *memorySearchFake) { delete(f.job.owners, fakeOwner) }, true},
+		{"nobody indexes it", other, func(f *memorySearchFake) { f.job.active.IndexedBy = "" }, true},
+		{"no machine of the indexer's offers it, and one of the caller's does", other, func(f *memorySearchFake) {
+			f.catalogs[other] = offeredFor(model, true)
+		}, true},
+		{"the indexer's machines offer it", other, func(f *memorySearchFake) {
+			f.catalogs[fakeOwner] = offeredFor(model, true)
+			f.catalogs[other] = offeredFor(model, true)
+		}, false},
+		{"neither person's machines offer it", other, nil, false},
+		{"the caller is the indexer", fakeOwner, func(f *memorySearchFake) { f.catalogs[fakeOwner] = nil }, false},
+		{"the caller is not an active owner", granted, func(f *memorySearchFake) { delete(f.job.owners, fakeOwner) }, false},
+		{"the cluster asking", "", func(f *memorySearchFake) { delete(f.job.owners, fakeOwner) }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newMemorySearchFake(2).noSwitch()
+			f.job.owners[other] = true
+			if tc.arrange != nil {
+				tc.arrange(f)
+			}
+			row, err := memorySearchStatus(ctx, f, tc.caller)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, row["takeOver"])
+			require.Zero(t, f.runAttempts, "a status writes nothing")
+			require.Empty(t, f.choices)
+		})
+	}
+
+	// A switch in progress: still the binding's question, and choosing the model
+	// in use again answers it.
+	f := newMemorySearchFake(2)
+	f.job.owners[other] = true
+	delete(f.job.owners, fakeOwner)
+	row, err := memorySearchStatus(ctx, f, other)
+	require.NoError(t, err)
+	require.Equal(t, true, row["takeOver"])
+	require.NoError(t, memorySearchSwitch(ctx, f, other, fakeOldRef))
+	row, err = memorySearchStatus(ctx, f, other)
+	require.NoError(t, err)
+	require.Equal(t, false, row["takeOver"], "the caller indexes it now")
+	require.Equal(t, other, row["indexedBy"])
+
+	// A vendor model has no indexer to take over from.
+	const vendor = "embedding3Small"
+	f = newMemorySearchFake(2).noSwitch()
+	f.job.active = EmbedderBinding{ProviderRef: vendor, Dimensions: 1536, ActivatedAt: "2026-10-01T00:00:00Z"}
+	f.job.owners[other] = true
+	row, err = memorySearchStatus(ctx, f, other)
+	require.NoError(t, err)
+	require.Equal(t, false, row["takeOver"])
 }
 
 // A vendor model nobody chose -- bound by the fallback this design removed --
@@ -744,7 +869,7 @@ func TestAVendorBindingPickedBeforeAsksForConfirmationOnce(t *testing.T) {
 	f.job.active = EmbedderBinding{ProviderRef: vendor, Dimensions: 1536, ActivatedAt: "2026-10-01T00:00:00Z"}
 	f.vendors = []vendorEmbedderRecord{{Name: vendor, Model: "text-embedding-3-small"}}
 
-	row, err := memorySearchStatus(ctx, f)
+	row, err := memorySearchStatus(ctx, f, fakeOwner)
 	require.NoError(t, err)
 	require.Equal(t, "vendor", row["kind"])
 	require.Equal(t, "text-embedding-3-small", row["label"])
@@ -754,7 +879,7 @@ func TestAVendorBindingPickedBeforeAsksForConfirmationOnce(t *testing.T) {
 	require.NoError(t, memorySearchConfirm(ctx, f, fakeOwner))
 	require.Equal(t, fakeOwner, f.job.active.ChosenBy)
 	require.Equal(t, []string{"lock", "writeChoice locked=true", "unlock"}, f.events)
-	row, err = memorySearchStatus(ctx, f)
+	row, err = memorySearchStatus(ctx, f, fakeOwner)
 	require.NoError(t, err)
 	require.Equal(t, false, row["needsConfirmation"])
 	require.Equal(t, fakeOwner, row["chosenBy"])
@@ -767,7 +892,7 @@ func TestAVendorBindingPickedBeforeAsksForConfirmationOnce(t *testing.T) {
 	// A machine model nobody chose (an adopted indexer) is not a vendor's to confirm.
 	f = newMemorySearchFake(2).noSwitch()
 	f.job.active.ChosenBy = ""
-	row, err = memorySearchStatus(ctx, f)
+	row, err = memorySearchStatus(ctx, f, fakeOwner)
 	require.NoError(t, err)
 	require.Equal(t, false, row["needsConfirmation"])
 	require.ErrorContains(t, memorySearchConfirm(ctx, f, fakeOwner), "machine model")

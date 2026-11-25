@@ -4987,7 +4987,7 @@ QueryClient.prototype.memorySearchConfirm = function (this: QueryClient, args: M
   return this.executeNamed("memorySearchConfirm", buildMemorySearchConfirm(args), opts);
 };
 
-/** Memory search's model and index, as ONE row (id `current`): providerRef, kind (machine or vendor), label; indexedBy and indexedByName (whose machines embed for it; empty for a vendor model, which the cluster's account pays for), chosenBy, and needsConfirmation (a vendor model nobody chose); indexed (the entries in its index); backlog (the items the backfill's last count found missing from it, counted even while indexing waits) with backlogCountedAt, and waitingReason; switch (state, targetRef, targetLabel, counts, startedAt, startedBy, waitingReason, and estimatedTotal, an ESTIMATE: the active index plus the backlog), or null; retained, the kept indexes as {providerRef, retireAt}. */
+/** Memory search's model and index, as ONE row (id `current`): providerRef, kind (machine or vendor), label; indexedBy and indexedByName (whose machines embed for it; empty for a vendor model, which the cluster's account pays for), chosenBy, and needsConfirmation (a vendor model nobody chose); previousRef (the model it replaced, empty for the first); takeOver (its indexer cannot index it, and choosing it again would make the caller its indexer); indexed (the entries in its index); backlog (the items the backfill's last count found missing from it, counted even while indexing waits) with backlogCountedAt, and waitingReason; switch (state, targetRef, targetLabel, counts, startedAt, startedBy, waitingReason, and estimatedTotal, an ESTIMATE: the active index plus the backlog), or null; retained, the kept indexes as {providerRef, retireAt}. */
 export interface MemorySearchStatusArgs {
 }
 
