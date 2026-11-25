@@ -4,8 +4,10 @@ import (
 	"encoding/base64"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/znasllc-io/memql/integrations/calls/providers"
 )
 
 func TestTesterPasswordHashRoundTrip(t *testing.T) {
@@ -70,4 +72,46 @@ func TestTesterPasswordHashTrimsSurroundingWhitespace(t *testing.T) {
 func TestCanonicalTesterPassword(t *testing.T) {
 	require.Equal(t, "K7QPM3XWRT9HNVAZD4ME", canonicalTesterPassword(" k7qpm-3xwrt 9hnva\tzd4me\r\n"))
 	require.Equal(t, "", canonicalTesterPassword(" - \n"))
+}
+
+// commerceEnvelopeEnv sets a complete mock envelope, as scripts/k3d/calls-mock.sh does.
+func commerceEnvelopeEnv(t *testing.T) {
+	t.Helper()
+	for name, value := range map[string]string{
+		"MODE": "mock", "VALID_UNTIL": time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+		"CASH_CENTS": "100000", "PROTECTED_CENTS": "10000", "FIXED_CENTS": "10000",
+		"VERIFICATION_UNIT_CENTS": "100", "VERIFICATION_BUDGET_CENTS": "10000", "PROVIDER_CREDIT_CENTS": "10000",
+		"CALL_BUDGET_CENTS": "50000", "FULFILLMENT_RESERVE_BPS": "5000", "MAX_ACCOUNTS": "200",
+		"MAX_PENDING_VERIFICATIONS": "10", "MAX_VERIFICATION_ATTEMPTS": "3", "MAX_OPEN_CALLS": "5", "MAX_PARTICIPANTS": "40",
+	} {
+		t.Setenv("MEMQL_CALLS_COMMERCE_"+name, value)
+	}
+}
+
+func TestCommerceConfigReadsTesterPasswordHash(t *testing.T) {
+	pw, line, err := GenerateTesterPassword()
+	require.NoError(t, err)
+	commerceEnvelopeEnv(t)
+	s := &Service{}
+
+	t.Setenv("MEMQL_CALLS_TESTER_PASSWORD_HASH", line+"\n")
+	c := s.commerceConfig()
+	require.False(t, c.Invalid)
+	require.NoError(t, c.admission(time.Now()))
+	require.NotNil(t, c.TesterPassword)
+	require.True(t, c.TesterPassword.matches(pw))
+
+	// A malformed or missing hash leaves the envelope usable; only simulated
+	// results are refused (the gate fails closed on a nil hash).
+	t.Setenv("MEMQL_CALLS_TESTER_PASSWORD_HASH", "not-a-hash")
+	c = s.commerceConfig()
+	require.False(t, c.Invalid)
+	require.NoError(t, c.admission(time.Now()))
+	require.Nil(t, c.TesterPassword)
+
+	t.Setenv("MEMQL_CALLS_COMMERCE_MODE", "disabled")
+	t.Setenv("MEMQL_CALLS_TESTER_PASSWORD_HASH", line)
+	c = s.commerceConfig()
+	require.Equal(t, providers.Disabled, c.Mode)
+	require.Nil(t, c.TesterPassword)
 }
