@@ -34,9 +34,9 @@ export function rowsResult(rows: Row[], cursor = ""): Result {
 export interface FakeQuery {
   inferenceStatus: ReturnType<typeof vi.fn>;
   /**
-   * Whether the caller may enter MemQL OS (CoreGate's access check). Unseeded
-   * it answers no row, which the gate reads as "unknown" and lets the person
-   * in, so a suite about something else is not held at the door.
+   * Whether the caller has model access set up (the read that decides Ask).
+   * Unseeded it answers no row, which reads as "unknown" and takes nothing
+   * away, so a suite about something else keeps Ask.
    */
   desktopAccess: ReturnType<typeof vi.fn>;
   passkeysForSelf: ReturnType<typeof vi.fn>;

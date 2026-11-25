@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, type AccessSummary } from "@znasllc-io/memql-sdk-core/client";
 
@@ -16,6 +16,7 @@ import { setRoleLadder } from "../../src/system/roles";
 import { LocalDesktopStore } from "../../src/system/store";
 import { UNKNOWN_RUNTIME_CONFIG } from "../../src/cluster/config";
 import { builtinReply } from "../fleet/harness";
+import { installSeededAccess } from "../seededAccess";
 import { SEEDED_LADDER } from "../seededLadder";
 
 // THE FRAME A CONFIGURED CLUSTER MUST NOT FLASH A SETUP SCREEN IN.
@@ -124,11 +125,11 @@ function memStorage(): Pick<Storage, "getItem" | "setItem"> {
   return { getItem: (k) => data.get(k) ?? null, setItem: (k, v) => void data.set(k, v) };
 }
 
-function mountShell() {
+function mountShell(layout: "desktop" | "phone" = "desktop") {
   resetIdsForTest();
   return render(
     <Shell
-      layout="desktop"
+      layout={layout}
       onSignOut={vi.fn()}
       config={{ ...UNKNOWN_RUNTIME_CONFIG, domain: "example.test" }}
       ports={{ store: new LocalDesktopStore(memStorage()) }}
@@ -152,6 +153,7 @@ beforeEach(() => {
 
 afterEach(() => {
   setRoleLadder(SEEDED_LADDER);
+  installSeededAccess("owner");
 });
 
 // THE CORE GATE, THROUGH THE REAL SHELL (epic memql#5118).
@@ -202,11 +204,11 @@ describe("the core gate, mounted by the real shell", () => {
     });
   });
 
-  it("lets a reader whose own API key is set up through to the desk", async () => {
-    // Design record 2026-11-24-desktop-access: everybody but an owner or
-    // developer enters on their own access, a key among it, whatever the
-    // cluster's verdict. Through the real Shell, so the gate's read reaches the
-    // connection it mounts.
+  it("keeps a reader out of a cluster that is not set up, whatever key of their own they have", async () => {
+    // Design record 2026-11-25-who-gets-into-memql-os: only the cluster's
+    // owners and developers enter a cluster that is not set up. Through the
+    // real Shell, so the gate's reads reach the connection it mounts.
+    installSeededAccess("reader");
     const { connection, openReadiness } = fakeConnection([readinessRow("ai", "unconfigured")]);
     connection.query.getMyAccess = vi.fn(async () => summary("reader"));
     answerAccess(connection, { admitted: true, exempt: false, sources: [{ kind: "key", state: "ready", own: true }] });
@@ -214,34 +216,92 @@ describe("the core gate, mounted by the real shell", () => {
     mountShell();
     openReadiness();
 
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Launcher" })).toBeTruthy();
-    });
-    expect(screen.queryByText("Your access is not set up yet")).toBeNull();
-  });
-
-  it("holds a reader with nothing set up on the held page, and adds a key there with no desk behind it", async () => {
-    // A reader may add an API key of their own (owner decisions 2026-11-22 and
-    // 2026-11-23). The wizard runs on the page: a Settings window would need
-    // the desk drawn under it.
-    const { connection, openReadiness } = fakeConnection([readinessRow("ai", "unconfigured")]);
-    connection.query.getMyAccess = vi.fn(async () => summary("reader"));
-    answerAccess(connection, { admitted: false, exempt: false, sources: [], reference: "ERR-0a1b2c", reasonsDigest: "p.r" });
-    h.connection = connection;
-    mountShell();
-    openReadiness();
-
-    expect(await screen.findByRole("heading", { name: "Your access is not set up yet" })).toBeTruthy();
-    expect(screen.getByText("ERR-0a1b2c")).toBeTruthy();
-    expect(screen.queryByRole("list", { name: "Set up this cluster" })).toBeNull();
+    expect(await screen.findByRole("heading", { name: "MemQL is not set up yet" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Sign out" })).toBeTruthy();
-
-    fireEvent.click(screen.getByRole("button", { name: "Add an API key" }));
-    expect(await screen.findByRole("heading", { name: "Add an API key" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Add an API key" })).toBeNull();
+    expect(screen.queryByRole("list", { name: "Set up this cluster" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Launcher" })).toBeNull();
     expect(document.querySelector("[data-os-dock]")).toBeNull();
     expect(document.querySelector("[data-os-root]")).toBeNull();
-    expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull();
+  });
+});
+
+// ASK FOLLOWS THE PERSON'S OWN MODEL ACCESS (design record
+// 2026-11-25-who-gets-into-memql-os): "It should let you in, but if you have no
+// inference access, then you don't even get the Ask app." "The Ask button
+// itself should be gone."
+//
+// Through the real `<Shell>`, because the three places Ask is drawn are wired
+// in three different ways: the dock and the phone bar read `canAsk` from the
+// Ask provider, and the widget is a registry entry the roster filters. A case
+// that mounted one of them by hand would say nothing about the other two, or
+// about the access answer reaching a provider mounted above the gate.
+describe("Ask, for a person with no model access", () => {
+  const NOTHING_SET_UP = { admitted: false, exempt: false, sources: [], reference: "ERR-0a1b2c", reasonsDigest: "p.r" };
+  const askButton = () => screen.queryByRole("button", { name: "Ask" });
+  const askWidget = () => document.querySelector('[data-os-widget="ask"]');
+
+  function signIn(role: string, access: Record<string, unknown>, layout: "desktop" | "phone" = "desktop") {
+    installSeededAccess(role);
+    const { connection, openReadiness } = fakeConnection([readinessRow("ai", "configured")]);
+    connection.query.getMyAccess = vi.fn(async () => summary(role));
+    answerAccess(connection, access);
+    h.connection = connection;
+    mountShell(layout);
+    openReadiness();
+  }
+
+  it("lets a reader with nothing set up into a cluster that is set up, with no Ask in the dock, on the desk or in the launcher", async () => {
+    signIn("reader", NOTHING_SET_UP);
+
+    expect(await screen.findByRole("button", { name: "Launcher" })).toBeTruthy();
+    expect(document.querySelector("[data-os-dock]")).not.toBeNull();
+    expect(screen.queryByText("Your access is not set up yet")).toBeNull();
+    expect(screen.queryByText("MemQL is not set up yet")).toBeNull();
+    expect(askButton()).toBeNull();
+    expect(askWidget()).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Ask" })).toBeNull();
+
+    // Nothing offers to put one back.
+    fireEvent.click(screen.getByRole("button", { name: "Launcher" }));
+    const launcher = await screen.findByRole("dialog", { name: "Launcher" });
+    fireEvent.click(within(launcher).getByRole("tab", { name: "Widgets" }));
+    expect(within(launcher).queryByRole("button", { name: /Ask/ })).toBeNull();
+  });
+
+  it.each([
+    ["a lent machine that is asleep", { kind: "machine", state: "asleep", own: false, lenderUserId: "ana", label: "Ana's laptop" }],
+    ["a key that is out of credit", { kind: "key", state: "outOfCredit", own: true, label: "Anthropic" }],
+  ])("keeps Ask for a reader whose only source is %s", async (_name, source) => {
+    signIn("reader", { admitted: true, exempt: false, sources: [source] });
+
+    expect(await screen.findByRole("button", { name: "Launcher" })).toBeTruthy();
+    expect(askButton()).not.toBeNull();
+    expect(askWidget()).not.toBeNull();
+    // And the launcher offers the widget, which is what the case above finds gone.
+    fireEvent.click(screen.getByRole("button", { name: "Launcher" }));
+    const launcher = await screen.findByRole("dialog", { name: "Launcher" });
+    fireEvent.click(within(launcher).getByRole("tab", { name: "Widgets" }));
+    expect(within(launcher).getByRole("button", { name: /Ask/ })).toBeTruthy();
+  });
+
+  it.each(["owner", "developer"])("keeps Ask for %s with nothing set up", async (role) => {
+    signIn(role, { admitted: true, exempt: true, sources: [] });
+
+    expect(await screen.findByRole("button", { name: "Launcher" })).toBeTruthy();
+    expect(askButton()).not.toBeNull();
+    expect(askWidget()).not.toBeNull();
+  });
+
+  it("shows no Ask on a phone to a reader with nothing set up, and shows it once something is", async () => {
+    signIn("reader", NOTHING_SET_UP, "phone");
+    expect(await screen.findByRole("button", { name: "Home" })).toBeTruthy();
+    expect(askButton()).toBeNull();
+    cleanup();
+
+    signIn("reader", { admitted: true, exempt: false, sources: [{ kind: "machine", state: "asleep", own: false, lenderUserId: "ana" }] }, "phone");
+    expect(await screen.findByRole("button", { name: "Home" })).toBeTruthy();
+    expect(askButton()).not.toBeNull();
   });
 });
 

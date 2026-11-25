@@ -50,6 +50,7 @@ import { desktopScale, setOsScale } from "../system/scale";
 import { SessionProvider, useSession } from "./access";
 import { CaptureContextInstaller } from "./CaptureContext";
 import { CoreGate } from "./CoreGate";
+import { DesktopAccessScope, useHasNoModelAccess } from "./desktopAccessContext";
 import { Desktop } from "./Desktop";
 import { suppressBrowserMenu } from "./browserMenu";
 import { Dock } from "./Dock";
@@ -159,16 +160,22 @@ export function Shell({
         <StorageHealthProvider>
         <SetupFactsScope>
         <MachinesProvider>
+        {/* THE PERSON'S OWN MODEL ACCESS, read once and above Ask (design
+            record 2026-11-25-who-gets-into-memql-os). It decides whether they
+            get Ask: the Ask provider inside ShellTransports, the roster's Ask
+            widget and the gate's first draw all read this one answer. */}
+        <DesktopAccessScope>
           <ShellTransports source={source} ports={ports}>
             {(uploads, desktopStore) => (
               <ShellRoster grid={grid} store={desktopStore} layout={layout}>
                 {/* THE CORE GATE, INSIDE the roster and around the layout (D1).
-                    It renders in place of the desk while the person's own
-                    access check holds them (`desktopAccess`: not exempt, and
-                    nothing set up; the held page) and, for the cluster's owners
-                    and developers, while the `ai` verdict is `unconfigured`
-                    (the setup screen). Either way nothing behind it -- no app,
-                    no dock, no launcher -- is mounted at all.
+                    It renders in place of the desk while the cluster's `ai`
+                    verdict is `unconfigured`: the setup screen for the
+                    cluster's owners and developers, and for everybody else the
+                    page saying it is not set up yet. Either way nothing behind
+                    it -- no app, no dock, no launcher -- is mounted at all. On
+                    any other verdict everybody enters; a person's own model
+                    access decides only whether they get Ask.
 
                     INSIDE rather than around `ShellRoster`, and the difference
                     is not cosmetic. The gate's stops offer their acts through
@@ -207,6 +214,7 @@ export function Shell({
               </ShellRoster>
             )}
           </ShellTransports>
+        </DesktopAccessScope>
         </MachinesProvider>
         </SetupFactsScope>
         </StorageHealthProvider>
@@ -283,9 +291,23 @@ function ShellRoster({
   children: ReactNode;
 }) {
   const { access, ladderLoaded, accessEpoch } = useSession();
+  // NO MODEL ACCESS, NO ASK (design record 2026-11-25-who-gets-into-memql-os).
+  // The dock's and the phone bar's Ask, the sheet and every "Ask about this"
+  // follow the Ask provider's `canAsk`. The Ask WIDGET is a registry entry and
+  // not a child of that provider, so it leaves this person's registry here:
+  // the desk draws none (a widget id the registry does not have is drawn as
+  // nothing), and neither the desk menu nor the launcher offers one. An item
+  // already on their desk stays in the document and is drawn again the moment
+  // they have access. `holds()` is deliberately not touched: it is the
+  // engine's answer about grants and nothing derived.
+  const noAsk = useHasNoModelAccess();
+  const registry = useMemo(
+    () => (noAsk ? { ...OS_REGISTRY, widgets: OS_REGISTRY.widgets.filter((w) => w.requires !== "app:ask") } : OS_REGISTRY),
+    [noAsk],
+  );
   return (
     <OsProvider
-      registry={OS_REGISTRY}
+      registry={registry}
       actorRole={access?.role ?? ""}
       // The effective set's epoch (epic memql#5289): the roster gates on the
       // capability set now, and it lands after the role and changes on
