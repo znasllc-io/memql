@@ -2,7 +2,7 @@ import { Result, type Row } from "@znasllc-io/memql-sdk-core/client";
 import type { ComponentType, ReactNode } from "react";
 
 import { ClusterApp } from "../src/apps/cluster/ClusterApp";
-import { ConnectionStatusContext } from "../src/chrome/connection";
+import { ConnectionStatusContext, type ShellConnectionStatus } from "../src/chrome/connection";
 
 // Cluster > Settings > Memory search (design record 2026-11-23, section 8), in
 // the readings worth judging as pixels. Fixtures only: the six memorySearch*
@@ -24,6 +24,9 @@ import { ConnectionStatusContext } from "../src/chrome/connection";
 //   memory-search-loading    the first read still out
 //   memory-search-error      the first read refused
 //   memory-search-settings   Cluster > Settings and its link row
+//   memory-search-settings-offline
+//                            the same with the cluster away before the first
+//                            read: the row says when it loads, not a skeleton
 
 const QWEN = "fleet:qwen3-embedding:0.6b";
 const NOMIC = "fleet:nomic-embed-text";
@@ -60,7 +63,7 @@ const VENDOR_STATUS = { providerRef: VENDOR, kind: "vendor", label: "text-embedd
 
 type Answer = Row | Error | "pending";
 
-const SCENES: Record<string, { status: Answer; section?: string }> = {
+const SCENES: Record<string, { status: Answer; section?: string; connection?: ShellConnectionStatus }> = {
   "memory-search": { status: status({ backlog: 37, waitingReason: "none of the indexer's machines offering qwen3-embedding:0.6b is online",
     previousRef: NOMIC, retained: [{ providerRef: NOMIC, retireAt: new Date(Date.now() + 29 * day).toISOString() }],
     switch: switchRun({ state: "done", targetRef: QWEN, targetLabel: "qwen3-embedding:0.6b" }) }) },
@@ -76,6 +79,7 @@ const SCENES: Record<string, { status: Answer; section?: string }> = {
   "memory-search-loading": { status: "pending" },
   "memory-search-error": { status: new Error("memorySearchStatus: capability_not_held: read app:cluster/memorysearch") },
   "memory-search-settings": { status: status(), section: "settings" },
+  "memory-search-settings-offline": { status: status(), section: "settings", connection: "disconnected" },
 };
 
 const rows = (list: Row[]) => new Result({ data: list } as never);
@@ -111,7 +115,7 @@ export function memorySearchScenes(Frame: Frame) {
         framed: true,
         render: () => (
           <Frame fallback="Cluster">
-            <ConnectionStatusContext.Provider value="connected">
+            <ConnectionStatusContext.Provider value={scene.connection ?? "connected"}>
               <ClusterApp sectionId={scene.section ?? "memorysearch"} navigate={() => {}} askContext={() => {}} />
             </ConnectionStatusContext.Provider>
           </Frame>

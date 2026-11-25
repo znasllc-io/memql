@@ -229,8 +229,11 @@ of your machines and held for Switch anyway; `-switch-takeover` a switch whose o
 indexer, another owner, cannot index its target (Re-index on my machines, held
 with Cancel); `-vendor` a vendor model nobody chose; `-takeover` another owner who
 can no longer index the model in use; `-unbound`, `-loading` and `-error` the
-first read's other answers; `-settings` the Settings link row. Fixtures only: no
-act reaches a cluster.
+first read's other answers; `-settings` the Settings link row, and
+`-settings-offline` that row while the cluster is away before its first read
+(a sentence, never a skeleton). `&click=Switch back` on the control opens its
+question, with Switch back withdrawn while it is open. Fixtures only: no act
+reaches a cluster.
 
 The `fleet-equipment-*` views open the whole Fleet app on Machines; add
 `section=models`, `routing`, `apps`, `workbenches`, `logs` or `settings` to open
