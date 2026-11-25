@@ -520,11 +520,19 @@ pipeline:
           # most three run at once. TestEngineManifestGoTestsStepHasHeadroom
           # holds the floor.
           memoryMiB: 6144
+          # -timeout is go test's alarm for each package, not for the step.
+          # cmd/memqllint's cases load the whole DSL tree, and under these flags
+          # it took 452 s on main's 6c533397a and 575 s on f33d91782, then
+          # passed 600 s on 138f95c67 (2026-11-25), which failed that push run
+          # with the alarm's panic and no failing case. 900 s gives the package
+          # room as the DSL grows; a hung case in any package now takes up to
+          # 15 minutes to end, and the step's 30-minute timeout still bounds the
+          # shard. Making memqllint's cases cheaper is the lasting fix.
           run: |
             set -eu
             export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
             bash scripts/identity/build-css.sh
-            go test -count=1 -timeout=600s $MEMQL_PACKAGES
+            go test -count=1 -timeout=900s $MEMQL_PACKAGES
         # Each shard keeps its own Postgres. The runner gives each selected
         # timeout class a fresh database, preserving CI's suite isolation and
         # budgets without carrying engine fixture rows into unrelated tests.
