@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { refusalSentence } from "@znasllc-io/memql-sdk-core/client";
 import { useSession } from "../../../chrome/access";
 import { useConnectionStatus } from "../../../chrome/connection";
@@ -128,6 +128,24 @@ export function MemorySearchSection({ visible = true }: { visible?: boolean }) {
 
 type Place = "inUse" | "change";
 
+/**
+ * Where keyboard focus goes once the page has removed the control that held
+ * it: the model the choices hold checked (the model in use, or the one a
+ * question is open about), as Fleet's board gives focus back to its task
+ * after Clear; with nothing checked (no model yet, or one the reader's
+ * machines do not offer), the first model that can be chosen; with no choices
+ * drawn (a switch shows instead), the Change model section itself. Never an
+ * act: Cancel under the focus of the Enter that started a switch would be one
+ * keystroke from undoing it.
+ */
+function focusAfterLoss(page: HTMLElement | null): HTMLElement | null {
+  if (page === null) return null;
+  const radios = [...page.querySelectorAll<HTMLElement>('[role="radio"]')];
+  return radios.find((radio) => radio.getAttribute("aria-checked") === "true")
+    ?? radios.find((radio) => radio.getAttribute("aria-disabled") !== "true")
+    ?? page.querySelector<HTMLElement>("[data-change-model]");
+}
+
 export function MemorySearchPage({ query, connected, visible, me, mayChange }: {
   query: MemorySearchQueries | null;
   connected: boolean;
@@ -147,7 +165,24 @@ export function MemorySearchPage({ query, connected, visible, me, mayChange }: {
   // Which part of the page the last act was pressed in: its refusal is said there.
   const [actedIn, setActedIn] = useState<Place>("change");
   const act = (place: Place, run: () => Promise<boolean>) => () => { setActedIn(place); return run(); };
-  return <div className="os-cluster os-memory-search">
+
+  // KEYBOARD FOCUS SURVIVES WHAT THE PAGE TAKES AWAY (step 6 review). A
+  // question that closes (Keep, Not now), an act that succeeds (a switch, a
+  // take-over) and a read that moves the section each remove the control that
+  // had focus, and the browser drops focus to the document's body, so the next
+  // Tab starts over at the window's top. After a render that removed the
+  // focused control, with focus left on nothing, focus goes where
+  // focusAfterLoss says; focus somebody moved elsewhere stays there. Only while
+  // the page is shown: a hidden pane takes nobody's focus.
+  const root = useRef<HTMLDivElement>(null);
+  const lastFocused = useRef<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    const held = lastFocused.current;
+    if (held === null || held.isConnected || !visible) return;
+    lastFocused.current = null;
+    if (document.activeElement === null || document.activeElement === document.body) focusAfterLoss(root.current)?.focus();
+  });
+  return <div className="os-cluster os-memory-search" ref={root} onFocus={(event) => { lastFocused.current = event.target as HTMLElement; }}>
     <Head title="Memory search" note={search.readError && status ? <HeadNote sentence="Memory search could not be refreshed." next="Showing the last reading." detail={search.readError} /> : null} />
     {status === null ? !connected ? <Notice sentence="Memory search loads when the cluster reconnects." />
       : search.readError ? <ReadRefused sentence="Memory search could not be read." reason={refusalSentence(search.readError, "memorySearchStatus")} retry={search.retry} />
@@ -231,7 +266,7 @@ function Switching({ status, sw, me, mayChange, refusal, search, act }: { status
   const deciding = sw.state === "needsDecision";
   return <DetailsSection title="Change model">
     <SettingRow label="Switching to">
-      <div className="os-memory-search-stack">
+      <div className="os-memory-search-stack" data-change-model tabIndex={-1}>
         <span className="os-mono os-memory-search-target">{sw.targetLabel}</span>
         {deciding ? <InPlaceAsk>
           <Notice tone="warn" sentence={`${items(held)} could not be indexed${kinds ? ` (${kinds})` : ""}.`}>
@@ -293,7 +328,7 @@ function ChangeModel({ status, search, draft, pick, refusal, act }: {
   const bound = status.providerRef !== "";
   return <DetailsSection title="Change model">
     <SettingRow label="Model">
-      <div className="os-memory-search-stack">
+      <div className="os-memory-search-stack" data-change-model tabIndex={-1}>
         {choices === null
           ? search.choicesError
             ? <ReadRefused sentence="The models you can choose could not be read." reason={refusalSentence(search.choicesError, "memorySearchChoices")} retry={search.retry} />

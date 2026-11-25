@@ -448,6 +448,69 @@ describe("Cluster > Settings > Memory search", () => {
     }
   });
 
+  /** A press the way a keyboard makes it: focus first, then the click the browser makes of Enter. */
+  const pressByKeyboard = (button: HTMLElement) => { act(() => button.focus()); fireEvent.click(button); };
+  const radio = (name: RegExp) => within(screen.getByRole("radiogroup", { name: "Memory search model" })).getByRole("radio", { name });
+
+  it("a question that closes gives keyboard focus back to the model the choices hold", async () => {
+    mount("memorysearch", memorySearchQuery(statusRow()));
+    fireEvent.click(await screen.findByRole("radio", { name: /nomic-embed-text/ }));
+    await readTheBar();
+    pressByKeyboard(screen.getByRole("button", { name: "Keep qwen3-embedding:0.6b" }));
+    expect(document.activeElement).toBe(radio(/qwen3-embedding:0\.6b/));
+    cleanup();
+
+    // No model yet, so nothing is checked: the first model that can be chosen.
+    mount("memorysearch", memorySearchQuery(statusRow({ providerRef: "", kind: "", label: "", indexedBy: "", indexedByName: "", chosenBy: "", indexed: 0 })));
+    fireEvent.click(await screen.findByRole("radio", { name: /text-embedding-3-small/ }));
+    await readTheBar();
+    pressByKeyboard(screen.getByRole("button", { name: "Not now" }));
+    expect(document.activeElement).toBe(radio(/qwen3-embedding:0\.6b/));
+    cleanup();
+
+    // The one-time vendor question, kept.
+    const vendor = { providerRef: VENDOR, kind: "vendor", label: "text-embedding-3-small", indexedBy: "", indexedByName: "", chosenBy: "" };
+    mount("memorysearch", memorySearchQuery(statusRow({ ...vendor, needsConfirmation: true }), statusRow({ ...vendor, chosenBy: "me" })));
+    await screen.findByRole("radiogroup", { name: "Memory search model" });
+    await readTheBar();
+    pressByKeyboard(screen.getByRole("button", { name: "Keep" }));
+    await settle();
+    expect(document.activeElement).toBe(radio(/text-embedding-3-small/));
+  });
+
+  it("an act that takes its own button away leaves focus on what it changed", async () => {
+    // The take-over of the model in use: the choices stay, with it checked.
+    mount("memorysearch", memorySearchQuery(statusRow({ indexedBy: "ana", indexedByName: "Ana Owner", takeOver: true }), statusRow()));
+    await screen.findByRole("radiogroup", { name: "Memory search model" });
+    await readTheBar();
+    pressByKeyboard(screen.getByRole("button", { name: "Index on my machines" }));
+    await settle();
+    expect(document.activeElement).toBe(radio(/qwen3-embedding:0\.6b/));
+    cleanup();
+
+    // A switch that starts: the choices give way to it, and focus stays in Change model.
+    mount("memorysearch", memorySearchQuery(statusRow(), statusRow({ switch: switchRun() })));
+    fireEvent.click(await screen.findByRole("radio", { name: /nomic-embed-text/ }));
+    await readTheBar();
+    pressByKeyboard(screen.getByRole("button", { name: "Switch to nomic-embed-text" }));
+    await settle();
+    const section = screen.getByRole("region", { name: "Change model" });
+    expect(screen.getByRole("progressbar")).toBeTruthy();
+    expect(section.contains(document.activeElement)).toBe(true);
+    // Never on Cancel: a second Enter must not undo what the first one started.
+    expect(document.activeElement).not.toBe(screen.getByRole("button", { name: "Cancel" }));
+    cleanup();
+
+    // The switch's own take-over: the same.
+    mount("memorysearch", memorySearchQuery(statusRow({ switch: switchRun({ indexedBy: "bo", indexedByName: "Bo Owner", takeOver: true }) }), statusRow({ switch: switchRun() })));
+    await screen.findByRole("progressbar");
+    await readTheBar();
+    pressByKeyboard(screen.getByRole("button", { name: "Re-index on my machines" }));
+    await settle();
+    expect(screen.getByRole("region", { name: "Change model" }).contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).not.toBe(screen.getByRole("button", { name: "Cancel" }));
+  });
+
   it("Change model is one place: a refusal is said there whichever of its states it arrives in", async () => {
     const advance = fakeClock();
     try {

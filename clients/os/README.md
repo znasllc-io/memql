@@ -2956,6 +2956,11 @@ board's caption, its refusal and the Models page's help).
   switch at a time); its progress shows the items done, clamped to the ESTIMATED
   total (the index plus its backlog), with Cancel. A switch held for failed or
   unrebuildable items offers Switch anyway and Cancel.
+- **WHAT THE PAGE TAKES AWAY DOES NOT TAKE FOCUS WITH IT.** A question that
+  closes, an act that succeeds or a read that moves the section removes the
+  control that had focus; focus then goes to the model the choices hold checked
+  (as Fleet's board does after Clear), else the first that can be chosen, else
+  the Change model section itself, and never to an act such as Cancel.
 - **SWITCH BACK NAMES THE MODEL THE BINDING REPLACED** (`previousRef`), never a
   cancelled switch's partial index, which `retained` also lists; it is offered only
   while that model can be chosen.
