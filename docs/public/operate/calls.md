@@ -2033,8 +2033,9 @@ Questions regression coverage is `integrations/calls/questions_db_test.go`
 `TestQuestionsTwoReplicasSelectAtMostOne`,
 `TestQuestionsCrossReplicaRetrySelectionAndLaggingClock`,
 `TestQuestionsTextReachesNoRawReadAndNoGraphEvent`,
-`TestQuestionsSelectionRechecksAuthorSession` and
-`TestQuestionsEntitlementLossAllowsOnlyCleanup`),
+`TestQuestionsSelectionRechecksAuthorSession`,
+`TestQuestionsEntitlementLossAllowsOnlyCleanup` and
+`TestQuestionsEndedRunAndLostEntitlementStillAllowClosing`),
 `component/retention/calls_questions_db_test.go`, `component/calls/questions_test.go`
 and `TestCallsConceptsAreServerWrittenAndUnreadable`. A selection announces nothing: no
 Activity entry or notification tells participants who are not reading the queue.

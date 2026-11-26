@@ -685,3 +685,67 @@ func TestQuestionsCrossReplicaRetrySelectionAndLaggingClock(t *testing.T) {
 	require.Equal(t, "withdrawn", withdrawn.QuestionReceipt.Status)
 	require.Nil(t, withdrawn.Questions.Selected)
 }
+
+// Ending the guidance closes the queue to new questions and to selection, never to
+// cleanup: after the host cancels the run, and again after the call loses its
+// Insights entitlement, a host can still resolve the selected question and dismiss
+// a pending one, while a submission is refused and nothing is offered for selection.
+func TestQuestionsEndedRunAndLostEntitlementStillAllowClosing(t *testing.T) {
+	cw, key, c, start, run := questionFixture(t)
+	if cw == nil {
+		return
+	}
+	ctx := context.Background()
+	host := *key.result.Session
+	_, guest, e := cw.join(start.Call.GuestToken, "Author")
+	require.NoError(t, e)
+	var ids []string
+	for i := range 2 {
+		if i > 0 {
+			cw.clock.Advance(11 * time.Second)
+		}
+		out, e := cw.svc.Workflow(ctx, cw.ref, guest.Token, questionRequest(t, cw, guest, run, "question_submit", fmt.Sprintf("closing-%d", i), fmt.Sprintf("Benign closing question %d", i)))
+		require.NoError(t, e)
+		ids = append(ids, out.QuestionReceipt.ID)
+	}
+	cw.clock.Advance(time.Second)
+	choose := questionRequest(t, cw, host, run, "question_select", "closing-select", "")
+	choose.Question.ID, choose.Question.Revision, choose.Question.ExpectedEpoch = ids[0], 1, run.ControlEpoch
+	_, e = cw.svc.Workflow(ctx, cw.ref, host.Token, choose)
+	require.NoError(t, e)
+
+	cw.clock.Advance(time.Second)
+	cancelled := workflowDo(t, cw, key, workflowCommand(run, "cancel", "closing-cancel")).Run
+	require.NotNil(t, cancelled)
+	require.Equal(t, "cancelled", cancelled.Status)
+	view := questionRead(t, cw, host, cancelled)
+	require.False(t, view.Available)
+	require.False(t, view.CanSubmit)
+	require.Equal(t, "questions_run_inactive", view.Reason)
+	require.NotNil(t, view.Selected)
+	require.True(t, view.Selected.CanResolve)
+	require.Len(t, view.Items, 1)
+	require.False(t, view.Items[0].CanSelect, "an ended run offered a question for selection")
+	require.True(t, view.Items[0].CanDismiss)
+	cw.clock.Advance(11 * time.Second)
+	_, e = cw.svc.Workflow(ctx, cw.ref, guest.Token, questionRequest(t, cw, guest, cancelled, "question_submit", "closing-late", "Benign late question"))
+	require.ErrorContains(t, e, "questions_run_inactive")
+
+	resolve := questionRequest(t, cw, host, cancelled, "question_resolve", "closing-resolve", "")
+	resolve.Question.ID, resolve.Question.Revision, resolve.Question.ExpectedEpoch = ids[0], 2, cancelled.ControlEpoch
+	resolved, e := cw.svc.Workflow(ctx, cw.ref, host.Token, resolve)
+	require.NoError(t, e)
+	require.Equal(t, "resolved", resolved.QuestionReceipt.Status)
+
+	c.Invalid = true
+	cw.clock.Advance(time.Second)
+	lost := questionRead(t, cw, host, cancelled)
+	require.Equal(t, "questions_insights_required", lost.Reason)
+	dismiss := questionRequest(t, cw, host, cancelled, "question_dismiss", "closing-dismiss", "")
+	dismiss.Question.ID, dismiss.Question.Revision, dismiss.Question.ExpectedEpoch = ids[1], 1, cancelled.ControlEpoch
+	dismissed, e := cw.svc.Workflow(ctx, cw.ref, host.Token, dismiss)
+	require.NoError(t, e)
+	require.Equal(t, "dismissed", dismissed.QuestionReceipt.Status)
+	require.Empty(t, dismissed.Questions.Items)
+	require.Nil(t, dismissed.Questions.Selected)
+}
