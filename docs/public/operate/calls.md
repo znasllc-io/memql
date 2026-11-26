@@ -2036,7 +2036,7 @@ Questions regression coverage is `integrations/calls/questions_db_test.go`
 `TestQuestionsSelectionRechecksAuthorSession` and
 `TestQuestionsEntitlementLossAllowsOnlyCleanup`),
 `component/retention/calls_questions_db_test.go`, `component/calls/questions_test.go`
-and `TestEveryCallsConceptIsClientUnreadable`. A selection announces nothing: no
+and `TestCallsConceptsAreServerWrittenAndUnreadable`. A selection announces nothing: no
 Activity entry or notification tells participants who are not reading the queue.
 
 Managed resource grants separately require `resources_read`,

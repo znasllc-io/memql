@@ -40,7 +40,7 @@ const callsClientUnreadableReason = "its rows are the calls integration's bookke
 // decides that per row (integrations/calls/questions.go). The rows are written as
 // the site's owner, so the tier alone would admit that owner and a cluster owner
 // to a raw read, and the bus would carry the text to any automation. Every calls
-// concept is on the list (TestEveryCallsConceptIsClientUnreadable).
+// concept is on the list (TestCallsConceptsAreServerWrittenAndUnreadable).
 const callsQuestionUnreadableReason = "its rows hold participants' private question text, which the calls integration shows only to the author's current admission and an authorized host (and a selected question to the room); a raw read would hand every pending question to the site's owner and a cluster owner, and a graph event would carry the text to any automation"
 
 // clientUnreadableConcepts are the concepts whose rows NO CLIENT READS, by any
