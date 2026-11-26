@@ -1977,35 +1977,67 @@ requirements need an occupied, non-agent human host with adult evidence; this
 does not substitute for parental authority or child-use launch review.
 
 Moderated questions use the same workflow transport with a separate `question`
-request. `question_submit` requires explicit `publication: "host_then_room_v1"`:
-the host can read the question and select it for the room. Pending text is private
-to the original author admission and eligible host; only the current selection
-is public. `question_withdraw` is author-only. Host `question_select`,
-`question_dismiss` and `question_resolve` never change microphones or advance a
-turn. A selection must be resolved, dismissed or withdrawn before another is
-selected. Questions require an active Insights Skills run and exclude family
-calls; existing cleanup remains available after entitlement loss.
+request (`questions`, `question_submit`, `question_withdraw`, `question_select`,
+`question_dismiss`, `question_resolve`), naming the current `roomId`, media
+`identity` and current `runId`. `question_submit` requires explicit
+`publication: "host_then_room_v1"`: the host can read the question and select it
+for the room. Pending text is private to the original author admission and an
+eligible host; only the current selection is public to the room.
+`question_withdraw` is author-only, from the admission that submitted it. Host
+`question_select`, `question_dismiss` and `question_resolve` never change
+microphones or advance a turn. One question is selected at a time: it must be
+resolved, dismissed or withdrawn before another is selected, and closing it never
+selects the next. Selection rechecks the author's own session, seat and agent
+authority, so a question whose author left or lost authority cannot be selected
+(`questions_author_unavailable`). Questions require an active Insights Skills run
+and exclude family calls; reading, withdrawing and closing existing questions
+remain available after entitlement loss or when the run ends.
 
 The `questions` read returns at most 20 pending items, an opaque `nextCursor` and
-`queueRevision`, current selection, and native per-item action permissions.
+`queueRevision`, the current selection, and native per-item action permissions.
 Continue with both returned values; restart the first page on `questions_changed`.
-Old-run pending questions remain available for authorized cleanup. Limits are
-500 Unicode characters, two open questions per admission, ten submissions per
-owning Callkey and 100 total per room across runs. Mutations bind current room,
-identity and run, exact question revision, and an idempotency key; host controls
-also bind the control epoch. Retry the identical request after an unknown reply.
-The receipt describes the original transition; the accompanying queue is current.
+There is no push or event: a client sees a change on its next read. Old-run
+pending questions remain available for authorized cleanup. Limits are 500 Unicode
+characters, two open questions per admission, ten submissions per owning Callkey
+and 100 per room across runs. Changes are rate limited: one submission per owning
+Callkey every 10 seconds, one change per Callkey every 400 ms and 60 changes a
+minute per room; `questions_rate_limited` changed nothing. Mutations bind the
+exact question revision and an idempotency key; host controls also bind the
+control epoch. Retry the identical request after an unknown reply. The receipt
+describes the original transition; the accompanying queue is current.
+
+Every read and change runs under the room's write gate with fresh reads, so a
+question submitted, selected or retried on one bff replica is seen exactly on the
+others, and two replicas cannot select two questions at once. Each transition is
+stamped no earlier than the one it follows, so a replica whose clock lags still
+writes a valid journal. Reads take the room gate as the workflow snapshot does.
 
 Agents need explicit `questions` authority, independently of `message`.
 Host queue access also requires `skills_read` and approved originating versions;
 moderation additionally requires `skills_control`, `control`, current and original
 approved versions, and no human hold. A fresh guest-agent admission still requires
-human host review. Question text is private database content under existing
-storage controls, not model input or call history. Terminal current text is
-cleared; historical versions remain until successful physical cleanup. The fixed
-technical expiry is no later than the room deadline plus one hour, and never
-more than 25 hours after submission. Cleanup may run later or retry on failure;
-this technical bound is not a legal retention policy.
+human host review. Question text is private stored content, not model input or
+call history. `v1:calls:workflowQuestion` is client-unreadable: no raw read reaches
+it, the site's owner and a cluster owner included, and its writes publish no graph
+event; only the calls integration and the retention sweep read it. Terminal current
+text is cleared; historical versions remain until successful physical cleanup.
+The fixed technical expiry is no later than the room deadline plus one hour, and
+never more than 25 hours after submission. The hourly retention sweep deletes every
+version of an expired question under the room's gate, up to 100 expired questions a
+pass; a malformed or unadmitted question is preserved and reported, never partly
+deleted. Cleanup may run later or retry on failure; this technical bound is not a
+legal retention policy.
+
+Questions regression coverage is `integrations/calls/questions_db_test.go`
+(including `TestQuestionsPrivateSelectionTerminalAndExactReplay`,
+`TestQuestionsTwoReplicasSelectAtMostOne`,
+`TestQuestionsCrossReplicaRetrySelectionAndLaggingClock`,
+`TestQuestionsTextReachesNoRawReadAndNoGraphEvent`,
+`TestQuestionsSelectionRechecksAuthorSession` and
+`TestQuestionsEntitlementLossAllowsOnlyCleanup`),
+`component/retention/calls_questions_db_test.go`, `component/calls/questions_test.go`
+and `TestEveryCallsConceptIsClientUnreadable`. A selection announces nothing: no
+Activity entry or notification tells participants who are not reading the queue.
 
 Managed resource grants separately require `resources_read`,
 `resources_publish`/`resources_control`, exact resource IDs and room authority.
