@@ -131,7 +131,12 @@ export function AccessCodesPanel({ site, onBusyChange }: {
   // ABSENT WITH NO OWNER (rule 12). The engine refuses a mint on a site with no owner,
   // and a code's row is written as that owner, so there is nobody to write it as.
   const ownerless = siteIsClusterOwned(site);
-  const canAdd = gates !== null && gates.length > 0 && !ownerless;
+  // THE ENGINE'S OWN GATE IS NOT EVERY ACT'S: guests never open it, and only somebody the gates
+  // reply calls issuable is offered its codes to add (cluster owners, for calls-testers).
+  const issuableGates = (gates ?? []).filter((gate) => gate.issuable);
+  const guestGates = (gates ?? []).filter((gate) => !gate.engineOwned);
+  const canAdd = gates !== null && issuableGates.length > 0 && !ownerless;
+  const canAllowGuests = gates !== null && guestGates.length > 0 && !ownerless;
   const gatesOut = gates === null && access.gates.state !== "failed";
 
   // A REFUSAL WHOSE ROW HAS GONE. The re-read after a refused regenerate of a code
@@ -148,7 +153,10 @@ export function AccessCodesPanel({ site, onBusyChange }: {
 
   // THE SAME RULE AS THE HEADING OVER CODES: no part over nothing. With no owner or no gate and
   // nothing standing, the one explanation below is the panel.
-  const showGuests = codes !== null && (guestPass !== undefined || !((noGates || ownerless) && codes.length === 0));
+  // NO GUEST PART OVER A GATE GUESTS CAN NEVER OPEN: where every declared gate is the engine's
+  // own, there is nothing to allow and nothing to say.
+  const onlyEngineGates = gates !== null && gates.length > 0 && guestGates.length === 0;
+  const showGuests = codes !== null && (guestPass !== undefined || (!onlyEngineGates && !((noGates || ownerless) && codes.length === 0)));
 
   let body: ReactNode;
   if (!access.connected) {
@@ -221,7 +229,7 @@ export function AccessCodesPanel({ site, onBusyChange }: {
         <GuestAccess
           site={site}
           pass={guestPass}
-          canAllow={canAdd}
+          canAllow={canAllowGuests}
           now={now}
           access={access}
           asked={guestPass !== undefined && asked?.codeId === guestPass.id ? asked.act : null}
@@ -232,7 +240,7 @@ export function AccessCodesPanel({ site, onBusyChange }: {
             backTo.current = ".access-guest .os-head button";
             access.clearRefusal();
             setAsked(null);
-            setFormGates(gates ?? []);
+            setFormGates(guestGates);
             setAdding("guest");
           }}
           onAsk={(event, act) => guestPass !== undefined && askFor(event, guestPass.id, act)}
@@ -259,7 +267,7 @@ export function AccessCodesPanel({ site, onBusyChange }: {
                   opener.current = event.currentTarget;
                   access.clearRefusal();
                   setAsked(null);
-                  setFormGates(gates);
+                  setFormGates(issuableGates);
                   setAdding("code");
                 }}
               />
@@ -292,7 +300,7 @@ export function AccessCodesPanel({ site, onBusyChange }: {
         <AddCodeForm
           mode={adding}
           siteId={site.id}
-          gates={gates ?? formGates}
+          gates={gates === null ? formGates : adding === "guest" ? guestGates : issuableGates}
           now={now}
           access={access}
           onCancel={() => {
@@ -474,6 +482,11 @@ function CodeEntry({
   const opensNothing = stale || ownerless;
   const canRemove = !stale || partsForOrganization(code.accountId, held).access;
   const undeclared = gates !== null && !gates.some((gate) => gate.gate === code.gate);
+  // THE ENGINE'S OWN GATE: no session ever opens with its codes, so last-opened would only ever
+  // say "never"; and a code of a gate this person may not issue keeps Remove and nothing else.
+  const declared = gates?.find((gate) => gate.gate === code.gate);
+  const noLastOpened = declared?.engineOwned === true;
+  const mayIssue = declared === undefined || declared.issuable;
   const expired = hasExpired(code.expiresAt, now);
   const writing = access.busy !== null;
   const lastOpened = lastOpenedWord(code.lastOpenedAt, code.issuedAt, now);
@@ -501,10 +514,10 @@ function CodeEntry({
         state={stale ? undefined : expiryWord(code.expiresAt, now)}
         tone={expired ? "warn" : "muted"}
         stateTitle={formatMoment(code.expiresAt)}
-        stateExtra={stale ? undefined : <span className="access-code-opened" title={code.lastOpenedAt === "" ? undefined : formatMoment(code.lastOpenedAt)}>{lastOpened}</span>}
+        stateExtra={stale || noLastOpened ? undefined : <span className="access-code-opened" title={code.lastOpenedAt === "" ? undefined : formatMoment(code.lastOpenedAt)}>{lastOpened}</span>}
         actions={
           <>
-            {opensNothing ? null : (
+            {opensNothing || !mayIssue ? null : (
               <>
                 <IconButton label={`Regenerate ${code.label}`} disabled={writing} aria-expanded={asked === "regenerate"} onClick={(event) => onAsk(event, "regenerate")}>
                   <RefreshCw size={16} aria-hidden />

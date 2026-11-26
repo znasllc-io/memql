@@ -580,7 +580,8 @@ export function DeployablePage({
             {storeStatistics ? <IconButton label="Store statistics" onClick={() => setDetail("storeStatistics")}><Receipt size={16} aria-hidden /></IconButton> : null}
             {/* ABSENT, NOT DISABLED (rule 12): a system-owned site is exempt from
                 the whole axis, and a code opens a gate that only a package's own
-                deployable can declare. */}
+                deployable can declare, or the engine's calls-testers gate, which a
+                deployable with calls on offers, package or not. */}
             {can.access && !site.systemOwned && (site.packageDeployableName || site.calls) ? <IconButton label="Access codes" onClick={() => setDetail("access")}><Lock size={16} aria-hidden /></IconButton> : null}
             {/* A store's reviews, for whoever holds the reviews part. */}
             {can.reviews && reviewsStore !== "" ? <IconButton label="Reviews" onClick={() => setDetail("reviews")}><MessageSquareText size={16} aria-hidden /></IconButton> : null}

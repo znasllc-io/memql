@@ -211,9 +211,10 @@ func (e AccessGateEntry) clone() AccessGateEntry {
 }
 
 // AccessGateCallsTesters is the engine's own gate. The calls feature declares it on
-// every package-deployed site with calls turned on, and only the calls service reads
+// every site with calls turned on, package or not, and only the calls service reads
 // it: a tester's code for simulated payment and age results. It opens no DSL
-// construct, and no DSL construct may claim the name.
+// construct and no session, no DSL construct may claim the name, and only cluster
+// owners issue its codes, since they spend the installation's shared simulation budget.
 const AccessGateCallsTesters = "calls-testers"
 
 // AccessGateSummary is what the operator surface needs to know about one gate:
@@ -228,6 +229,10 @@ type AccessGateSummary struct {
 	UsesSubject bool
 	// Constructs are the gate's construct names, sorted.
 	Constructs []string
+	// EngineOwned marks the engine's own calls-testers gate: it opens no construct and
+	// no session, so it has no guest pass, the access route refuses its codes, and a
+	// code's last-opened says nothing about it. Only cluster owners issue its codes.
+	EngineOwned bool
 }
 
 // accessGateSlot identifies one gated construct: the domain that declared it,

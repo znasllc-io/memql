@@ -491,6 +491,9 @@ func (i *Integration) checkMint(ctx context.Context, actor, siteID string, args 
 	if !declaresGate(gates, gate) {
 		return mintRequest{}, refuse("Choose a gate this deployable declares: %s.", gateNames(gates))
 	}
+	if gate == memql.AccessGateCallsTesters && !callerIsClusterOwner(ctx) {
+		return mintRequest{}, refuse(testerCodesOwnersOnly)
+	}
 	label := strings.TrimSpace(asString(args["label"]))
 	if label == "" {
 		return mintRequest{}, refuse("Enter a name for the access code.")
@@ -642,6 +645,9 @@ func (i *Integration) regenerate(ctx context.Context, actor, codeID string, args
 	if t.code.Guest {
 		return minted{}, refuse("Guest access has no code to regenerate. Change when it ends, or turn it off.")
 	}
+	if t.code.Gate == memql.AccessGateCallsTesters && !callerIsClusterOwner(ctx) {
+		return minted{}, refuse("Only the installation's owners can regenerate a tester code.")
+	}
 	if err := refuseIfEnded(t); err != nil {
 		return minted{}, err
 	}
@@ -729,6 +735,9 @@ func (i *Integration) setExpiry(ctx context.Context, actor, codeID string, args 
 	t, err := i.readTarget(ctx, codeID)
 	if err != nil {
 		return target{}, time.Time{}, err
+	}
+	if t.code.Gate == memql.AccessGateCallsTesters && !callerIsClusterOwner(ctx) {
+		return target{}, time.Time{}, refuse("Only the installation's owners can change when a tester code expires.")
 	}
 	// A RUN DOES NOT RE-TIME A GUEST PASS (see the file note). It is asked once the row
 	// says it is a pass, and before anything about its state, since no state of the pass
@@ -842,6 +851,11 @@ func (i *Integration) handleGates(ctx context.Context, args map[string]any, _ in
 			"gate":        gate.Gate,
 			"usesSubject": gate.UsesSubject,
 			"constructs":  gate.Constructs,
+			// WHAT THIS CALLER MAY DO WITH IT, so the panel offers only legal acts: the
+			// engine's own gate has no guests and no last-opened, and its codes are issued
+			// by cluster owners alone.
+			"engineOwned": gate.EngineOwned,
+			"issuable":    !gate.EngineOwned || callerIsClusterOwner(ctx),
 		})
 		if err != nil {
 			return nil, i.failed("gates", siteID, err, "")
@@ -868,7 +882,7 @@ func (i *Integration) gatesOf(ctx context.Context, site siteView) ([]memql.Acces
 	// package declares, and with no package at all, since a package only matters for
 	// gates declared in DSL. It opens no construct; only the calls service reads it.
 	if site.Calls {
-		gates = append(gates, memql.AccessGateSummary{Gate: memql.AccessGateCallsTesters, Constructs: []string{}})
+		gates = append(gates, memql.AccessGateSummary{Gate: memql.AccessGateCallsTesters, Constructs: []string{}, EngineOwned: true})
 		sort.Slice(gates, func(a, b int) bool { return gates[a].Gate < gates[b].Gate })
 	}
 	return gates, nil
@@ -1165,6 +1179,18 @@ func requireCaller(ctx context.Context) (string, error) {
 		return "", refuse("An access code is changed by a person, and this call resolves to no one. Sign in as yourself and try again.")
 	}
 	return actor, nil
+}
+
+// testerCodesOwnersOnly is why a tester code is a cluster owner's to issue: every one
+// spends the simulated-payment budget the whole installation shares (owner, 26 November).
+const testerCodesOwnersOnly = "Only the installation's owners can add tester codes, because they spend the simulated-payment budget the whole installation shares."
+
+// callerIsClusterOwner is whether the caller holds the cluster's owner role, the only
+// one that issues, regenerates or re-times calls-testers codes. Removing one takes
+// access away, so it stays with whoever manages the deployable's codes.
+func callerIsClusterOwner(ctx context.Context) bool {
+	ac, ok := auth.AccessFromContext(ctx)
+	return ok && ac.IsClusterOwner()
 }
 
 // callerUserID is the authenticated person calling, or "" when there is none.

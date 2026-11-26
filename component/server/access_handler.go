@@ -273,7 +273,7 @@ type AccessStore interface {
 	// about who may do what: what makes the row mean something is the handler comparing
 	// the stamp with it. A site with no package deployable is not a miss: it comes back
 	// with a blank DeployableName, and the handler refuses it, because it was read and has
-	// simply never had a code to open.
+	// no code the handler opens (a calls-testers code it may have opens no session).
 	SiteAsCluster(ctx context.Context, siteID string) (*AccessSite, error)
 	// PackageDomainsAsCluster reads the DSL domains a package ships, as the cluster acting,
 	// one point read. No package and no list are both no domains, which reaches no gate.
@@ -478,7 +478,9 @@ func sameBareID(a, b string) bool {
 // on a code and 0 on its session compare equal: with both read as absent, a regenerate
 // would stop ending sessions and nothing would look wrong.
 func codeOpensSite(code *AccessCode, site *AccessSite) bool {
-	return !code.Revoked && code.Generation >= 1 &&
+	// THE ENGINE'S OWN GATE OPENS NO SESSION: a tester code is typed into the calls
+	// service with each simulated result, and here it answers as a stranger's would.
+	return code.Gate != memql.AccessGateCallsTesters && !code.Revoked && code.Generation >= 1 &&
 		sameBareID(code.SiteID, site.ID) && sameBareID(code.AccountID, site.AccountID)
 }
 

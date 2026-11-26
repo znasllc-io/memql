@@ -463,8 +463,13 @@ construct through `/_memql/access/call`; the calls service reads it when a teste
 applies a simulated payment or age result in `mock` commerce mode
 ([calls.md](calls.md#simulated-results-and-tester-codes)), one code typed with
 each result. The name is reserved: loading `@accessGate(gate="calls-testers")` is
-refused. A guest pass on it is refused too, since no typed code ever finds a guest
-pass. Turning calls off withdraws the gate, and its codes then open nothing.
+refused. It opens no session either: the access route answers its codes as it
+answers a stranger's, a guest pass on it is refused, and Access codes shows no
+last-opened for its codes, since a tester's use is not recorded on the code. Only
+a cluster owner adds, regenerates or changes the expiry of its codes, because every
+one spends the simulated-payment budget the whole installation shares; anybody who
+manages the deployable's codes may remove one. Turning calls off withdraws the
+gate, and its codes then open nothing.
 
 ---
 
@@ -528,7 +533,9 @@ removed row each time.
 
 Allowing guests refuses for every cause a code's Add does: no owner, a
 system-owned deployable, no package deployable, a gate the package does not
-declare, a name or subject out of bounds and an expiry out of bounds.
+declare, a name or subject out of bounds and an expiry out of bounds. It also
+refuses the engine's [calls-testers gate](#the-calls-testers-gate), which opens no
+session.
 
 **A run may not create or re-time a guest pass, and may remove one.** Creating
 one inside a run is refused, with the reason that opening a deployable to anyone
@@ -1084,7 +1091,7 @@ export function accessSession({ onOpen, onLocked }) {
 | Unlock and the status check work, every call answers `404`, and the bff logs "this site's calls answer 404" | The site's owner cannot read it or its package. A site whose owner was removed from its organization reads as zero rows under that owner. The log line carries the reason | Restore the owner's membership, or give the site an owner who can read it |
 | A code unlocks and every call answers `404`, and the bff logs nothing | Which node the edge reaches. On an instance where the neutral `bff` mounts no product bundle, a code minted through `bff-<product>` unlocks, because the rows are the same everywhere, and every call misses the gate registry of a node that never loaded the gate | Check which node the edge's `bff-http` selects, and mount the product's DSL there ([which node](#which-node-answers)) |
 | All five routes answer `404` for a platform-managed site | It has no owner to borrow | Codes are for your own deployables |
-| Add is absent, and a visitor is only ever told `invalid` or `none` | The deployable was not deployed from a package, so it has no deployable name, no gate can be its own, and it has no codes | Deploy it from a package that declares a gate |
+| Add is absent, and a visitor is only ever told `invalid` or `none` | The deployable was not deployed from a package, so it has no deployable name and no gate of its own (with calls on it still offers `calls-testers`, whose codes only a cluster owner adds) | Deploy it from a package that declares a gate |
 | A `503` or a plain `404` before any JSON | The deployable is offline, or not live | Take it live. An offline spell does not end a session: it works again if its code has not expired |
 
 ### Which node answers

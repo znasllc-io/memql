@@ -1713,3 +1713,47 @@ describe("guest access", () => {
     expect(inGuestPart()).toBe(false);
   });
 });
+
+describe("the engine's calls-testers gate opens no session, and only someone who may issue its codes is offered to", () => {
+  const TESTERS = accessGateRow({ gate: "calls-testers", engineOwned: true, issuable: true, constructs: [] });
+  const TESTERS_NOT_YOURS = accessGateRow({ gate: "calls-testers", engineOwned: true, issuable: false, constructs: [] });
+  const tester = (over: Partial<Row> = {}): Row => accessCodeRow({ id: "code-tester", label: "Dana", gate: "calls-testers", ...over });
+
+  it("has no guest part where it is the only gate", async () => {
+    mountPanel({ accessGates: [TESTERS], accessCodes: [tester()] });
+    expect(await screen.findByText("Dana")).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Guest access" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Allow guests" })).toBeNull();
+  });
+
+  it("is never offered to guests beside the deployable's own gates", async () => {
+    mountPanel({ accessGates: [DASHBOARD, TESTERS], accessCodes: [] });
+    await click(await screen.findByRole("button", { name: "Allow guests" }));
+    await screen.findByRole("region", { name: "Allow guests" });
+    // With the testers gate left out, the deployable's own gate is the only one, so it is chosen.
+    expect(selectedLabel(screen.getByLabelText("Opens"))).toBe("dashboard");
+  });
+
+  it("shows no last opened on a tester code, since a tester's use opens no session", async () => {
+    mountPanel({ accessGates: [TESTERS], accessCodes: [tester()] });
+    const text = (await rowOf("Dana")).textContent ?? "";
+    expect(text).not.toContain("Not opened");
+    expect(text).not.toContain("Last opened");
+  });
+
+  it("offers adding, regenerating and re-timing tester codes only to someone who may issue them", async () => {
+    mountPanel({ accessGates: [TESTERS_NOT_YOURS], accessCodes: [tester()] });
+    await screen.findByText("Dana");
+    expect(screen.queryByRole("button", { name: "Add an access code" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Regenerate Dana" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Change expiry of Dana" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Remove Dana" })).toBeTruthy();
+  });
+
+  it("offers a cluster owner every act on a tester code but guests", async () => {
+    mountPanel({ accessGates: [TESTERS], accessCodes: [tester()] });
+    expect(await screen.findByRole("button", { name: "Add an access code" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Regenerate Dana" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Change expiry of Dana" })).toBeTruthy();
+  });
+});

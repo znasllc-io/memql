@@ -159,3 +159,35 @@ func TestTesterCodeVerdicts(t *testing.T) {
 	require.Equal(t, TesterCodeLive, verdict(unpackaged, unpackagedCode), "a calls site with no package must open its testers code")
 	require.Equal(t, TesterCodeUnavailable, verdict(w.site, unpackagedCode), "a site without calls cannot hold tester codes and must say so")
 }
+
+func TestCallsTestersCodesAreForClusterOwners(t *testing.T) {
+	w := newWorld(t, "callowners")
+	operator := actorContext(w.operator, auth.RoleOwner)
+	developer := "ac-developer-" + w.suffix
+	w.principal(developer, auth.RoleDeveloper)
+	dev := actorContext(developer, auth.RoleDeveloper)
+	calls := w.callsSite("ac-calls", nil)
+
+	// THE GATES SAY WHAT THE CALLER MAY DO, so the panel offers only legal acts: the
+	// testers gate is the engine's own and, for anybody but a cluster owner, not theirs to
+	// issue codes for.
+	devGates := w.gatesOn(dev, calls)
+	require.Equal(t, true, devGates[memql.AccessGateCallsTesters]["engineOwned"])
+	require.Equal(t, false, devGates[memql.AccessGateCallsTesters]["issuable"])
+	require.Equal(t, false, devGates["dashboard"]["engineOwned"])
+	require.Equal(t, true, devGates["dashboard"]["issuable"])
+	require.Equal(t, true, w.gatesOn(operator, calls)[memql.AccessGateCallsTesters]["issuable"])
+
+	_, err := w.in.handleCreate(dev, w.createArgs(map[string]any{"siteId": calls, "gate": memql.AccessGateCallsTesters}), 0)
+	require.Equal(t, "Only the installation's owners can add tester codes, because they spend the simulated-payment budget the whole installation shares.", requireSentence(t, err))
+	w.mint(dev, map[string]any{"siteId": calls, "gate": "dashboard"})
+
+	codeID, _ := w.mint(operator, map[string]any{"siteId": calls, "gate": memql.AccessGateCallsTesters, "label": "Dana"})
+	_, err = w.in.handleRegenerate(dev, map[string]any{"codeId": codeID}, 0)
+	require.Equal(t, "Only the installation's owners can regenerate a tester code.", requireSentence(t, err))
+	_, err = w.in.handleSetExpiry(dev, map[string]any{"codeId": codeID, "expiresAt": after(2 * time.Hour)}, 0)
+	require.Equal(t, "Only the installation's owners can change when a tester code expires.", requireSentence(t, err))
+	// Removing one takes access away, so anybody who may manage the deployable's codes may.
+	_, err = w.in.handleRemove(dev, map[string]any{"codeId": codeID}, 0)
+	require.NoError(t, err)
+}

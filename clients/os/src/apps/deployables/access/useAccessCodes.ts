@@ -75,13 +75,20 @@ export function accessCodesFromRows(rows: readonly Row[]): AccessCodeRow[] {
 export interface AccessGateRow {
   gate: string;
   usesSubject: boolean;
+  /** The engine's own calls-testers gate: it opens no session, so it has no guest pass and its
+   * codes have no last-opened. */
+  engineOwned: boolean;
+  /** Whether the person asking may add, regenerate and re-time this gate's codes. An engine
+   * that does not say leaves every gate issuable, as before. */
+  issuable: boolean;
 }
 
 function accessGateFromRow(row: Row): AccessGateRow {
   // READ AS TEXT TOO, `packages/calls.ts`'s reading of a flag on a builtin's row,
   // which is how a scalar boolean has reached this client.
-  const uses = row["usesSubject"];
-  return { gate: rowString(row, "gate"), usesSubject: uses === true || uses === "true" };
+  const flag = (name: string): boolean => row[name] === true || row[name] === "true";
+  const issuable = row["issuable"] === undefined || row["issuable"] === null ? true : flag("issuable");
+  return { gate: rowString(row, "gate"), usesSubject: flag("usesSubject"), engineOwned: flag("engineOwned"), issuable };
 }
 
 /** The code as a person receives it, once. Never a row. */

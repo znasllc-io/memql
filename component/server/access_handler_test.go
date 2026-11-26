@@ -657,6 +657,15 @@ func TestUnlockInvalidIsOneAnswer(t *testing.T) {
 			r.store.codes[accessTestCodeID].Revoked = true
 			r.store.codes[accessTestCodeID].ExpiresAt = accessT0.Add(-time.Hour)
 		}},
+		// THE ENGINE'S OWN GATE OPENS NO SESSION: a tester code is typed into the calls
+		// service with each simulated result, and this route answers it as a stranger's.
+		"a tester code": {arrange: func(r *accessRig) {
+			r.store.codes[accessTestCodeID].Gate = memql.AccessGateCallsTesters
+		}},
+		"a tester code past its expiry": {arrange: func(r *accessRig) {
+			r.store.codes[accessTestCodeID].Gate = memql.AccessGateCallsTesters
+			r.store.codes[accessTestCodeID].ExpiresAt = accessT0.Add(-time.Hour)
+		}},
 		"no code at all":      {body: `{}`},
 		"a blank code":        {body: `{"code":"   "}`},
 		"not a string":        {body: `{"code":12345}`},

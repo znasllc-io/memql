@@ -45,7 +45,7 @@ import (
 // with the site's own ownerUserId once a digest has found a row and before anything is
 // delivered, and THAT IS WHAT CHECKS THE OWNER.
 // These reads answer for anybody who reaches them, which is why they are @serverOnly and
-// why a caller outside this package holds only the eight functions below. A test persona
+// why a caller outside this package holds only the nine functions below. A test persona
 // is judged under the caller, at the reads above, and only asked after that whether its
 // session is still live: see asCluster.
 //

@@ -1649,9 +1649,11 @@ never only by the client, and it is never stored or logged.
 A tester code is an ordinary [access code](site-access-codes.md) for the
 engine-owned gate `calls-testers`, which every site with calls turned on offers,
 package or not, ([the calls-testers gate](site-access-codes.md#the-calls-testers-gate)).
-An operator adds one per tester in MemQL OS (Deployables, the deployable, Access
-codes), names it after them and picks its expiry. Regenerate, Change expiry and
-Remove work as for any code and count from the next request, with no restart.
+A cluster owner adds one per tester in MemQL OS (Deployables, the deployable, Access
+codes), names it after them and picks its expiry; only cluster owners add,
+regenerate or re-time tester codes, since they spend the simulated-payment budget
+the whole installation shares. Regenerate, Change expiry and Remove count from the
+next request, with no restart.
 The bff normalizes what was typed exactly as the access route does. Until a code
 exists every gated result is refused; backing out still works.
 

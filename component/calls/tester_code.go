@@ -6,9 +6,9 @@ import "time"
 // needs a tester's access code for the site's calls-testers gate; backing out
 // never does.
 const (
-	// ReasonTesterAccessUnavailable: this site cannot hold tester codes (no package
-	// deployable), so every gated simulated result is refused. Nothing is applied or
-	// counted.
+	// ReasonTesterAccessUnavailable: this site cannot hold tester codes (calls are
+	// off for it, or it is gone), so every gated simulated result is refused. Nothing is
+	// applied or counted.
 	ReasonTesterAccessUnavailable = "tester_access_unavailable"
 	// ReasonTesterCodeRequired: a gated simulated result arrived without a code.
 	ReasonTesterCodeRequired = "tester_code_required"
