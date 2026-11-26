@@ -1432,8 +1432,8 @@ current decision. A pass remains visible until expiry even when exhausted.
 Simulated credit only comes from a payment result in the purchase-first
 commerce lifecycle (see
 [Purchase-first adult verification](#purchase-first-adult-verification-and-provider-test-modes)):
-a simulated checkout applied with the installation's tester password in `mock`
-mode, or a provider test payment in `sandbox`. The earlier direct
+a simulated checkout applied with a tester's access code in `mock` mode, or a
+provider test payment in `sandbox`. The earlier direct
 `simulate_topup` action is retired: it is refused with `checkout_required` in
 every configuration, and existing simulated balances and receipts remain.
 
@@ -1634,51 +1634,50 @@ endpoint for `checkout_begin`, `checkout_refresh`, `verification_begin` and
 `verification_refresh`. Local-only outcome operations are rejected in sandbox.
 A browser redirect only resumes the interface: provider reads determine results.
 
-### Simulated results and the tester password
+### Simulated results and tester codes
 
 In `mock` mode a simulated provider page is replaced by two account actions:
 `mock_checkout_complete` (`paid`, `declined`, `requires_action`, `pending`,
 `cancelled`) and `mock_verification_complete` (`approved`, `underage`,
 `declined`, `in_review`, `abandoned`, `expired`), each with the operation's
-`operationId` and an `outcome`. Every result except backing out needs the
-installation's tester password in `testerPassword` (at most 64 bytes): backing
-out, a `cancelled` checkout or an `abandoned` age check, is always allowed, as
-leaving Stripe's or Didit's own page is, and must not carry a password. The
-password is checked by the bff, never only by the client. It is never stored,
-digested or logged.
+`operationId` and an `outcome`. Every result except backing out needs a tester's
+access code in `testerCode` (at most 64 bytes): backing out, a `cancelled`
+checkout or an `abandoned` age check, is always allowed, as leaving Stripe's or
+Didit's own page is, and must not carry a code. The code is checked by the bff,
+never only by the client, and it is never stored or logged.
+
+A tester code is an ordinary [access code](site-access-codes.md) for the
+engine-owned gate `calls-testers`, which every package-deployed site with calls
+turned on offers ([the calls-testers gate](site-access-codes.md#the-calls-testers-gate)).
+An operator adds one per tester in MemQL OS (Deployables, the deployable, Access
+codes), names it after them and picks its expiry. Regenerate, Change expiry and
+Remove work as for any code and count from the next request, with no restart.
+The bff normalizes what was typed exactly as the access route does. Until a code
+exists every gated result is refused; backing out still works.
 
 | Refusal | HTTP | Meaning |
 | --- | --- | --- |
-| `tester_access_unavailable` | 403 | No valid hash is configured, so every gated result is refused. Nothing is applied or counted. |
-| `tester_password_required` | 400 | The gated result carried no password. Not counted. |
-| `tester_password_incorrect` | 403 | Wrong password; the reply's `attemptsLeft` (4 to 1) says how many remain. |
-| `tester_password_paused` | 429 | The fifth wrong password within 15 minutes paused this account's simulated results for 15 minutes from that fifth; `retryAfterMs` and `Retry-After` say when. A correct password is refused too while paused. |
+| `tester_access_unavailable` | 403 | The site cannot hold codes (no package deployable), so every gated result is refused. Nothing is applied or counted. |
+| `tester_code_required` | 400 | The gated result carried no code. Not counted. |
+| `tester_code_incorrect` | 403 | Not a live `calls-testers` code of this site: unknown, removed, replaced by a regenerate, another gate's or another site's. The reply's `attemptsLeft` (4 to 1) says how many tries remain. |
+| `tester_code_expired` | 403 | Exactly a tester code of this site, past its expiry. Not counted, since only its holder can learn this; Change expiry revives it. |
+| `tester_code_paused` | 429 | The fifth wrong code within 15 minutes paused this account's simulated results for 15 minutes from that fifth; `retryAfterMs` and `Retry-After` say when. A live code is refused too while paused. |
 
-The count is per account, kept in its commerce state, so replicas and restarts
-share it; there is no installation-wide limit, so a stranger cannot lock every
-tester out. The per-address account budget at the edge stays in front of it, and
-answers its own 429 with reason `rate`. A correct password clears the count and
-applies the result under the unchanged rules: a repeated `paid` credits once.
-In `sandbox` the actions are refused with `simulation_disabled` before any
-password is looked at.
+A failed lookup applies nothing, counts nothing and can be retried. The count is
+per account, kept in its commerce state, so replicas and restarts share it; there
+is no installation-wide limit, so a stranger cannot lock every tester out. The
+per-address account budget at the edge stays in front of it, and answers its own
+429 with reason `rate`. A live code clears the count and applies the result under
+the unchanged rules: a repeated `paid` credits once. In `sandbox` the actions are
+refused with `simulation_disabled` before any code is looked at.
 
 Two other effects change in `mock` mode only. A pending simulated checkout holds
 no verification slot or fulfillment liability, since only a tester's result can
-finish it; a password-checked `paid` checks the room instead and is refused with
+finish it; a code-checked `paid` checks the room instead and is refused with
 `business_reserve` or `verification_capacity`, crediting nothing, when there is
 none. And automatic top-ups are refused with `automatic_topup_unavailable`,
-because nobody is present to type the password (see
+because nobody is present to type a code (see
 [agent top-ups](#agent-authority-and-utcp)).
-
-Make a password with `go run ./cmd/memql-calls-tester-password
---password-file=PATH --hash-file=PATH`. It writes a generated 100-bit password
-(four groups of five characters) and its hash line to two new 0600 files and
-prints neither. Store the hash line as `MEMQL_CALLS_TESTER_PASSWORD_HASH` on the
-bff, keep the password where operators look it up, give it to testers directly,
-and delete both files. The bff reads the value only when it starts. To rotate,
-make a new pair, replace the value and restart the bff: the old password stops
-working at once. The hash is a salted SHA-256 of a generated secret, so a leaked
-hash reveals nothing usable; the helper refuses chosen passwords.
 
 Before an initial checkout, the visitor declares adulthood and accepts the
 verification disclosure. A server check reserves verification capacity for up to
@@ -1738,10 +1737,8 @@ or supply `Service.SetCommerceConfig` from an installed operator controller:
 | `MAX_OPEN_CALLS` | Simultaneously open room ceiling. |
 | `MAX_PARTICIPANTS` | Total configured participant capacity committed to open rooms. |
 
-`MEMQL_CALLS_TESTER_PASSWORD_HASH` is deliberately outside this envelope: it
-gates simulated results in `mock` mode, refreshing the envelope never rotates
-it, and a missing or malformed value refuses every gated result without closing
-the envelope.
+Tester codes are deliberately outside this envelope: they are access codes
+managed in MemQL OS, and refreshing the envelope never touches them.
 
 The server requires all values in mock and sandbox modes. Values are not a
 profit forecast or proof of hardware capacity. The global PostgreSQL gate spans
@@ -1818,18 +1815,11 @@ validity window. The site's `simulatedFunding` and `callConfiguration` policies
 must already be enabled. The helper does not enlarge or reduce existing site
 limits; a configuration above the global or physical capacity is refused.
 
-Install a tester password on the same cluster without touching the envelope:
-
-```bash
-go run ./cmd/memql-calls-tester-password --password-file="$HOME/.memql/calls-tester-password" --hash-file="$HOME/.memql/calls-tester-password.hash"
-bash scripts/k3d/calls-mock.sh --cluster=memql --namespace=memql --tester-password-hash-file="$HOME/.memql/calls-tester-password.hash" --apply
-```
-
-The option changes only `MEMQL_CALLS_TESTER_PASSWORD_HASH`, with the same
-context, version and preservation guards, refuses combination with
-`--valid-days` or `--family`, and reports the key without its value. Restart the
-bff replicas afterwards. Until a hash is installed, the local simulation refuses
-every gated result.
+To apply simulated results locally, add a tester code for the site in the local
+MemQL OS (Deployables, the deployable, Access codes, Add, Unlocks
+`calls-testers`). The site must be a package deployable with calls turned on. No
+restart is needed; until a code exists, the local simulation refuses every gated
+result.
 
 On an HTTPS calls site, local checkout and verification controls use the same
 origin account endpoint. They need neither external hosted URLs nor provider

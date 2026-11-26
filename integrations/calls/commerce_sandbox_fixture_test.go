@@ -73,8 +73,8 @@ func (f *commerceFakePayments) chargeCount() int {
 }
 
 // commerceSandboxFixture is commerceFixture in sandbox mode with fake provider
-// adapters. The tester password stays configured, as it may be on a real
-// installation moving from mock to sandbox, and must change nothing there.
+// adapters. Tester codes stay answerable, as they may on a real installation
+// moving from mock to sandbox, and must change nothing there.
 func commerceSandboxFixture(t *testing.T, name string) (*callWorld, accountTestKey, *CommerceConfig, *commerceFakePayments) {
 	t.Helper()
 	cw, k, c := commerceFixture(t, name)

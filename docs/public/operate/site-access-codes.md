@@ -450,6 +450,18 @@ repaired by deploying it again.
 This stops one product's code reaching another's operations by accident. It is
 not a defense against a hostile author: DSL is already cluster-wide authority.
 
+### The calls-testers gate
+
+One gate is the engine's own. A package-deployed site with calls turned on (the
+site's `calls` field) offers `calls-testers` beside the gates its package
+declares, so a calls product needs no DSL for it. A code for it opens no
+construct through `/_memql/access/call`; the calls service reads it when a tester
+applies a simulated payment or age result in `mock` commerce mode
+([calls.md](calls.md#simulated-results-and-tester-codes)), one code typed with
+each result. The name is reserved: loading `@accessGate(gate="calls-testers")` is
+refused. A guest pass on it is refused too, since no typed code ever finds a guest
+pass. Turning calls off withdraws the gate, and its codes then open nothing.
+
 ---
 
 ## Guest access

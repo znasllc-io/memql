@@ -82,7 +82,7 @@ tags     = ["memql", "credential", "bearer-token"]
 # have now tried the second thing (memql#3484).
 
 [[allowlists]]
-description = "Calls tester password fixtures (2026-11-25): the 32-character alphabet constant of the tester password generator (integrations/calls/tester_password.go), the test-only password and a fragment of its fixed test hash line. None is an installation's tester password: an operator generates one with cmd/memql-calls-tester-password and stores only its salted hash. Match only these exact fixture bytes."
+description = "Retired calls tester password fixtures (2026-11-25), still in this repository's history: the alphabet constant of the retired generator (integrations/calls/tester_password.go), the test-only password and a fragment of its fixed test hash line. Access codes for the calls-testers gate replaced the password before it was released, and none of these was ever an installation's password. Match only these exact fixture bytes."
 regexTarget = "secret"
 regexes = ['''^ABCDEFGHJKLMNPQRSTUVWXYZ23456789$''', '''^TQ7ZK-M4WHX-CR8NE-P3VJB$''', '''^H82ui-STcfwRoIkZ4dzTUem4$''']
 

@@ -14,10 +14,9 @@ import (
 )
 
 func TestCallsMockLocalGuardAndAtomicPreservation(t *testing.T) {
-	const testerHash = "v1$AQIDBAUGBwgJCgsMDQ4PEA$H82ui-STcfwRoIkZ4dzTUem4-2MysKX6WGEbuQtCmhY"
 	for _, tc := range []struct {
-		name, context, mode, days, family, tester string
-		apply, conflict, refused                  bool
+		name, context, mode, days, family string
+		apply, conflict, refused          bool
 	}{
 		{name: "preview", context: "k3d-memql"},
 		{name: "apply", context: "k3d-memql", apply: true},
@@ -33,13 +32,6 @@ func TestCallsMockLocalGuardAndAtomicPreservation(t *testing.T) {
 		{name: "family-rejects-live", context: "k3d-memql", mode: "bW9jaw==", family: "live", apply: true, refused: true},
 		{name: "family-cannot-renew-envelope", context: "k3d-memql", mode: "bW9jaw==", family: "mock", days: "30", apply: true, refused: true},
 		{name: "family-concurrent-change", context: "k3d-memql", mode: "bW9jaw==", family: "mock", apply: true, conflict: true, refused: true},
-		{name: "tester-preview", context: "k3d-memql", mode: "bW9jaw==", tester: testerHash},
-		{name: "tester-hash-only", context: "k3d-memql", mode: "bW9jaw==", tester: testerHash, apply: true},
-		{name: "tester-malformed-refused", context: "k3d-memql", mode: "bW9jaw==", tester: "not-a-hash", apply: true, refused: true},
-		{name: "tester-missing-file-refused", context: "k3d-memql", mode: "bW9jaw==", tester: "@missing", apply: true, refused: true},
-		{name: "tester-not-with-envelope", context: "k3d-memql", mode: "bW9jaw==", tester: testerHash, days: "30", apply: true, refused: true},
-		{name: "tester-not-with-family", context: "k3d-memql", mode: "bW9jaw==", tester: testerHash, family: "mock", apply: true, refused: true},
-		{name: "tester-sandbox-refused", context: "k3d-memql", mode: "c2FuZGJveA==", tester: testerHash, apply: true, refused: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -72,13 +64,6 @@ printf 'unexpected kubectl operation\n' >&2; exit 91
 			if tc.family != "" {
 				args = append(args, "--family="+tc.family)
 			}
-			if tc.tester != "" {
-				hashPath := filepath.Join(dir, "tester.hash")
-				if tc.tester != "@missing" {
-					require.NoError(t, os.WriteFile(hashPath, []byte(tc.tester+"\n"), 0o600))
-				}
-				args = append(args, "--tester-password-hash-file="+hashPath)
-			}
 			cmd := exec.Command("bash", args...)
 			conflict := "false"
 			if tc.conflict {
@@ -88,9 +73,6 @@ printf 'unexpected kubectl operation\n' >&2; exit 91
 			var stdout, stderr bytes.Buffer
 			cmd.Stdout, cmd.Stderr = &stdout, &stderr
 			err := cmd.Run()
-			if tc.tester != "" {
-				require.NotContains(t, stdout.String()+stderr.String(), testerHash, "the hash is never printed")
-			}
 			if tc.refused {
 				require.Error(t, err, stdout.String()+stderr.String())
 			} else {
@@ -112,9 +94,7 @@ printf 'unexpected kubectl operation\n' >&2; exit 91
 			require.NoError(t, json.Unmarshal(patch, &doc))
 			require.Equal(t, "7", doc.Metadata.ResourceVersion)
 			require.Equal(t, "Prune=false,Delete=false", doc.Metadata.Annotations["argocd.argoproj.io/sync-options"])
-			if tc.tester != "" {
-				require.Equal(t, map[string]string{"MEMQL_CALLS_TESTER_PASSWORD_HASH": testerHash}, doc.StringData, "installing the hash must not reset or renew the commerce envelope")
-			} else if tc.family != "" {
+			if tc.family != "" {
 				require.Equal(t, map[string]string{"MEMQL_CALLS_FAMILY_MODE": tc.family}, doc.StringData, "family changes must not reset or renew the commerce envelope")
 			} else {
 				require.Equal(t, "mock", doc.StringData["MEMQL_CALLS_COMMERCE_MODE"])

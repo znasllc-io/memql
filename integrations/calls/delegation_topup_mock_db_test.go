@@ -9,7 +9,7 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 )
 
-// An agent's automatic top-up has nobody present to type the tester password,
+// An agent's automatic top-up has nobody present to type a tester code,
 // so while payments are simulated it must never fabricate a paid payment.
 func TestDelegationMockTopupRefusedWithoutReservation(t *testing.T) {
 	cw, k, _ := commerceFixture(t, "delegation-mock-topup")
