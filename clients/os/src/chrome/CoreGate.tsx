@@ -287,12 +287,12 @@ export function CoreGate({ onSignOut, children, waitForReadiness = true }: {
  * two different kinds of problem, which is the argument `.os-setup` already
  * makes about mirroring `.os-rank-refused`.
  *
- * THE HEAD AND THE SENTENCE DO NOT REPEAT EACH OTHER. The record states the
- * whole thing as one sentence -- "MemQL is not set up yet. An owner or
- * developer has to set up inference before anyone can use it." -- and printing
- * that under a headline saying the first half is rule 7 broken. So the
- * headline IS the first half and the paragraph is the rest; together they are
- * the record's sentence and neither says anything twice.
+ * THE HEAD SAYS WHAT IS WRONG, THE SENTENCE SAYS WHAT TO DO. The owner asked
+ * that this page tell the person to contact their admin (call of 2026-11-25,
+ * 2:39); Jesús chose the words on 2026-11-25. Until then it carried 0.31.40's
+ * "An owner or developer has to set up inference before anyone can use it.",
+ * which said what had to happen but not who the person should ask. The
+ * headline and the sentence do not repeat each other (rule 7).
  *
  * IT DOES NOT NAME THE OWNER. A person's name is not the cluster's to publish,
  * and the sentence is exactly as actionable without one.
@@ -315,7 +315,7 @@ function ToldVariant({ onSignOut }: { onSignOut: () => void }) {
         </span>
         <h1 className="os-core-gate-head">MemQL is not set up yet</h1>
         <p className="os-core-gate-body">
-          An owner or developer has to set up inference before anyone can use it.
+          Ask your admin to finish setting up MemQL.
         </p>
         <p className="os-core-gate-note">This page opens by itself once they have.</p>
         <div className="os-core-gate-out">

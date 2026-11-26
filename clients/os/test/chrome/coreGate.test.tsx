@@ -50,7 +50,7 @@ const GATE = <DesktopAccessScope><CoreGate onSignOut={() => {}}>{DESK}</CoreGate
 
 /** What everybody but an owner or developer gets while the cluster is not set up. */
 const NOT_SET_UP = "MemQL is not set up yet";
-const NOT_SET_UP_SENTENCE = "An owner or developer has to set up inference before anyone can use it.";
+const NOT_SET_UP_SENTENCE = "Ask your admin to finish setting up MemQL.";
 /** The page release 0.31.41 drew in place of the desk for a person with no model access. It is gone. */
 const REMOVED_PAGE = "Your access is not set up yet";
 

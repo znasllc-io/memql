@@ -118,11 +118,12 @@ the work could be finished. Any of them can be overruled.
    reads**, `ai` = `unconfigured`. No new readiness check was built. See
    [what the verdict checks](#what-cluster-not-set-up-checks): it is more than
    "no embedding model".
-5. **The page is the one release 0.31.40 had**, with its words: "MemQL is not
-   set up yet", "An owner or developer has to set up inference before anyone
-   can use it.", "This page opens by itself once they have.", and Sign out. No
-   new screen was designed. The page does not say "contact your admin" in those
-   words.
+5. **The page is the one release 0.31.40 had**, with one sentence changed:
+   "MemQL is not set up yet", "Ask your admin to finish setting up MemQL.",
+   "This page opens by itself once they have.", and Sign out. No new screen was
+   designed. 0.31.40's sentence ("An owner or developer has to set up inference
+   before anyone can use it.") did not tell the person who to ask, which the
+   owner's words did; Jesús chose the new sentence on 2026-11-25.
 6. **The page shows no reference**, and offers no "Add an API key". Whether the
    `ERR-` reference and its Logs line are wanted on this page is the owner's to
    say.

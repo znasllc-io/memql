@@ -76,8 +76,7 @@ Anybody who is not an owner or developer of the cluster sees one page in place
 of the desk while the cluster cannot reach a model:
 
 - the title, *MemQL is not set up yet*;
-- one sentence: *An owner or developer has to set up inference before anyone
-  can use it.*;
+- one sentence: *Ask your admin to finish setting up MemQL.*;
 - *This page opens by itself once they have*;
 - Sign out.
 
