@@ -108,8 +108,9 @@ Owner only today, and inside "almost everything an owner does" unless José coun
   another person's pipeline; the GitHub App registration; row-ownership transfer.
 - Client data in the Shopify mirror and commerce concepts (orders, customers, products, payouts), custom domains,
   front doors, secrets, campaign and call operations: all `clusterOwner` rows a developer reads nothing of.
-- Files: an owner reads every person's files; a developer reads only their own. Whether the tree should let a
-  developer read the files of people ranked below them was not said on the call.
+- Files: settled by Jesús (Nov 25): a developer does NOT open the files of people ranked below them, and sees and
+  stops their SHARES (`librarySharesOverseen`: shares by people strictly below the caller). That is what the code
+  already does, so nothing changes.
 
 ## Tests
 

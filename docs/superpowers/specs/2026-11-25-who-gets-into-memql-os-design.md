@@ -104,7 +104,8 @@ the work could be finished. Any of them can be overruled.
 
 1. **Ask is gone, not disabled.** His first and repeated wording was "you don't
    even get the Ask app" and "the Ask button itself should be gone". "Or we
-   completely disable it" was offered once as an alternative.
+   completely disable it" was offered once as an alternative. Confirmed by
+   Jesús on 2026-11-25: gone.
 2. **"No inference access" is the engine's existing answer.** A person has no
    inference access when `desktopAccess` finds no source of any kind for them.
    A source that is asleep or out of credit counts as set up, so Ask stays,
