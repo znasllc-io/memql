@@ -25,8 +25,9 @@ import (
 // group whose organization is the role's scope.
 
 // scopedCatalog is the five seeded rungs plus `org-moderator`, scoped to
-// organization `org-a`. The owner holds every principal verb and admission, so
-// the outer gates and the capability half of MayAssignRole admit it and the
+// organization `org-a`. The owner and the developer (from 2026-11-25, design
+// record developer access) hold every principal verb and admission, so the
+// outer gates and the capability half of MayAssignRole admit them and the
 // membership clause is what decides.
 type scopedCatalog struct{}
 
@@ -39,7 +40,7 @@ var scopedRanks = map[string]int{
 func (scopedCatalog) Rank(slug string) (int, bool) { r, ok := scopedRanks[slug]; return r, ok }
 func (scopedCatalog) Name(slug string) string      { return slug }
 func (scopedCatalog) Holds(slug, verb, resource string) bool {
-	if slug != "owner" {
+	if slug != "owner" && slug != "developer" {
 		return false
 	}
 	return resource == auth.ResourcePrincipal || (resource == auth.ResourceAdmission && verb == auth.VerbCreate)
@@ -263,6 +264,44 @@ func TestAnInvitationNamesAScopedRoleOnlyWithAGroupOfItsOrganization(t *testing.
 			}
 			if refusedForMembership(audit) || res.Code == CodePermissionDenied {
 				t.Fatalf("%s: refused: code=%d %q (audit %+v)", tc.name, res.Code, res.ErrorMessage, audit.events)
+			}
+		})
+	}
+}
+
+// A DEVELOPER INVITES A CLIENT INTO THEIR ORGANIZATION (design record
+// 2026-11-25, developer access): Jesús inviting Carlos as the Fylo
+// organization's moderator, carrying the Fylo group, without the owner. And
+// the same rules hold for them as for the owner: no group of the organization,
+// no invitation.
+func TestADeveloperInvitesAClientIntoTheirOrganization(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		groups  []map[string]any
+		carries []string
+		refused bool
+	}{
+		{name: "carrying the organization's group",
+			groups: []map[string]any{group("acct-org-a", "org-a", "account", "active")}, carries: []string{"acct-org-a"}},
+		{name: "carrying no group", refused: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			installScopedCatalog(t)
+			eng := &membershipEngine{groups: tc.groups}
+			svc, audit := newMembershipService(t, eng)
+
+			res := svc.IssueUserInvitation(ctxAs(auth.RoleDeveloper), UserInvitation{
+				Email: "carlos@example.test", Role: "org-moderator", GroupIds: tc.carries,
+			})
+
+			if tc.refused {
+				if res.Code != CodePermissionDenied || !refusedForMembership(audit) {
+					t.Fatalf("got code=%d %q, want a membership refusal", res.Code, res.ErrorMessage)
+				}
+				return
+			}
+			if res.Code == CodePermissionDenied || refusedForMembership(audit) {
+				t.Fatalf("a developer was refused: code=%d %q (audit %+v)", res.Code, res.ErrorMessage, audit.events)
 			}
 		})
 	}
