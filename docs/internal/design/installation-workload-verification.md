@@ -58,6 +58,17 @@ the omitted default of one. A live scale-to-zero or changed completion target
 cannot redefine that intention. An explicitly rendered zero-replica target
 remains valid. CloudNativePG requires an explicit rendered instance count.
 
+A DaemonSet has no rendered target: its count is the controller's placement,
+read from status once the controller has observed the current generation, and
+zero is valid. An autoscaled pool with no node left has nothing to run, so no
+Pod can run an unapproved image, and its template was already compared with
+the render. Production's build pool scales to zero between builds; until this
+rule (2026-11-25) its buildkit DaemonSet refused every completion made while
+the pool was empty. A selector that matches no node by mistake also passes:
+the observation proves which images run, not that every DaemonSet has a node.
+Unwritten status, a stale observed generation and any owned Pod left behind
+still refuse.
+
 The codec lists the complete bounded namespace collections, without a label
 filter. Pagination, duplicate identities, missing identities and malformed
 inventories refuse. Exact controller owner references identify Pods and a
@@ -122,7 +133,10 @@ reads and the native Argo render codec. They cover all eight admitted workload
 kinds, multi-platform index/manifest runtime IDs bound to an assigned Node,
 tag-and-digest pins on every kind with retagged Pods and unverified runtime
 digests refused (`TestWorkloadsObserveTagAndDigestImages`,
-`TestWorkloadsRefuseTaggedImageSubstitution`), changed ownership and configuration,
+`TestWorkloadsRefuseTaggedImageSubstitution`), a DaemonSet on an empty node
+pool accepted while its unsettled forms refuse
+(`TestWorkloadsAcceptDaemonSetOnEmptyNodePool`,
+`TestWorkloadsRefuseUnsettledEmptyDaemonSet`), changed ownership and configuration,
 missing/extra Pods and containers, concurrent resource changes, stale evidence,
 and recovery in a fresh host. Host tests run both the installed recipe and an
 alternate composition, and verify that caller inputs, unbound operations or
