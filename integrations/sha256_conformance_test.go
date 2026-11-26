@@ -50,6 +50,7 @@ func TestNoSHA256InIntegrations(t *testing.T) {
 		"calls/providers/providers_test.go":      "independently constructs provider HMAC-SHA256 webhook fixtures to test signature, replay and payload verification",
 		"calls/commerce_webhook_test.go":         "constructs Stripe/Didit protocol signatures for native commerce webhook integration tests",
 		"calls/account_authenticator_test.go":    "software authenticator emits the WebAuthn protocol's exact SHA-256 RP ID, client data and ES256 signature digests; these are wire bytes, not row identities",
+		"calls/tester_password.go":               "checks the tester password against the operator's stored v1 hash line, a salted SHA-256 verifier that cmd/memql-calls-tester-password writes and MEMQL_CALLS_TESTER_PASSWORD_HASH carries; a credential check, not a row identity or cache key, so core/id does not apply",
 		"release/installation_overlay.go":        "BeforeSHA256 is the bounded GitHub branch writer's exact standard SHA-256 checksum of existing file bytes; request IDs and configuration fingerprints use core/id separately",
 		"workbench/export.go":                    "streams the standard SHA-256 file checksum required by verified storage and v1:library:file.sha256; receipt identities use core/id separately",
 		"workbench/export_test.go":               "independently verifies the exported binary bytes against their standard SHA-256 checksum",
