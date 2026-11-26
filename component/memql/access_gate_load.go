@@ -69,6 +69,10 @@ func checkAccessGateNames(deployable, gate string) error {
 		return fmt.Errorf("@accessGate gate=%q is not a gate name: write 1 to 40 lowercase letters, "+
 			"digits or hyphens, starting with a letter (for example \"dashboard\")", gate)
 	}
+	if gate == AccessGateCallsTesters {
+		return fmt.Errorf("@accessGate gate=%q is reserved for the engine's calls feature, which declares it "+
+			"on every calls deployable: choose another gate name", gate)
+	}
 	return nil
 }
 

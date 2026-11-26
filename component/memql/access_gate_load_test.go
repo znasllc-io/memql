@@ -1341,3 +1341,17 @@ func TestAccessGuestIsStampedOnAQueryAndAMutation(t *testing.T) {
 		})
 	}
 }
+
+// TestAccessGateCallsTestersIsReserved: calls-testers is the engine's own gate, which
+// the calls feature declares on a calls deployable, so no DSL construct may claim it.
+func TestAccessGateCallsTestersIsReserved(t *testing.T) {
+	fn := gatedFunction("deskBriefs", "query", "x", "y")
+	fn.AccessGate = &AccessGateDecl{Deployable: "callkey", Gate: AccessGateCallsTesters}
+	if _, err := accessGateEntryFromFunction(fn); err == nil || !strings.Contains(err.Error(), "reserved") {
+		t.Fatalf("a DSL gate named %q was accepted, or refused for another reason: %v", AccessGateCallsTesters, err)
+	}
+	fn.AccessGate = &AccessGateDecl{Deployable: "callkey", Gate: "testers"}
+	if _, err := accessGateEntryFromFunction(fn); err != nil {
+		t.Fatalf("an ordinary gate name was refused: %v", err)
+	}
+}

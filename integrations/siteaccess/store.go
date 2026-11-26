@@ -371,6 +371,9 @@ type siteView struct {
 	PackageID      string
 	DeployableName string
 	SystemOwned    bool
+	// Calls is the site's calls field: a calls deployable offers the engine's
+	// calls-testers gate beside the gates its package declares.
+	Calls bool
 	// Version is the row's createdAt, the time of its latest write: the witness a
 	// mint carries, so a site that moved to another organization since this read
 	// cannot end up with a code copying the one it left (D15).
@@ -432,6 +435,7 @@ func (s *GraphStore) siteForCaller(ctx context.Context, siteID string) (siteView
 		PackageID:      memql.BareShortId(rowString(r, "packageId")),
 		DeployableName: strings.TrimSpace(rowString(r, "packageDeployableName")),
 		SystemOwned:    rowBool(r, "systemOwned"),
+		Calls:          rowBool(r, "calls"),
 		Version:        rowTime(r, "createdAt"),
 	}, true, nil
 }

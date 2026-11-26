@@ -210,6 +210,12 @@ func (e AccessGateEntry) clone() AccessGateEntry {
 	return e
 }
 
+// AccessGateCallsTesters is the engine's own gate. The calls feature declares it on
+// every package-deployed site with calls turned on, and only the calls service reads
+// it: a tester's code for simulated payment and age results. It opens no DSL
+// construct, and no DSL construct may claim the name.
+const AccessGateCallsTesters = "calls-testers"
+
 // AccessGateSummary is what the operator surface needs to know about one gate:
 // that it exists, which constructs it reaches, and whether a code for it can
 // carry a subject.

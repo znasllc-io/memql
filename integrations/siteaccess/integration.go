@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -283,6 +284,11 @@ func (i *Integration) handleGuestPassCreate(ctx context.Context, args map[string
 	actor, siteID, err := mintCaller(ctx, args, guestsInARun)
 	if err != nil {
 		return nil, err
+	}
+	// A GUEST PASS HAS NO CODE TO TYPE, and the testers gate opens only for a typed
+	// code, so a pass on it would promise everyone something it never opens.
+	if strings.TrimSpace(asString(args["gate"])) == memql.AccessGateCallsTesters {
+		return nil, refuse("Guests cannot open calls-testers. Add a code for each tester.")
 	}
 	var out minted
 	err = onceMore(func() (err error) {
@@ -857,7 +863,14 @@ func (i *Integration) gatesOf(ctx context.Context, site siteView) ([]memql.Acces
 	if err != nil {
 		return nil, err
 	}
-	return memql.AccessGatesFor(site.DeployableName, domains), nil
+	gates := memql.AccessGatesFor(site.DeployableName, domains)
+	// THE ENGINE'S OWN GATE: a calls deployable offers calls-testers whatever its
+	// package declares. It opens no construct; only the calls service reads its codes.
+	if site.Calls {
+		gates = append(gates, memql.AccessGateSummary{Gate: memql.AccessGateCallsTesters, Constructs: []string{}})
+		sort.Slice(gates, func(a, b int) bool { return gates[a].Gate < gates[b].Gate })
+	}
+	return gates, nil
 }
 
 // handleList answers every code of a site, ended ones included, without the code or
