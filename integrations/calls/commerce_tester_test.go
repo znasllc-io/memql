@@ -1,39 +1,64 @@
 package calls
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	callrules "github.com/znasllc-io/memql/component/calls"
 	"github.com/znasllc-io/memql/integrations/calls/providers"
+	"github.com/znasllc-io/memql/integrations/siteaccess"
 )
 
-// A fixed, test-only tester password and its hash line (salt 0x01..0x10). Never
-// configured on an installation.
+// Fixed, test-only tester codes in the access-code shape (the first is the example
+// in site-access-codes.md). Never minted on an installation: these tests stand in for
+// integrations/siteaccess with a table of verdicts.
 const (
-	testTesterPassword     = "TQ7ZK-M4WHX-CR8NE-P3VJB"
-	testTesterPasswordHash = "v1$AQIDBAUGBwgJCgsMDQ4PEA$H82ui-STcfwRoIkZ4dzTUem4-2MysKX6WGEbuQtCmhY"
+	testTesterCode        = "K7Q4M-2XPDN-8RT3V-WJ6HC-9FBZA"
+	testExpiredTesterCode = "M4WHX-CR8NE-P3VJB-TQ7ZK-2XPDN"
+	testerWrongCode       = "WRONG-WRONG-WRONG-WRONG-WRONG"
 )
 
-func testTesterHash(t *testing.T) *testerPasswordHash {
-	t.Helper()
-	h, ok := parseTesterPasswordHash(testTesterPasswordHash)
-	require.True(t, ok)
-	require.True(t, h.matches(testTesterPassword))
-	return h
+// fakeTesterCodes answers a fixed table of verdicts, so these tests decide the calls
+// side of the gate; integrations/siteaccess decides the verdict over real rows.
+type fakeTesterCodes struct {
+	verdicts map[string]siteaccess.TesterCodeVerdict
+	fallback siteaccess.TesterCodeVerdict
+	err      error
+	lookups  *atomic.Int32
 }
 
-func TestCommerceRequestTesterPasswordPlacement(t *testing.T) {
-	const pw = "K7QPM-3XWRT-9HNVA-ZD4ME"
-	result := func(action, outcome, password string) callrules.AccountRequest {
-		return callrules.AccountRequest{Action: action, AccountID: "account-1", OperationID: "operation-1", Outcome: outcome, TesterPassword: password}
+func (f fakeTesterCodes) TesterCode(_ context.Context, _, typed string, _ time.Time) (siteaccess.TesterCodeVerdict, error) {
+	if f.lookups != nil {
+		f.lookups.Add(1)
 	}
-	begin := func(action, password string) callrules.AccountRequest {
-		r := callrules.AccountRequest{Action: action, AccountID: "account-1", IdempotencyKey: "tester-password-0001", AdultDeclared: true, TermsAccepted: true, TesterPassword: password}
+	if f.err != nil {
+		return siteaccess.TesterCodeUnknown, f.err
+	}
+	if v, ok := f.verdicts[typed]; ok {
+		return v, nil
+	}
+	return f.fallback, nil
+}
+
+func testTesterCodes() fakeTesterCodes {
+	return fakeTesterCodes{verdicts: map[string]siteaccess.TesterCodeVerdict{
+		testTesterCode: siteaccess.TesterCodeLive, testExpiredTesterCode: siteaccess.TesterCodeExpired,
+	}}
+}
+
+func TestCommerceRequestTesterCodePlacement(t *testing.T) {
+	const pw = testTesterCode
+	result := func(action, outcome, code string) callrules.AccountRequest {
+		return callrules.AccountRequest{Action: action, AccountID: "account-1", OperationID: "operation-1", Outcome: outcome, TesterCode: code}
+	}
+	begin := func(action, code string) callrules.AccountRequest {
+		r := callrules.AccountRequest{Action: action, AccountID: "account-1", IdempotencyKey: "tester-code-000001", AdultDeclared: true, TermsAccepted: true, TesterCode: code}
 		if action == "checkout_begin" {
 			r.AmountCents = 1000
 		}
@@ -62,8 +87,8 @@ func TestCommerceRequestTesterPasswordPlacement(t *testing.T) {
 		require.False(t, validCommerceRequest(begin(action, pw)), action)
 	}
 
-	require.False(t, validAccountRequest(callrules.AccountRequest{Action: "login_begin", TesterPassword: pw}))
-	require.False(t, validAccountRequest(callrules.AccountRequest{Action: "simulate_topup", AccountID: "account-1", AmountCents: 1000, IdempotencyKey: "tester-password-0002", TesterPassword: pw}))
+	require.False(t, validAccountRequest(callrules.AccountRequest{Action: "login_begin", TesterCode: pw}))
+	require.False(t, validAccountRequest(callrules.AccountRequest{Action: "simulate_topup", AccountID: "account-1", AmountCents: 1000, IdempotencyKey: "tester-code-000002", TesterCode: pw}))
 }
 
 func TestTesterFailuresCountDownThenPause(t *testing.T) {
@@ -129,56 +154,77 @@ func TestTesterBackOutOutcomes(t *testing.T) {
 }
 
 func TestTesterGateOrder(t *testing.T) {
+	ctx := context.Background()
 	now := time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC)
-	c := CommerceConfig{Mode: providers.Mock, TesterPassword: testTesterHash(t)}
-	req := func(outcome, password string) callrules.AccountRequest {
-		return callrules.AccountRequest{Action: "mock_checkout_complete", Outcome: outcome, TesterPassword: password}
+	var lookups atomic.Int32
+	codes := testTesterCodes()
+	codes.lookups = &lookups
+	req := func(outcome, code string) callrules.AccountRequest {
+		return callrules.AccountRequest{Action: "mock_checkout_complete", Outcome: outcome, TesterCode: code}
 	}
 	v := newCommerceState("site-1", "key-1", providers.Mock)
 
-	changed, err := testerGate(c, v, "checkout", req("cancelled", ""), now)
+	changed, err := testerGate(ctx, codes, "site-1", v, "checkout", req("cancelled", ""), now)
 	require.NoError(t, err)
 	require.False(t, changed)
 
-	changed, err = testerGate(CommerceConfig{Mode: providers.Mock}, v, "checkout", req("paid", testTesterPassword), now)
+	changed, err = testerGate(ctx, nil, "site-1", v, "checkout", req("paid", testTesterCode), now)
 	require.False(t, changed)
 	require.Equal(t, callrules.ReasonTesterAccessUnavailable, callrules.ReasonOf(err))
 	require.ErrorIs(t, err, callrules.ErrForbidden)
 
-	changed, err = testerGate(c, v, "checkout", req("paid", ""), now)
+	changed, err = testerGate(ctx, codes, "site-1", v, "checkout", req("paid", " "), now)
 	require.False(t, changed)
-	require.Equal(t, callrules.ReasonTesterPasswordRequired, callrules.ReasonOf(err))
+	require.Equal(t, callrules.ReasonTesterCodeRequired, callrules.ReasonOf(err))
 	require.ErrorIs(t, err, callrules.ErrInvalid)
+	require.Zero(t, lookups.Load(), "backing out and an empty code are decided without a lookup")
+
+	changed, err = testerGate(ctx, fakeTesterCodes{fallback: siteaccess.TesterCodeUnavailable}, "site-1", v, "checkout", req("paid", testTesterCode), now)
+	require.False(t, changed, "a site that cannot hold codes counts nothing")
+	require.Equal(t, callrules.ReasonTesterAccessUnavailable, callrules.ReasonOf(err))
+
+	changed, err = testerGate(ctx, codes, "site-1", v, "checkout", req("paid", testExpiredTesterCode), now)
+	require.False(t, changed, "an expired code is never counted")
+	require.Equal(t, callrules.ReasonTesterCodeExpired, callrules.ReasonOf(err))
+	require.ErrorIs(t, err, callrules.ErrForbidden)
+
+	changed, err = testerGate(ctx, fakeTesterCodes{err: errors.New("graph down")}, "site-1", v, "checkout", req("paid", testTesterCode), now)
+	require.Error(t, err)
+	require.False(t, changed)
+	require.Empty(t, callrules.ReasonOf(err), "a failed lookup is not a refusal of the code")
+	require.Empty(t, v.TesterFailures)
 
 	for want := 4; want >= 1; want-- {
-		changed, err = testerGate(c, v, "checkout", req("paid", "WRONG-WRONG-WRONG-WRONG"), now)
+		changed, err = testerGate(ctx, codes, "site-1", v, "checkout", req("paid", testerWrongCode), now)
 		require.True(t, changed)
-		var incorrect *callrules.TesterPasswordIncorrect
+		var incorrect *callrules.TesterCodeIncorrect
 		require.True(t, errors.As(err, &incorrect))
 		require.Equal(t, want, incorrect.AttemptsLeft)
 	}
-	changed, err = testerGate(c, v, "checkout", req("paid", "WRONG-WRONG-WRONG-WRONG"), now)
+	changed, err = testerGate(ctx, codes, "site-1", v, "checkout", req("paid", testerWrongCode), now)
 	require.True(t, changed)
-	var paused *callrules.TesterPasswordPaused
+	var paused *callrules.TesterCodePaused
 	require.True(t, errors.As(err, &paused))
 	require.Equal(t, 15*time.Minute, paused.RetryAfter)
 
-	// Paused refuses even the right password, so parallel requests cannot exceed
-	// the limit; backing out still works.
-	changed, err = testerGate(c, v, "checkout", req("paid", testTesterPassword), now.Add(time.Minute))
+	// Paused refuses even a live code, before any lookup, so parallel requests cannot
+	// exceed the limit; backing out still works.
+	before := lookups.Load()
+	changed, err = testerGate(ctx, codes, "site-1", v, "checkout", req("paid", testTesterCode), now.Add(time.Minute))
 	require.False(t, changed)
 	require.True(t, errors.As(err, &paused))
 	require.Equal(t, 14*time.Minute, paused.RetryAfter)
-	_, err = testerGate(c, v, "checkout", req("cancelled", ""), now.Add(time.Minute))
+	require.Equal(t, before, lookups.Load(), "a paused account is refused before any lookup")
+	_, err = testerGate(ctx, codes, "site-1", v, "checkout", req("cancelled", ""), now.Add(time.Minute))
 	require.NoError(t, err)
 
 	later := now.Add(15 * time.Minute)
-	changed, err = testerGate(c, v, "checkout", req("paid", " "+strings.ToLower(testTesterPassword)+"\n"), later)
+	changed, err = testerGate(ctx, codes, "site-1", v, "checkout", req("paid", testTesterCode), later)
 	require.NoError(t, err)
-	require.True(t, changed, "success clears the expired pause")
+	require.True(t, changed, "success clears the ended pause")
 	require.Empty(t, v.TesterFailures)
 	require.True(t, v.TesterPausedUntil.IsZero())
-	changed, err = testerGate(c, v, "checkout", req("paid", testTesterPassword), later)
+	changed, err = testerGate(ctx, codes, "site-1", v, "checkout", req("paid", testTesterCode), later)
 	require.NoError(t, err)
 	require.False(t, changed, "nothing to clear")
 }

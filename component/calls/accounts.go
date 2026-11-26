@@ -12,10 +12,10 @@ type AccountRequest struct {
 	ParticipationMode string         `json:"participationMode,omitempty"`
 	OperationID       string         `json:"operationId,omitempty"`
 	Outcome           string         `json:"outcome,omitempty"`
-	// TesterPassword applies a simulated payment or age result in mock commerce
-	// mode. Only the mock_*_complete actions carry it; it is never stored,
-	// digested or logged.
-	TesterPassword   string          `json:"testerPassword,omitempty"`
+	// TesterCode applies a simulated payment or age result in mock commerce mode:
+	// a tester's access code for the site's calls-testers gate. Only the
+	// mock_*_complete actions carry it; it is never stored or logged.
+	TesterCode       string          `json:"testerCode,omitempty"`
 	AdultDeclared    bool            `json:"adultDeclared,omitempty"`
 	TermsAccepted    bool            `json:"termsAccepted,omitempty"`
 	SaveMethod       bool            `json:"saveMethod,omitempty"`

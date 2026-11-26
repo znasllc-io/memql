@@ -49,7 +49,7 @@ type commerceState struct {
 	CustomerID           string                  `json:"customerId,omitempty"`
 	PaymentMethodID      string                  `json:"paymentMethodId,omitempty"`
 	Operations           []commerceOperation     `json:"operations"`
-	// TesterFailures are this account's wrong tester passwords in the current
+	// TesterFailures are this account's wrong tester codes in the current
 	// window (at most five); TesterPausedUntil ends the pause the fifth starts.
 	TesterFailures    []time.Time `json:"testerFailures,omitempty"`
 	TesterPausedUntil time.Time   `json:"testerPausedUntil,omitzero"`

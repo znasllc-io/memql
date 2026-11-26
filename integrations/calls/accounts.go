@@ -128,7 +128,7 @@ func (s *Service) Account(ctx context.Context, site callrules.SiteRef, token str
 }
 
 func validAccountRequest(r callrules.AccountRequest) bool {
-	if r.OperationID != "" || r.Outcome != "" || r.TesterPassword != "" || r.AdultDeclared || r.TermsAccepted || r.SaveMethod {
+	if r.OperationID != "" || r.Outcome != "" || r.TesterCode != "" || r.AdultDeclared || r.TermsAccepted || r.SaveMethod {
 		return false
 	}
 	if r.Action == "quote_call" {

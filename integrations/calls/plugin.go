@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"fmt"
+	"github.com/znasllc-io/memql/integrations/siteaccess"
 	"io"
 	"log/slog"
 	"os"
@@ -149,7 +150,7 @@ func New(d Deps) *Integration {
 	}
 	i.service = &Service{
 		lifecycle: &lifecycleScans{},
-		store:     i.store, gateDB: i.gateDB, pepper: i.pepper, random: i.random,
+		store:     i.store, gateDB: i.gateDB, pepper: i.pepper, random: i.random, testerCodes: siteaccess.NewGraphStore(d.Engine),
 		now: i.now, media: media, logger: i.logger, guestRetirement: &guestRetirementScan{}, portraitMaintenance: &portraitMaintenanceState{},
 	}
 	return i

@@ -155,14 +155,17 @@ type Service struct {
 	portraitStorage     PortraitStorage
 	guestRetirement     *guestRetirementScan
 	commerce            func() CommerceConfig
-	store               *Store
-	gateDB              func() *sql.DB
-	pepper              func(context.Context) ([]byte, error)
-	random              io.Reader
-	now                 func() time.Time
-	media               func(MediaServer, MediaCredential) (MediaBackend, error)
-	logger              *slog.Logger
-	invitationSender    func() email.Sender
+	// testerCodes decides a tester's typed code for a simulated result
+	// (integrations/siteaccess, the calls-testers gate).
+	testerCodes      TesterCodes
+	store            *Store
+	gateDB           func() *sql.DB
+	pepper           func(context.Context) ([]byte, error)
+	random           io.Reader
+	now              func() time.Time
+	media            func(MediaServer, MediaCredential) (MediaBackend, error)
+	logger           *slog.Logger
+	invitationSender func() email.Sender
 }
 
 // ---------------------------------------------------------------------------

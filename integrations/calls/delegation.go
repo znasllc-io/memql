@@ -673,7 +673,7 @@ func (s *Service) agentTopup(ctx context.Context, site callrules.SiteRef, token 
 		return nil, accountRefusal("delegation_topup_disabled")
 	}
 	// While payments are simulated an automatic top-up would be credit nobody
-	// typed the tester password for; refuse before reserving any mandate.
+	// typed a tester code for; refuse before reserving any mandate.
 	if s.commerceConfig().Mode == providers.Mock {
 		return nil, accountRefusal(callrules.ReasonAutomaticTopupUnavailable)
 	}

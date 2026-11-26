@@ -29,10 +29,6 @@ type CommerceConfig struct {
 	Payments                                                                                     providers.PaymentProvider
 	Verifications                                                                                providers.VerificationProvider
 	Invalid                                                                                      bool
-	// TesterPassword gates simulated payment and age results in mock mode. Nil
-	// (missing or malformed) never invalidates the envelope: it refuses every
-	// gated result instead, so a missing setting cannot open free hosting.
-	TesterPassword *testerPasswordHash
 }
 
 func (s *Service) commerceConfig() CommerceConfig {
@@ -47,9 +43,6 @@ func (s *Service) commerceConfig() CommerceConfig {
 	if mode != providers.Mock && mode != providers.Sandbox {
 		c.Invalid = true
 		return c
-	}
-	if h, ok := parseTesterPasswordHash(os.Getenv("MEMQL_CALLS_TESTER_PASSWORD_HASH")); ok {
-		c.TesterPassword = h
 	}
 	parse := func(name string) int64 {
 		n, err := strconv.ParseInt(os.Getenv("MEMQL_CALLS_COMMERCE_"+name), 10, 64)

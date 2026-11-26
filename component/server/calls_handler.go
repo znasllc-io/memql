@@ -916,7 +916,7 @@ type callsErrorReply struct {
 	Error        string `json:"error"`
 	Reason       string `json:"reason,omitempty"`
 	RetryAfterMs int64  `json:"retryAfterMs,omitempty"`
-	// AttemptsLeft is how many tester passwords remain before an account's pause.
+	// AttemptsLeft is how many tester codes remain before an account's pause.
 	AttemptsLeft int `json:"attemptsLeft,omitempty"`
 }
 
@@ -963,15 +963,15 @@ func callsAnswerFor(op string, err error, result calls.JoinResult) callsAnswer {
 	if errors.As(err, &invitationLimit) {
 		retryAfter = callsMs(invitationLimit.RetryAfter)
 	}
-	var paused *calls.TesterPasswordPaused
-	var incorrect *calls.TesterPasswordIncorrect
+	var paused *calls.TesterCodePaused
+	var incorrect *calls.TesterCodeIncorrect
 	switch {
 	case errors.As(err, &paused):
-		// An account's tester password pause: a rate limit with its own reason, so a
-		// client never mistakes an address's request budget for wrong passwords.
-		return callsAnswer{http.StatusTooManyRequests, callsErrorReply{Error: "limited", Reason: calls.ReasonTesterPasswordPaused, RetryAfterMs: callsMs(paused.RetryAfter)}, true}
+		// An account's tester code pause: a rate limit with its own reason, so a
+		// client never mistakes an address's request budget for wrong codes.
+		return callsAnswer{http.StatusTooManyRequests, callsErrorReply{Error: "limited", Reason: calls.ReasonTesterCodePaused, RetryAfterMs: callsMs(paused.RetryAfter)}, true}
 	case errors.As(err, &incorrect):
-		return callsAnswer{http.StatusForbidden, callsErrorReply{Error: "forbidden", Reason: calls.ReasonTesterPasswordIncorrect, AttemptsLeft: incorrect.AttemptsLeft}, true}
+		return callsAnswer{http.StatusForbidden, callsErrorReply{Error: "forbidden", Reason: calls.ReasonTesterCodeIncorrect, AttemptsLeft: incorrect.AttemptsLeft}, true}
 	case errors.Is(err, errCallsNotHere):
 		return callsAnswer{http.StatusNotFound, callsErrorReply{Error: "not_found"}, true}
 	case errors.Is(err, errCallsTooLarge):

@@ -122,7 +122,7 @@ func TestHistoryAnalyticsPendingCheckoutAndRefundAreNotWalletReversals(t *testin
 	pending := commerceDo(t, cw, key, callrules.AccountRequest{Action: "checkout_begin", AmountCents: 1000, IdempotencyKey: "analytics-checkout", AdultDeclared: true, TermsAccepted: true})
 	before := analyticsOverview(t, cw.svc, *key.result.Session, 30)
 	require.EqualValues(t, 0, *before.Ledger.CreditedCents)
-	commerceDo(t, cw, key, callrules.AccountRequest{Action: "mock_checkout_complete", OperationID: pending.Lifecycle.Checkout.ID, Outcome: "paid", TesterPassword: testTesterPassword})
+	commerceDo(t, cw, key, callrules.AccountRequest{Action: "mock_checkout_complete", OperationID: pending.Lifecycle.Checkout.ID, Outcome: "paid", TesterCode: testTesterCode})
 	state, err := cw.svc.store.commerceState(context.Background(), cw.owner, cw.site, key.result.Account.AccountID)
 	require.NoError(t, err)
 	op := state.latest("checkout")
