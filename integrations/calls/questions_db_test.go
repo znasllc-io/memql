@@ -5,13 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/znasllc-io/memql/component/auth"
 	callrules "github.com/znasllc-io/memql/component/calls"
+	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -502,4 +505,93 @@ func TestQuestionsFamilyExclusionAndNoImplicitSkillRun(t *testing.T) {
 	request := callrules.WorkflowRequest{Action: "questions", Question: &callrules.QuestionRequest{RoomID: start.Call.ID, Identity: start.Join.Identity, RunID: "unavailable-run"}}
 	_, e := cw.svc.Workflow(context.Background(), cw.ref, key.result.Session.Token, request)
 	require.ErrorContains(t, e, "questions_family_unavailable")
+}
+
+// QUESTION TEXT LEAVES ONLY THROUGH THE NATIVE PROJECTION. The rows are written as
+// the site's owner, so the row tier alone would admit that owner and a cluster owner
+// to a raw read, and an ordinary write publishes graph events carrying the whole row
+// to the bus, where an authored automation can trigger on it and journal it. The
+// concept is on clientUnreadableConcepts (component/memql/site_access_guards.go) for
+// both reasons; this proves it against stored rows, with the server's own read and an
+// ordinary write's event held up as controls so a pass cannot be an empty fixture.
+func TestQuestionsTextReachesNoRawReadAndNoGraphEvent(t *testing.T) {
+	cw, key, _, start, run := questionFixture(t)
+	if cw == nil {
+		return
+	}
+	ctx := context.Background()
+	previous := cw.eng.EventBus()
+	bus := events.NewBus()
+	cw.eng.SetEventBus(bus)
+	t.Cleanup(func() { cw.eng.SetEventBus(previous) })
+	var mu sync.Mutex
+	var topics, bodies []string
+	t.Cleanup(bus.Subscribe("#", func(ev events.Event) {
+		raw, _ := json.Marshal(ev)
+		mu.Lock()
+		defer mu.Unlock()
+		topics, bodies = append(topics, ev.Topic), append(bodies, string(raw))
+	}))
+	heard := func(topic string) bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Contains(topics, topic)
+	}
+
+	_, guest, e := cw.join(start.Call.GuestToken, "Question author")
+	require.NoError(t, e)
+	text := "benign private question fixture for the bus 7731"
+	submitted, e := cw.svc.Workflow(ctx, cw.ref, guest.Token, questionRequest(t, cw, guest, run, "question_submit", "bus-question", text))
+	require.NoError(t, e)
+	choose := questionRequest(t, cw, *key.result.Session, run, "question_select", "bus-select", "")
+	choose.Question.ID, choose.Question.Revision, choose.Question.ExpectedEpoch = submitted.QuestionReceipt.ID, 1, run.ControlEpoch
+	_, e = cw.svc.Workflow(ctx, cw.ref, key.result.Session.Token, choose)
+	require.NoError(t, e)
+
+	// THE CONTROL WRITE: an ordinary concept publishes on this bus. It is written last,
+	// so its arrival bounds how long the question's events could still be in flight.
+	control := "cl-question-control-" + cw.suffix
+	cw.principal(control, auth.RoleWriter)
+	require.Eventually(t, func() bool { return heard("graph.node.created.v1:identity:user") }, 5*time.Second, 20*time.Millisecond,
+		"the control write published no graph event, so this test cannot hear the bus")
+	time.Sleep(300 * time.Millisecond)
+	mu.Lock()
+	seenTopics, seenBodies := append([]string(nil), topics...), append([]string(nil), bodies...)
+	mu.Unlock()
+	for i, topic := range seenTopics {
+		require.False(t, strings.HasPrefix(topic, "graph.") && strings.Contains(topic, "workflowQuestion"), "a question write published %s", topic)
+		require.NotContains(t, seenBodies[i], text, "the event on %s carries the question's text", topic)
+	}
+	// The result cache and the other replicas still hear of the write, on the channel
+	// that carries the concept's name and nothing of its rows.
+	require.True(t, heard(events.TopicCacheInvalidateForConcept(questionConcept)), "no cache invalidation was published for the question concept")
+
+	forms := map[string]string{
+		"a raw read by room":     fmt.Sprintf(`concept==%s && roomId==%q`, questionConcept, roomConcept+":"+start.Call.ID),
+		"a raw read by id":       fmt.Sprintf(`concept==%s && id==%q`, questionConcept, questionConcept+":"+submitted.QuestionReceipt.ID),
+		"a raw read of them all": `concept==` + questionConcept,
+	}
+	for name, query := range forms {
+		// THE CONTROL: the server's own reader, internal origin as the site's owner,
+		// reads the question through this very form.
+		res, e := cw.eng.Execute(auth.ContextWithInternalOrigin(actorContext(cw.owner, auth.RoleWriter)), query)
+		require.NoError(t, e, "%s: the control read failed, so the refusals below prove nothing", name)
+		raw, e := json.Marshal(memql.MaterializeRows(res))
+		require.NoError(t, e)
+		require.Contains(t, string(raw), text, "%s: the control read did not return the question, so the refusals below prove nothing", name)
+		for caller, client := range map[string]context.Context{
+			"the site's owner":  actorContext(cw.owner, auth.RoleWriter),
+			"a cluster owner":   actorContext(cw.operator, auth.RoleOwner),
+			"the site's member": actorContext(cw.developer, auth.RoleDeveloper),
+		} {
+			res, e := cw.eng.Execute(client, query)
+			if e != nil {
+				continue // a refusal is a refusal
+			}
+			rows := memql.MaterializeRows(res)
+			raw, _ := json.Marshal(rows)
+			require.Empty(t, rows, "%s read %d question row(s) through %s: %s", caller, len(rows), name, raw)
+			require.NotContains(t, string(raw), text, "%s was handed the question's text through %s", caller, name)
+		}
+	}
 }
