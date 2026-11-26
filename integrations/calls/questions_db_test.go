@@ -2,9 +2,12 @@ package calls
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -14,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
 	callrules "github.com/znasllc-io/memql/component/calls"
+	"github.com/znasllc-io/memql/component/database"
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/memql"
 )
@@ -594,4 +598,90 @@ func TestQuestionsTextReachesNoRawReadAndNoGraphEvent(t *testing.T) {
 			require.NotContains(t, string(raw), text, "%s was handed the question's text through %s", caller, name)
 		}
 	}
+}
+
+// questionReplica is a second bff replica: its own Service and write-gate pool over
+// the same database, with a clock that may lag this one's by skew. It holds none of
+// the first replica's in-process state.
+func questionReplica(t *testing.T, cw *callWorld, c *CommerceConfig, skew time.Duration) *Service {
+	t.Helper()
+	pool, err := database.NewGatePool(sharedBoot.dsn, database.DefaultGatePoolSize)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = pool.Close() })
+	replica := New(Deps{Engine: liveEngine{cw.eng}, GateDB: func() *sql.DB { return pool }, ResolveSystemSecret: cw.eng.ResolveSystemSecret,
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: func() time.Time { return cw.clock.Now().Add(-skew) }, NewMediaBackend: cw.media.backend}).Service()
+	replica.commerce = func() CommerceConfig { return *c }
+	return replica
+}
+
+// THE HOP. A question submitted on one replica, whose reply was lost after it
+// committed, is retried on the other: the retry returns the original receipt and adds
+// no version. The host reads and selects it there, on a replica whose clock lags the
+// first one's, and the author and another participant see the selection back on the
+// first. Nothing about the queue lives in a replica's memory, and a lagging clock must
+// not make a legitimate transition unwritable (its timestamps would otherwise run
+// backwards in the question's stored journal, which the stored-state check refuses).
+func TestQuestionsCrossReplicaRetrySelectionAndLaggingClock(t *testing.T) {
+	cw, key, c, start, run := questionFixture(t)
+	if cw == nil {
+		return
+	}
+	ctx := context.Background()
+	host := *key.result.Session
+	_, author, e := cw.join(start.Call.GuestToken, "Author on replica A")
+	require.NoError(t, e)
+	_, other, e := cw.join(start.Call.GuestToken, "Other participant")
+	require.NoError(t, e)
+	cw.clock.Advance(3 * time.Second)
+
+	lossy := *cw.svc.store
+	lossy.engine = &questionReplyLoss{Engine: lossy.engine}
+	replicaA := *cw.svc
+	replicaA.store = &lossy
+	replicaB := questionReplica(t, cw, c, 2*time.Second)
+
+	text := "benign cross replica question fixture 5150"
+	submit := questionRequest(t, cw, author, run, "question_submit", "hop-submit", text)
+	_, e = replicaA.Workflow(ctx, cw.ref, author.Token, submit)
+	require.Error(t, e, "replica A must lose the committed reply")
+	retried, e := replicaB.Workflow(ctx, cw.ref, author.Token, submit)
+	require.NoError(t, e)
+	require.Equal(t, &callrules.QuestionReceipt{ID: retried.QuestionReceipt.ID, Revision: 1, Status: "pending"}, retried.QuestionReceipt)
+	var versions int
+	require.NoError(t, cw.db.QueryRowContext(ctx, `SELECT count(*) FROM "MemoryNodes" WHERE concept=? AND id=?`, questionConcept, questionConcept+":"+retried.QuestionReceipt.ID).Scan(&versions))
+	require.Equal(t, 1, versions, "the retry on another replica wrote a second version")
+
+	queue, e := replicaB.Workflow(ctx, cw.ref, host.Token, questionRequest(t, cw, host, run, "questions", "", ""))
+	require.NoError(t, e)
+	require.Len(t, queue.Questions.Items, 1)
+	require.Equal(t, text, queue.Questions.Items[0].Text)
+	require.True(t, queue.Questions.Items[0].CanSelect)
+
+	choose := questionRequest(t, cw, host, run, "question_select", "hop-select", "")
+	choose.Question.ID, choose.Question.Revision, choose.Question.ExpectedEpoch = retried.QuestionReceipt.ID, 1, run.ControlEpoch
+	selected, e := replicaB.Workflow(ctx, cw.ref, host.Token, choose)
+	require.NoError(t, e, "a replica whose clock lags the submitting one's could not select")
+	require.Equal(t, "selected", selected.QuestionReceipt.Status)
+
+	for name, session := range map[string]callrules.Session{"the author": author, "another participant": other} {
+		view, e := cw.svc.Workflow(ctx, cw.ref, session.Token, questionRequest(t, cw, session, run, "questions", "", ""))
+		require.NoError(t, e, name)
+		require.NotNil(t, view.Questions.Selected, "%s on replica A does not see the selection made on replica B", name)
+		require.Equal(t, text, view.Questions.Selected.Text)
+	}
+	stored, e := cw.svc.store.question(ctx, cw.owner, retried.QuestionReceipt.ID)
+	require.NoError(t, e)
+	require.Len(t, stored.State.Operations, 2)
+	require.False(t, stored.State.Operations[1].At.Before(stored.State.Operations[0].At), "the stored journal runs backwards")
+
+	// The author withdraws on the lagging replica too: the third transition is written.
+	// Its rate budget reads the author's previous change as still recent until this
+	// replica's clock passes it (the safe direction), so the clock moves on first.
+	cw.clock.Advance(3 * time.Second)
+	withdraw := questionRequest(t, cw, author, run, "question_withdraw", "hop-withdraw", "")
+	withdraw.Question.ID, withdraw.Question.Revision = retried.QuestionReceipt.ID, 2
+	withdrawn, e := replicaB.Workflow(ctx, cw.ref, author.Token, withdraw)
+	require.NoError(t, e)
+	require.Equal(t, "withdrawn", withdrawn.QuestionReceipt.Status)
+	require.Nil(t, withdrawn.Questions.Selected)
 }

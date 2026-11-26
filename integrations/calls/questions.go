@@ -49,6 +49,24 @@ func questionModerate(a questionActor) bool {
 func questionExpiry(r roomRow) time.Time {
 	return minTime(r.OpenedAt.Add(25*time.Hour), r.FundingDeadline.Add(time.Hour))
 }
+
+// questionStamp is the time a transition is recorded at: now, or the newest time it
+// follows when that is later. The stored journal must run forward (submission after
+// the author's admission, each operation after the one before;
+// callrules.ParseQuestionStoredState refuses anything else), but replicas' clocks
+// are not one clock: the step this one follows may have been stamped by a replica
+// running ahead of this one by up to their skew. Without this a lagging replica
+// wrote an unwritable journal and refused a legitimate select, withdraw or close
+// as questions_unavailable. The row's own version stamp gets the same treatment
+// from memql.VersionTimeAfter (TestQuestionsCrossReplicaRetrySelectionAndLaggingClock).
+func questionStamp(now time.Time, after ...time.Time) time.Time {
+	for _, t := range after {
+		if t.After(now) {
+			now = t
+		}
+	}
+	return now
+}
 func (s *Service) workflowQuestions(ctx context.Context, site callrules.SiteRef, token string, req callrules.WorkflowRequest) (callrules.WorkflowResult, error) {
 	none := callrules.WorkflowResult{ServerNow: s.now()}
 	if !callrules.ValidQuestionRequest(req) {
@@ -342,7 +360,7 @@ func (s *Service) questionMutate(ctx context.Context, site callrules.SiteRef, to
 		if len(rows) >= 100 {
 			return nil, accountRefusal("questions_room_limit")
 		}
-		q = &questionRow{ID: callrules.HistoryDigest(a.pepper, "question-id", site.SiteID, a.room.ID, a.actor, ask.IdempotencyKey)[:32], SiteID: site.SiteID, RoomID: a.room.ID, RunID: a.run.ID, AuthorKeyID: a.session.KeyID, AuthorAdmission: a.admission, Status: "pending", Body: strings.TrimSpace(ask.Text), SubmittedAt: now, RoomDeadline: a.room.FundingDeadline, ExpiresAt: questionExpiry(a.room), State: questionState{Author: callrules.QuestionAuthor{Name: a.seat.DisplayName, Kind: a.seat.Kind, Identity: a.seat.Identity}, SeatID: a.seat.ID, SessionID: a.session.ID, CredentialID: a.session.CredentialID, JoinedAt: a.seat.JoinedAt, SkillID: a.run.DefinitionID, SkillVersion: a.run.DefinitionVersion, Operations: []questionOperation{}}}
+		q = &questionRow{ID: callrules.HistoryDigest(a.pepper, "question-id", site.SiteID, a.room.ID, a.actor, ask.IdempotencyKey)[:32], SiteID: site.SiteID, RoomID: a.room.ID, RunID: a.run.ID, AuthorKeyID: a.session.KeyID, AuthorAdmission: a.admission, Status: "pending", Body: strings.TrimSpace(ask.Text), SubmittedAt: questionStamp(now, a.seat.JoinedAt), RoomDeadline: a.room.FundingDeadline, ExpiresAt: questionExpiry(a.room), State: questionState{Author: callrules.QuestionAuthor{Name: a.seat.DisplayName, Kind: a.seat.Kind, Identity: a.seat.Identity}, SeatID: a.seat.ID, SessionID: a.session.ID, CredentialID: a.session.CredentialID, JoinedAt: a.seat.JoinedAt, SkillID: a.run.DefinitionID, SkillVersion: a.run.DefinitionVersion, Operations: []questionOperation{}}}
 		if a.grant != nil {
 			q.State.GrantID = a.grant.ID
 			q.State.ApprovalDigest = delegationApprovalDigest(a.grant)
@@ -425,7 +443,11 @@ func (s *Service) questionMutate(ctx context.Context, site callrules.SiteRef, to
 			q.Body = ""
 		}
 	}
-	// Fixed successful-operation budgets are derived from at most300 receipts.
+	// Successful-operation budgets come from the receipts already in the room's
+	// bounded inventory (at most 100 questions of at most 3 operations each): one
+	// change per Callkey every 400 ms, one submission per Callkey every 10 s and 60
+	// changes a minute per room. They are read under the room gate, so they hold
+	// across replicas; replays answered above spend none of them.
 	recent := 0
 	for _, r := range rows {
 		for _, op := range r.State.Operations {
@@ -441,7 +463,11 @@ func (s *Service) questionMutate(ctx context.Context, site callrules.SiteRef, to
 		return nil, accountRefusal("questions_rate_limited")
 	}
 	q.Revision++
-	q.State.Operations = append(q.State.Operations, questionOperation{Key: ask.IdempotencyKey, Digest: digest, Actor: a.actor, BudgetKey: a.budget, Status: q.Status, Revision: q.Revision, At: now})
+	after := []time.Time{q.SubmittedAt}
+	if n := len(q.State.Operations); n > 0 {
+		after = append(after, q.State.Operations[n-1].At)
+	}
+	q.State.Operations = append(q.State.Operations, questionOperation{Key: ask.IdempotencyKey, Digest: digest, Actor: a.actor, BudgetKey: a.budget, Status: q.Status, Revision: q.Revision, At: questionStamp(now, after...)})
 	if e := s.questionCurrentActor(ctx, site, token, a.session, a.seat, a.room, req.Action); e != nil {
 		return nil, e
 	}
