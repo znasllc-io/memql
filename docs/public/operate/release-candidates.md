@@ -917,6 +917,18 @@ The operator who started such an update ends it with **Close without
 verification**, described in
 [Close an update that cannot be verified](#close-an-update-that-cannot-be-verified).
 
+**Check progress** also confirms every workload the release renders, including
+a DaemonSet that runs only on an autoscaled node pool, such as a build pool's
+buildkit DaemonSet. While the autoscaler has removed every node of that pool,
+the DaemonSet has no Pod. It counts as converged once Kubernetes has observed
+its current template: no Pod can run an unapproved image, and a node that joins
+later runs the approved one. A DaemonSet whose status Kubernetes has not yet
+updated, or that still has a Pod of an earlier template, keeps the update
+unverified until it settles. Engines released before this change refuse that
+completion with `daemon workload has no observed placement` until a node joins
+the pool. On those, select **Check progress** while a pipeline run keeps a build
+node up, rather than closing the update without verification.
+
 
 ## Restore a selected installation
 

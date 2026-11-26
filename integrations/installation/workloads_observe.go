@@ -309,8 +309,24 @@ func (s *workloadAdmission) observeWorkload(ctx context.Context, reads *receiver
 			return errors.New("stateful workload revisions differ")
 		}
 	case "apps/DaemonSet":
+		// A DaemonSet's cardinality is its controller's placement, never a
+		// rendered target, so the count comes from status, and zero is a
+		// settled answer once the controller has observed the current
+		// generation. An autoscaled pool with no node left (production's build
+		// pool and its buildkit DaemonSet, which refused the 0.31.41 completion
+		// on 2026-11-25) has nothing to run, so no Pod can run an unapproved
+		// image. The template was compared with the render above, so a node
+		// that joins later runs the approved image. A selector that matches no
+		// node by mistake also reads as zero: this proves which images run, not
+		// that every DaemonSet has a node. Requiring a node, or exempting pools
+		// by annotation, would block completion on autoscaler timing or add a
+		// second list to keep in step. Unwritten status (an absent count) and a
+		// stale observed generation still refuse, and a Pod the controller has
+		// not removed fails the owned Pod count below.
+		// TestWorkloadsAcceptDaemonSetOnEmptyNodePool,
+		// TestWorkloadsRefuseUnsettledEmptyDaemonSet.
 		count = workloadCount(status, "desiredNumberScheduled", -1)
-		if count < 1 || count > 256 || generation < 1 || receiverInteger(status["observedGeneration"]) != generation {
+		if count < 0 || count > 256 || generation < 1 || receiverInteger(status["observedGeneration"]) != generation {
 			return errors.New("daemon workload has no observed placement")
 		}
 		for _, field := range []string{"currentNumberScheduled", "updatedNumberScheduled", "numberReady", "numberAvailable"} {

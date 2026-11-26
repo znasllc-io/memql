@@ -107,6 +107,80 @@ func TestWorkloadProfilesRefuseUnconvergedControllers(t *testing.T) {
 	}
 }
 
+const workloadPodsPath = "api/v1/namespaces/memql/pods?limit=256"
+
+// emptyNodePoolDaemonSet is a one-DaemonSet fixture in the state its controller
+// reports once the autoscaler has removed every node the DaemonSet's selector
+// admits: the current generation observed, nothing scheduled and no owned Pod
+// left. It also returns the Pod that ran there before, for the refusal cases.
+func emptyNodePoolDaemonSet(t *testing.T) (*workloadFixture, *workloadAdmission, resourceObject, map[string]any, map[string]any) {
+	t.Helper()
+	f := newWorkloadFixture(t, "DaemonSet")
+	s := f.scope(t)
+	object := s.objects[s.requirements[0].Key]
+	live := workloadObject(t, f.api.response[object.apiPath])
+	status := resourceMap(live, "status")
+	for _, field := range []string{"desiredNumberScheduled", "currentNumberScheduled", "numberReady", "numberMisscheduled"} {
+		status[field] = json.Number("0")
+	}
+	// The API omits these two when they are zero.
+	delete(status, "updatedNumberScheduled")
+	delete(status, "numberAvailable")
+	f.api.response[object.apiPath] = workloadJSON(t, live)
+	pods := workloadObject(t, f.api.response[workloadPodsPath])
+	pod := pods["items"].([]any)[0].(map[string]any)
+	pods["items"] = []any{}
+	f.api.response[workloadPodsPath] = workloadJSON(t, pods)
+	return f, s, object, live, pod
+}
+
+// A DaemonSet's cardinality is its controller's placement, not a rendered
+// target. Production's build pool scales to zero when no build runs, and its
+// buildkit DaemonSet then has no node to run on. On 2026-11-25 that refused the
+// 0.31.41 install's completion ("daemon workload has no observed placement")
+// until a node joined the pool. Nothing scheduled under the observed current
+// template is converged: no Pod can run an unapproved image.
+func TestWorkloadsAcceptDaemonSetOnEmptyNodePool(t *testing.T) {
+	_, s, _, _, _ := emptyNodePoolDaemonSet(t)
+	_, err := s.seal(observeWorkloads(t, s))
+	require.NoError(t, err)
+}
+
+// Zero is converged only as the controller's settled answer for the current
+// template. Unwritten or stale status, and Pods the controller has not removed
+// yet, still refuse.
+func TestWorkloadsRefuseUnsettledEmptyDaemonSet(t *testing.T) {
+	for fault, want := range map[string]string{
+		"status unwritten":      "daemon workload has no observed placement",
+		"generation unobserved": "daemon workload has no observed placement",
+		"pod remains":           "workload ready Pod count differs: got 1, require 0",
+		"pod terminating":       "workload still has a terminating Pod",
+		"pod misscheduled":      "daemon workload has unavailable or misplaced pods",
+	} {
+		t.Run(fault, func(t *testing.T) {
+			f, s, object, live, pod := emptyNodePoolDaemonSet(t)
+			switch fault {
+			case "status unwritten":
+				live["status"] = map[string]any{}
+			case "generation unobserved":
+				resourceMap(live, "status")["observedGeneration"] = json.Number("0")
+			case "pod remains", "pod terminating":
+				if fault == "pod terminating" {
+					resourceMap(pod, "metadata")["deletionTimestamp"] = "2026-11-25T23:48:00Z"
+				}
+				pods := workloadObject(t, f.api.response[workloadPodsPath])
+				pods["items"] = []any{pod}
+				f.api.response[workloadPodsPath] = workloadJSON(t, pods)
+			case "pod misscheduled":
+				resourceMap(live, "status")["numberMisscheduled"] = json.Number("1")
+			}
+			f.api.response[object.apiPath] = workloadJSON(t, live)
+			_, err := s.check(context.Background(), s.requirements[0].Key)
+			require.ErrorContains(t, err, want)
+		})
+	}
+}
+
 func TestWorkloadsBindIndexAndManifestToTheAssignedNodePlatform(t *testing.T) {
 	f := newWorkloadFixture(t, "Deployment")
 	publication, err := f.artifacts.next.Release()
