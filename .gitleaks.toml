@@ -82,6 +82,11 @@ tags     = ["memql", "credential", "bearer-token"]
 # have now tried the second thing (memql#3484).
 
 [[allowlists]]
+description = "Calls tester password fixtures (2026-11-25): the 32-character alphabet constant of the tester password generator (integrations/calls/tester_password.go), the test-only password and a fragment of its fixed test hash line. None is an installation's tester password: an operator generates one with cmd/memql-calls-tester-password and stores only its salted hash. Match only these exact fixture bytes."
+regexTarget = "secret"
+regexes = ['''^ABCDEFGHJKLMNPQRSTUVWXYZ23456789$''', '''^TQ7ZK-M4WHX-CR8NE-P3VJB$''', '''^H82ui-STcfwRoIkZ4dzTUem4$''']
+
+[[allowlists]]
 description = "Planted failure-truncation sentinel in TestFleetStepMasksItsFailureBeforeCuttingIt, never an issued credential. Commit 8610a3c3 used the variable name secret; its later rename left that historical fixture detectable. The test sends this value only to fakeDispatcher and checks masking before truncation. Match only these exact fixture bytes, not arbitrary test files or token shapes."
 regexTarget = "secret"
 regexes = ['''^S3CRET-straddling-the-failure-cut$''']
