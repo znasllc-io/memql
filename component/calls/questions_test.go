@@ -80,3 +80,28 @@ func TestQuestionsStoredMetadataRejectsUnknownFieldsAndIllegalTransitions(t *tes
 		t.Fatal("pending-to-resolved accepted")
 	}
 }
+
+// The rate budgets are part of what an agent must plan around, so the manual states
+// them on every operation that spends them (integrations/calls/questions.go enforces
+// them under the room gate), and says what to do on the refusal.
+func TestQuestionsManualStatesTheRateBudgets(t *testing.T) {
+	tools := UTCPManual("https://example.test/_memql/calls/agent")["tools"].([]any)
+	seen := 0
+	for _, raw := range tools {
+		tool := raw.(map[string]any)
+		name := tool["name"].(string)
+		if !strings.HasPrefix(name, "callkey_workflow_question_") {
+			continue
+		}
+		seen++
+		description := tool["description"].(string)
+		for _, want := range []string{"one submission per owning Callkey every 10 seconds", "one change per Callkey every 400 ms", "60 changes a minute per room", "questions_rate_limited"} {
+			if !strings.Contains(description, want) {
+				t.Errorf("%s does not say %q", name, want)
+			}
+		}
+	}
+	if seen != 5 {
+		t.Fatalf("found %d question operations, want 5", seen)
+	}
+}

@@ -20,6 +20,7 @@ func questionUTCPTools(endpoint string) []any {
 			fields["idempotencyKey"] = map[string]any{"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$"}
 			required = append(required, "idempotencyKey")
 			description += " Retry the identical entire request and idempotency key after an unknown result; the receipt reports the original transition, while questions is the current projection. Never silently create a new intent."
+			description += " Changes are rate limited: one submission per owning Callkey every 10 seconds, one change per Callkey every 400 ms and 60 changes a minute per room. On questions_rate_limited nothing changed; wait, then retry the identical request."
 			if action == "question_submit" {
 				fields["text"] = map[string]any{"type": "string", "minLength": 1, "maxLength": 500, "description": "Plain inert question. LF and tab are allowed; other C0, DEL and C1 controls are rejected. No hidden instructions."}
 				fields["publication"] = map[string]any{"type": "string", "const": QuestionPublication, "description": "Explicit disclosure acknowledgment: host can read and select this text for the entire room."}
