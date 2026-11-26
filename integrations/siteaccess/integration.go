@@ -477,7 +477,7 @@ func (i *Integration) checkMint(ctx context.Context, actor, siteID string, args 
 	if auth.IsRoleTestContext(ctx) && actor != site.OwnerUserID {
 		return mintRequest{}, refuse("A test persona can only add an access code to a deployable it owns, because the code belongs to the deployable's owner. Add it as yourself.")
 	}
-	if site.DeployableName == "" {
+	if site.DeployableName == "" && !site.Calls {
 		return mintRequest{}, refuse("This deployable was not deployed from a package, so it has no gates for a code to open. Deploy it from a source that declares a gate with @accessGate, then add the code.")
 	}
 	gates, err := i.gatesOf(ctx, site)
@@ -856,16 +856,17 @@ func (i *Integration) handleGates(ctx context.Context, args map[string]any, _ in
 // between products, so a gate another domain declares under the same name is not
 // this deployable's to offer (D5).
 func (i *Integration) gatesOf(ctx context.Context, site siteView) ([]memql.AccessGateSummary, error) {
-	if site.DeployableName == "" {
-		return nil, nil
+	var gates []memql.AccessGateSummary
+	if site.DeployableName != "" {
+		domains, err := i.store.packageDomains(ctx, site.PackageID)
+		if err != nil {
+			return nil, err
+		}
+		gates = memql.AccessGatesFor(site.DeployableName, domains)
 	}
-	domains, err := i.store.packageDomains(ctx, site.PackageID)
-	if err != nil {
-		return nil, err
-	}
-	gates := memql.AccessGatesFor(site.DeployableName, domains)
 	// THE ENGINE'S OWN GATE: a calls deployable offers calls-testers whatever its
-	// package declares. It opens no construct; only the calls service reads its codes.
+	// package declares, and with no package at all, since a package only matters for
+	// gates declared in DSL. It opens no construct; only the calls service reads it.
 	if site.Calls {
 		gates = append(gates, memql.AccessGateSummary{Gate: memql.AccessGateCallsTesters, Constructs: []string{}})
 		sort.Slice(gates, func(a, b int) bool { return gates[a].Gate < gates[b].Gate })

@@ -212,6 +212,12 @@ describe("the lock sits after Statistics and is absent without the part, on a sy
     expect(within(page).getByRole("button", { name: "Statistics" })).toBeTruthy();
     expect(within(page).queryByRole("button", { name: "Access codes" })).toBeNull();
   });
+
+  it("is there on a deployable with calls on even with no package, for the engine's calls-testers gate", async () => {
+    const calls = siteRow({ id: "site-calls", hostname: "calls.memql.example.com", calls: true });
+    const page = await openPage({ sites: [calls] }, "calls.memql.example.com");
+    expect(within(page).getByRole("button", { name: "Access codes" })).toBeTruthy();
+  });
 });
 
 describe("Back holds while a write is out and while a new code stands", () => {

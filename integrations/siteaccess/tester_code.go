@@ -24,8 +24,8 @@ const (
 	TesterCodeExpired
 	// TesterCodeLive: the code opens simulated results now.
 	TesterCodeLive
-	// TesterCodeUnavailable: the site cannot hold codes at all (no such site, or
-	// no package deployable), so no typed value could ever open it.
+	// TesterCodeUnavailable: the site cannot hold tester codes at all (no such
+	// site, or calls are off), so no typed value could ever open it.
 	TesterCodeUnavailable
 )
 
@@ -46,7 +46,7 @@ func (s *GraphStore) TesterCode(ctx context.Context, siteID, typed string, now t
 	if err != nil {
 		return TesterCodeUnknown, err
 	}
-	if site == nil || site.DeployableName == "" {
+	if site == nil || !site.Calls {
 		return TesterCodeUnavailable, nil
 	}
 	if code == nil || code.Guest || code.Gate != memql.AccessGateCallsTesters || code.Revoked || code.Generation < 1 ||

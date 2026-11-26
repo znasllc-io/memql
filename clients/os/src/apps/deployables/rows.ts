@@ -158,6 +158,8 @@ export interface SiteRow {
   packageId: string;
   /** The manifest deployable name this site serves; "" whenever packageId is. */
   packageDeployableName: string;
+  /** Calls are on: the engine offers its calls-testers access-code gate, package or not. */
+  calls: boolean;
   createdAt: string;
 }
 
@@ -189,6 +191,7 @@ export function siteFromRow(raw: Row): SiteRow {
     accountId: rowString(row, "accountId"),
     packageId: rowString(row, "packageId"),
     packageDeployableName: rowString(row, "packageDeployableName"),
+    calls: boolOr(row, "calls", false),
     createdAt: rowString(row, "createdAt"),
   };
 }

@@ -72,7 +72,15 @@ func TestGatesOfferCallsTestersOnCallsSites(t *testing.T) {
 	require.Contains(t, got, "dashboard", "the deployable's own gates must still be offered")
 
 	require.NotContains(t, w.gatesOn(operator, w.site), memql.AccessGateCallsTesters, "a deployable without calls offered the testers gate")
-	require.Empty(t, w.gatesOn(operator, unpackaged), "a site with no package deployable offered a gate")
+
+	// THE PACKAGE ONLY MATTERS FOR GATES DECLARED IN DSL: a calls deployable with no
+	// package offers the engine's gate and nothing else, and one without calls nothing.
+	only := w.gatesOn(operator, unpackaged)
+	require.Len(t, only, 1, "a calls site with no package offered more than the testers gate: %v", only)
+	require.Contains(t, only, memql.AccessGateCallsTesters)
+	plain := "ac-plain-" + w.suffix
+	w.siteRow(plain, map[string]any{"packageDeployableName": nil, "packageId": nil})
+	require.Empty(t, w.gatesOn(operator, plain), "a site with no package and no calls offered a gate")
 }
 
 func TestCreateMintsCallsTestersCodeOnlyOnCallsSites(t *testing.T) {
@@ -87,6 +95,12 @@ func TestCreateMintsCallsTestersCodeOnlyOnCallsSites(t *testing.T) {
 	_, err := w.in.handleCreate(operator, w.createArgs(map[string]any{"gate": memql.AccessGateCallsTesters}), 0)
 	requireSentence(t, err)
 	require.Zero(t, w.codesOn(w.site), "a testers code was minted on a deployable without calls")
+
+	unpackaged := w.callsSite("ac-calls-unpkg", map[string]any{"packageDeployableName": nil, "packageId": nil})
+	_, code = w.mint(operator, map[string]any{"siteId": unpackaged, "gate": memql.AccessGateCallsTesters, "label": "Sam"})
+	require.Regexp(t, codeFormat, code, "a calls site with no package must take a testers code")
+	_, err = w.in.handleCreate(operator, w.createArgs(map[string]any{"siteId": unpackaged, "gate": "dashboard"}), 0)
+	requireSentence(t, err)
 }
 
 func TestGuestPassRefusedOnCallsTesters(t *testing.T) {
@@ -141,5 +155,7 @@ func TestTesterCodeVerdicts(t *testing.T) {
 	moved := w.forgeGateCode(calls, "ac-moved-"+w.suffix, "ac-acct-elsewhere-"+w.suffix, memql.AccessGateCallsTesters, now.Add(time.Hour))
 	require.Equal(t, TesterCodeUnknown, verdict(calls, moved), "a code whose organization copy is out of date opened")
 
-	require.Equal(t, TesterCodeUnavailable, verdict(unpackaged, code), "a site that cannot hold codes must say so")
+	_, unpackagedCode := w.mint(operator, map[string]any{"siteId": unpackaged, "gate": memql.AccessGateCallsTesters, "label": "Sam"})
+	require.Equal(t, TesterCodeLive, verdict(unpackaged, unpackagedCode), "a calls site with no package must open its testers code")
+	require.Equal(t, TesterCodeUnavailable, verdict(w.site, unpackagedCode), "a site without calls cannot hold tester codes and must say so")
 }

@@ -581,7 +581,7 @@ export function DeployablePage({
             {/* ABSENT, NOT DISABLED (rule 12): a system-owned site is exempt from
                 the whole axis, and a code opens a gate that only a package's own
                 deployable can declare. */}
-            {can.access && !site.systemOwned && site.packageDeployableName ? <IconButton label="Access codes" onClick={() => setDetail("access")}><Lock size={16} aria-hidden /></IconButton> : null}
+            {can.access && !site.systemOwned && (site.packageDeployableName || site.calls) ? <IconButton label="Access codes" onClick={() => setDetail("access")}><Lock size={16} aria-hidden /></IconButton> : null}
             {/* A store's reviews, for whoever holds the reviews part. */}
             {can.reviews && reviewsStore !== "" ? <IconButton label="Reviews" onClick={() => setDetail("reviews")}><MessageSquareText size={16} aria-hidden /></IconButton> : null}
             {/* A store's wholesale applications, for whoever holds the wholesale part. */}

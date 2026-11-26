@@ -86,7 +86,9 @@ after Statistics in the page head (after Logs on a draft, which has no
 Statistics icon): **Access codes**. The control is *absent*, not
 disabled, when you do not hold the part, when the deployable is one the cluster
 manages itself, and when it was not deployed from a package, since only a
-package's own deployable can declare a gate.
+package's own deployable can declare a gate. A deployable with calls turned on
+shows it either way, for the engine's own
+[calls-testers gate](#the-calls-testers-gate).
 
 **The part is `execute` on `app:deployables/access`**, seeded on owner and
 developer like `deploy`, `publish` and `preview`, and checked against the
@@ -145,7 +147,8 @@ change:
 - it was deployed from a package, and that package **declares the gate** you
   chose. A source deployed before access codes existed has no list of the DSL
   domains it ships, so it declares none until it is deployed again
-  ([below](#when-a-gate-answers-404));
+  ([below](#when-a-gate-answers-404)). The one exception is `calls-testers`,
+  which needs only calls turned on ([the calls-testers gate](#the-calls-testers-gate));
 - the name, the subject and the expiry are inside the bounds above.
 
 A regenerate or a new expiry on a deployable that has since lost its owner is
@@ -452,9 +455,10 @@ not a defense against a hostile author: DSL is already cluster-wide authority.
 
 ### The calls-testers gate
 
-One gate is the engine's own. A package-deployed site with calls turned on (the
-site's `calls` field) offers `calls-testers` beside the gates its package
-declares, so a calls product needs no DSL for it. A code for it opens no
+One gate is the engine's own. A site with calls turned on (the site's `calls`
+field) offers `calls-testers` beside any gates its package declares, with or
+without a package, since a package only matters for gates declared in DSL. A calls
+product needs no DSL for it. A code for it opens no
 construct through `/_memql/access/call`; the calls service reads it when a tester
 applies a simulated payment or age result in `mock` commerce mode
 ([calls.md](calls.md#simulated-results-and-tester-codes)), one code typed with

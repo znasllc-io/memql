@@ -117,6 +117,8 @@ type Session struct {
 // handler's own projection: what nobody can see cannot leak into a reply.
 type Site struct {
 	ID, OwnerUserID, AccountID, PackageID, DeployableName string
+	// Calls is the site's calls field, which is what lets it hold tester codes.
+	Calls bool
 }
 
 // GraphStore reads and writes access codes through the engine.
@@ -222,6 +224,7 @@ func (s *GraphStore) SiteForAccess(ctx context.Context, siteID string) (*Site, e
 		AccountID:      memql.BareShortId(rowString(r, "accountId")),
 		PackageID:      memql.BareShortId(rowString(r, "packageId")),
 		DeployableName: strings.TrimSpace(rowString(r, "packageDeployableName")),
+		Calls:          rowBool(r, "calls"),
 	}, nil
 }
 

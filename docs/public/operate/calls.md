@@ -1647,8 +1647,8 @@ Didit's own page is, and must not carry a code. The code is checked by the bff,
 never only by the client, and it is never stored or logged.
 
 A tester code is an ordinary [access code](site-access-codes.md) for the
-engine-owned gate `calls-testers`, which every package-deployed site with calls
-turned on offers ([the calls-testers gate](site-access-codes.md#the-calls-testers-gate)).
+engine-owned gate `calls-testers`, which every site with calls turned on offers,
+package or not, ([the calls-testers gate](site-access-codes.md#the-calls-testers-gate)).
 An operator adds one per tester in MemQL OS (Deployables, the deployable, Access
 codes), names it after them and picks its expiry. Regenerate, Change expiry and
 Remove work as for any code and count from the next request, with no restart.
@@ -1657,7 +1657,7 @@ exists every gated result is refused; backing out still works.
 
 | Refusal | HTTP | Meaning |
 | --- | --- | --- |
-| `tester_access_unavailable` | 403 | The site cannot hold codes (no package deployable), so every gated result is refused. Nothing is applied or counted. |
+| `tester_access_unavailable` | 403 | The site cannot hold codes (calls are off for it), so every gated result is refused. Nothing is applied or counted. |
 | `tester_code_required` | 400 | The gated result carried no code. Not counted. |
 | `tester_code_incorrect` | 403 | Not a live `calls-testers` code of this site: unknown, removed, replaced by a regenerate, another gate's or another site's. The reply's `attemptsLeft` (4 to 1) says how many tries remain. |
 | `tester_code_expired` | 403 | Exactly a tester code of this site, past its expiry. Not counted, since only its holder can learn this; Change expiry revives it. |
@@ -1817,7 +1817,7 @@ limits; a configuration above the global or physical capacity is refused.
 
 To apply simulated results locally, add a tester code for the site in the local
 MemQL OS (Deployables, the deployable, Access codes, Add, Unlocks
-`calls-testers`). The site must be a package deployable with calls turned on. No
+`calls-testers`). The site needs calls turned on; a package is not required. No
 restart is needed; until a code exists, the local simulation refuses every gated
 result.
 

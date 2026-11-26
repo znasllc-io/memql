@@ -336,6 +336,8 @@ func TestCommerceTesterCodeFromAccessCodes(t *testing.T) {
 		return
 	}
 	cw.svc.testerCodes = siteaccess.NewGraphStore(liveEngine{cw.eng})
+	// A site holds tester codes once its calls field is on, as on a live installation.
+	cw.mutate(seedContext(), "updateSiteCalls", map[string]any{"siteId": cw.site, "calls": true})
 	code := forgeTesterAccessCode(t, cw, "tester-code-row", cw.clock.Now().Add(time.Hour))
 	op := testerBegin(t, cw, k, "tester-access-check-01")
 
