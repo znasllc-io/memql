@@ -68,16 +68,19 @@ import (
 //   - "calls.scheduled.<id>" serializes one booking: its moves, its cancel and the join
 //     that opens its room, so two first joins on two replicas open one room, and the end
 //     of that room, which marks the booking ended: a decision that may end a call -- a
-//     leave, a host's end, reconciliation -- takes the booking's gate before the room's
+//     leave, a host's end, reconciliation -- takes the booking and room gates together
 //     (host.go endGates).
 //
 // Every write that takes or frees a server seat or changes a queue entry holds the
 // room's gate and the server's together; so does every host control that writes, since
-// a lock or an admission changes who stands in the server's queue. The ORDER IS FIXED --
-// account (when present), key, booking, room, server -- and every caller takes its gates in one
-// call in that order, which rules out two callers each holding a lock the other waits
-// for. A room's server never changes after placement, so it is read before the gates are
-// taken and the room is read again inside them.
+// a lock or an admission changes who stands in the server's queue. Every decision names
+// its complete set in one call; gates canonicalizes a copy in lexicographic order.
+// Callers must not establish their own order: Questions, observations and mute effects
+// used to take room before account, opposite native media forwarding, and deadlocked
+// across replicas. A room's server never changes after placement, so it is read before
+// the gates are taken and the room is read again inside them. The separate family-media
+// and agent-admission coordination gates remain outer, single-purpose reservations;
+// they are never added to an inner decision's complete authority set.
 //
 // THE GATES TAKE A BOUNDED SHARE OF THE PROCESS'S GATE POOL (gates): at
 // most callsGateShare calls decisions hold a write-gate connection at once in one process,
@@ -1864,9 +1867,9 @@ func (s *Service) movedSession(err error) error {
 	return fmt.Errorf("%w: the session was seated in another call at the same moment: %w", callrules.ErrConflict, err)
 }
 
-// gates takes the write gates of one decision, in the order given, which every caller
-// keeps as account, key, booking, room, server (see the file note), within the calls share of the
-// process's gate pool.
+// gates takes one decision's complete write-gate set in canonical lexicographic order,
+// within the calls share of the process's gate pool. Copy before sorting: callers may
+// retain their input for later authority-set comparisons or another operation.
 //
 // A BOUNDED SHARE OF THE POOL. The gate pool is the process's, every
 // write gate of every feature takes its connection there (component/database gate_pool.go:
@@ -1886,6 +1889,8 @@ func (s *Service) movedSession(err error) error {
 // gates. COST: under a burst, calls decisions queue a little longer in the process; the
 // share is per pool and at most half of a pool of two or more (gateSlotsFor).
 func (s *Service) gates(ctx context.Context, keys ...string) (func(), error) {
+	keys = append([]string(nil), keys...)
+	sort.Strings(keys)
 	pool, err := memql.ResolveWriteGatePool(s.gateDB, "calls: a call's admission", "the calls plug-in takes it from PluginContext.GateDB")
 	if err != nil {
 		return nil, err
