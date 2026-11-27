@@ -46,20 +46,26 @@ is updating. Pings and cancellation traffic continue.
 
 After acquiring the reservation, the updater reads the worker again and checks
 its exact process, executable, running build, idle state, active reservation
-and saved home choices. A connection paused automatically just before the
-reservation therefore stops this attempt before files or the recovery record
-change; retry starts from the current choices. During the reservation, manual
-connection changes are refused and automatic pauses are deferred. Cancellation
-or expiry restores the ordinary connection checks without resetting their
-failure window. This keeps an update from recording choices that its own
-replacement worker can no longer match.
+and saved home choices, including whether an older worker paused a connection
+automatically. A change before the reservation stops this attempt before files
+or the recovery record change; retry starts from the current choices. During
+the reservation, manual connection changes are refused and stalled-runner
+restarts are deferred. Cancellation or expiry restores the watchdog without
+resetting its elapsed time.
 
 This reservation is in memory. Before shutdown is accepted, `cancel-update`
 releases it on failure, and expiry releases it if the updater disappears. It never writes
 paused state to the enrollment registry. The new worker starts with the same
 registry, credentials, machine identity and policy. Its existing registration
 handshake advertises the new stamped version and current capabilities to each
-enabled cluster. A previously paused connection stays paused.
+enabled cluster. An explicitly paused connection stays paused. Startup repairs
+only the automatic pauses recorded by 0.23.3. After verifying the replacement's
+version and installation, the updater accepts that recorded migration; its
+pre-swap reservation still requires unchanged choices. The pending journal
+retains the automatic-pause reason so recovery can distinguish it from a manual
+pause. An older updater that did not retain this reason may report changed
+connections after migration; checking the new worker's status establishes whether
+it has already reconnected, without forcing another restart.
 
 After atomic replacement, `finish-update --pid=N` asks only the exact reserved
 worker to shut down. It checks the unexpired reservation and idle state under

@@ -40,8 +40,8 @@ type Home struct {
 	OSURL      string `yaml:"os_url,omitempty"`
 	Token      string `yaml:"token"`
 	Enabled    *bool  `yaml:"enabled,omitempty"`
-	// AutoPaused distinguishes a connection that exhausted its retry window
-	// from an explicit owner pause. Enrollment and credentials are retained.
+	// AutoPaused identifies an outage persisted by 0.23.3, not an owner pause.
+	// Fleet startup recovers these enrollments; new outages never set it.
 	AutoPaused bool `yaml:"auto_paused,omitempty"`
 }
 

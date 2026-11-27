@@ -3,6 +3,7 @@ package selfupdate
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 )
 
@@ -184,5 +185,77 @@ func TestReservedRestartDoesNotForceAStuckOrUnverifiableWorker(t *testing.T) {
 				t.Fatalf("uncertain handoff did not stop safely: %v starts=%d", err, starts)
 			}
 		})
+	}
+}
+
+func TestUpdatedWorkerAcceptsOnlyRecordedAutomaticPauseRecovery(t *testing.T) {
+	for _, reason := range []string{"automatic", "manual", "unmarked", "wrong-version", "wrong-process-path", "duplicate", "removed"} {
+		t.Run(reason, func(t *testing.T) {
+			f := setupFixture(t)
+			before := []homeStatus{{ID: "a", AutoPaused: true}, {ID: "b", Enabled: false}}
+			switch reason {
+			case "manual", "unmarked":
+				before[0].AutoPaused = false
+			}
+			f.worker.Version = "1.1.0"
+			f.worker.Homes = []homeStatus{{ID: "a", Enabled: true, State: "Connected"}, {ID: "b", State: "Paused"}}
+			switch reason {
+			case "manual":
+				f.worker.Homes[1].Enabled = true
+			case "wrong-version":
+				f.worker.Version = "1.0.0"
+			case "wrong-process-path":
+				f.worker.Executable += "-other"
+			case "duplicate":
+				f.worker.Homes[1].ID = "a"
+			case "removed":
+				f.worker.Homes = f.worker.Homes[:1]
+			}
+			if sameHomes(before, f.worker.Homes) {
+				t.Fatal("pre-swap comparison accepted changed choices")
+			}
+			if got := f.c.matchesUpdatedWorker(f.worker, "1.1.0", before); got != (reason == "automatic") {
+				t.Fatalf("replacement accepted=%v for %s", got, reason)
+			}
+			if reason == "automatic" {
+				if _, err := f.c.waitReady(t.Context(), "1.1.0", before); err != nil {
+					t.Fatal(err)
+				}
+				if homesAfterUpdate(f.worker.Homes, before) {
+					t.Fatal("recovery comparison allowed disabling an enabled home")
+				}
+				if err := os.MkdirAll(f.c.state, 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := f.c.savePending("1.1.0", "fixture-operation", before); err != nil {
+					t.Fatal(err)
+				}
+				if record, ok := f.c.pendingRecord(); !ok || !record.Homes[0].AutoPaused {
+					t.Fatal("recovery journal lost the automatic-pause reason")
+				}
+				if err := os.WriteFile(f.c.Executable, f.payload, 0755); err != nil {
+					t.Fatal(err)
+				}
+				f.c.Version = "1.1.0+grelease"
+				if _, ok := f.c.pending(); !ok {
+					t.Fatal("replacement cannot read its pending update")
+				}
+				if _, pending := f.c.recoveryCheck(t.Context()); pending {
+					t.Fatal("updated worker with recovered enrollment still needs restart")
+				}
+				r := f.c.resumeUpdate(t.Context(), Result{LatestVersion: "1.1.0"})
+				if !r.OK || r.RestartRequired || !r.WorkerReconnected || f.prepares != 0 || f.restarts != 0 {
+					t.Fatalf("recovered worker was not recognized: %+v", r)
+				}
+			}
+		})
+	}
+}
+
+func TestReservationDistinguishesManualPauseFromAutomaticPause(t *testing.T) {
+	before := []homeStatus{{ID: "a", AutoPaused: true}}
+	after := []homeStatus{{ID: "a"}}
+	if sameHomes(before, after) || homesAfterUpdate(before, after) {
+		t.Fatal("manual pause erased during update comparison")
 	}
 }

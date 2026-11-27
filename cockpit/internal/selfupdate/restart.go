@@ -19,7 +19,7 @@ func (e *restartRecoveryError) Error() string {
 func restartRecovery(reason string) error { return &restartRecoveryError{reason: reason} }
 
 func (c *Client) matchesUpdatedWorker(worker workerStatus, version string, homes []homeStatus) bool {
-	return validateWorker(worker, c.Executable) == nil && baseVersion(worker.Version) == baseVersion(version) && sameHomes(worker.Homes, homes)
+	return validateWorker(worker, c.Executable) == nil && baseVersion(worker.Version) == baseVersion(version) && homesAfterUpdate(homes, worker.Homes)
 }
 
 // restartReserved finishes only the exact worker that reserved admission. The

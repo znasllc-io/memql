@@ -96,7 +96,7 @@ func (c *Client) recoveryCheck(ctx context.Context) (Result, bool) {
 	}
 	worker, statusErr := c.status(ctx)
 	if statusErr == nil && validateWorker(worker, c.Executable) == nil &&
-		baseVersion(worker.Version) == pending.Version && sameHomes(worker.Homes, pending.Homes) {
+		baseVersion(worker.Version) == pending.Version && homesAfterUpdate(pending.Homes, worker.Homes) {
 		return Result{}, false
 	}
 	r := c.result()
@@ -152,10 +152,10 @@ func (c *Client) resumeUpdate(ctx context.Context, r Result) Result {
 		if err := validateWorker(before, c.Executable); err != nil {
 			return failed(r, err)
 		}
-		if !sameHomes(before.Homes, pending.Homes) {
+		alreadyReady = baseVersion(before.Version) == pending.Version
+		if !sameHomes(before.Homes, pending.Homes) && !(alreadyReady && homesAfterUpdate(pending.Homes, before.Homes)) {
 			return failed(r, errors.New("Saved connections changed after the update. Restart the MemQL worker service after its work finishes, then check again"))
 		}
-		alreadyReady = baseVersion(before.Version) == pending.Version
 		if !alreadyReady {
 			if before.Busy == nil || *before.Busy {
 				return failed(r, errors.New("The worker is busy or cannot reserve a safe restart. Finish its work, then retry"))

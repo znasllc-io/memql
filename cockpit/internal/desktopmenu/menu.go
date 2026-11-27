@@ -78,9 +78,9 @@ func summary(status *Status) string {
 	return fmt.Sprintf("%d of %d servers connected", connected, len(status.Homes))
 }
 
-// An automatic pause is a failed connection episode, not a changed consent
-// choice. The explicit retry uses the same per-home control with enabled=true
-// so the worker clears that episode and starts a fresh bounded retry window.
+// An automatic pause records an outage in an older worker, not a consent
+// choice. Keep explicit retry for old workers and entries startup could not
+// safely repair; enabled=true clears that marker using the saved enrollment.
 func homeConnectionAction(home Home) (label, detail string, enabled bool) {
 	if home.AutoPaused {
 		return "Try again", "No connection for 10 minutes.", true

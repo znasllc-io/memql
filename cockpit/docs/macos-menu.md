@@ -352,35 +352,40 @@ changing their connection policy; the menu refuses an ambiguous pause.
 Menu status distinguishes paused,
 pausing, connected, connecting/retrying, and an unavailable background worker.
 
-A saved, menu-managed home that cannot maintain a healthy worker connection
-for ten continuous minutes pauses automatically. Brief outages keep using the
-normal reconnect backoff. A healthy connection must complete registration and send its regular
-heartbeat; a TCP connection or a short-lived registration alone does not reset
-the failure window. Idle, healthy workers continue heartbeating normally.
+Enabled connections keep retrying after an outage, however long it lasts.
+Network failures use the normal reconnect backoff; rejected credentials keep
+their slower retry schedule and refusal details. Neither failure changes the
+saved connection choice or removes enrollment. Idle, healthy workers continue
+heartbeating normally.
+
 An outbound heartbeat that stalls for a minute ends that stream so reconnect
-can proceed instead of leaving the menu indefinitely showing Connected.
+can proceed. If a dial or registered runner makes no progress for ten minutes,
+the supervisor cancels only that runner and starts another with the same
+identity, credentials and per-home policy. A completed failed attempt resets
+this watchdog after its scheduled backoff, including jitter; a fifteen-minute
+credential hold is not a stalled runner. A TCP connection or registration alone
+is not a healthy heartbeat. Time when the supervisor cannot observe connections,
+such as machine sleep, does not consume the watchdog window. Recovery does not
+rewrite `workers.yaml`, depend on its being writable, or resume interrupted work.
 
-The menu labels this **Paused automatically**, explains the ten-minute limit,
-and offers **Try again**. Retrying reuses the saved enrollment and begins a
-fresh ten-minute window; it does not repair a revoked or invalid credential.
-The automatic-pause marker and disabled state are saved with the selected home,
-so restarting or updating Cockpit cannot resume it. Other homes and their work
-continue. Manual pause remains available and retains its existing meaning.
-The failure window uses elapsed time in the running worker; time spent shut
-down or a long gap when the supervisor could not observe connections (such as
-machine sleep) is not counted as failed connection attempts. A healthy stream
-that stops completing normal heartbeats also expires after ten minutes,
-including a local probe stalled before a heartbeat send. A persistence failure leaves
-the current policy intact and reports the error rather than claiming a durable
-pause.
+On startup, Cockpit repairs the `enabled: false, auto_paused: true` entries
+saved by version 0.23.3. These recorded automatic pauses resume with their
+existing enrollment. Explicit **Pause connection** choices remain paused.
+Migration preserves other homes, tokens, unknown settings and comments. If it
+cannot safely save the recovered choice, or a manually paused duplicate names
+the same server, that entry stays paused and the worker logs the reason; other
+homes can still connect. The existing **Try again** control remains available
+for an entry whose saved automatic pause could not be repaired.
 
-The updater's active handoff reservation temporarily defers automatic pause
-without resetting the failure window. After cancellation or expiry, the
-supervisor evaluates that home again. Explicit single-home command-line
-overrides have no saved per-home controls and retain their normal reconnect
-behavior. The heartbeat-send timeout still applies in that mode. Regression
-coverage is in [`connection_pause_test.go`](../internal/worker/connection_pause_test.go)
+The updater's active handoff reservation temporarily defers watchdog restarts.
+After cancellation or expiry, the supervisor evaluates stalled runners again.
+Explicit single-home command-line overrides retain their normal reconnect
+behavior and heartbeat-send timeout. Regression coverage is in
+[`connection_recovery_test.go`](../internal/worker/connection_recovery_test.go)
 and [`heartbeat_deadline_test.go`](../internal/worker/heartbeat_deadline_test.go).
+The tests cover a simulated twelve-hour outage, refused credentials, a stalled
+dial, fresh heartbeats after recovery, manual pauses, restart migration, sibling
+isolation and update reservations; they are not a twelve-hour live network test.
 
 **Quit menu bar — worker keeps running** quits only the companion. It does not
 change any server policy. The companion returns at the next login, or launch

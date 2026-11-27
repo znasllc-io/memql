@@ -42,9 +42,10 @@ type Result struct {
 }
 
 type homeStatus struct {
-	ID      string `json:"id"`
-	Enabled bool   `json:"enabled"`
-	State   string `json:"state"`
+	ID         string `json:"id"`
+	Enabled    bool   `json:"enabled"`
+	State      string `json:"state"`
+	AutoPaused bool   `json:"auto_paused,omitempty"`
 }
 type workerStatus struct {
 	Version       string       `json:"version"`
@@ -534,19 +535,32 @@ func (c *Client) validateReservation(ctx context.Context, before workerStatus) e
 }
 
 func sameHomes(a, b []homeStatus) bool {
+	return matchingHomes(a, b, false)
+}
+
+// Startup repairs the automatic pauses saved by 0.23.3. Accept that one-way
+// recovery only after identifying the requested replacement version; pre-swap
+// reservations still require the exact choices, including the pause's reason.
+func homesAfterUpdate(before, after []homeStatus) bool {
+	return matchingHomes(before, after, true)
+}
+
+func matchingHomes(a, b []homeStatus, allowRecovery bool) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	expected := map[string]bool{}
+	expected := map[string]homeStatus{}
 	for _, h := range a {
 		if _, ok := expected[h.ID]; ok {
 			return false
 		}
-		expected[h.ID] = h.Enabled
+		expected[h.ID] = h
 	}
 	for _, h := range b {
-		enabled, ok := expected[h.ID]
-		if !ok || enabled != h.Enabled {
+		before, ok := expected[h.ID]
+		same := before.Enabled == h.Enabled && before.AutoPaused == h.AutoPaused
+		recovered := allowRecovery && before.AutoPaused && h.Enabled && !h.AutoPaused
+		if !ok || !same && !recovered {
 			return false
 		}
 		delete(expected, h.ID)
@@ -572,7 +586,7 @@ func (c *Client) waitReady(ctx context.Context, version string, homes []homeStat
 	defer ticker.Stop()
 	for {
 		s, err := c.status(ctx)
-		if err == nil && validateWorker(s, c.Executable) == nil && baseVersion(s.Version) == baseVersion(version) && sameHomes(homes, s.Homes) {
+		if err == nil && validateWorker(s, c.Executable) == nil && baseVersion(s.Version) == baseVersion(version) && homesAfterUpdate(homes, s.Homes) {
 			return s, nil
 		}
 		select {

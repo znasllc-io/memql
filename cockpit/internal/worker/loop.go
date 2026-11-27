@@ -117,6 +117,7 @@ type Runner struct {
 	pause func(ctx context.Context, d time.Duration) bool
 	// Fleet observes application health, not just a successful transport dial.
 	connectionHealth func(*Connection, bool)
+	connectionRetry  func(time.Duration)
 	// Tests can fire the bounded heartbeat watchdog without waiting a minute.
 	heartbeatDeadline func(time.Duration, func()) func() bool
 
@@ -362,7 +363,7 @@ func (r *Runner) Run(ctx context.Context) error {
 				return err
 			}
 			r.metrics.RecordReconnect(r.home)
-			if !r.wait(ctx, r.afterConnectFailure(err, &backoff)) {
+			if !r.waitForRetry(ctx, r.afterConnectFailure(err, &backoff)) {
 				return ctx.Err()
 			}
 			continue
@@ -397,7 +398,7 @@ func (r *Runner) Run(ctx context.Context) error {
 			"healthy", healthy,
 			"backoff_seconds", backoff.Seconds(),
 		)
-		if !r.wait(ctx, backoff) {
+		if !r.waitForRetry(ctx, backoff) {
 			return ctx.Err()
 		}
 		backoff = nextBackoff(backoff, r.maxBackoff())
@@ -1085,6 +1086,13 @@ func (r *Runner) minBackoff() time.Duration {
 		return r.backoffMin
 	}
 	return defaultReconnectMinBackoff
+}
+
+func (r *Runner) waitForRetry(ctx context.Context, delay time.Duration) bool {
+	if r.connectionRetry != nil {
+		r.connectionRetry(delay)
+	}
+	return r.wait(ctx, delay)
 }
 
 func (r *Runner) maxBackoff() time.Duration {

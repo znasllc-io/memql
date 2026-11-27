@@ -163,7 +163,7 @@ type homeRun struct {
 }
 
 // Run connects every enabled home in parallel, one stream per cluster
-// (runnableHomes). One home failing or pausing after failed retries does not
+// (runnableHomes). One home failing or being manually paused does not
 // cancel the others; only ctx cancel tears the supervisor down.
 //
 // EVERY HOME IS BUILT BEFORE ANY IS STARTED (memql-cockpit#433). A home
@@ -176,6 +176,7 @@ type homeRun struct {
 // before Run returns; what those start in turn -- a generation, an app
 // session's process -- is cancelled with them and ends on its own.
 func (f *Fleet) Run(ctx context.Context) error {
+	f.recoverAutomaticallyPausedHomes()
 	homes, duplicates := f.workers.runnableHomes()
 	machineID, err := ResolveMachineID(f.workers.machineRoot())
 	if err != nil {
@@ -295,6 +296,7 @@ func (f *Fleet) runManagedHomeOnce(ctx context.Context, h *managedHome) error {
 	f.runners = append(f.runners, run.runner)
 	generation := h.generation
 	run.runner.connectionHealth = func(conn *Connection, healthy bool) { f.connectionHealth(h, run.runner, generation, conn, healthy) }
+	run.runner.connectionRetry = func(delay time.Duration) { f.connectionRetryScheduled(h, run.runner, generation, delay) }
 	f.mu.Unlock()
 	defer func() {
 		f.mu.Lock()

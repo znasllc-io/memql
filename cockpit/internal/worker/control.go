@@ -34,7 +34,6 @@ type managedHome struct {
 	healthy     bool
 	lastHealthy time.Time
 	failedSince time.Time
-	pauseFailed bool
 	generation  uint64
 }
 
@@ -118,12 +117,12 @@ func (f *Fleet) LocalStatus() LocalStatus {
 				if h.autoPaused {
 					state = "Paused automatically"
 				}
+			case h.retrying:
+				state = "Disconnected / retrying"
 			case h.runner != nil && h.runner.RegistrationId() != "":
 				state = "Connected"
 			case h.runner != nil:
 				state = "Connecting / retrying"
-			case h.retrying:
-				state = "Disconnected / retrying"
 			default:
 				state = "Starting"
 			}
@@ -177,7 +176,6 @@ func (f *Fleet) SetHomeEnabled(id string, enabled bool) error {
 	h.healthy = false
 	h.lastHealthy = time.Time{}
 	h.failedSince = time.Time{}
-	h.pauseFailed = false
 	if enabled {
 		h.failedSince = f.connectionNow()
 	}
