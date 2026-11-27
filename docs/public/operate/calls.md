@@ -2122,15 +2122,55 @@ other routes. Neither the JSON schema nor a UTCP declaration grants authority.
 
 `skills_read`, `skills_write` and `skills_control` separate discovery/reading,
 authoring and running. Runs require the actual call's Insights entitlement and
-the approved immutable skill version. The catalog contains fourteen curated
-templates. The implemented finite graph vocabulary is readiness, instruction,
-turn, discussion, presentation, acknowledgment, condition, handoff and finish.
-Unsupported repeat/parallel nodes, cycles and arbitrary effects are rejected.
+the approved immutable skill version. The original fourteen curated template
+versions stay immutable; newer Presentation, Office hours and Workshop versions
+and Training add bounded graph behavior. The graph vocabulary includes readiness,
+instruction, turn, discussion, presentation, acknowledgment, condition, handoff,
+repeat, parallel, effect and finish. Repeat permits one to eight rounds; parallel
+permits two to four disjoint branches with an all-branches join. Unbounded cycles,
+nested or overlapping parallel regions and arbitrary effects are rejected. The
+only effect node is the explicit `end_turn_mute` action described below.
 The connected-node editor and UTCP use the same definition. Preview has no real
 side effects. Published versions, run visits, server clock anchors, revision and
 control epoch survive refresh/replica changes. Participant snapshots filter
 private content before transport. Human pause/change/cancel creates a hold that
 an agent cannot bypass by rereading the latest revision.
+
+Simulation follows the bounded longest valid path rather than summing alternative
+branches. Parallel branches retain separate visits, clocks, acknowledgments and
+commands. Previous follows ancestor visits; revisiting a repeat stays within its
+round. Readiness can declare help, a one-to-3,600-second waiting deadline and a
+reviewed alternative edge. The deadline never advances guidance automatically:
+an authorized fallback rechecks acknowledgments and authority. Visit history
+distinguishes completion, skipping, revisiting and stopping. Extend cannot exceed
+remaining funded time; an unsuccessful authorized Change pauses the existing run
+under a human hold.
+
+Language, materials and typed input/output declarations describe the expected
+work without collecting answers, storing call content or fetching material URLs.
+Logical resource requirements bind owner-approved revisions to exact active
+leases and media identities. Loss or replacement blocks guidance; explicit Resume
+rechecks and adopts a separately restarted source. Scheduled bindings recheck at
+start. Cohosts can use existing approved references without discovering or
+expanding the owner's private resource library.
+
+Presenter ownership and audience microphone/camera/share permissions are native
+authority, separate from shared spotlight. Narrowing fences joins, removes old
+provider publication authority and verifies absence before reporting applied;
+uncertain cleanup stays pending. Temporary speakers receive microphone permission
+for at most five minutes. Affected clients reconnect with devices off, and wider
+permission never activates a device. Human and delegated-agent controls share the
+same current-admission and revision checks; they do not grant resource ownership
+or account spending authority.
+
+Optional BYO observations require the subject's explicit consent to the exact
+purpose, observer and recipients for one to five minutes on the current admission.
+Agents also need the separate `observations` scope. Subject or requester can
+withdraw permission. Bounded reports are attributed, ephemeral and visibly
+untrusted; only consent metadata persists, and replay never resends report text.
+This permission grants no screenshots or additional media access, excludes family
+calls, and supplies neither age proof nor sole grounds for a sanction. Managed
+resource seats are excluded as described under resource publication below.
 
 Overtime stays advisory. Separate End turn and Mute controls remain available.
 The host-only `end_turn_mute` action combines them in one durable operation;
