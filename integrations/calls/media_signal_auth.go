@@ -154,10 +154,14 @@ func (s *Service) authenticateMediaSignal(ctx context.Context, token string) (*r
 		return fail(e)
 	}
 	v, e := lkauth.ParseAPIToken(token)
-	if e != nil || v.APIKey() != credential.Key {
+	if e != nil {
 		return fail(accountRefusal("media_admission_invalid"))
 	}
-	claims, grants, e := v.Verify(credential.Secret)
+	signing, e := s.mediaSignalSigningCredential(ctx, *server, credential, v.APIKey())
+	if e != nil {
+		return fail(e)
+	}
+	claims, grants, e := v.Verify(signing.Secret)
 	if e != nil || claims.ExpiresAt == nil || !s.now().Before(claims.ExpiresAt.Time) || grants.Video == nil || !grants.Video.RoomJoin || grants.Video.Room != r.MediaRoom {
 		return fail(accountRefusal("media_admission_invalid"))
 	}
@@ -174,6 +178,32 @@ func (s *Service) authenticateMediaSignal(ctx context.Context, token string) (*r
 		return fail(accountRefusal("media_admission_invalid"))
 	}
 	return r, *server, credential, b, proof, nil
+}
+
+// LiveKit v1.13.7 refreshToken selects the first entry while ranging its key
+// map. The bootstrap provider also has its separately sealed webhook key in
+// that map, so a genuine refreshed participant JWT may have either issuer.
+// The global webhook credential belongs only to this exact bootstrap registry
+// binding; it grants no trust to another server or a replacement credential.
+// This selects only JWT signature verification. The independent native proof
+// and current admission checks below remain mandatory, and authenticate returns
+// the API credential for all upstream remints and control operations.
+func (s *Service) mediaSignalSigningCredential(ctx context.Context, server MediaServer, api MediaCredential, issuer string) (MediaCredential, error) {
+	if issuer == api.Key {
+		return api, nil
+	}
+	if server.ID != BootstrapMediaServerID || server.CredentialSecret != SecretMediaBootstrap {
+		return MediaCredential{}, accountRefusal("media_admission_invalid")
+	}
+	raw, err := s.store.resolveSecret(ctx, SecretMediaWebhook)
+	if err != nil {
+		return MediaCredential{}, accountRefusal("media_admission_invalid")
+	}
+	webhook, err := ParseMediaCredential(raw)
+	if err != nil || issuer != webhook.Key {
+		return MediaCredential{}, accountRefusal("media_admission_invalid")
+	}
+	return webhook, nil
 }
 
 // Called with the room plus all relevant account/credential/grant gates held.
