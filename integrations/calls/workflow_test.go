@@ -1,6 +1,7 @@
 package calls
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -14,8 +15,9 @@ func TestWorkflowCatalogIsDeclarativeAndValid(t *testing.T) {
 	require.GreaterOrEqual(t, len(catalog), 14)
 	seen := map[string]bool{}
 	for _, d := range catalog {
-		require.False(t, seen[d.ID])
-		seen[d.ID] = true
+		key := fmt.Sprintf("%s:%d", d.ID, d.Version)
+		require.False(t, seen[key])
+		seen[key] = true
 		require.Empty(t, callrules.ValidateWorkflow(d))
 		require.Equal(t, "published", d.Status)
 	}

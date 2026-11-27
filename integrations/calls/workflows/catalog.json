@@ -1537,5 +1537,556 @@
       }
     ],
     "entryNodeId": "step-1"
+  },
+  {
+    "id": "presentation",
+    "version": 2,
+    "revision": 2,
+    "status": "published",
+    "title": "Presentation and Q&A",
+    "description": "Present with explicitly reviewed presenter ownership, audience publication permissions and moderated questions.",
+    "instructions": "Guide the conversation respectfully. Never infer age, identity, consent or comprehension from media. Do not activate another participant's camera or microphone. Hosts explicitly review presenter and audience permissions at each presentation visit. A role assignment alone does not change media permissions. Narrowing disconnects affected publishers; they reconnect with devices off. Stop other resources before assigning a resource presenter.",
+    "requiresInsights": true,
+    "roles": [
+      {
+        "id": "facilitator",
+        "label": "Facilitator",
+        "required": true
+      }
+    ],
+    "nodes": [
+      {
+        "id": "step-1",
+        "type": "discussion",
+        "label": "Welcome",
+        "instructions": "Welcome. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 120,
+        "requirements": {},
+        "position": {
+          "x": 0,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-2",
+        "type": "presentation",
+        "label": "Presentation",
+        "instructions": "Review and set the current presenter and audience microphone, camera and screen-share permissions. Assignment never starts a device. The presenter chooses when to share an approved source. Stop other resource leases before assigning a resource presenter; their owner remains unchanged.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 1200,
+        "requirements": {},
+        "position": {
+          "x": 240,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-3",
+        "type": "presentation",
+        "label": "Questions",
+        "instructions": "Review presenter permissions for this new visit. Read the moderated Questions queue and explicitly share one question when appropriate. Offer a reviewed temporary speaker permission for a named participant only; they still choose whether to unmute. Resolve or dismiss questions explicitly. Ending this visit restores only this skill’s restrictions.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 600,
+        "requirements": {},
+        "position": {
+          "x": 480,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-4",
+        "type": "discussion",
+        "label": "Close",
+        "instructions": "Close. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 120,
+        "requirements": {},
+        "position": {
+          "x": 720,
+          "y": 100
+        }
+      },
+      {
+        "id": "finish",
+        "type": "finish",
+        "label": "Complete",
+        "instructions": "Confirm next actions. Guidance ends; the call remains open.",
+        "visibility": "all",
+        "position": {
+          "x": 960,
+          "y": 100
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-1",
+        "source": "step-1",
+        "target": "step-2"
+      },
+      {
+        "id": "edge-2",
+        "source": "step-2",
+        "target": "step-3"
+      },
+      {
+        "id": "edge-3",
+        "source": "step-3",
+        "target": "step-4"
+      },
+      {
+        "id": "edge-4",
+        "source": "step-4",
+        "target": "finish"
+      }
+    ],
+    "entryNodeId": "step-1"
+  },
+  {
+    "id": "office-hours",
+    "version": 2,
+    "revision": 2,
+    "status": "published",
+    "title": "Office hours",
+    "description": "Use moderated questions and explicitly reviewed temporary speaking permissions for orderly group Q&A.",
+    "instructions": "Guide the conversation respectfully. Never infer age, identity, consent or comprehension from media. Do not activate another participant's camera or microphone. Use Questions for participant submissions; nothing is shared or moderated automatically. Each presentation visit requires an explicit presenter/audience review. Temporary speaking permission never turns on a microphone, and its expiry may interrupt that publisher until a fresh scoped reconnect.",
+    "requiresInsights": true,
+    "roles": [
+      {
+        "id": "facilitator",
+        "label": "Facilitator",
+        "required": true
+      }
+    ],
+    "nodes": [
+      {
+        "id": "step-1",
+        "type": "presentation",
+        "label": "Question",
+        "instructions": "Review the presenter and audience publication permissions, then collect questions in the moderated queue. Ask before sharing the selected question; the queue never grants speaking authority.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 180,
+        "requirements": {},
+        "position": {
+          "x": 0,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-2",
+        "type": "presentation",
+        "label": "Explore together",
+        "instructions": "Review permissions for this visit and choose the current presenter. If useful, review a temporary speaker assignment for a named participant for at most five minutes. The speaker decides when to unmute. Resolve the shared question explicitly; changing a presenter never transfers resource ownership or starts a device.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 900,
+        "requirements": {},
+        "position": {
+          "x": 240,
+          "y": 100
+        }
+      },
+      {
+        "id": "step-3",
+        "type": "discussion",
+        "label": "Next steps",
+        "instructions": "Next steps. Invite participants to contribute; time limits are advisory.",
+        "visibility": "all",
+        "roleId": "facilitator",
+        "durationSeconds": 180,
+        "requirements": {},
+        "position": {
+          "x": 480,
+          "y": 100
+        }
+      },
+      {
+        "id": "finish",
+        "type": "finish",
+        "label": "Complete",
+        "instructions": "Confirm next actions. Guidance ends; the call remains open.",
+        "visibility": "all",
+        "position": {
+          "x": 720,
+          "y": 100
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-1",
+        "source": "step-1",
+        "target": "step-2"
+      },
+      {
+        "id": "edge-2",
+        "source": "step-2",
+        "target": "step-3"
+      },
+      {
+        "id": "edge-3",
+        "source": "step-3",
+        "target": "finish"
+      }
+    ],
+    "entryNodeId": "step-1"
+  },
+  {
+    "id": "planning",
+    "version": 2,
+    "revision": 2,
+    "status": "published",
+    "title": "Planning workshop",
+    "description": "Develop options and dependencies in two parallel guidance groups, then join to choose owners and next steps.",
+    "instructions": "Guide the conversation respectfully. Never infer age, identity, consent or comprehension from media. Do not activate another participant's camera or microphone. Assign an options lead and a dependency lead before starting. Parallel groups share this call; they are not private breakout rooms. Each group explicitly acknowledges its results before the host continues. No source, media effect or agent task starts automatically.",
+    "requiresInsights": true,
+    "roles": [
+      {
+        "id": "facilitator",
+        "label": "Facilitator",
+        "required": true
+      },
+      {
+        "id": "options-lead",
+        "label": "Options lead",
+        "required": true
+      },
+      {
+        "id": "dependencies-lead",
+        "label": "Dependencies lead",
+        "required": true
+      }
+    ],
+    "nodes": [
+      {
+        "id": "scope",
+        "type": "discussion",
+        "label": "Agree the scope",
+        "instructions": "Agree an outcome and bounds for both groups.",
+        "visibility": "all",
+        "position": {
+          "x": 0,
+          "y": 100
+        },
+        "durationSeconds": 120,
+        "roleId": "facilitator"
+      },
+      {
+        "id": "groups",
+        "type": "parallel",
+        "label": "Explore options and dependencies",
+        "instructions": "",
+        "visibility": "all",
+        "position": {
+          "x": 240,
+          "y": 100
+        },
+        "parallel": {
+          "branches": [
+            {
+              "id": "options",
+              "entryNodeId": "options",
+              "untilNodeId": "options-ready"
+            },
+            {
+              "id": "dependencies",
+              "entryNodeId": "dependencies",
+              "untilNodeId": "dependencies-ready"
+            }
+          ]
+        }
+      },
+      {
+        "id": "options",
+        "type": "instruction",
+        "label": "Develop options",
+        "instructions": "Develop a short set of options within the agreed scope. Use only authorized resources.",
+        "visibility": "all",
+        "position": {
+          "x": 480,
+          "y": 20
+        },
+        "durationSeconds": 120,
+        "roleId": "options-lead"
+      },
+      {
+        "id": "options-ready",
+        "type": "acknowledgment",
+        "label": "Confirm options are ready",
+        "instructions": "The assigned lead acknowledges when these options are ready to discuss.",
+        "visibility": "all",
+        "position": {
+          "x": 720,
+          "y": 20
+        },
+        "durationSeconds": 30,
+        "roleId": "options-lead"
+      },
+      {
+        "id": "dependencies",
+        "type": "instruction",
+        "label": "Identify dependencies",
+        "instructions": "List dependencies, unknowns and questions without taking external actions.",
+        "visibility": "all",
+        "position": {
+          "x": 480,
+          "y": 220
+        },
+        "durationSeconds": 120,
+        "roleId": "dependencies-lead"
+      },
+      {
+        "id": "dependencies-ready",
+        "type": "acknowledgment",
+        "label": "Confirm dependencies are ready",
+        "instructions": "The assigned lead acknowledges when this group is ready to discuss.",
+        "visibility": "all",
+        "position": {
+          "x": 720,
+          "y": 220
+        },
+        "durationSeconds": 30,
+        "roleId": "dependencies-lead"
+      },
+      {
+        "id": "selection",
+        "type": "discussion",
+        "label": "Compare and choose",
+        "instructions": "Both groups have joined. Compare their work and explicitly choose the next actions.",
+        "visibility": "all",
+        "position": {
+          "x": 960,
+          "y": 100
+        },
+        "durationSeconds": 180,
+        "roleId": "facilitator"
+      },
+      {
+        "id": "owners",
+        "type": "discussion",
+        "label": "Owners and next steps",
+        "instructions": "Agree owners and next steps. This guidance does not send messages or assign external tasks.",
+        "visibility": "all",
+        "position": {
+          "x": 1200,
+          "y": 100
+        },
+        "durationSeconds": 120,
+        "roleId": "facilitator"
+      },
+      {
+        "id": "finish",
+        "type": "finish",
+        "label": "Complete",
+        "instructions": "Guidance ends; the call remains open.",
+        "visibility": "all",
+        "position": {
+          "x": 1440,
+          "y": 100
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "scope-groups",
+        "source": "scope",
+        "target": "groups"
+      },
+      {
+        "id": "groups-options",
+        "source": "groups",
+        "target": "options"
+      },
+      {
+        "id": "groups-dependencies",
+        "source": "groups",
+        "target": "dependencies"
+      },
+      {
+        "id": "options-options-ready",
+        "source": "options",
+        "target": "options-ready"
+      },
+      {
+        "id": "dependencies-dependencies-ready",
+        "source": "dependencies",
+        "target": "dependencies-ready"
+      },
+      {
+        "id": "options-ready-selection",
+        "source": "options-ready",
+        "target": "selection"
+      },
+      {
+        "id": "dependencies-ready-selection",
+        "source": "dependencies-ready",
+        "target": "selection"
+      },
+      {
+        "id": "selection-owners",
+        "source": "selection",
+        "target": "owners"
+      },
+      {
+        "id": "owners-finish",
+        "source": "owners",
+        "target": "finish"
+      }
+    ],
+    "entryNodeId": "scope"
+  },
+  {
+    "id": "training",
+    "version": 1,
+    "revision": 1,
+    "status": "published",
+    "title": "Training and role-play",
+    "description": "Practice a bounded scenario for three rounds with explicit reflection and acknowledgment.",
+    "instructions": "Guide the conversation respectfully. Never infer age, identity, consent or comprehension from media. Do not activate another participant's camera or microphone. Agree the scenario and roles explicitly. Three finite rounds create fresh visits and acknowledgments. Feedback is participant-led reflection, not an automated assessment. No model, message, purchase or media action is invoked by the template. Children’s Skills remain unavailable.",
+    "requiresInsights": true,
+    "roles": [
+      {
+        "id": "facilitator",
+        "label": "Facilitator",
+        "required": true
+      },
+      {
+        "id": "participant",
+        "label": "Practicing participant",
+        "required": true
+      }
+    ],
+    "nodes": [
+      {
+        "id": "agreement",
+        "type": "instruction",
+        "label": "Agree the scenario",
+        "instructions": "Agree a safe bounded scenario, the learning aim and how to stop. Participation and feedback remain voluntary.",
+        "visibility": "all",
+        "position": {
+          "x": 0,
+          "y": 100
+        },
+        "durationSeconds": 120,
+        "roleId": "facilitator"
+      },
+      {
+        "id": "rounds",
+        "type": "repeat",
+        "label": "Three practice rounds",
+        "instructions": "",
+        "visibility": "all",
+        "position": {
+          "x": 240,
+          "y": 100
+        },
+        "repeat": {
+          "count": 3,
+          "untilNodeId": "reflection-ready"
+        }
+      },
+      {
+        "id": "practice",
+        "type": "turn",
+        "label": "Practice the scenario",
+        "instructions": "Practice the agreed scenario. The time is advisory; finish the turn when ready.",
+        "visibility": "all",
+        "position": {
+          "x": 480,
+          "y": 100
+        },
+        "durationSeconds": 90,
+        "roleId": "participant"
+      },
+      {
+        "id": "reflection",
+        "type": "discussion",
+        "label": "Reflect together",
+        "instructions": "Invite reflection on observable choices and useful alternatives. Do not treat a track, score or agent assertion as proof of comprehension.",
+        "visibility": "all",
+        "position": {
+          "x": 720,
+          "y": 100
+        },
+        "durationSeconds": 60,
+        "roleId": "facilitator"
+      },
+      {
+        "id": "reflection-ready",
+        "type": "acknowledgment",
+        "label": "Ready for the next round",
+        "instructions": "The assigned participant acknowledges this round before continuing. Each round requires a fresh acknowledgment.",
+        "visibility": "all",
+        "position": {
+          "x": 960,
+          "y": 100
+        },
+        "durationSeconds": 15,
+        "roleId": "participant"
+      },
+      {
+        "id": "wrap",
+        "type": "discussion",
+        "label": "Choose a next practice goal",
+        "instructions": "Summarize what participants chose to share and agree a next practice goal. No external assignment is sent.",
+        "visibility": "all",
+        "position": {
+          "x": 1200,
+          "y": 100
+        },
+        "durationSeconds": 180,
+        "roleId": "facilitator"
+      },
+      {
+        "id": "finish",
+        "type": "finish",
+        "label": "Complete",
+        "instructions": "Guidance ends; the call remains open.",
+        "visibility": "all",
+        "position": {
+          "x": 1440,
+          "y": 100
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "agreement-rounds",
+        "source": "agreement",
+        "target": "rounds"
+      },
+      {
+        "id": "rounds-practice",
+        "source": "rounds",
+        "target": "practice"
+      },
+      {
+        "id": "practice-reflection",
+        "source": "practice",
+        "target": "reflection"
+      },
+      {
+        "id": "reflection-reflection-ready",
+        "source": "reflection",
+        "target": "reflection-ready"
+      },
+      {
+        "id": "reflection-ready-wrap",
+        "source": "reflection-ready",
+        "target": "wrap"
+      },
+      {
+        "id": "wrap-finish",
+        "source": "wrap",
+        "target": "finish"
+      }
+    ],
+    "entryNodeId": "agreement"
   }
 ]
