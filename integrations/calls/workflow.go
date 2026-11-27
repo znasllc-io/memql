@@ -17,6 +17,9 @@ import (
 // and write is scoped to the authenticated account or an occupied seat's room.
 func (s *Service) Workflow(ctx context.Context, site callrules.SiteRef, token string, req callrules.WorkflowRequest) (callrules.WorkflowResult, error) {
 	out := callrules.WorkflowResult{ServerNow: s.now()}
+	if (req.BranchID == "") != (req.BranchVisitID == "") || req.BranchID != "" && (!callrules.ValidWorkflowID(req.BranchID) || !callrules.ValidWorkflowID(req.BranchVisitID) || !slices.Contains([]string{"next", "previous", "seek", "extend", "ack", "end_turn"}, req.Action)) {
+		return out, callrules.ErrInvalid
+	}
 	site, err := checkSite(site)
 	if err != nil {
 		return out, err
@@ -323,6 +326,7 @@ func workflowTerminal(r *callrules.WorkflowRun) bool {
 	return r.Status == "cancelled" || r.Status == "completed"
 }
 func workflowFreeze(r *callrules.WorkflowRun, now time.Time) {
+	workflowParallelFreeze(r, now)
 	r.ElapsedSeconds = callrules.WorkflowElapsed(*r, now)
 	r.AnchorAt = time.Time{}
 }
@@ -338,8 +342,13 @@ func workflowEvent(r *callrules.WorkflowRun, kind, msg string, now time.Time) {
 	}
 }
 func workflowEnter(r *callrules.WorkflowRun, nodeID string, now time.Time) {
+	workflowParallelArchive(r, now)
 	if r.VisitID != "" {
-		r.History = append(r.History, callrules.WorkflowVisit{NodeID: r.NodeID, VisitID: r.VisitID, ElapsedSeconds: callrules.WorkflowElapsed(*r, now)})
+		visit := callrules.WorkflowVisit{NodeID: r.NodeID, VisitID: r.VisitID, ElapsedSeconds: callrules.WorkflowElapsed(*r, now)}
+		if r.Repeat != nil {
+			visit.RepeatVisitID, visit.RepeatIteration = r.Repeat.VisitID, r.Repeat.Iteration
+		}
+		r.History = append(r.History, visit)
 		if len(r.History) > 256 {
 			r.History = r.History[len(r.History)-256:]
 		}
@@ -359,6 +368,7 @@ func workflowEnter(r *callrules.WorkflowRun, nodeID string, now time.Time) {
 		r.AnchorAt = time.Time{}
 	}
 	workflowEvent(r, "step_entered", n.Label, now)
+	workflowParallelEnter(r, now)
 }
 
 // Previous revisits the most recently retained graph ancestor, not the last
@@ -383,8 +393,9 @@ func workflowPreviousNode(r *callrules.WorkflowRun) string {
 		}
 	}
 	visit(r.NodeID)
+	regions := callrules.WorkflowRepeatRegions(r.Definition)
 	for i := len(r.History) - 1; i >= 0; i-- {
-		if ancestors[r.History[i].NodeID] {
+		if ancestors[r.History[i].NodeID] && workflowRepeatRevisit(r, r.History[i], regions) {
 			return r.History[i].NodeID
 		}
 	}
@@ -607,128 +618,156 @@ func (s *Service) workflowRunCommand(ctx context.Context, site callrules.SiteRef
 		if r == nil {
 			return out, accountRefusal("workflow_run_required")
 		}
-		if !seat.Host {
-			n, _ := callrules.WorkflowNodeByID(r.Definition, r.NodeID)
-			if n.RoleID == "" || r.Bindings[n.RoleID] != seat.ID {
-				return out, notHost()
-			}
-			if req.Action == "end_turn" && r.Status != "running" {
-				return out, accountRefusal("workflow_paused")
-			}
-			if req.Action == "end_turn" && n.Type != "turn" {
-				return out, notHost()
-			}
-		}
-		// A real human's intervention invalidates pending agent commands and requires
-		// an explicit human resume/handoff. Merely rereading the epoch is insufficient.
-		if !agent && seat.Host && slices.Contains([]string{"pause", "previous", "next", "seek", "extend", "cancel"}, req.Action) {
-			r.ControlEpoch++
-			r.Hold = "human"
-		}
-		switch req.Action {
-		case "pause":
-			workflowFreeze(r, now)
-			r.Status = "paused"
-			workflowEvent(r, "paused", "Guidance paused. Call time and billing continue.", now)
-		case "cancel":
-			workflowFreeze(r, now)
-			r.Status = "cancelled"
-			r.Blockers = []string{}
-			workflowEvent(r, "cancelled", "Guidance cancelled. The call remains open.", now)
-		case "resume", "handoff":
-			if req.Action == "handoff" && agent {
-				return out, accountRefusal("workflow_human_handoff_required")
-			}
-			if err = s.workflowEntitlement(ctx, site, *room); err != nil {
+		if req.BranchID != "" {
+			if err = s.workflowParallelCommand(ctx, site, *room, r, *seat, agent, req, now); err != nil {
 				return out, err
 			}
-			blockers, e := s.workflowRequirements(ctx, site, *room, *r, r.NodeID)
-			if e != nil {
-				return out, e
+		} else {
+			if r.Parallel != nil && slices.Contains([]string{"extend", "ack", "end_turn"}, req.Action) {
+				return out, accountRefusal("workflow_branch_required")
 			}
-			if len(blockers) > 0 {
-				return out, accountRefusal("workflow_requirements_unavailable")
+			if !seat.Host {
+				n, _ := callrules.WorkflowNodeByID(r.Definition, r.NodeID)
+				if n.RoleID == "" || r.Bindings[n.RoleID] != seat.ID {
+					return out, notHost()
+				}
+				if req.Action == "end_turn" && r.Status != "running" {
+					return out, accountRefusal("workflow_paused")
+				}
+				if req.Action == "end_turn" && n.Type != "turn" {
+					return out, notHost()
+				}
 			}
-			if !agent {
+			// A real human's intervention invalidates pending agent commands and requires
+			// an explicit human resume/handoff. Merely rereading the epoch is insufficient.
+			if !agent && seat.Host && slices.Contains([]string{"pause", "previous", "next", "seek", "extend", "cancel"}, req.Action) {
 				r.ControlEpoch++
-				r.Hold = ""
+				r.Hold = "human"
 			}
-			if r.Status != "running" {
-				r.AnchorAt = now
-			}
-			r.Status = "running"
-			r.Blockers = []string{}
-			workflowEvent(r, req.Action, "Guidance resumed with current authority.", now)
-		case "extend":
-			if req.Seconds < 1 || req.Seconds > 3600 || r.DurationSeconds+req.Seconds > 14400 {
-				return out, callrules.ErrInvalid
-			}
-			r.DurationSeconds += req.Seconds
-			workflowEvent(r, "extended", "The host extended this step's advisory time.", now)
-		case "ack":
-			n, _ := callrules.WorkflowNodeByID(r.Definition, r.NodeID)
-			if !req.Acknowledged || n.Type != "acknowledgment" && !n.Requirements.Acknowledgment {
-				return out, callrules.ErrInvalid
-			}
-			if n.RoleID != "" && r.Bindings[n.RoleID] != seat.ID {
-				return out, accountRefusal("workflow_acknowledgment_actor")
-			}
-			if !slices.Contains(r.AcknowledgedSeatIDs, seat.ID) {
-				r.AcknowledgedSeatIDs = append(r.AcknowledgedSeatIDs, seat.ID)
-				workflowEvent(r, "acknowledged", "The assigned participant acknowledged this step.", now)
-			}
-		case "next", "end_turn", "previous", "seek":
-			if err = s.workflowEntitlement(ctx, site, *room); err != nil {
-				return out, err
-			}
-			if !workflowAckReady(r) {
-				return out, accountRefusal("workflow_acknowledgment_required")
-			}
-			if r.Status == "blocked" {
-				return out, accountRefusal("workflow_requirements_unavailable")
-			}
-			target := req.NodeID
-			if req.Action == "previous" {
-				target = workflowPreviousNode(r)
-				if target == "" {
-					return out, accountRefusal("workflow_no_previous")
-				}
-			} else if req.Action == "seek" {
-				allowed := target == r.NodeID
-				for _, v := range r.History {
-					if v.NodeID == target {
-						allowed = true
-					}
-				}
-				if !allowed {
-					return out, accountRefusal("workflow_seek_requires_visited_step")
-				}
-			} else {
-				next := callrules.WorkflowNext(r.Definition, r.NodeID)
-				if target == "" && len(next) == 1 {
-					target = next[0]
-				}
-				if !slices.Contains(next, target) {
-					return out, accountRefusal("workflow_branch_required")
-				}
-			}
-			blockers, e := s.workflowRequirements(ctx, site, *room, *r, target)
-			if e != nil {
-				return out, e
-			}
-			if len(blockers) > 0 {
-				return out, accountRefusal("workflow_requirements_unavailable")
-			}
-			wasPaused := r.Status == "paused"
-			workflowEnter(r, target, now)
-			if wasPaused && !workflowTerminal(r) {
+			switch req.Action {
+			case "pause":
 				workflowFreeze(r, now)
 				r.Status = "paused"
+				workflowEvent(r, "paused", "Guidance paused. Call time and billing continue.", now)
+			case "cancel":
+				workflowFreeze(r, now)
+				r.Status = "cancelled"
+				r.Blockers = []string{}
+				workflowEvent(r, "cancelled", "Guidance cancelled. The call remains open.", now)
+			case "resume", "handoff":
+				if req.Action == "handoff" && agent {
+					return out, accountRefusal("workflow_human_handoff_required")
+				}
+				if err = s.workflowEntitlement(ctx, site, *room); err != nil {
+					return out, err
+				}
+				blockers, e := s.workflowRequirements(ctx, site, *room, *r, r.NodeID)
+				if e != nil {
+					return out, e
+				}
+				if len(blockers) > 0 {
+					return out, accountRefusal("workflow_requirements_unavailable")
+				}
+				if !agent {
+					r.ControlEpoch++
+					r.Hold = ""
+				}
+				if r.Status != "running" {
+					r.AnchorAt = now
+				}
+				r.Status = "running"
+				r.Blockers = []string{}
+				workflowParallelResume(r, now)
+				workflowEvent(r, req.Action, "Guidance resumed with current authority.", now)
+			case "extend":
+				node, _ := callrules.WorkflowNodeByID(r.Definition, r.NodeID)
+				if node.Type == "effect" {
+					return out, callrules.ErrInvalid
+				}
+				if req.Seconds < 1 || req.Seconds > 3600 || r.DurationSeconds+req.Seconds > 14400 {
+					return out, callrules.ErrInvalid
+				}
+				r.DurationSeconds += req.Seconds
+				workflowEvent(r, "extended", "The host extended this step's advisory time.", now)
+			case "ack":
+				n, _ := callrules.WorkflowNodeByID(r.Definition, r.NodeID)
+				if !req.Acknowledged || n.Type != "acknowledgment" && !n.Requirements.Acknowledgment {
+					return out, callrules.ErrInvalid
+				}
+				if n.RoleID != "" && r.Bindings[n.RoleID] != seat.ID {
+					return out, accountRefusal("workflow_acknowledgment_actor")
+				}
+				if !slices.Contains(r.AcknowledgedSeatIDs, seat.ID) {
+					r.AcknowledgedSeatIDs = append(r.AcknowledgedSeatIDs, seat.ID)
+					workflowEvent(r, "acknowledged", "The assigned participant acknowledged this step.", now)
+				}
+			case "next", "end_turn", "previous", "seek":
+				node, _ := callrules.WorkflowNodeByID(r.Definition, r.NodeID)
+				if node.Type == "effect" && (req.Action == "next" || req.Action == "end_turn") {
+					return out, accountRefusal("workflow_effect_required")
+				}
+				if r.Parallel != nil && req.Action == "next" && !workflowParallelJoined(r) {
+					return out, accountRefusal("workflow_parallel_join_required")
+				}
+				if err = s.workflowEntitlement(ctx, site, *room); err != nil {
+					return out, err
+				}
+				if !workflowAckReady(r) {
+					return out, accountRefusal("workflow_acknowledgment_required")
+				}
+				if r.Status == "blocked" {
+					return out, accountRefusal("workflow_requirements_unavailable")
+				}
+				target := req.NodeID
+				if req.Action == "previous" {
+					target = workflowPreviousNode(r)
+					if target == "" {
+						return out, accountRefusal("workflow_no_previous")
+					}
+				} else if req.Action == "seek" {
+					if !workflowCanSeek(r, target) {
+						if r.Repeat != nil || workflowRepeatOwner(callrules.WorkflowRepeatRegions(r.Definition), target) != "" {
+							return out, accountRefusal("workflow_repeat_navigation")
+						}
+						return out, accountRefusal("workflow_seek_requires_visited_step")
+					}
+				} else {
+					next := workflowForwardTargets(r)
+					if target == "" && len(next) == 1 {
+						target = next[0]
+					}
+					if !slices.Contains(next, target) {
+						if r.Repeat != nil {
+							return out, accountRefusal("workflow_repeat_navigation")
+						}
+						return out, accountRefusal("workflow_branch_required")
+					}
+				}
+				blockers, e := s.workflowRequirements(ctx, site, *room, *r, target)
+				if e != nil {
+					return out, e
+				}
+				if len(blockers) > 0 {
+					return out, accountRefusal("workflow_requirements_unavailable")
+				}
+				wasPaused := r.Status == "paused"
+				if !workflowMove(r, target, req.Action == "next" || req.Action == "end_turn", now) {
+					return out, accountRefusal("workflow_repeat_navigation")
+				}
+				if wasPaused && !workflowTerminal(r) {
+					workflowFreeze(r, now)
+					r.Status = "paused"
+				}
+			default:
+				return out, callrules.ErrInvalid
 			}
-		default:
-			return out, callrules.ErrInvalid
 		}
 		r.Revision++
+	}
+	if v.Run.Parallel != nil {
+		if _, err = s.workflowParallelObserve(ctx, site, *room, v.Run, now); err != nil {
+			return out, err
+		}
 	}
 	// Media readiness may require a remote read. Refresh the credential after
 	// that boundary, before committing even a purely local player transition.

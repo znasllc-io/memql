@@ -194,13 +194,19 @@ func (s *Service) workflowObserve(ctx context.Context, site callrules.SiteRef, r
 		workflowEvent(r, "requirements_restored", "Requirements restored. A permitted resume is still required.", now)
 		return true, nil
 	}
-	return false, nil
+	return s.workflowParallelObserve(ctx, site, room, r, now)
 }
 
 // Projection copies all slices before redaction: a participant read cannot mutate
 // persisted definitions. Host-only and role-only text never enters that response.
 func workflowProjection(run callrules.WorkflowRun, seat seatRow, agent bool, now time.Time) callrules.WorkflowRun {
 	r := run
+	workflowParallelProjection(&r, run, seat, agent, now)
+	if run.Repeat != nil {
+		frame := *run.Repeat
+		r.Repeat = &frame
+	}
+	r.SeekableNodeIDs = []string{}
 	r.Definition.Nodes = append([]callrules.WorkflowNode(nil), run.Definition.Nodes...)
 	r.Events = []callrules.WorkflowEvent{}
 	r.AllowedActions = []string{}
@@ -251,9 +257,14 @@ func workflowProjection(run callrules.WorkflowRun, seat seatRow, agent bool, now
 			r.AllowedActions = append(r.AllowedActions, "handoff")
 		}
 		if r.Status != "blocked" && workflowAckReady(&r) {
-			r.AllowedActions = append(r.AllowedActions, "next", "end_turn")
 			node, _ := callrules.WorkflowNodeByID(r.Definition, r.NodeID)
-			if node.Type == "turn" && node.RoleID != "" && r.Bindings[node.RoleID] != "" && r.Status == "running" && (r.Effect == nil || r.Effect.Status == "completed" || r.Effect.Status == "cancelled") {
+			if node.Type != "effect" && (r.Parallel == nil || workflowParallelJoined(&r)) {
+				r.AllowedActions = append(r.AllowedActions, "next")
+				if r.Parallel == nil {
+					r.AllowedActions = append(r.AllowedActions, "end_turn")
+				}
+			}
+			if workflowCanPrepareMuteNode(node) && node.RoleID != "" && r.Bindings[node.RoleID] != "" && r.Status == "running" && (r.Effect == nil || r.Effect.Status == "completed" || r.Effect.Status == "cancelled") {
 				r.AllowedActions = append(r.AllowedActions, "end_turn_mute")
 			}
 			if len(r.History) > 0 {
@@ -271,6 +282,30 @@ func workflowProjection(run callrules.WorkflowRun, seat seatRow, agent bool, now
 	}
 	if !seat.Host && bound && n.Type == "turn" && r.Status == "running" && workflowAckReady(&r) {
 		r.AllowedActions = append(r.AllowedActions, "end_turn")
+	}
+	if slices.Contains(r.AllowedActions, "seek") {
+		for _, id := range workflowSeekableNodes(&r) {
+			node, ok := callrules.WorkflowNodeByID(run.Definition, id)
+			if ok && permitted(node.Visibility, node.RoleID) {
+				r.SeekableNodeIDs = append(r.SeekableNodeIDs, id)
+			}
+		}
+	}
+	if r.Parallel != nil {
+		r.AllowedActions = slices.DeleteFunc(r.AllowedActions, func(action string) bool {
+			return action == "extend" || action == "ack" || action == "end_turn" || action == "end_turn_mute"
+		})
+		if seat.Host && !slices.Contains(r.AllowedActions, "resume") {
+			for _, branch := range r.Parallel.Branches {
+				if branch.Status == "blocked" && len(branch.Blockers) == 0 {
+					r.AllowedActions = append(r.AllowedActions, "resume")
+					break
+				}
+			}
+		}
+	}
+	if node, _ := callrules.WorkflowNodeByID(r.Definition, r.NodeID); node.Type == "effect" {
+		r.AllowedActions = slices.DeleteFunc(r.AllowedActions, func(action string) bool { return action == "extend" })
 	}
 	return r
 }

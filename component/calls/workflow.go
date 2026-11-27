@@ -40,15 +40,21 @@ type WorkflowRequirements struct {
 	Acknowledgment   bool   `json:"acknowledgment,omitempty"`
 }
 type WorkflowNode struct {
-	ID              string               `json:"id"`
-	Type            string               `json:"type"`
-	Label           string               `json:"label"`
-	Instructions    string               `json:"instructions,omitempty"`
-	Visibility      string               `json:"visibility"`
-	RoleID          string               `json:"roleId,omitempty"`
-	DurationSeconds int64                `json:"durationSeconds,omitempty"`
-	Requirements    WorkflowRequirements `json:"requirements,omitempty"`
-	Position        *WorkflowPosition    `json:"position,omitempty"`
+	Parallel        *WorkflowParallelSpec `json:"parallel,omitempty"`
+	Effect          *WorkflowEffectSpec   `json:"effect,omitempty"`
+	Repeat          *WorkflowRepeatSpec   `json:"repeat,omitempty"`
+	ID              string                `json:"id"`
+	Type            string                `json:"type"`
+	Label           string                `json:"label"`
+	Instructions    string                `json:"instructions,omitempty"`
+	Visibility      string                `json:"visibility"`
+	RoleID          string                `json:"roleId,omitempty"`
+	DurationSeconds int64                 `json:"durationSeconds,omitempty"`
+	Requirements    WorkflowRequirements  `json:"requirements,omitempty"`
+	Position        *WorkflowPosition     `json:"position,omitempty"`
+}
+type WorkflowEffectSpec struct {
+	Action string `json:"action"`
 }
 type WorkflowEdge struct {
 	ID     string `json:"id"`
@@ -62,6 +68,7 @@ type WorkflowIssue struct {
 	Message string `json:"message"`
 }
 type WorkflowSimulation struct {
+	MaximumVisits  int      `json:"maximumVisits"`
 	NodeIDs        []string `json:"nodeIds"`
 	MaximumSeconds int64    `json:"maximumSeconds"`
 	Notes          []string `json:"notes"`
@@ -75,6 +82,8 @@ type WorkflowBinding struct {
 }
 
 type WorkflowRequest struct {
+	BranchID         string               `json:"branchId,omitempty"`
+	BranchVisitID    string               `json:"branchVisitId,omitempty"`
 	Presentation     *PresentationRequest `json:"presentation,omitempty"`
 	Observation      *ObservationRequest  `json:"observation,omitempty"`
 	Question         *QuestionRequest     `json:"question,omitempty"`
@@ -93,20 +102,26 @@ type WorkflowRequest struct {
 	Acknowledged     bool                 `json:"acknowledged,omitempty"`
 }
 type WorkflowEvent struct {
-	ID         string    `json:"id"`
-	Sequence   int64     `json:"sequence"`
-	At         time.Time `json:"at"`
-	Type       string    `json:"type"`
-	NodeID     string    `json:"nodeId"`
-	VisitID    string    `json:"visitId"`
-	Message    string    `json:"message"`
-	Visibility string    `json:"visibility"`
-	RoleID     string    `json:"roleId,omitempty"`
+	ParallelVisitID string    `json:"parallelVisitId,omitempty"`
+	BranchID        string    `json:"branchId,omitempty"`
+	ID              string    `json:"id"`
+	Sequence        int64     `json:"sequence"`
+	At              time.Time `json:"at"`
+	Type            string    `json:"type"`
+	NodeID          string    `json:"nodeId"`
+	VisitID         string    `json:"visitId"`
+	Message         string    `json:"message"`
+	Visibility      string    `json:"visibility"`
+	RoleID          string    `json:"roleId,omitempty"`
 }
 type WorkflowVisit struct {
-	NodeID         string `json:"nodeId"`
-	VisitID        string `json:"visitId"`
-	ElapsedSeconds int64  `json:"elapsedSeconds"`
+	ParallelVisitID string `json:"parallelVisitId,omitempty"`
+	BranchID        string `json:"branchId,omitempty"`
+	RepeatVisitID   string `json:"repeatVisitId,omitempty"`
+	RepeatIteration int    `json:"repeatIteration,omitempty"`
+	NodeID          string `json:"nodeId"`
+	VisitID         string `json:"visitId"`
+	ElapsedSeconds  int64  `json:"elapsedSeconds"`
 }
 
 // WorkflowEffect is a receipt, not a claim that cancellation undid media changes.
@@ -117,31 +132,34 @@ type WorkflowEffect struct {
 	Reason      string `json:"reason,omitempty"`
 }
 type WorkflowRun struct {
-	Effect              *WorkflowEffect    `json:"effect,omitempty"`
-	ID                  string             `json:"id"`
-	RoomID              string             `json:"roomId"`
-	DefinitionID        string             `json:"definitionId"`
-	DefinitionVersion   int                `json:"definitionVersion"`
-	Definition          WorkflowDefinition `json:"definition"`
-	Revision            int64              `json:"revision"`
-	ControlEpoch        int64              `json:"controlEpoch"`
-	Status              string             `json:"status"`
-	NodeID              string             `json:"nodeId"`
-	VisitID             string             `json:"visitId"`
-	VisitNumber         int64              `json:"visitNumber"`
-	StartedAt           time.Time          `json:"startedAt"`
-	AnchorAt            time.Time          `json:"anchorAt"`
-	ElapsedSeconds      int64              `json:"elapsedSeconds"`
-	DurationSeconds     int64              `json:"durationSeconds"`
-	OvertimeSeconds     int64              `json:"overtimeSeconds"`
-	Bindings            map[string]string  `json:"bindings"`
-	AcknowledgedSeatIDs []string           `json:"acknowledgedSeatIds"`
-	Hold                string             `json:"hold"`
-	Blockers            []string           `json:"blockers"`
-	AllowedActions      []string           `json:"allowedActions"`
-	Events              []WorkflowEvent    `json:"events"`
-	History             []WorkflowVisit    `json:"history"`
-	ServerNow           time.Time          `json:"serverNow"`
+	Parallel            *WorkflowParallelProgress `json:"parallel,omitempty"`
+	Repeat              *WorkflowRepeatProgress   `json:"repeat,omitempty"`
+	SeekableNodeIDs     []string                  `json:"seekableNodeIds"`
+	Effect              *WorkflowEffect           `json:"effect,omitempty"`
+	ID                  string                    `json:"id"`
+	RoomID              string                    `json:"roomId"`
+	DefinitionID        string                    `json:"definitionId"`
+	DefinitionVersion   int                       `json:"definitionVersion"`
+	Definition          WorkflowDefinition        `json:"definition"`
+	Revision            int64                     `json:"revision"`
+	ControlEpoch        int64                     `json:"controlEpoch"`
+	Status              string                    `json:"status"`
+	NodeID              string                    `json:"nodeId"`
+	VisitID             string                    `json:"visitId"`
+	VisitNumber         int64                     `json:"visitNumber"`
+	StartedAt           time.Time                 `json:"startedAt"`
+	AnchorAt            time.Time                 `json:"anchorAt"`
+	ElapsedSeconds      int64                     `json:"elapsedSeconds"`
+	DurationSeconds     int64                     `json:"durationSeconds"`
+	OvertimeSeconds     int64                     `json:"overtimeSeconds"`
+	Bindings            map[string]string         `json:"bindings"`
+	AcknowledgedSeatIDs []string                  `json:"acknowledgedSeatIds"`
+	Hold                string                    `json:"hold"`
+	Blockers            []string                  `json:"blockers"`
+	AllowedActions      []string                  `json:"allowedActions"`
+	Events              []WorkflowEvent           `json:"events"`
+	History             []WorkflowVisit           `json:"history"`
+	ServerNow           time.Time                 `json:"serverNow"`
 }
 type WorkflowResult struct {
 	Presentation       *PresentationStatus  `json:"presentation,omitempty"`
@@ -207,9 +225,19 @@ func ValidateWorkflow(d WorkflowDefinition) []WorkflowIssue {
 		}
 		nodes[n.ID] = n
 		switch n.Type {
-		case "readiness", "instruction", "turn", "discussion", "presentation", "acknowledgment", "condition", "handoff", "finish":
+		case "readiness", "instruction", "turn", "discussion", "presentation", "acknowledgment", "condition", "handoff", "repeat", "parallel", "effect", "finish":
 		default:
 			add(path, "unsupported_node", "This node type has no implemented runtime capability.")
+		}
+		if n.Type == "effect" {
+			if n.Effect == nil || n.Effect.Action != "end_turn_mute" || n.RoleID == "" || n.DurationSeconds != 0 {
+				add(path, "invalid_effect", "An effect explicitly mutes the assigned role's microphone and continues; no timer or arbitrary effect is supported.")
+			}
+		} else if n.Effect != nil {
+			add(path, "invalid_effect", "Only an effect node may declare its closed effect action.")
+		}
+		if n.Repeat != nil && n.Type != "repeat" {
+			add(path, "invalid_repeat", "Repeat settings belong only to a repeat controller.")
 		}
 		if n.Label == "" || len(n.Label) > 120 || len(n.Instructions) > 8000 {
 			add(path, "invalid_content", "Node label/instructions exceed their bounds.")
@@ -254,7 +282,7 @@ func ValidateWorkflow(d WorkflowDefinition) []WorkflowIssue {
 		if n.Type != "finish" && len(out[id]) == 0 {
 			add("nodes."+id, "missing_finish", "Every path must reach a finish node.")
 		}
-		if n.Type != "condition" && len(out[id]) > 1 {
+		if n.Type != "condition" && n.Type != "parallel" && len(out[id]) > 1 {
 			add("nodes."+id, "ambiguous_branch", "Multiple successors require an explicit condition node.")
 		}
 	}
@@ -278,6 +306,15 @@ func ValidateWorkflow(d WorkflowDefinition) []WorkflowIssue {
 	for id := range nodes {
 		if color[id] == 0 {
 			add("nodes."+id, "unreachable", "All nodes must be reachable from the entry.")
+		}
+	}
+	if len(issues) == 0 {
+		repeats, found := workflowBuildRepeats(d, workflowRepeatSpecs(d))
+		issues = append(issues, found...)
+		_, parallelIssues := workflowBuildParallels(d, workflowParallelSpecs(d))
+		issues = append(issues, parallelIssues...)
+		if len(issues) == 0 {
+			issues = append(issues, workflowRepeatBounds(d, repeats)...)
 		}
 	}
 	return issues
@@ -305,45 +342,13 @@ func SimulateWorkflow(d WorkflowDefinition) WorkflowSimulation {
 		out.Notes = append(out.Notes, "Fix validation issues before simulating this workflow.")
 		return out
 	}
-	// A condition chooses one successor; summing all nodes would describe a route
-	// that cannot run. Memoize suffixes of the validated DAG and retain one longest
-	// route. Equal-duration branches choose the smaller target ID, independent of
-	// visual/node/edge ordering. This never makes a participant's actual choice.
-	nodes := make(map[string]WorkflowNode, len(d.Nodes))
-	for _, n := range d.Nodes {
-		nodes[n.ID] = n
+	plan := workflowPlan(d, WorkflowRepeatRegions(d))
+	out.MaximumSeconds, out.MaximumVisits, out.NodeIDs = plan.seconds, plan.visits, plan.nodes
+	if len(WorkflowRepeatRegions(d)) > 0 {
+		out.Notes = append(out.Notes, "Repeat bodies run the declared finite number of rounds. Each round needs fresh acknowledgments; navigation never replays an effect.")
 	}
-	next := make(map[string][]string, len(d.Nodes))
-	for _, e := range d.Edges {
-		next[e.Source] = append(next[e.Source], e.Target)
-	}
-	durations := make(map[string]int64, len(d.Nodes))
-	choices := make(map[string]string, len(d.Nodes))
-	var longest func(string) int64
-	longest = func(id string) int64 {
-		if duration, ok := durations[id]; ok {
-			return duration
-		}
-		node := nodes[id]
-		// Entering finish immediately completes the run; its configured timer never
-		// runs. The other durations are planned allowances, not hard time limits.
-		if node.Type == "finish" {
-			durations[id] = 0
-			return 0
-		}
-		var best int64
-		for _, target := range next[id] {
-			duration := longest(target)
-			if choices[id] == "" || duration > best || duration == best && target < choices[id] {
-				best, choices[id] = duration, target
-			}
-		}
-		durations[id] = node.DurationSeconds + best
-		return durations[id]
-	}
-	out.MaximumSeconds = longest(d.EntryNodeID)
-	for id := d.EntryNodeID; id != ""; id = choices[id] {
-		out.NodeIDs = append(out.NodeIDs, id)
+	if len(WorkflowParallelRegions(d)) > 0 {
+		out.Notes = append(out.Notes, "Parallel branches join only after all finish. Planned time uses the longest branch; planned visits include every branch. Branch effects and nested regions are unavailable.")
 	}
 	out.Notes = append(out.Notes, "This example follows one longest planned route from the first step to finish. Conditions still require a choice during the session. Finish completes immediately and adds no planned time.")
 	return out

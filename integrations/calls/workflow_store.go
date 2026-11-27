@@ -78,6 +78,12 @@ func (s *Store) workflowState(ctx context.Context, owner, id string) (*workflowS
 			return nil, accountRefusal("workflow_state_unavailable")
 		}
 	}
+	if !workflowValidRepeat(&v) {
+		return nil, accountRefusal("workflow_state_unavailable")
+	}
+	if !workflowValidParallel(&v) {
+		return nil, accountRefusal("workflow_state_unavailable")
+	}
 	if !workflowValidMute(&v) {
 		return nil, accountRefusal("workflow_state_unavailable")
 	}
@@ -90,6 +96,10 @@ func (s *Store) workflowState(ctx context.Context, owner, id string) (*workflowS
 	return &v, nil
 }
 func (s *Store) saveWorkflow(ctx context.Context, owner string, v *workflowState, now time.Time) error {
+	if v.Run != nil && workflowTerminal(v.Run) {
+		workflowParallelArchive(v.Run, now)
+		v.Run.Repeat = nil
+	}
 	workflowInvalidateMute(v)
 	workflowInvalidatePresentation(v, now)
 	data, err := json.Marshal(v)

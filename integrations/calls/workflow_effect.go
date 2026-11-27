@@ -43,7 +43,7 @@ func workflowMuteOperation(v *workflowState, req callrules.WorkflowRequest, acto
 }
 func workflowMuteCurrent(v *workflowState) bool {
 	m := v.Mute
-	return m != nil && v.Run != nil && v.Run.ID == m.RunID && v.Run.VisitID == m.VisitID && v.Run.Revision == m.Revision && v.Run.ControlEpoch == m.Epoch && v.Run.Status == "running"
+	return m != nil && v.Run != nil && v.Run.ID == m.RunID && v.Run.VisitID == m.VisitID && v.Run.Revision == m.Revision && v.Run.ControlEpoch == m.Epoch && v.Run.Status == "running" && slices.Contains(workflowForwardTargets(v.Run), m.TargetNodeID)
 }
 func workflowMuteStatus(v *workflowState, status, reason string) {
 	if v.Mute == nil {
@@ -136,18 +136,18 @@ func (s *Service) workflowPrepareMute(ctx context.Context, site callrules.SiteRe
 	if v.Mute != nil {
 		return accountRefusal("workflow_effect_pending")
 	}
-	if req.Definition != nil || len(req.Bindings) != 0 || req.SkillID != "" || req.Version != 0 || req.Seconds != 0 || req.Acknowledged || req.BookingID != "" {
+	if req.BranchID != "" || req.BranchVisitID != "" || req.Definition != nil || len(req.Bindings) != 0 || req.SkillID != "" || req.Version != 0 || req.Seconds != 0 || req.Acknowledged || req.BookingID != "" {
 		return callrules.ErrInvalid
 	}
 	r := v.Run
 	node, _ := callrules.WorkflowNodeByID(r.Definition, r.NodeID)
-	if r.Status != "running" || node.Type != "turn" || node.RoleID == "" || r.Bindings[node.RoleID] == "" {
+	if r.Status != "running" || !workflowCanPrepareMuteNode(node) || node.RoleID == "" || r.Bindings[node.RoleID] == "" {
 		return accountRefusal("workflow_turn_required")
 	}
 	if !workflowAckReady(r) {
 		return accountRefusal("workflow_acknowledgment_required")
 	}
-	legal := callrules.WorkflowNext(r.Definition, r.NodeID)
+	legal := workflowForwardTargets(r)
 	targetNode := req.NodeID
 	if targetNode == "" && len(legal) == 1 {
 		targetNode = legal[0]
@@ -456,9 +456,10 @@ func (s *Service) workflowReconcileMute(ctx context.Context, owner, stateID stri
 	}
 	if reason != "" {
 		workflowMuteFinish(v, "cancelled", reason)
+	} else if !workflowMove(v.Run, m.TargetNodeID, true, s.now()) {
+		workflowMuteFinish(v, "cancelled", "workflow_repeat_navigation")
 	} else {
 		workflowMuteFinish(v, "completed", "")
-		workflowEnter(v.Run, m.TargetNodeID, s.now())
 		v.Run.Revision++
 	}
 	return s.store.saveWorkflow(fresh, owner, v, s.now())

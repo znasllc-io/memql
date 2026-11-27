@@ -24,7 +24,7 @@ func TestQuestionsTypedContractRejectsImplicitDisclosureAndMixedActions(t *testi
 	if !ValidQuestionText("Line one\nLine two\t界") {
 		t.Fatal("plain multiline text refused")
 	}
-	for _, mutate := range []func(*WorkflowRequest){func(r *WorkflowRequest) { r.Question.Publication = "" }, func(r *WorkflowRequest) { r.SkillID = "mixed" }, func(r *WorkflowRequest) { r.Question.Cursor = "cursor" }, func(r *WorkflowRequest) { r.ExpectedEpoch = 1 }} {
+	for _, mutate := range []func(*WorkflowRequest){func(r *WorkflowRequest) { r.Question.Publication = "" }, func(r *WorkflowRequest) { r.SkillID = "mixed" }, func(r *WorkflowRequest) { r.Question.Cursor = "cursor" }, func(r *WorkflowRequest) { r.ExpectedEpoch = 1 }, func(r *WorkflowRequest) { r.BranchID = "branch" }, func(r *WorkflowRequest) { r.BranchVisitID = "visit" }} {
 		r := base
 		q := *base.Question
 		r.Question = &q

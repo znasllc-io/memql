@@ -64,6 +64,53 @@ func dtoSchema(t reflect.Type) map[string]any {
 		if t == reflect.TypeOf(ObservationPerson{}) {
 			props["kind"] = map[string]any{"type": "string", "enum": []string{"person", "agent", "avatar"}}
 		}
+		if t == reflect.TypeOf(WorkflowRepeatSpec{}) {
+			props["count"] = map[string]any{"type": "integer", "minimum": 1, "maximum": 8, "description": "Finite sequential rounds. Every path reaches the inclusive untilNodeId exit; rounds require fresh acknowledgments and never replay effects automatically."}
+			props["untilNodeId"] = map[string]any{"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$"}
+		}
+		if t == reflect.TypeOf(WorkflowRepeatProgress{}) {
+			for _, field := range []string{"count", "iteration"} {
+				props[field] = map[string]any{"type": "integer", "minimum": 1, "maximum": 8}
+			}
+		}
+		if t == reflect.TypeOf(WorkflowSimulation{}) {
+			props["maximumVisits"] = map[string]any{"type": "integer", "minimum": 0, "maximum": 256}
+			props["nodeIds"].(map[string]any)["maxItems"] = 256
+		}
+		if t == reflect.TypeOf(WorkflowRun{}) || t == reflect.TypeOf(WorkflowParallelBranch{}) {
+			props["history"].(map[string]any)["maxItems"] = 256
+			props["seekableNodeIds"].(map[string]any)["maxItems"] = 64
+			props["acknowledgedSeatIds"].(map[string]any)["maxItems"] = 100
+		}
+		if t == reflect.TypeOf(WorkflowRun{}) {
+			props["events"].(map[string]any)["maxItems"] = 256
+		}
+		if t == reflect.TypeOf(WorkflowParallelProgress{}) {
+			props["branches"].(map[string]any)["minItems"] = 2
+			props["branches"].(map[string]any)["maxItems"] = 4
+		}
+		if t == reflect.TypeOf(WorkflowParallelBranch{}) {
+			props["status"] = map[string]any{"type": "string", "enum": []string{"running", "blocked", "joined"}}
+			props["allowedActions"] = map[string]any{"type": "array", "maxItems": 6, "uniqueItems": true, "items": map[string]any{"type": "string", "enum": []string{"next", "previous", "seek", "extend", "ack", "end_turn"}}, "description": "Authoritative current branch controls. A joined branch has no actions. Global pause, resume, cancel and handoff act on the whole run."}
+		}
+		if t == reflect.TypeOf(WorkflowDefinition{}) {
+			props["nodes"].(map[string]any)["maxItems"] = 64
+			props["roles"].(map[string]any)["maxItems"] = 16
+		}
+		if t == reflect.TypeOf(WorkflowParallelSpec{}) {
+			props["branches"] = map[string]any{"type": "array", "items": dtoSchema(reflect.TypeOf(WorkflowParallelBranchSpec{})), "minItems": 2, "maxItems": 4, "description": "Two to four disjoint guidance branches. Controller edges exactly match their entries; every inclusive exit has one edge to the same join-all successor. No nested repeat/parallel, presentation, resource ownership or effects inside branches."}
+		}
+		if t == reflect.TypeOf(WorkflowParallelBranchSpec{}) {
+			for _, field := range []string{"id", "entryNodeId", "untilNodeId"} {
+				props[field] = map[string]any{"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$"}
+			}
+		}
+		if t == reflect.TypeOf(WorkflowEffectSpec{}) {
+			props["action"] = map[string]any{"type": "string", "const": "end_turn_mute", "description": "A host or explicitly approved agent must review and invoke the existing end_turn_mute operation for this exact visit. Entry, resume and revisit never execute it. No arbitrary effects or device start are supported."}
+		}
+		if t == reflect.TypeOf(WorkflowNode{}) {
+			props["type"] = map[string]any{"type": "string", "enum": []string{"readiness", "instruction", "turn", "discussion", "presentation", "acknowledgment", "condition", "handoff", "repeat", "parallel", "effect", "finish"}, "description": "Repeat and parallel are bounded structured regions. Effect requires roleId, zero duration, exactly one successor and the closed end_turn_mute action."}
+		}
 		return map[string]any{"type": "object", "properties": props, "required": required, "additionalProperties": false}
 	case reflect.Slice:
 		return map[string]any{"type": "array", "items": dtoSchema(t.Elem()), "maxItems": 128}
@@ -101,6 +148,17 @@ func workflowUTCPTools(endpoint string) []any {
 			delete(props, "question")     // Questions have their own closed operation-specific schema.
 			delete(props, "observation")  // Consent and untrusted text forwarding are separately scoped.
 			delete(props, "presentation") // Presentation actions have a closed revision-bound contract.
+			if family.name == "workflow" {
+				if action == "next" || action == "previous" || action == "seek" || action == "extend" || action == "ack" || action == "end_turn" {
+					for _, field := range []string{"branchId", "branchVisitId"} {
+						props[field] = map[string]any{"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$", "description": "Provide both branchId and its exact current branchVisitId for a parallel branch command, alongside the shared run revision/epoch. Omit both for outer guidance. Branch completion waits at join-all; it never advances a sibling."}
+					}
+					nested["dependentRequired"] = map[string]any{"branchId": []string{"branchVisitId"}, "branchVisitId": []string{"branchId"}}
+				} else {
+					delete(props, "branchId")
+					delete(props, "branchVisitId")
+				}
+			}
 			props["action"] = map[string]any{"type": "string", "const": action}
 			if action == "end_turn_mute" {
 				props = map[string]any{
@@ -117,7 +175,7 @@ func workflowUTCPTools(endpoint string) []any {
 			request := map[string]any{"type": "object", "properties": map[string]any{"action": map[string]any{"type": "string", "const": family.name}, family.name: nested}, "required": []string{"action", family.name}, "additionalProperties": false}
 			description := "Callkey " + family.name + " " + action + ". Uses the same native operation as the human interface. Requires separately approved scopes and exact skill versions/resource IDs. Live skill execution requires the room's paid Insights entitlement. Host holds and revision/epoch guards remain authoritative."
 			if action == "end_turn_mute" {
-				description += " Host only; requires BOTH skills_control and control. One durable intent pins the current turn speaker and microphone publications. Retry the identical request and idempotency key: pending or uncertain retries only reconcile, never mute again. A completed effect confirms advancement; cancelled means no advancement, but already dispatched microphones may have been muted. Never unmute automatically."
+				description += " Host only; requires BOTH skills_control and control. Explicitly review the assigned participant on the current turn or closed effect node before invocation. One durable intent pins that exact visit, participant and microphone publications. Retry the identical request and idempotency key: pending or uncertain retries only reconcile, never mute again. A completed effect confirms advancement; cancelled means no advancement, but already dispatched microphones may have been muted. Entry, resume and revisit never authorize automatic execution. Parallel branch effects are unavailable. Never unmute automatically."
 			}
 			result = append(result, map[string]any{"name": "callkey_" + family.name + "_" + action, "description": description, "inputs": map[string]any{"type": "object", "properties": map[string]any{"request": request}, "required": []string{"request"}, "additionalProperties": false}, "outputs": map[string]any{"type": "object"}, "tool_call_template": map[string]any{"call_template_type": "http", "url": endpoint, "http_method": "POST", "content_type": "application/json", "body_field": "request", "auth": map[string]any{"auth_type": "api_key", "api_key": "Bearer ${CALLKEY_AGENT_TOKEN}", "var_name": "Authorization", "location": "header"}}})
 		}
