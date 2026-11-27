@@ -58,6 +58,9 @@ func UTCPManual(endpoint string) map[string]any {
 		description := "Callkey " + action + " under the authenticated grant's separately approved scope and limits. Never infer host privileges from a facilitator role."
 		output := map[string]any{"type": "object"}
 		switch action {
+		case "session":
+			description += " mediaCleanup, when present, distinguishes clear from pending provider cleanup. pending_signals is bounded native work still requiring provider confirmation; a completed native revocation alone does not mean issued media connections are gone."
+			output = map[string]any{"type": "object", "properties": map[string]any{"mediaCleanup": map[string]any{"type": "object", "properties": map[string]any{"state": map[string]any{"type": "string", "enum": []string{"clear", "pending"}}, "pending_signals": map[string]any{"type": "integer", "minimum": 0, "maximum": 128}, "reason": map[string]any{"type": "string", "maxLength": 100}}, "required": []string{"state", "pending_signals"}, "additionalProperties": false}}}
 		case "host":
 			description = "Apply an approved host control only while this agent is a current host and its grant permits control. For control=spotlight, read session first, then send only spotlight {roomId, actorIdentity, revision, requestId, seat, identity}; requestId is 16–128 ASCII letters/digits/underscore/hyphen and stable for retries. Clear with empty target seat and identity. Stale revisions or admissions refuse; refresh before a new intent. Shared spotlight is layout guidance, separate from private pins and media permissions. Identical selections and retries coalesce; distinct changes share a 30-per-minute fixed room window."
 		case "processing_consent":
@@ -108,7 +111,9 @@ func UTCPManual(endpoint string) map[string]any {
 	tools = append(tools, workflowUTCPTools(endpoint)...)
 	tools = append(tools, proposalUTCPTools(endpoint)...)
 	tools = append(tools, questionUTCPTools(endpoint)...)
-	return map[string]any{"utcp_version": "1.1.0", "manual_version": "2.7.0", "agent_policy": CurrentAgentPolicy(), "application_messages": map[string]any{"protocol": MessageProtocol, "reactionCatalog": map[string]any{"url": "/reaction-identifiers.json", "sha256": ReactionCatalogDigest}}, "tools": tools}
+	tools = append(tools, observationUTCPTools(endpoint)...)
+	tools = append(tools, presentationUTCPTools(endpoint)...)
+	return map[string]any{"utcp_version": "1.1.0", "manual_version": "2.8.0", "agent_policy": CurrentAgentPolicy(), "application_messages": map[string]any{"protocol": MessageProtocol, "reactionCatalog": map[string]any{"url": "/reaction-identifiers.json", "sha256": ReactionCatalogDigest}}, "tools": tools}
 }
 func agentAcceptanceSchema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{"approvalRevision": map[string]any{"type": "integer", "minimum": 1}, "approvalDigest": map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"}, "conductVersion": map[string]any{"type": "string", "const": AgentConductVersion}, "terms": map[string]any{"type": "string", "const": AgentTermsVersion}}, "required": []string{"approvalRevision", "approvalDigest", "conductVersion", "terms"}, "additionalProperties": false}
