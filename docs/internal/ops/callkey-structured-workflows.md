@@ -105,7 +105,7 @@ delegated approval or trigger an effect, device, provider or payment action.
 
 ## Readiness help and reviewed alternatives
 
-A guidance node with a declared video, screen-share or connected-supervisor
+A guidance node with a declared video, screen-share, exact-resource or connected-supervisor
 condition may configure `readiness: {timeoutSeconds, help, fallbackNodeId?}`.
 Timeout is 1–3600 seconds; inert help is nonempty and at most 1000 UTF-8 bytes.
 A fallback is an extra declared outgoing edge alongside the ordinary path.
@@ -140,3 +140,57 @@ metadata to the host; failed Change preserves the old paused run. Older retained
 visits without outcome metadata remain unknown rather than claiming completion.
 Native coverage is in `workflow_readiness*` and `workflow_player_limits*`; actual
 origin and deployed acceptance are recorded separately.
+
+## Declarative Skill metadata
+
+The canonical definition accepts optional `languages`, `materials`, `inputs` and
+`outputs`. Languages contain at most eight distinct bounded language tags.
+Materials and each field list contain at most sixteen stable-ID declarations;
+labels are at most 120 UTF-8 bytes and descriptions at most 1000. Fields declare
+only `text`, `number` or `boolean`, optional `required`, and an optional text-only
+`maxLength` of 1–8000. There is no field-value, file, URL, credential, fetch or
+execution API. Plain descriptions are untrusted text and confer no authority.
+
+Human builder and delegated `skills_write` authoring use the same native
+definition, validation, save and immutable publish operations. Run projections
+keep materials, inputs and outputs host-only alongside facilitator instructions;
+language tags remain public. Omitted and empty optional lists preserve the old
+canonical serialization and original published catalog hashes.
+
+## Exact approved resource requirements
+
+A definition may declare at most eight logical `resources` slots, each with a
+stable ID, bounded label, optional resource kind and one required media source.
+A guidance step may name up to four declared slots in `requirements.resourceIds`.
+The supported sources follow the existing managed ingress exactly: camera and
+microphone resource kinds expose camera/microphone sources; desktop, window,
+terminal and synthetic kinds expose screen-share/screen-share-audio sources.
+This declaration does not narrow the existing ingress grant to a single track.
+
+Explicit Start, Change and booking binding provide all declared slots as exact
+owner `resourceId`/`revision` references in `resourceBindings`. Source reads use
+the opening room or booking owner's account, never an inferred cohost owner.
+A cohost can reuse approved references but cannot discover or select other owner
+resources; its options use logical slot labels. Agents additionally need
+`resources_read`, exact approved resource IDs and the current room or owned
+booking envelope. Host-only run bindings/options never contain publisher keys.
+An agent without that resource envelope may still read guidance and stop it, but
+receives no exact source references or resource-dependent navigation authority.
+
+First use pins the current same-room lease ID, participant identity and expiry.
+Readiness requires that exact native lease and an unmuted provider track with the
+declared source; an unrelated participant's track cannot satisfy it. Missing,
+stopped, expired, revoked or revised sources block guidance, and provider failures
+fail closed. Ordinary navigation never replaces an existing pin, including a slot
+shared by parallel branches. Only explicit global Resume can renew a replaced
+lease. Read-only snapshots never acquire or substitute a lease, start publishing,
+resume guidance or dispatch an effect. A changed resource revision requires a new
+reviewed binding; scheduled bindings are rechecked at live Start and cannot be
+silently substituted there.
+
+Insights, Resources reservation, capacity, family/account authority and funded
+call deadlines continue to apply. Owners start and stop publishers separately
+under the existing resource contract; Skills never obtain device credentials,
+capture devices, create an ingress or launch a remote process. Native tests in
+`workflow_resources*` and actual-origin synthetic publisher acceptance establish
+separate evidence; contract or fixture validation alone is not deployment proof.
