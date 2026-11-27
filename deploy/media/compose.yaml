@@ -50,11 +50,8 @@ services:
       # 443, so a webhook takes the same front door a browser does.
       - "${MEDIA_API_HOST:?set by scripts/media/local-up.sh}:host-gateway"
     ports:
-      # The control API, on every interface: the bff dials it from inside k3d at
-      # host.k3d.internal, the Docker host's address on the cluster's network, which a
-      # port published on loopback alone is not reachable through on Linux. Every request
-      # on it carries a token signed with one of the server's keys.
-      - "7880:7880"
+      # LiveKit's HTTP listener stays private to this Compose network. Caddy
+      # exposes only fixed control RPCs and independently guarded RTC on 7880.
       # ICE over TCP and UDP. node_ip is 127.0.0.1 (livekit.yaml.tmpl): the browser runs
       # on this machine, so loopback is the only address these need.
       - "127.0.0.1:7881:7881"
@@ -76,10 +73,14 @@ services:
     depends_on: [livekit]
     environment:
       MEDIA_CONFIG_DIGEST: "${MEDIA_CONFIG_DIGEST:?set by scripts/media/local-up.sh}"
+    extra_hosts:
+      - "${MEDIA_API_HOST:?set by scripts/media/local-up.sh}:host-gateway"
     ports:
+      - "7880:7880"
       # The public URL's port, on loopback: the browser on this machine is its only client.
       - "127.0.0.1:${MEDIA_HTTPS_PORT:?set by scripts/media/local-up.sh}:${MEDIA_HTTPS_PORT:?set by scripts/media/local-up.sh}"
     volumes:
       - "${MEDIA_CONFIG_DIR:?set by scripts/media/local-up.sh}/Caddyfile:/etc/caddy/Caddyfile:ro"
+      - "${MEDIA_CONFIG_DIR:?set by scripts/media/local-up.sh}/front-door-ca.pem:/etc/caddy/front-door-ca.pem:ro"
       - "${MEDIA_TLS_CERT:?set by scripts/media/local-up.sh}:/etc/caddy/tls/cert.pem:ro"
       - "${MEDIA_TLS_KEY:?set by scripts/media/local-up.sh}:/etc/caddy/tls/key.pem:ro"

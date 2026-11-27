@@ -1,4 +1,9 @@
 #cloud-config
+# SECURITY QUALIFICATION: this legacy cloud topology still forwards provider signalling
+# directly to LiveKit and does NOT enforce the native issued-token admission fence.
+# The 2026-11-26 guard is implemented and qualified only in the local Compose target.
+# Do not claim immediate issued-token revocation or deploy Callkey on this template
+# until the fixed signalling boundary is ported and accepted on a cloud media target.
 #
 # deploy/media/cloud-init.yaml.tmpl -- the first boot of a calls media server on a
 # rented host (Hetzner Cloud). scripts/media/provision-hetzner.sh renders it into the

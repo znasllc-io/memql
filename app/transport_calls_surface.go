@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	callstypes "github.com/znasllc-io/memql/component/calls"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/server"
@@ -31,13 +32,18 @@ import (
 // with one answer.
 
 func (a *App) mountCallsSurface() {
-	handler := server.NewCallsHandler(a.callsSurface(), a.Logger, time.Now)
+	surface := a.callsSurface()
+	handler := server.NewCallsHandler(surface, a.Logger, time.Now)
 	for _, path := range server.CallsSurfacePaths() {
 		// Both methods on the one base: the handler decides which is legal for which, so a
 		// GET to /calls/join is a 404 from the handler rather than a 405 from the mux. One
 		// answer for "there is nothing here" beats two a prober can tell apart.
 		a.handleRoute("GET "+path, handler)
 		a.handleRoute("POST "+path, handler)
+	}
+	media, _ := surface.(callstypes.MediaSignalService)
+	for _, path := range server.MediaSignalPaths() {
+		a.handleRoute("GET "+path, server.NewMediaSignalHandler(media))
 	}
 }
 

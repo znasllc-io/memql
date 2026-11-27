@@ -15,6 +15,7 @@ package media
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -433,10 +434,18 @@ func TestLocalUpRendersTheMediaServer(t *testing.T) {
 	}
 
 	caddy := readFile(t, filepath.Join(f.stateDir, "Caddyfile"))
+	guard := sha256.Sum256([]byte("memql-media-signal-v1:" + f.apiSecret))
 	for _, want := range []string{
 		"https://media.memql.localhost:7443 {",
 		"tls /etc/caddy/tls/cert.pem /etc/caddy/tls/key.pem",
 		"reverse_proxy livekit:7880",
+		"reverse_proxy https://api.memql.localhost",
+		"rewrite * /media{uri}",
+		"path /rtc /rtc/validate /rtc/v1 /rtc/v1/validate",
+		"header X-MemQL-Media-Signal " + hex.EncodeToString(guard[:]),
+		"header_up -X-MemQL-Media-Signal",
+		"http://:7880",
+		"exclude http.log.error",
 	} {
 		if !strings.Contains(caddy, want) {
 			t.Errorf("the rendered Caddyfile does not carry %q:\n%s", want, caddy)
@@ -830,10 +839,13 @@ func TestTheComposeFileRunsTheReviewedServer(t *testing.T) {
 		t.Errorf("compose.yaml defines %d services, want livekit, redis and caddy", len(c.Services))
 	}
 	livekit := c.Services["livekit"]
-	for _, port := range []string{"7880:7880", "127.0.0.1:7881:7881", "127.0.0.1:7882:7882/udp"} {
+	for _, port := range []string{"127.0.0.1:7881:7881", "127.0.0.1:7882:7882/udp"} {
 		if !slices.Contains(livekit.Ports, port) {
 			t.Errorf("livekit does not publish %s (it publishes %v)", port, livekit.Ports)
 		}
+	}
+	if slices.ContainsFunc(livekit.Ports, func(port string) bool { return strings.Contains(port, "7880") }) {
+		t.Fatal("raw LiveKit HTTP is exposed, bypassing native signalling authority")
 	}
 	if !slices.ContainsFunc(livekit.ExtraHosts, func(h string) bool {
 		return strings.HasPrefix(h, "${MEDIA_API_HOST:?") && strings.HasSuffix(h, ":host-gateway")
@@ -845,8 +857,8 @@ func TestTheComposeFileRunsTheReviewedServer(t *testing.T) {
 		t.Error("livekit trusts no certificate authority for the front door, so its webhooks fail TLS")
 	}
 	caddy := c.Services["caddy"]
-	if len(caddy.Ports) != 1 || !strings.HasPrefix(caddy.Ports[0], "127.0.0.1:${MEDIA_HTTPS_PORT:?") {
-		t.Errorf("caddy does not publish the public URL's port on loopback alone: %v", caddy.Ports)
+	if len(caddy.Ports) != 2 || !slices.Contains(caddy.Ports, "7880:7880") || !slices.ContainsFunc(caddy.Ports, func(port string) bool { return strings.HasPrefix(port, "127.0.0.1:${MEDIA_HTTPS_PORT:?") }) {
+		t.Errorf("caddy must own guarded control7880 and loopback public TLS: %v", caddy.Ports)
 	}
 	for _, service := range []string{"livekit", "caddy"} {
 		if c.Services[service].Environment["MEDIA_CONFIG_DIGEST"] == "" {

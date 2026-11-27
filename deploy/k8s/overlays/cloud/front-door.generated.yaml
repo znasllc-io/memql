@@ -170,6 +170,13 @@ spec:
                 name: bff-http
                 port:
                   number: 8085
+          - path: /media/rtc/v1/validate
+            pathType: Prefix
+            backend:
+              service:
+                name: bff-http
+                port:
+                  number: 8085
           - path: /automations/resume
             pathType: Prefix
             backend:
@@ -178,6 +185,13 @@ spec:
                 port:
                   number: 8085
           - path: /email/events/azure
+            pathType: Prefix
+            backend:
+              service:
+                name: bff-http
+                port:
+                  number: 8085
+          - path: /media/rtc/validate
             pathType: Prefix
             backend:
               service:
@@ -233,6 +247,13 @@ spec:
                 name: bff-http
                 port:
                   number: 8085
+          - path: /media/rtc/v1
+            pathType: Prefix
+            backend:
+              service:
+                name: bff-http
+                port:
+                  number: 8085
           - path: /auth/logout
             pathType: Prefix
             backend:
@@ -269,6 +290,13 @@ spec:
                 port:
                   number: 8085
           - path: /artifacts
+            pathType: Prefix
+            backend:
+              service:
+                name: bff-http
+                port:
+                  number: 8085
+          - path: /media/rtc
             pathType: Prefix
             backend:
               service:

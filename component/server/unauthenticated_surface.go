@@ -197,6 +197,8 @@ func HandlerAuthorizedPaths() []string {
 	// trusted because the routes are classified servedButNotExternallyRouted, which is a
 	// property of the generated ingress rather than of this code.
 	paths = append(paths, CallsSurfacePaths()...)
+	// Fixed provider signalling accepts only a verified native media admission.
+	paths = append(paths, MediaSignalPaths()...)
 	paths = append(paths, UnsubscribePaths()...)
 	// GET /t/o/{token} + GET /t/c/{token} -- the campaign open- and
 	// click-tracking endpoints (memql#4823). Authorized by the HMAC-signed
@@ -326,6 +328,7 @@ func SelfAuthenticatedPaths() []string {
 	paths = append(paths, AzureEmailFeedbackPaths()...)
 	paths = append(paths, AccessSelfAuthenticatedPaths()...)
 	paths = append(paths, CallsSelfAuthenticatedPaths()...)
+	paths = append(paths, MediaSignalPaths()...)
 	return append(paths, ShopperSelfAuthenticatedPaths()...)
 }
 

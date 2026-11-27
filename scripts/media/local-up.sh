@@ -348,6 +348,11 @@ function render_template() {
 # says why each exists; memql-media configure fills them for a rented server.
 function render_configuration() {
     local dir="$1"
+    local signal_guard
+    command -v openssl >/dev/null 2>&1 || cap_fail 4 "openssl is required to derive the media signalling guard"
+    signal_guard="$(printf '%s' "memql-media-signal-v1:${API_SECRET}" | openssl dgst -sha256 | awk '{print $NF}')" \
+        || cap_fail 5 "could not derive the media signalling guard"
+    [[ "$signal_guard" =~ ^[a-f0-9]{64}$ ]] || cap_fail 5 "could not derive the media signalling guard"
     mkdir -p "$dir" || cap_fail 5 "could not create ${dir}"
     chmod 700 "$dir" || cap_fail 5 "could not make ${dir} private"
     render_template "${TEMPLATE_DIR}/livekit.yaml.tmpl" "${dir}/${RENDERED_LIVEKIT}" \
@@ -357,7 +362,7 @@ function render_configuration() {
         BIND_ADDRESS "" REDIS_ADDRESS "redis:6379" NODE_IP "127.0.0.1" \
         TURN_ENABLED false TURN_DOMAIN "" TURN_TLS_PORT 0 TURN_UDP_PORT 0
     render_template "${TEMPLATE_DIR}/Caddyfile.tmpl" "${dir}/${RENDERED_CADDY}" \
-        MEDIA_HOST "$MEDIA_HOST" HTTPS_PORT "$HTTPS_PORT"
+        MEDIA_HOST "$MEDIA_HOST" HTTPS_PORT "$HTTPS_PORT" API_HOST "$API_HOST" SIGNAL_GUARD "$signal_guard"
     write_private "${dir}/${RENDERED_CA}" "$FRONT_DOOR_CA"
     if [[ -n "$INGRESS_ENABLED" ]]; then
         render_template "${TEMPLATE_DIR}/ingress.yaml.tmpl" "${dir}/ingress.yaml" API_KEY "$API_KEY" API_SECRET "$API_SECRET"

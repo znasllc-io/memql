@@ -11,11 +11,57 @@
 	# recreating the container, which make media-up does when the rendered files change.
 	auto_https off
 	admin off
+	# SDKs may put the pass in access_token. Caddy proxy error records include
+	# request URIs even without access logging, so exclude that request logger.
+	log default {
+		exclude http.log.error
+	}
 }
 
 https://{{MEDIA_HOST}}:{{HTTPS_PORT}} {
 	tls /etc/caddy/tls/cert.pem /etc/caddy/tls/key.pem
-	# Signalling (a WebSocket upgrade) and the client's https connection check both go to
-	# LiveKit's one port; reverse_proxy carries the upgrade as it is.
-	reverse_proxy livekit:7880
+	@rtc path /rtc /rtc/validate /rtc/v1 /rtc/v1/validate
+	handle @rtc {
+		# A fixed native protocol boundary. Never forward a browser's guard header.
+		rewrite * /media{uri}
+		reverse_proxy https://{{API_HOST}} {
+			header_up -X-MemQL-Media-Signal
+			header_up Host {{API_HOST}}
+			transport http {
+				tls_trust_pool file /etc/caddy/front-door-ca.pem
+			}
+		}
+	}
+	handle / {
+		reverse_proxy livekit:7880
+	}
+	handle {
+		respond 404
+	}
+}
+
+# The BFF still reaches the registry's fixed APIURL. Control RPCs retain their
+# LiveKit signed server authentication. RTC additionally needs a derived secret
+# that only native admission supplies; an old or refreshed participant JWT is
+# insufficient. The rendered file is 0600 and access logging is not enabled.
+http://:7880 {
+	@rtc {
+		path /rtc /rtc/validate /rtc/v1 /rtc/v1/validate
+		header X-MemQL-Media-Signal {{SIGNAL_GUARD}}
+	}
+	handle @rtc {
+		reverse_proxy livekit:7880 {
+			header_up -X-MemQL-Media-Signal
+		}
+	}
+	@control {
+		method POST
+		path /twirp/livekit.RoomService/CreateRoom /twirp/livekit.RoomService/DeleteRoom /twirp/livekit.RoomService/ListRooms /twirp/livekit.RoomService/ListParticipants /twirp/livekit.RoomService/GetParticipant /twirp/livekit.RoomService/RemoveParticipant /twirp/livekit.RoomService/MutePublishedTrack /twirp/livekit.RoomService/UpdateParticipant /twirp/livekit.RoomService/SendData /twirp/livekit.IngressService/CreateIngress /twirp/livekit.IngressService/ListIngress /twirp/livekit.IngressService/DeleteIngress
+	}
+	handle @control {
+		reverse_proxy livekit:7880
+	}
+	handle {
+		respond 404
+	}
 }

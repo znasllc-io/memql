@@ -174,7 +174,11 @@ func TestCallsRoutesSurviveTheUnauthenticatedSurfaceAssertion(t *testing.T) {
 
 	a.mountCallsSurface()
 
-	if want := []string{"GET /calls/", "POST /calls/"}; !reflect.DeepEqual(a.registeredRoutes, want) {
+	want := []string{"GET /calls/", "POST /calls/"}
+	for _, path := range server.MediaSignalPaths() {
+		want = append(want, "GET "+path)
+	}
+	if !reflect.DeepEqual(a.registeredRoutes, want) {
 		t.Fatalf("registered = %v, want %v", a.registeredRoutes, want)
 	}
 	if err := server.AssertUnauthenticatedSurfaceDeclared(a.unauthenticatedSurfaceRoutes(true)); err != nil {

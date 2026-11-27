@@ -186,10 +186,11 @@ type declaration struct {
 // notServedByTheBFF below, is what now says the bff does not serve the
 // portal's bundle.
 var reachedThroughAggregate = map[string]declaration{
-	"HealthzPaths": {"appended by PublicPaths()", server.HealthzPaths},
-	"ReadyzPaths":  {"appended by PublicPaths()", server.ReadyzPaths},
-	"LivezPaths":   {"appended by PublicPaths()", server.LivezPaths},
-	"AuthPaths":    {"appended by PublicPaths()", server.AuthPaths},
+	"MediaSignalPaths": {"fixed provider signalling; native media pass checked by handler, appended by HandlerAuthorizedPaths and SelfAuthenticatedPaths", server.MediaSignalPaths},
+	"HealthzPaths":     {"appended by PublicPaths()", server.HealthzPaths},
+	"ReadyzPaths":      {"appended by PublicPaths()", server.ReadyzPaths},
+	"LivezPaths":       {"appended by PublicPaths()", server.LivezPaths},
+	"AuthPaths":        {"appended by PublicPaths()", server.AuthPaths},
 	"JWKSPaths": {"appended by PublicPaths() -- identity-only, kept per over-approximation",
 		server.JWKSPaths},
 	"IdentityDiscoveryPaths": {"appended by PublicPaths() -- identity-only, kept per over-approximation",
