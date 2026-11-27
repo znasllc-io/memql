@@ -47,7 +47,7 @@ func (s *Service) BeginMediaSignal(ctx context.Context, token string) (*callrule
 	if e != nil {
 		return nil, e
 	}
-	expires := s.now().Add(mediaHandshakeTTL)
+	var expires time.Time
 	name := "Callkey processing"
 	var grant callrules.GrantSpec
 	e = s.mediaSignalGated(ctx, *r, b, func(ctx context.Context, r roomRow) error {
@@ -113,7 +113,13 @@ func (s *Service) BeginMediaSignal(ctx context.Context, token string) (*callrule
 				j.remove(supersede)
 			}
 		}
-		j.Intents = append(j.Intents, mediaSignalIntent{ID: intentID, Binding: b, Grant: grant, GrantDigest: mediaGrantDigest(grant), State: "pending", CreatedAt: s.now(), ExpiresAt: expires})
+		// Admission reads and gate waits precede the pending effect. Start its
+		// bounded lifetime here, using one epoch for both timestamps: a slow
+		// admission must not persist ExpiresAt <= CreatedAt and make the entire
+		// journal unreadable. The durable write still precedes every upstream call.
+		created := s.now()
+		expires = created.Add(mediaHandshakeTTL)
+		j.Intents = append(j.Intents, mediaSignalIntent{ID: intentID, Binding: b, Grant: grant, GrantDigest: mediaGrantDigest(grant), State: "pending", CreatedAt: created, ExpiresAt: expires})
 		return s.store.saveMediaSignals(ctx, r, j, s.now())
 	})
 	if e != nil {
