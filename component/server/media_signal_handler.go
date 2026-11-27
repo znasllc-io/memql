@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -100,6 +101,9 @@ func (h *mediaSignalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	definitive := true // remains true until the first upstream request may be sent
 	defer func() {
+		if admission.Finish != nil {
+			defer admission.Finish()
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_ = admission.Close(ctx, definitive)
@@ -133,7 +137,9 @@ func (h *mediaSignalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		definitive = false
 		var response *http.Response
 		var dialErr error
+		started := time.Now()
 		upstream, response, dialErr = dialer.DialContext(forward, u.String(), headers)
+		mediaSignalObserve(admission, "upstream_dial", started, dialErr)
 		if dialErr != nil && response != nil {
 			definitive = true
 			response.Body.Close()
@@ -160,8 +166,13 @@ func (h *mediaSignalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	})
 	upstream.SetReadLimit(mediaSignalLimit)
 	_ = upstream.SetReadDeadline(deadline)
+	initialAt := time.Now()
 	kind, first, err := upstream.ReadMessage()
+	mediaSignalObserve(admission, "upstream_initial", initialAt, err)
 	if err != nil || !mediaSignalInitial(kind, first, admission.Room, admission.Identity) {
+		if err == nil {
+			mediaSignalObserve(admission, "upstream_initial", time.Now(), errors.New("initial response refused"))
+		}
 		// A provider Leave is a definitive refusal. A broken or unexpected
 		// initial frame remains uncertain and must retain its pending fence.
 		var refusal livekit.SignalResponse
@@ -174,6 +185,7 @@ func (h *mediaSignalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	definitive = true
 	var initial livekit.SignalResponse
 	if mediaSignalDecode(kind, first, &initial) != nil || !budget.provider(&initial, admission.Identity) {
+		mediaSignalObserve(admission, "provider_budget", time.Now(), errors.New("provider frame refused"))
 		http.NotFound(w, r)
 		return
 	}
@@ -188,7 +200,9 @@ func (h *mediaSignalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// provider/native durability constraint; client SyncState is never authority.
 	var buffered []mediaSignalFrame
 	if initial.GetReconnect() != nil {
+		resumeAt := time.Now()
 		buffered, err = mediaSignalResumeInventory(upstream, budget, admission.Identity)
+		mediaSignalObserve(admission, "upstream_resume", resumeAt, err)
 		if err != nil || admission.Forward(ctx, func(context.Context) error { return nil }) != nil {
 			http.NotFound(w, r)
 			return
@@ -196,22 +210,41 @@ func (h *mediaSignalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = upstream.SetReadDeadline(time.Time{})
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	upgradeAt := time.Now()
 	downstream, err := upgrader.Upgrade(w, r, nil)
+	mediaSignalObserve(admission, "downstream_upgrade", upgradeAt, err)
 	if err != nil {
 		return
 	}
 	defer downstream.Close()
 	downstream.SetReadLimit(mediaSignalLimit)
 	_ = downstream.SetWriteDeadline(time.Now().Add(5 * time.Second))
-	if downstream.WriteMessage(kind, first) != nil {
+	writeAt := time.Now()
+	if err := downstream.WriteMessage(kind, first); err != nil {
+		mediaSignalObserve(admission, "downstream_initial", writeAt, err)
 		return
 	}
+	mediaSignalObserve(admission, "downstream_initial", writeAt, nil)
 	for _, frame := range buffered {
-		if downstream.WriteMessage(frame.kind, frame.data) != nil {
+		if err := downstream.WriteMessage(frame.kind, frame.data); err != nil {
+			mediaSignalObserve(admission, "downstream_initial", time.Now(), err)
 			return
 		}
 	}
 	mediaSignalRelay(r.Context(), admission, downstream, upstream, budget)
+}
+
+func mediaSignalObserve(admission *calls.MediaSignalAdmission, phase string, started time.Time, err error) {
+	// A clean peer close, EOF or our own socket close is terminal information,
+	// not an admission failure. Do not turn ordinary teardown into WARN noise.
+	if phase == "client_read" || phase == "provider_read" {
+		if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) || websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+			err = nil
+		}
+	}
+	if admission.Observe != nil {
+		admission.Observe(phase, time.Since(started), err)
+	}
 }
 
 func mediaSignalInitial(kind int, data []byte, room, identity string) bool {
@@ -244,6 +277,7 @@ func mediaSignalRelay(ctx context.Context, admission *calls.MediaSignalAdmission
 	}
 	downstream.SetPingHandler(func(payload string) error {
 		if !budget.control(time.Now(), len(payload)) {
+			mediaSignalObserve(admission, "client_budget", time.Now(), errors.New("control budget exceeded"))
 			refuse()
 			return errors.New("signal control budget exceeded")
 		}
@@ -251,13 +285,16 @@ func mediaSignalRelay(ctx context.Context, admission *calls.MediaSignalAdmission
 	})
 	downstream.SetPongHandler(func(payload string) error {
 		if !budget.control(time.Now(), len(payload)) {
+			mediaSignalObserve(admission, "client_budget", time.Now(), errors.New("control budget exceeded"))
 			refuse()
 			return errors.New("signal control budget exceeded")
 		}
 		return nil
 	})
 	var writes sync.Mutex
-	forward := func(operation func(context.Context) error) error {
+	forward := func(phase string, operation func(context.Context) error) (resultErr error) {
+		started := time.Now()
+		defer func() { mediaSignalObserve(admission, phase, started, resultErr) }()
 		writes.Lock()
 		defer writes.Unlock()
 		bounded, stop := context.WithTimeout(ctx, 5*time.Second)
@@ -270,18 +307,21 @@ func mediaSignalRelay(ctx context.Context, admission *calls.MediaSignalAdmission
 		for {
 			kind, data, err := downstream.ReadMessage()
 			if err != nil {
+				mediaSignalObserve(admission, "client_read", time.Now(), err)
 				return
 			}
 			if !budget.frame(time.Now(), len(data)) {
+				mediaSignalObserve(admission, "client_budget", time.Now(), errors.New("frame budget exceeded"))
 				refuse()
 				return
 			}
 			var request livekit.SignalRequest
 			if mediaSignalDecode(kind, data, &request) != nil || request.Message == nil || !budget.request(time.Now(), &request) {
+				mediaSignalObserve(admission, "client_budget", time.Now(), errors.New("request shape or budget refused"))
 				refuse()
 				return
 			}
-			if forward(func(ctx context.Context) error {
+			if forward("client_frame", func(ctx context.Context) error {
 				deadline, _ := ctx.Deadline()
 				_ = upstream.SetWriteDeadline(deadline)
 				return upstream.WriteMessage(kind, data)
@@ -295,17 +335,22 @@ func mediaSignalRelay(ctx context.Context, admission *calls.MediaSignalAdmission
 		for {
 			kind, data, err := upstream.ReadMessage()
 			if err != nil {
+				mediaSignalObserve(admission, "provider_read", time.Now(), err)
 				return
 			}
 			var response livekit.SignalResponse
 			if mediaSignalDecode(kind, data, &response) != nil || !budget.provider(&response, admission.Identity) {
+				mediaSignalObserve(admission, "provider_budget", time.Now(), errors.New("provider frame refused"))
 				refuse()
 				return
 			}
 			_ = downstream.SetWriteDeadline(time.Now().Add(5 * time.Second))
-			if downstream.WriteMessage(kind, data) != nil {
+			writeAt := time.Now()
+			if err := downstream.WriteMessage(kind, data); err != nil {
+				mediaSignalObserve(admission, "downstream_write", writeAt, err)
 				return
 			}
+			mediaSignalObserve(admission, "downstream_write", writeAt, nil)
 		}
 	}()
 	go func() {
@@ -317,7 +362,7 @@ func mediaSignalRelay(ctx context.Context, admission *calls.MediaSignalAdmission
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if forward(func(context.Context) error { return nil }) != nil {
+				if forward("client_heartbeat", func(context.Context) error { return nil }) != nil {
 					return
 				}
 			}

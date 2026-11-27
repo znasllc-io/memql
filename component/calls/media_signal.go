@@ -33,6 +33,11 @@ type MediaSignalAdmission struct {
 	// or the upstream actually responded; timeout/EOF after send is ambiguous.
 	// Ambiguous handshakes survive process restart as pending cleanup.
 	Close func(context.Context, bool) error
+	// Optional in-process diagnostics. The native observer accepts only fixed
+	// phase/error classes and emits at most one bounded terminal receipt. Never
+	// pass caller text, identities, tokens, URLs or frame contents as a phase.
+	Observe func(phase string, elapsed time.Duration, err error)
+	Finish  func()
 }
 
 // MediaCleanupStatus describes provider cleanup, separately from committing a

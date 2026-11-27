@@ -517,7 +517,9 @@ func (s *Store) readAsCluster(ctx context.Context, what, call string, rendered e
 
 // read runs one rendered query. Every read and write here leaves through this or
 // write, which is what makes "no digest in an error" a property of the file.
-func (s *Store) read(ctx context.Context, what, call string, rendered error) ([]map[string]any, error) {
+func (s *Store) read(ctx context.Context, what, call string, rendered error) (rows []map[string]any, resultErr error) {
+	started := time.Now()
+	defer func() { mediaSignalTraceFrom(ctx).record("native_read", time.Since(started), resultErr) }()
 	if rendered != nil {
 		return nil, fmt.Errorf("calls: render the read of %s: %w", what, scrubbed(rendered))
 	}
@@ -532,7 +534,9 @@ func (s *Store) read(ctx context.Context, what, call string, rendered error) ([]
 }
 
 // write runs one rendered mutation, for read's reason.
-func (s *Store) write(ctx context.Context, what, call string, rendered error) error {
+func (s *Store) write(ctx context.Context, what, call string, rendered error) (resultErr error) {
+	started := time.Now()
+	defer func() { mediaSignalTraceFrom(ctx).record("native_write", time.Since(started), resultErr) }()
 	if rendered != nil {
 		return fmt.Errorf("calls: render the write of %s: %w", what, scrubbed(rendered))
 	}

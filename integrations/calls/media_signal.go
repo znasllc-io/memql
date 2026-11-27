@@ -25,11 +25,21 @@ func (s *Service) CheckMediaSignal(ctx context.Context, token string) error {
 // BeginMediaSignal is a native admission, not a JWT-only preflight. A durable
 // pending intent precedes any upstream effect. Cross-replica room/account gates
 // order each bounded write with revocation; no gate spans the WS lifetime.
-func (s *Service) BeginMediaSignal(ctx context.Context, token string) (*callrules.MediaSignalAdmission, error) {
+func (s *Service) BeginMediaSignal(ctx context.Context, token string) (admission *callrules.MediaSignalAdmission, resultErr error) {
+	started := time.Now()
 	r, server, credential, b, proof, e := s.authenticateMediaSignal(ctx, token)
 	if e != nil {
 		return nil, e
 	}
+	trace := &mediaSignalTrace{logger: s.logger, started: started}
+	trace.record("authenticate", time.Since(started), nil)
+	ctx = mediaSignalTraceContext(ctx, trace)
+	defer func() {
+		trace.record("begin", time.Since(started), resultErr)
+		if resultErr != nil {
+			trace.finish()
+		}
+	}()
 	// A cryptographically valid but natively revoked pass cannot trigger
 	// journal writes or provider work. Admission is rechecked again after the
 	// cleanup gap before registering its pending effect.
@@ -132,8 +142,8 @@ func (s *Service) BeginMediaSignal(ctx context.Context, token string) (*callrule
 		return nil, e
 	}
 	guard := sha256.Sum256([]byte("memql-media-signal-v1:" + credential.Secret))
-	lease := &mediaSignalConnection{service: s, room: *r, binding: b, id: intentID}
-	return &callrules.MediaSignalAdmission{UpstreamURL: server.APIURL, UpstreamToken: upstream, UpstreamGuard: hex.EncodeToString(guard[:]), Room: r.MediaRoom, Identity: b.Identity, IntentID: intentID, ExpiresAt: expires, Forward: lease.forward, Confirm: lease.confirm, Close: lease.close}, nil
+	lease := &mediaSignalConnection{service: s, room: *r, binding: b, id: intentID, trace: trace}
+	return &callrules.MediaSignalAdmission{UpstreamURL: server.APIURL, UpstreamToken: upstream, UpstreamGuard: hex.EncodeToString(guard[:]), Room: r.MediaRoom, Identity: b.Identity, IntentID: intentID, ExpiresAt: expires, Forward: lease.forward, Confirm: lease.confirm, Close: lease.close, Observe: trace.record, Finish: trace.finish}, nil
 }
 
 type mediaSignalConnection struct {
@@ -143,9 +153,13 @@ type mediaSignalConnection struct {
 	binding mediaSignalBinding
 	id      string
 	closed  bool
+	trace   *mediaSignalTrace
 }
 
-func (c *mediaSignalConnection) forward(ctx context.Context, fn func(context.Context) error) error {
+func (c *mediaSignalConnection) forward(ctx context.Context, fn func(context.Context) error) (resultErr error) {
+	started := time.Now()
+	ctx = mediaSignalTraceContext(ctx, c.trace)
+	defer func() { c.trace.record("forward", time.Since(started), resultErr) }()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed || fn == nil {
@@ -153,7 +167,9 @@ func (c *mediaSignalConnection) forward(ctx context.Context, fn func(context.Con
 	}
 	s := c.service
 	return s.mediaSignalGated(ctx, c.room, c.binding, func(ctx context.Context, r roomRow) error {
+		readAt := time.Now()
 		j, e := s.store.mediaSignals(ctx, r)
+		c.trace.record("journal_read", time.Since(readAt), e)
 		if e != nil {
 			return e
 		}
@@ -161,10 +177,12 @@ func (c *mediaSignalConnection) forward(ctx context.Context, fn func(context.Con
 		if v == nil || (v.State != "pending" && v.State != "active") || !s.now().Before(v.ExpiresAt) {
 			return accountRefusal("media_connection_expired")
 		}
-		if e := s.checkMediaBinding(ctx, r, c.binding); e != nil {
+		if e := mediaSignalMeasure(ctx, "authority", func() error { return s.checkMediaBinding(ctx, r, c.binding) }); e != nil {
 			return e
 		}
+		grantAt := time.Now()
 		grant, e := s.currentMediaGrant(ctx, r, c.binding)
+		c.trace.record("grant", time.Since(grantAt), e)
 		if e != nil {
 			return e
 		}
@@ -198,7 +216,7 @@ func (c *mediaSignalConnection) forward(ctx context.Context, fn func(context.Con
 		}
 		write, cancel := context.WithTimeout(ctx, bound)
 		defer cancel()
-		if e := fn(write); e != nil {
+		if e := mediaSignalMeasure(ctx, "provider_write", func() error { return fn(write) }); e != nil {
 			return e
 		}
 		if e := write.Err(); e != nil {
@@ -206,12 +224,19 @@ func (c *mediaSignalConnection) forward(ctx context.Context, fn func(context.Con
 		}
 		if v.State == "active" && v.ExpiresAt.Sub(s.now()) < 20*time.Second {
 			v.ExpiresAt = s.now().Add(mediaSignalLeaseTTL)
-			return s.store.saveMediaSignals(ctx, r, j, s.now())
+			err := s.store.saveMediaSignals(ctx, r, j, s.now())
+			if err == nil {
+				c.trace.record("lease_renewed", 0, nil)
+			}
+			return err
 		}
 		return nil
 	})
 }
-func (c *mediaSignalConnection) confirm(ctx context.Context) error {
+func (c *mediaSignalConnection) confirm(ctx context.Context) (resultErr error) {
+	started := time.Now()
+	ctx = mediaSignalTraceContext(ctx, c.trace)
+	defer func() { c.trace.record("confirm", time.Since(started), resultErr) }()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
@@ -229,7 +254,7 @@ func (c *mediaSignalConnection) confirm(ctx context.Context) error {
 		}
 		// A definitive response settles uncertainty even after the handshake
 		// deadline or revocation. Never turn that late response into authority.
-		allowed := s.checkMediaBinding(ctx, r, c.binding)
+		allowed := mediaSignalMeasure(ctx, "authority", func() error { return s.checkMediaBinding(ctx, r, c.binding) })
 		if allowed == nil && !s.now().Before(v.ExpiresAt) {
 			allowed = accountRefusal("media_connection_expired")
 		}
@@ -284,7 +309,10 @@ func (s *Service) applyMediaPermission(ctx context.Context, room roomRow, identi
 	}
 	return nil
 }
-func (c *mediaSignalConnection) close(ctx context.Context, definitive bool) error {
+func (c *mediaSignalConnection) close(ctx context.Context, definitive bool) (resultErr error) {
+	started := time.Now()
+	ctx = mediaSignalTraceContext(ctx, c.trace)
+	defer func() { c.trace.record("close", time.Since(started), resultErr) }()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {

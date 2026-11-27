@@ -361,11 +361,16 @@ func (s *Service) mediaSignalGateKeys(ctx context.Context, r roomRow, b mediaSig
 func (s *Service) mediaSignalGated(ctx context.Context, hint roomRow, b mediaSignalBinding, fn func(context.Context, roomRow) error) error {
 	for attempt := 0; attempt < 3; attempt++ {
 		fresh := memql.ContextWithFreshRead(ctx)
+		trace := mediaSignalTraceFrom(ctx)
+		phaseAt := time.Now()
 		keys, e := s.mediaSignalGateKeys(fresh, hint, b)
+		trace.record("gate_keys_before", time.Since(phaseAt), e)
 		if e != nil {
 			return e
 		}
+		phaseAt = time.Now()
 		release, e := s.gates(ctx, keys...)
+		trace.record("gate_acquire", time.Since(phaseAt), e)
 		if e != nil {
 			return e
 		}
@@ -373,14 +378,18 @@ func (s *Service) mediaSignalGated(ctx context.Context, hint roomRow, b mediaSig
 			// Provider/transport callbacks can panic. The HTTP recovery boundary
 			// must never retain account/room write gates after such a failure.
 			defer release()
+			phaseAt = time.Now()
 			r, e := s.store.roomByID(fresh, hint.OwnerUserID, hint.ID)
+			trace.record("gate_room_read", time.Since(phaseAt), e)
 			if e != nil {
 				return false, e
 			}
 			if r == nil {
 				return false, accountRefusal("media_admission_closed")
 			}
+			phaseAt = time.Now()
 			current, e := s.mediaSignalGateKeys(fresh, *r, b)
+			trace.record("gate_keys_after", time.Since(phaseAt), e)
 			if e != nil {
 				return false, e
 			}
