@@ -20,6 +20,7 @@ import (
 
 const callsQuestionConcept = "v1:calls:workflowQuestion"
 const questionVersionLimit = 3
+const questionRetentionProgress = "MemoryNodes/v1:calls:workflowQuestion/expired-v1"
 
 type callQuestionBinding struct {
 	SiteID          string `json:"siteId"`
@@ -101,9 +102,35 @@ func questionRetentionRecord(row memorynodes.MemoryNode) (callQuestionRecord, ti
 // than the saved room deadline plus one hour (and submission plus 25 hours).
 // staged-data: MUST-NOT-GATE -- expiry covers all physical private versions;
 // every candidate and version still passes the maintenance row-admission check.
-func (s *Sweeper) sweepCallQuestions(ctx context.Context, now time.Time, dry bool, report *Report) error {
+func (s *Sweeper) sweepCallQuestions(ctx context.Context, now time.Time, dry bool, report *Report) (result error) {
 	if _, err := s.Concepts.Get(callsQuestionConcept); err != nil {
 		return nil
+	}
+	progress := &cursor{}
+	nextID := ""
+	if !dry {
+		var err error
+		progress, err = s.claim(ctx, questionRetentionProgress)
+		if err != nil {
+			return fmt.Errorf("call question retention progress unavailable; records preserved")
+		}
+		if progress == nil {
+			return nil
+		}
+		nextID = progress.ID
+		// A preserved page must not pin every later private question indefinitely.
+		// Remember examined IDs even when their records fail validation/admission,
+		// then wrap at the end so repaired or newly expired records get another turn.
+		// The shared lease makes progress survive replica changes; its generation
+		// prevents a slow/expired claimant from rewinding a replacement's cursor.
+		// Per-room gates and exact row fences still own deletion authority.
+		defer func() {
+			release, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+			defer cancel()
+			if _, err := s.DB.ExecContext(release, `UPDATE concept_retention_progress SET cursor_at=NULL,cursor_id=?,lease_until=clock_timestamp() WHERE policy=? AND generation=?`, nextID, questionRetentionProgress, progress.Generation); err != nil {
+				result = errors.Join(result, fmt.Errorf("call question retention progress could not be saved"))
+			}
+		}()
 	}
 	var candidates []memorynodes.MemoryNode
 	// Native dates are canonical UTC. Compare only the whole-second prefix for
@@ -111,7 +138,7 @@ func (s *Sweeper) sweepCallQuestions(ctx context.Context, now time.Time, dry boo
 	// untrusted date in SQL, where malformed data can leak into a driver error.
 	err := s.DB.NewRaw(`SELECT latest.* FROM (
  SELECT DISTINCT ON (id) * FROM "MemoryNodes" WHERE concept=? ORDER BY id,"createdAt" DESC
- ) latest WHERE left(payload->>'expiresAt',19) <= ? ORDER BY id LIMIT 100`, callsQuestionConcept, now.UTC().Format("2006-01-02T15:04:05")).Scan(ctx, &candidates)
+ ) latest WHERE id>? AND left(payload->>'expiresAt',19) <= ? ORDER BY id LIMIT ?`, callsQuestionConcept, progress.ID, now.UTC().Format("2006-01-02T15:04:05"), pageSize).Scan(ctx, &candidates)
 	if err != nil {
 		return fmt.Errorf("call question retention candidates unavailable; records preserved")
 	}
@@ -121,6 +148,7 @@ func (s *Sweeper) sweepCallQuestions(ctx context.Context, now time.Time, dry boo
 		if err := ctx.Err(); err != nil {
 			return errors.Join(append(failures, err)...)
 		}
+		nextID = candidate.ID
 		if !s.Admit(ctx, candidate) {
 			failures = append(failures, fmt.Errorf("call question retention row admission refused; records preserved"))
 			continue
@@ -155,6 +183,9 @@ func (s *Sweeper) sweepCallQuestions(ctx context.Context, now time.Time, dry boo
 				s.Invalidate(callsQuestionConcept)
 			}
 		}
+	}
+	if len(candidates) < pageSize {
+		nextID = ""
 	}
 	return errors.Join(failures...)
 }

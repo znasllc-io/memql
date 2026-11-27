@@ -379,6 +379,80 @@ func TestCallQuestionsPurgeContinuesAfterMalformedCandidate(t *testing.T) {
 	require.Empty(t, f.versionsOf(t, callsQuestionConcept+":b-valid"))
 }
 
+func TestCallQuestionsPurgePassesPreservedPageAcrossReplicasAndRevisitsRepairs(t *testing.T) {
+	for _, mode := range []string{"malformed", "admission denied"} {
+		t.Run(mode, func(t *testing.T) {
+			f, put := questionRetentionFixture(t)
+			for i := range pageSize {
+				fields := questionRetentionFields(f.now, 1, "pending")
+				if mode == "malformed" {
+					fields["authorAdmission"] = "invalid"
+				}
+				put(fmt.Sprintf("a-preserved-%03d", i), time.Second, fields)
+			}
+			put("z-eligible", time.Second, questionRetentionFields(f.now, 1, "pending"))
+			repairedID := ""
+			f.sweep.Admit = func(_ context.Context, row memorynodes.MemoryNode) bool {
+				return mode != "admission denied" || !strings.Contains(row.ID, ":a-preserved-") || row.ID == repairedID
+			}
+			ctx := context.Background()
+			first, err := f.sweep.Run(ctx, false)
+			require.Error(t, err)
+			require.Equal(t, pageSize, first.Scanned)
+			require.Zero(t, first.Deleted)
+
+			// A new sweeper and connection share no local progress with the first.
+			// The complete refused page must stay intact without starving the next ID.
+			replica := *f.sweep
+			replica.DB = f.open()
+			replica.GateDB = func() *sql.DB { return replica.DB.DB }
+			second, err := replica.Run(ctx, false)
+			require.NoError(t, err)
+			require.Equal(t, 1, second.Scanned)
+			require.Equal(t, 1, second.Deleted)
+			require.Empty(t, f.versionsOf(t, callsQuestionConcept+":z-eligible"))
+			require.Equal(t, pageSize, f.count(t, "MemoryNodes"))
+
+			// Wrapping is essential: preserved records are retried, not abandoned.
+			repairedID = callsQuestionConcept + ":a-preserved-000"
+			if mode == "malformed" {
+				_, err = f.db.ExecContext(ctx, `UPDATE "MemoryNodes" SET payload=jsonb_set(payload,'{authorAdmission}',?::jsonb) WHERE id=?`, `"`+strings.Repeat("a", 64)+`"`, repairedID)
+				require.NoError(t, err)
+			}
+			third, err := f.sweep.Run(ctx, false)
+			require.Error(t, err, "the other preserved records still fail their checks")
+			require.Equal(t, pageSize, third.Scanned)
+			require.Equal(t, 1, third.Deleted)
+			require.Empty(t, f.versionsOf(t, repairedID))
+			require.Equal(t, pageSize-1, f.count(t, "MemoryNodes"))
+		})
+	}
+}
+
+func TestCallQuestionsDryRunCannotConsumeRetentionProgress(t *testing.T) {
+	f, put := questionRetentionFixture(t)
+	for i := range pageSize + 1 {
+		put(fmt.Sprintf("question-%03d", i), time.Second, questionRetentionFields(f.now, 1, "pending"))
+	}
+	ctx := context.Background()
+	dry, err := f.sweep.Run(ctx, true)
+	require.NoError(t, err)
+	require.Equal(t, pageSize, dry.Scanned)
+	require.Equal(t, pageSize, dry.Eligible)
+	require.Zero(t, dry.Deleted)
+	require.Zero(t, f.count(t, "concept_retention_progress"))
+
+	first, err := f.sweep.Run(ctx, false)
+	require.NoError(t, err)
+	require.Equal(t, pageSize, first.Deleted)
+	require.Empty(t, f.versionsOf(t, callsQuestionConcept+":question-000"))
+	require.Len(t, f.versionsOf(t, callsQuestionConcept+":question-100"), 1)
+	second, err := f.sweep.Run(ctx, false)
+	require.NoError(t, err)
+	require.Equal(t, 1, second.Deleted)
+	require.Zero(t, f.count(t, "MemoryNodes"))
+}
+
 func TestCallQuestionsScheduledSweepUsesPrivateRowAdmission(t *testing.T) {
 	f, put := questionRetentionFixture(t)
 	_, err := memql.LoadUnifiedConcepts(nil)
