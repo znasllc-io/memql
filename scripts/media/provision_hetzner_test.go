@@ -934,17 +934,20 @@ func (f *hetznerFixture) emptyProject(t *testing.T) {
 // TestProvisionHetznerCreatesTheFirewallAndTheServer: a confirmed run against an empty
 // project creates the firewall and the server, sends exactly what the dry run showed,
 // hands the token to curl only on stdin, and answers {serverId, ipv4, ipv6}. The IPv6
-// answer is the server's address, the first in its /64, which is what the AAAA record
-// names.
+// answer is the server's address for the media hostname. It is not an instruction
+// to advertise IPv6 for the configured IPv4 TURN relay.
 func TestProvisionHetznerCreatesTheFirewallAndTheServer(t *testing.T) {
 	f := newHetznerFixture(t)
 	f.emptyProject(t)
-	env, _, code := f.run(t, m1Args("--confirm=provision-m1")...)
+	env, stderr, code := f.run(t, m1Args("--confirm=provision-m1")...)
 	if code != 0 || !env.OK {
 		t.Fatalf("run failed: exit %d, %+v", code, env.Error)
 	}
 	if !env.Changed {
 		t.Error("creating a server reported no change")
+	}
+	if !strings.Contains(stderr, "media hostname A/AAAA; TURN hostname A only, no AAAA") {
+		t.Error("provisioning must distinguish the media hostname from the IPv4 TURN DNS boundary")
 	}
 	for k, want := range map[string]any{
 		"serverId":        float64(1001),

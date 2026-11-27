@@ -990,13 +990,28 @@ images. It starts nothing: the server cannot run before it has its keys.
 | Name | A | AAAA |
 |---|---|---|
 | `m1.media.<domain>` | `ipv4` | `ipv6` |
-| `turn.m1.media.<domain>` | `ipv4` | `ipv6` |
+| `turn.m1.media.<domain>` | `ipv4` | Do not publish |
 
 The first is where browsers connect and the engine drives the server; the second is
-its TURN server, which LiveKit offers browsers at port 443 under that name. Caddy
-obtains a certificate for each as soon as it starts, so both names must point at the
-server before step 3 (a certificate authority prefers IPv6 when it finds an AAAA
-record, so a wrong one can fail the certificate too).
+its TURN server, which LiveKit offers browsers at port 443 under that name. This
+provisioned TURN path uses the server's IPv4 `rtc.node_ip` and LiveKit's IPv4 relay
+bind address. Publish **only A for the TURN name**, even when the media hostname has
+both A and AAAA. Caddy preserves the original connection addresses through PROXY
+v2; advertising IPv6 for this TURN path can select an address family its relay
+allocator cannot bind. The pinned LiveKit configuration does not expose Pion's
+`StrictAddressFamily` option; adding an unsupported YAML field is not a repair.
+
+For an existing installation, compare the exact TURN record before removing its
+AAAA record and preserve the media hostname's A/AAAA records. Wait for the old
+record's TTL to expire, then qualify authenticated TURN allocation and a real relay
+connection through the public hostname. A successful TLS certificate handshake
+alone does not qualify allocation. This script reports server addresses but never
+writes DNS. Dual-stack TURN requires a separately supported and tested relay
+configuration before advertising AAAA.
+
+Caddy obtains a certificate for each name as soon as it starts, so both names must
+point at the server before step 3. Any published AAAA record must be reachable;
+a certificate authority may prefer IPv6 when it finds one.
 
 **The server's public host must sit under the media host suffix**, which is
 `media.<domain>` unless you set it otherwise (step 4): a calls page's policy lets the

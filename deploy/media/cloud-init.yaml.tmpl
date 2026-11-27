@@ -526,8 +526,8 @@ write_files:
               [[ "$SECONDS" -lt "$deadline" ]] || break
               sleep 3
           done
-          [[ -n "$public" ]] || fail 5 "the server is started, but LiveKit did not answer at ${url} within ${WAIT_SECONDS}s. Caddy needs certificates for ${PUBLIC_HOST} and ${TURN_HOST} first: check that their A and AAAA records point here and that ports 80 and 443 reach this server, then run this command again. Caddy's log: docker logs ${PROJECT}-caddy-1"
-          fail 5 "the server is started and LiveKit answers at ${url}, but ${TURN_HOST} did not complete TLS with a certificate for its name within ${WAIT_SECONDS}s, so a browser that can reach only HTTPS cannot relay through this server. Caddy needs a certificate for ${TURN_HOST}: check that its A and AAAA records point here and that ports 80 and 443 reach this server, then run this command again. Caddy's log: docker logs ${PROJECT}-caddy-1"
+          [[ -n "$public" ]] || fail 5 "the server is started, but LiveKit did not answer at ${url} within ${WAIT_SECONDS}s. Caddy needs certificates for ${PUBLIC_HOST} and ${TURN_HOST} first: check that the media hostname A/AAAA records and the TURN hostname A record point here; the IPv4 TURN setup must have no AAAA record and that ports 80 and 443 reach this server, then run this command again. Caddy's log: docker logs ${PROJECT}-caddy-1"
+          fail 5 "the server is started and LiveKit answers at ${url}, but ${TURN_HOST} did not complete TLS with a certificate for its name within ${WAIT_SECONDS}s, so a browser that can reach only HTTPS cannot relay through this server. Caddy needs a certificate for ${TURN_HOST}: check that its A record points here and it has no AAAA record for this IPv4 TURN setup and that ports 80 and 443 reach this server, then run this command again. Caddy's log: docker logs ${PROJECT}-caddy-1"
       }
 
       function configure() {

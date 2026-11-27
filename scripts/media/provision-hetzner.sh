@@ -6,7 +6,8 @@
 # Capability: media.provisionHetzner -- create one calls media server on Hetzner Cloud:
 # the shared memql-media firewall, then a server whose first boot installs the media
 # server (deploy/media/cloud-init.yaml.tmpl). It answers {serverId, ipv4, ipv6}: the
-# addresses the server's DNS records name. The runbook, from this step to the first call,
+# server addresses; IPv6 is for the media hostname, while this IPv4 TURN setup
+# requires an A-only TURN name. It never writes DNS. The runbook to the first call,
 # is docs/public/operate/calls.md ("Production media server").
 #
 # WHAT IT DOES NOT HAND THE SERVER: ITS KEYS. The cloud-init it renders carries no key,
@@ -324,7 +325,7 @@ function hc_field() { printf '%s' "$HC_BODY" | jq -r "$1"; }
 
 # record_addresses <server-json-path> -- the server's IPv4, and its IPv6 address: Hetzner
 # answers the /64 it routes to the server, and the server takes the first address in it
-# (::1), which is what its AAAA records name.
+# (::1), which the media hostname's AAAA record names, not the IPv4 TURN hostname.
 function record_addresses() {
     local base="$1"
     SERVER_ID="$(hc_field "${base}.id")"
@@ -335,7 +336,7 @@ function record_addresses() {
     if [[ "$IPV6_NETWORK" == *"::/64" ]]; then
         IPV6="${IPV6_NETWORK%/64}1"
     elif [[ -n "$IPV6_NETWORK" ]]; then
-        cap_warn "Hetzner gave the server the IPv6 network ${IPV6_NETWORK}, whose first address this script cannot write out; its AAAA records name the address the server holds (ip -6 addr on the server)"
+        cap_warn "Hetzner gave the server the IPv6 network ${IPV6_NETWORK}, whose first address this script cannot write out; the media hostname's AAAA record names the address the server holds (ip -6 addr on the server)"
     fi
 }
 
@@ -510,7 +511,7 @@ function main() {
     cap_result_set_raw firewallCreated "$FIREWALL_CREATED"
     cap_result_set_raw firewallApplied "$FIREWALL_APPLIED"
     cap_result_set_raw created "$CREATED"
-    cap_info "media server ${NAME}: id ${SERVER_ID}, ${IPV4}, ${IPV6:-no IPv6}. Next: its DNS records (docs/public/operate/calls.md)."
+    cap_info "media server ${NAME}: id ${SERVER_ID}, ${IPV4}, ${IPV6:-no IPv6}. Next: media hostname A/AAAA; TURN hostname A only, no AAAA (docs/public/operate/calls.md)."
     cap_ok
 }
 

@@ -619,7 +619,7 @@ func TestConfigureChecksTheTURNNamesTLSThroughCaddy(t *testing.T) {
 		if code != 5 {
 			t.Fatalf("exited %d, want a code-5 failure: a server whose TURN name has no certificate is not done", code)
 		}
-		for _, want := range []string{"turn.m1.media.example.com", "LiveKit answers", "80", "443"} {
+		for _, want := range []string{"turn.m1.media.example.com", "LiveKit answers", "its A record points here", "no AAAA record for this IPv4 TURN setup", "80", "443"} {
 			if !strings.Contains(stderr, want) {
 				t.Errorf("the failure does not name %q:\n%s", want, stderr)
 			}
