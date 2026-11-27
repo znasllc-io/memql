@@ -54,6 +54,12 @@ func TestQuestionsManualKeepsPrivateCapabilityExplicit(t *testing.T) {
 		if len(workflow["properties"].(map[string]any)) != 2 {
 			t.Fatal("generic authority fields leaked into question action")
 		}
+		output := tool["outputs"].(map[string]any)
+		fields := output["properties"].(map[string]any)
+		if output["additionalProperties"] != false || len(fields) != 3 || fields["questions"] == nil || fields["questionReceipt"] == nil || fields["serverNow"] == nil {
+			t.Fatal("Questions output must describe only its native result envelope")
+		}
+
 	}
 	if count != 6 {
 		t.Fatalf("expected six precise tools, got %d", count)
