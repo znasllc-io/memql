@@ -1,0 +1,111 @@
+{
+  "extensions": {
+    "documents": [
+      "pdf",
+      "doc",
+      "docx",
+      "txt",
+      "md",
+      "markdown",
+      "rtf",
+      "odt",
+      "pages",
+      "epub",
+      "ppt",
+      "pptx",
+      "key",
+      "odp"
+    ],
+    "images": [
+      "jpg",
+      "jpeg",
+      "png",
+      "gif",
+      "webp",
+      "svg",
+      "heic",
+      "heif",
+      "bmp",
+      "tif",
+      "tiff",
+      "avif",
+      "ico"
+    ],
+    "media": [
+      "mp3",
+      "wav",
+      "m4a",
+      "aac",
+      "flac",
+      "ogg",
+      "oga",
+      "opus",
+      "aiff",
+      "mp4",
+      "m4v",
+      "mov",
+      "webm",
+      "mkv",
+      "avi",
+      "wmv",
+      "mpg",
+      "mpeg"
+    ],
+    "sheets": [
+      "xlsx",
+      "xls",
+      "csv",
+      "tsv",
+      "ods",
+      "numbers"
+    ],
+    "archives": [
+      "zip",
+      "tar",
+      "gz",
+      "tgz",
+      "7z",
+      "rar",
+      "bz2",
+      "xz"
+    ]
+  },
+  "formats": {
+    "markdown": "documents",
+    "document": "documents",
+    "pdf": "documents",
+    "text": "documents",
+    "spreadsheet": "sheets",
+    "image": "images"
+  },
+  "mime": [
+    {
+      "kind": "sheets",
+      "pattern": "spreadsheet|excel|csv|tab-separated|numbers"
+    },
+    {
+      "kind": "archives",
+      "pattern": "zip|x-tar|gzip|x-7z|x-rar|rar-compressed|bzip|x-xz"
+    },
+    {
+      "kind": "images",
+      "pattern": "^image/"
+    },
+    {
+      "kind": "media",
+      "pattern": "^(audio|video)/"
+    },
+    {
+      "kind": "documents",
+      "pattern": "^(text/plain|text/markdown)$|pdf|msword|wordprocessing|opendocument\\.text|rtf|presentation|powerpoint|epub"
+    }
+  ],
+  "order": [
+    "documents",
+    "images",
+    "media",
+    "sheets",
+    "archives",
+    "misc"
+  ]
+}

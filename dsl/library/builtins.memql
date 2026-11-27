@@ -625,3 +625,24 @@ builtin libraryEndSharesForArtifact {
   artifactId   string!  @description("The archived artifact.")
   ownerUserId  string!  @description("Its owner, from the archived row; checked by reading the artifact under that owner.")
 }
+
+/// One Library page after file type, Added and display sorting, reduced on the server.
+@sdk
+@executor("integration.library.browsePage")
+builtin libraryBrowsePage {
+ archived bool
+ folderId string
+ kind string
+ source string
+ accountId string
+ label string
+ search string
+ ids []string
+ folderIds []string
+ sourceRefs []string
+ sort string
+ fileType string
+ since string
+ locale string
+ cursor string
+}

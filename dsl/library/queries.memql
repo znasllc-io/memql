@@ -821,6 +821,7 @@ query file libraryImagesForRevision {
 @actor
 query artifact libraryArtifactsBrowse {
   args {
+    asOf datetime
     archived bool
     folderId string
     kind string
@@ -834,6 +835,7 @@ query artifact libraryArtifactsBrowse {
   }
   filter row => row.ownerUserId == actor.userId && row.lens == "artifact"
     && ((args.archived == true && row.archived == true) || (args.archived != true && row.archived != true))
+    && (args.asOf == nil || row.createdAt <= args.asOf)
     && (args.folderId == nil || row.folderId == args.folderId)
     && (args.kind == nil || row.kind == args.kind)
     && (args.source == nil || row.source == args.source)
@@ -853,6 +855,7 @@ query artifact libraryArtifactsBrowse {
 @actor
 query artifact libraryArtifactsBrowseOldest {
   args {
+    asOf datetime
     archived bool
     folderId string
     kind string
@@ -866,6 +869,7 @@ query artifact libraryArtifactsBrowseOldest {
   }
   filter row => row.ownerUserId == actor.userId && row.lens == "artifact"
     && ((args.archived == true && row.archived == true) || (args.archived != true && row.archived != true))
+    && (args.asOf == nil || row.createdAt <= args.asOf)
     && (args.folderId == nil || row.folderId == args.folderId)
     && (args.kind == nil || row.kind == args.kind)
     && (args.source == nil || row.source == args.source)
@@ -1016,4 +1020,13 @@ query shareNotice librarySharedWithMe {
   filter row => row.ownerUserId == actor.userId && row.endedAt == nil && row.expiresAt > now
     && (args.artifactId == nil || row.artifactId == args.artifactId)
   shape libraryShareNoticeFull
+}
+
+/// Owned size metadata for server-side Library sorting; never file bytes.
+@actor
+query file libraryFileSizeRows {
+  filter row => row.ownerUserId == actor.userId
+  sort "row.createdAt", "desc"
+  paginate 500
+  shape libraryFileSize
 }

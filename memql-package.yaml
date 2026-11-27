@@ -195,6 +195,7 @@ pipeline:
       # Keep Dockerfile changes in the same validation path as the shell.
       os:
         - integrations/agent/worker/pipeline_purpose.go
+        - integrations/library/file_kinds.json
         - Dockerfile
         - clients/**
         - sdk/ts/**

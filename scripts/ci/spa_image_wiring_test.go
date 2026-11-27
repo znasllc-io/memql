@@ -309,15 +309,16 @@ func TestSpaBuildStageCopiesEveryTreeTheShellImports(t *testing.T) {
 	shellRel := filepath.Join("clients", "os")
 	srcDir := filepath.Join(root, shellRel, "src")
 
-	// Top-level tree -> the stylesheets that reach into it, for the message.
+	// Imported path -> the source files that reach into it. JSON imports in
+	// TypeScript need the same isolated-build coverage as CSS brand imports.
 	escapes := map[string]map[string]bool{}
 
-	importRe := regexp.MustCompile(`@import\s+["']([^"']+)["']`)
+	importRe := regexp.MustCompile(`(?:@import\s+|from\s+|import\s*\(?\s*)["']([^"']+)["']`)
 	err := filepath.WalkDir(srcDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() || !strings.HasSuffix(path, ".css") {
+		if d.IsDir() || !(strings.HasSuffix(path, ".css") || strings.HasSuffix(path, ".ts") || strings.HasSuffix(path, ".tsx")) {
 			return nil
 		}
 		raw, err := os.ReadFile(path)
@@ -341,7 +342,7 @@ func TestSpaBuildStageCopiesEveryTreeTheShellImports(t *testing.T) {
 			if rel == shellRel || strings.HasPrefix(rel, shellRel+string(filepath.Separator)) {
 				continue
 			}
-			top := strings.Split(rel, string(filepath.Separator))[0]
+			top := filepath.ToSlash(rel)
 			from, _ := filepath.Rel(root, path)
 			if escapes[top] == nil {
 				escapes[top] = map[string]bool{}
@@ -363,7 +364,7 @@ func TestSpaBuildStageCopiesEveryTreeTheShellImports(t *testing.T) {
 	for _, tree := range trees {
 		found := false
 		for _, src := range copied {
-			if src == tree || strings.HasPrefix(src, tree+"/") {
+			if src == tree || strings.HasPrefix(tree, src+"/") {
 				found = true
 				break
 			}

@@ -310,6 +310,7 @@ func init() {
 		resultCacheInvalidationEvictions,
 		resultCacheInvalidationEvents,
 		resultCacheQueryReads,
+		queryDuration,
 		cacheCollector{},
 		automationLoopsStopped,
 		meshEventsTotal,

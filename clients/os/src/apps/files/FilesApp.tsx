@@ -257,7 +257,7 @@ export function FilesApp({
     filter.type,
     filter.added,
     filter.sort,
-    // Size reads each file's bytes off the files feed, which lands after the list.
+    // Backups can also supply file sizes while its health feed is retained.
     filter.sort === "size" ? `s:${files.snapshot.version}` : "",
     filter.place === "desktop" ? deskKey : "",
     // A COMPOSITION LANDING REVEALS ROWS THE BROWSER ALREADY HELD, exactly as
@@ -276,7 +276,7 @@ export function FilesApp({
       effectiveFilter,
       desk.membership,
       materialized,
-      (row) => (row.kind === "file" ? sizes.get(row.sourceConceptRef.split(":").pop() ?? "") : undefined),
+      (row) => row.browseSize ?? (row.kind === "file" ? sizes.get(row.sourceConceptRef.split(":").pop() ?? "") : undefined),
     ),
   );
 

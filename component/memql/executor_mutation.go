@@ -2305,6 +2305,17 @@ func (e *MemQLEngine) loadLatestNodes(ctx context.Context, ids []string, timesta
 		ctx = context.Background()
 	}
 
+	if len(unique) == 1 {
+		// Keep key and payload reads in one database snapshot. The stored
+		// reader reuses the key plan and prunes payload chunks at plan time.
+		// Batch admission retains its existing bounded lateral probes below.
+		var rows []memorynodes.MemoryNode
+		if err := db.NewRaw(`SELECT * FROM public.memql_latest_node(?::text, ?::timestamptz)`, unique[0], timestamp).Scan(ctx, &rows); err != nil {
+			return nil, err
+		}
+		return nodesToMap(rows), nil
+	}
+
 	// Collapse covering-index keys first. Selecting every historical payload
 	// here would undo the read-path optimization as soon as candidates are
 	// rechecked against their true latest version.

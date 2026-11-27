@@ -686,6 +686,7 @@ export const BoundConcepts = {
   libraryFileByUploadedFrom: "v1:library:file",
   libraryFileChunksForFile: "v1:library:fileChunk",
   libraryFileHistoryPage: "v1:library:fileVersion",
+  libraryFileSizeRows: "v1:library:file",
   libraryFileSizesForOwner: "v1:library:file",
   libraryFileVersionByNumber: "v1:library:fileVersion",
   libraryFileVersionSizesForOwner: "v1:library:fileVersion",

@@ -5348,6 +5348,7 @@ QueryClient.prototype.libraryArtifacts = function (this: QueryClient, args: Libr
 /** Ten owner-scoped Library entries matching the requested place and facets. */
 // Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactsBrowse"] in generated_concepts.ts).
 export interface LibraryArtifactsBrowseArgs {
+  asOf?: string;
   archived?: boolean;
   folderId?: string;
   kind?: string;
@@ -5362,6 +5363,7 @@ export interface LibraryArtifactsBrowseArgs {
 
 export function buildLibraryArtifactsBrowse(args: LibraryArtifactsBrowseArgs): string {
   const parts: string[] = [];
+  if (args.asOf !== undefined) parts.push("asOf: " + renderMemQLValue(args.asOf));
   if (args.archived !== undefined) parts.push("archived: " + renderMemQLValue(args.archived));
   if (args.folderId !== undefined) parts.push("folderId: " + renderMemQLValue(args.folderId));
   if (args.kind !== undefined) parts.push("kind: " + renderMemQLValue(args.kind));
@@ -5388,6 +5390,7 @@ QueryClient.prototype.libraryArtifactsBrowse = function (this: QueryClient, args
 /** Ten owner-scoped Library entries matching the requested place and facets. */
 // Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactsBrowseOldest"] in generated_concepts.ts).
 export interface LibraryArtifactsBrowseOldestArgs {
+  asOf?: string;
   archived?: boolean;
   folderId?: string;
   kind?: string;
@@ -5402,6 +5405,7 @@ export interface LibraryArtifactsBrowseOldestArgs {
 
 export function buildLibraryArtifactsBrowseOldest(args: LibraryArtifactsBrowseOldestArgs): string {
   const parts: string[] = [];
+  if (args.asOf !== undefined) parts.push("asOf: " + renderMemQLValue(args.asOf));
   if (args.archived !== undefined) parts.push("archived: " + renderMemQLValue(args.archived));
   if (args.folderId !== undefined) parts.push("folderId: " + renderMemQLValue(args.folderId));
   if (args.kind !== undefined) parts.push("kind: " + renderMemQLValue(args.kind));
@@ -5706,6 +5710,26 @@ declare module "./query.js" {
 
 QueryClient.prototype.libraryFileHistoryPage = function (this: QueryClient, args: LibraryFileHistoryPageArgs = {} as LibraryFileHistoryPageArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("libraryFileHistoryPage", buildLibraryFileHistoryPage(args), opts);
+};
+
+/** Owned size metadata for server-side Library sorting; never file bytes. */
+// Bound concept: v1:library:file (machine-readable: BoundConcepts["libraryFileSizeRows"] in generated_concepts.ts).
+export interface LibraryFileSizeRowsArgs {
+}
+
+export function buildLibraryFileSizeRows(args: LibraryFileSizeRowsArgs): string {
+  void args;
+  return "query libraryFileSizeRows()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryFileSizeRows(args?: LibraryFileSizeRowsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryFileSizeRows = function (this: QueryClient, args: LibraryFileSizeRowsArgs = {} as LibraryFileSizeRowsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryFileSizeRows", buildLibraryFileSizeRows(args), opts);
 };
 
 /** The sizes of every file the caller holds, ARCHIVED INCLUDED -- the stored half of the storage quota (memql#4782, design C4). Archived files keep their bytes and keep counting: retention is real, and a quota that forgot archived rows would let 'archive then re-upload' mint unbounded storage. UNBOUNDED for the same fail-open reason as its session sibling; owner-scoped, two fields per row. */

@@ -293,7 +293,7 @@ describe("the Head line and its hidden search panel (José, Nov 19 2026)", () =>
     expect(checked()).toEqual(["All", "Any label", "Any source", "Any account"]);
   });
 
-  it("reads every page before sorting by name, so the first tile is the Library's first name", async () => {
+  it("asks for one sorted page, so the first tile is the Library's first name without draining the library", async () => {
     const artifacts = Array.from({ length: 25 }, (_, n) => artifactRow({
       id: `artifact-${n}`, title: n === 3 ? "Aardvark.pdf" : `Document ${n}.pdf`,
       createdAt: `2026-10-${String(n + 1).padStart(2, "0")}T12:00:00Z`,
@@ -305,8 +305,9 @@ describe("the Head line and its hidden search panel (José, Nov 19 2026)", () =>
     await click(screen.getByRole("button", { name: "Search" }));
     chooseOption(screen.getByLabelText("Sort"), "Name");
     await act(async () => {});
-    await waitFor(() => expect(screen.getAllByRole("button", { name: /\.pdf/ })).toHaveLength(25));
-    expect(connection.callsNamed("libraryArtifactsBrowse")).toHaveLength(3);
+    await waitFor(() => expect(screen.getAllByRole("button", { name: /\.pdf/ })).toHaveLength(10));
+    expect(connection.callsNamed("libraryArtifactsBrowse")).toHaveLength(1);
+    expect(connection.callsNamed("libraryBrowsePage")).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: /\.pdf/ })[0]!.textContent).toContain("Aardvark.pdf");
   });
 });

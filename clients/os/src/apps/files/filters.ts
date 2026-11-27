@@ -1,15 +1,10 @@
+import fileKinds from "../../../../../integrations/library/file_kinds.json";
 import { CONTENT_KINDS, SOURCE_VALUES } from "./concepts";
 import { artifactName, isContentKind, type ArtifactRow } from "./rows";
 
-// The list derivation (design D1, reshaped by epic memql#4842): place / kind /
-// source / search / folder scope / sort, as ONE pure fold over the artifacts
-// snapshot.
-//
-// CLIENT-SIDE ON PURPOSE. The owner-scoped set is small, and `folderId == ""`
-// cannot match pre-field rows server-side -- a row promoted before folders
-// exist has no member at all, and only a client-side fold reads absence and
-// the empty string as the same answer: the root. (The `archived != true`
-// lesson, applied to the next field.)
+// Shared predicates for live rows and folder navigation. Artifact pages and
+// facets are read on the server; derived orders and filters use the same file
+// classification rules as the server directory reducer.
 //
 // ===========================================================================
 // PLACES, NOT A CHECKBOX (epic memql#4842, #4846)
@@ -171,43 +166,16 @@ export type FileType = (typeof FILE_TYPES)[number][0];
 /** What one file is: every FileType except the two that are not a file's own. */
 export type FileKind = Exclude<FileType, "all" | "folders">;
 
-const EXTENSIONS: Record<Exclude<FileKind, "misc">, readonly string[]> = {
-  // Slides count as documents: a deck is something you read, and Misc is for
-  // files nothing else claims.
-  documents: ["pdf", "doc", "docx", "txt", "md", "markdown", "rtf", "odt", "pages", "epub", "ppt", "pptx", "key", "odp"],
-  images: ["jpg", "jpeg", "png", "gif", "webp", "svg", "heic", "heif", "bmp", "tif", "tiff", "avif", "ico"],
-  media: ["mp3", "wav", "m4a", "aac", "flac", "ogg", "oga", "opus", "aiff", "mp4", "m4v", "mov", "webm", "mkv", "avi", "wmv", "mpg", "mpeg"],
-  sheets: ["xlsx", "xls", "csv", "tsv", "ods", "numbers"],
-  // A .tar.gz reads as "gz", its last extension, as the tile's glyph does.
-  archives: ["zip", "tar", "gz", "tgz", "7z", "rar", "bz2", "xz"],
-};
+// The server and browser classify the same file using the same rules.
 const KIND_OF_EXTENSION = new Map<string, FileKind>(
-  Object.entries(EXTENSIONS).flatMap(([kind, exts]) => exts.map((ext) => [ext, kind as FileKind] as const)),
+  Object.entries(fileKinds.extensions).flatMap(([kind, exts]) => exts.map(ext => [ext, kind as FileKind] as const)),
 );
-
+const MIME_KINDS = fileKinds.mime.map(rule => ({ kind: rule.kind as FileKind, pattern: new RegExp(rule.pattern) }));
 function kindOfMime(mime: string): FileKind | null {
-  const m = mime.toLowerCase().split(";")[0]?.trim() ?? "";
-  if (m === "") return null;
-  // Sheets and archives first: text/csv is a sheet, not text, and
-  // application/x-zip-compressed is an archive whatever else it says.
-  if (/spreadsheet|excel|csv|tab-separated|numbers/.test(m)) return "sheets";
-  if (/zip|x-tar|gzip|x-7z|x-rar|rar-compressed|bzip|x-xz/.test(m)) return "archives";
-  if (m.startsWith("image/")) return "images";
-  if (m.startsWith("audio/") || m.startsWith("video/")) return "media";
-  if (m === "text/plain" || m === "text/markdown" || /pdf|msword|wordprocessing|opendocument\.text|rtf|presentation|powerpoint|epub/.test(m)) {
-    return "documents";
-  }
-  return null;
+  const value = mime.toLowerCase().split(";")[0]?.trim() ?? "";
+  return MIME_KINDS.find(rule => rule.pattern.test(value))?.kind ?? null;
 }
-
-const KIND_OF_FORMAT: Record<string, FileKind> = {
-  markdown: "documents",
-  document: "documents",
-  pdf: "documents",
-  text: "documents",
-  spreadsheet: "sheets",
-  image: "images",
-};
+const KIND_OF_FORMAT = fileKinds.formats as Record<string, FileKind>;
 
 /** Which kind of file a row is; "misc" when neither its name, its MIME type nor its format says. */
 export function fileKindOf(row: Pick<ArtifactRow, "title" | "mimeType" | "format">): FileKind {
@@ -247,8 +215,10 @@ export const FILES_SORTS = [
 export type FilesSort = (typeof FILES_SORTS)[number][0];
 
 const KIND_ORDER: readonly FileType[] = FILE_TYPES.map(([type]) => type);
+// Match the server cursor's bytewise ID tie-break, including mixed case.
+const byID = (a: ArtifactRow, b: ArtifactRow) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 const byName = (a: ArtifactRow, b: ArtifactRow) =>
-  artifactName(a).localeCompare(artifactName(b), undefined, { numeric: true, sensitivity: "base" }) || a.id.localeCompare(b.id);
+  artifactName(a).localeCompare(artifactName(b), undefined, { numeric: true, sensitivity: "base" }) || byID(a, b);
 
 /**
  * The order a sort names. Newest and Oldest keep the server's own page order
@@ -258,7 +228,7 @@ const byName = (a: ArtifactRow, b: ArtifactRow) =>
 export function compareRows(sort: FilesSort, sizeOf: (row: ArtifactRow) => number | undefined = () => undefined) {
   return (a: ArtifactRow, b: ArtifactRow): number => {
     if (sort === "newest" || sort === "oldest") {
-      return (sort === "oldest" ? 1 : -1) * (a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+      return (sort === "oldest" ? 1 : -1) * (a.createdAt.localeCompare(b.createdAt) || byID(a, b));
     }
     if (sort === "size") return (sizeOf(b) ?? -1) - (sizeOf(a) ?? -1) || byName(a, b);
     if (sort === "kind") return KIND_ORDER.indexOf(fileKindOf(a)) - KIND_ORDER.indexOf(fileKindOf(b)) || byName(a, b);
@@ -266,13 +236,8 @@ export function compareRows(sort: FilesSort, sizeOf: (row: ArtifactRow) => numbe
   };
 }
 
-/**
- * Whether the view needs the place's WHOLE population rather than the pages
- * scrolled so far. The server pages newest (or oldest) first and narrows only
- * by what `libraryBrowseArgs` sends, so a name, size or kind order, a kind of
- * file and an Added window are answered here, over every page.
- */
-export function needsWholePlace(filter: Pick<FilesFilter, "sort" | "type" | "added">): boolean {
+/** Derived file questions are reduced on the server before paging. */
+export function usesServerDirectory(filter: Pick<FilesFilter, "sort" | "type" | "added">): boolean {
   return (filter.sort !== "newest" && filter.sort !== "oldest") ||
     (filter.type !== "all" && filter.type !== "folders") ||
     filter.added !== "any";

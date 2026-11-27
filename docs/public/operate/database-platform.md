@@ -123,6 +123,45 @@ written around and what produced the 53300 storm; that constraint is gone.
 
 ---
 
+## Measure query latency before increasing resources
+
+Every engine exports `memql_query_duration_seconds` with `query` and `outcome`
+labels. The query label is the registered construct name; raw statements and
+parse failures use `<adhoc>`. Arguments, record IDs and error text are excluded.
+The measurement includes parsing, authorization, database calls and shaping,
+including cache hits. Nested engine executions are separate samples, so their
+summed duration is not database CPU time.
+
+Compare the same workload before and after a release. For example, per-query
+95th percentile latency and call rate over fifteen minutes:
+
+```promql
+histogram_quantile(0.95,
+  sum by (le, query) (rate(memql_query_duration_seconds_bucket{outcome="success"}[15m])))
+```
+
+```promql
+topk(10, sum by (query) (rate(memql_query_duration_seconds_count[15m])))
+```
+
+Read these alongside database CPU, I/O wait, disk latency, connection-pool
+waits and PostgreSQL wait events. Use representative SELECT plans with
+`EXPLAIN (ANALYZE, BUFFERS, TIMING OFF)` to distinguish planning overhead,
+metadata scans and payload reads. An idle disk does not explain a busy CPU;
+additional connections can increase lock contention without increasing capacity.
+
+Library folder/run lookups and chronological pages have dedicated partial
+indexes. Migration `20261127010000` builds and verifies them on the hypertable
+and its chunks through the normal resumable migration path. Point reads use
+`memql_latest_node`, installed by migration `20261127020000`: it reuses a key
+plan and plans the payload read with the selected timestamp. The function is
+read-only and uses one statement snapshot, including mutable observations.
+It caches query plans, not row values. Apply these through the normal engine
+release/migration lifecycle before comparing latency; no PostgreSQL resource
+or global planner setting change is required by these optimizations.
+
+---
+
 ## Alerts
 
 Three failures, all of which leave the database **serving traffic perfectly**

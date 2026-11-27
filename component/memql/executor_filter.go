@@ -493,7 +493,15 @@ func (e *MemQLEngine) executeCombinedFilterQuery(ctx context.Context, expr Expre
 	// re-scan, and a bun query carries both its LIMIT and the destination slice,
 	// so each attempt needs a fresh builder and a fresh slice.
 	walk := e.latestScanWalk(ctx, expr, timestamp, sorter)
+	library := e.latestLibraryScan(ctx, expr, filter, timestamp, sorter)
 	buildScan := func(rows *[]memorynodes.MemoryNode, limit int) *bun.SelectQuery {
+		if library != nil {
+			q := db.NewSelect().Model(rows).ModelTableExpr("(?) AS mn", library(limit))
+			for _, order := range combinedFilterOrderExprs(sorter) {
+				q = q.OrderExpr(order)
+			}
+			return q
+		}
 		// The collapse. `memory_nodes_id_created_at_desc_idx` is `(id,
 		// "createdAt" DESC)`, exactly this ordering, so the subquery reads the
 		// index rather than sorting.

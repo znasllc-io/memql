@@ -247,6 +247,8 @@ type indexFacts struct {
 	KeyColumns    []string
 	KeyDescending []bool
 	KeyPlain      []bool
+	KeyCollations []string
+	KeyNullsFirst []bool
 }
 
 // shapeProblem says why this index cannot answer the latest-row read, or ""
@@ -929,6 +931,13 @@ SELECT i.indrelid::int8,
                LEFT JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = i.indkey[k]
                LEFT JOIN pg_opclass oc ON oc.oid = i.indclass[k]
               ORDER BY k),
+       ARRAY(SELECT COALESCE(c.collname::text, '')
+               FROM generate_series(0, i.indnkeyatts - 1) AS k
+               LEFT JOIN pg_collation c ON c.oid = i.indcollation[k]
+              ORDER BY k),
+       ARRAY(SELECT (i.indoption[k] & 2) = 2
+               FROM generate_series(0, i.indnkeyatts - 1) AS k
+              ORDER BY k),
        CASE WHEN i.indrelid = ?::oid THEN pg_get_indexdef(i.indexrelid) ELSE '' END
   FROM pg_index i
   JOIN pg_class ic ON ic.oid = i.indexrelid
@@ -945,7 +954,7 @@ SELECT i.indrelid::int8,
 			f   indexFacts
 		)
 		if err := rows.Scan(&rel, &f.Name, &f.Method, &f.Valid, &f.Ready, &f.Live, &f.Partial, &f.Predicate, &f.Expressions, &f.Expression,
-			pgdialect.Array(&f.KeyColumns), pgdialect.Array(&f.KeyDescending), pgdialect.Array(&f.KeyPlain),
+			pgdialect.Array(&f.KeyColumns), pgdialect.Array(&f.KeyDescending), pgdialect.Array(&f.KeyPlain), pgdialect.Array(&f.KeyCollations), pgdialect.Array(&f.KeyNullsFirst),
 			&f.Definition); err != nil {
 			return st, fmt.Errorf("reading the indexes of %s: %w", st.qualifiedTable(), err)
 		}

@@ -5611,6 +5611,141 @@ func LibraryBrowseFacetsBuild(args LibraryBrowseFacetsArgs) string {
 	return b.String()
 }
 
+// LibraryBrowsePage -- One Library page after file type, Added and display sorting, reduced on the server.
+type LibraryBrowsePageArgs struct {
+	Archived    bool
+	ArchivedSet bool // set true to send archived; required because zero-value bool is ambiguous
+	FolderId    string
+	Kind        string
+	Source      string
+	AccountId   string
+	Label       string
+	Search      string
+	Ids         []string
+	FolderIds   []string
+	SourceRefs  []string
+	Sort        string
+	FileType    string
+	Since       string
+	Locale      string
+	Cursor      string
+}
+
+// LibraryBrowsePage calls the engine builtin libraryBrowsePage.
+func (qc *QueryClient) LibraryBrowsePage(ctx context.Context, args LibraryBrowsePageArgs) (*Result, error) {
+	call := LibraryBrowsePageBuild(args)
+	return qc.executeNamed(ctx, "libraryBrowsePage", call)
+}
+
+func LibraryBrowsePageBuild(args LibraryBrowsePageArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryBrowsePage(")
+	if args.ArchivedSet {
+		b.WriteString("archived: ")
+		b.WriteString(fmt.Sprintf("%v", args.Archived))
+	}
+	if args.FolderId != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("folderId: ")
+		b.WriteString(quoteMemQL(args.FolderId))
+	}
+	if args.Kind != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("kind: ")
+		b.WriteString(quoteMemQL(args.Kind))
+	}
+	if args.Source != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("source: ")
+		b.WriteString(quoteMemQL(args.Source))
+	}
+	if args.AccountId != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("accountId: ")
+		b.WriteString(quoteMemQL(args.AccountId))
+	}
+	if args.Label != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("label: ")
+		b.WriteString(quoteMemQL(args.Label))
+	}
+	if args.Search != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	if args.Ids != nil {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("ids: ")
+		b.WriteString(renderMemQLValue(args.Ids))
+	}
+	if args.FolderIds != nil {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("folderIds: ")
+		b.WriteString(renderMemQLValue(args.FolderIds))
+	}
+	if args.SourceRefs != nil {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sourceRefs: ")
+		b.WriteString(renderMemQLValue(args.SourceRefs))
+	}
+	if args.Sort != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sort: ")
+		b.WriteString(quoteMemQL(args.Sort))
+	}
+	if args.FileType != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("fileType: ")
+		b.WriteString(quoteMemQL(args.FileType))
+	}
+	if args.Since != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("since: ")
+		b.WriteString(quoteMemQL(args.Since))
+	}
+	if args.Locale != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("locale: ")
+		b.WriteString(quoteMemQL(args.Locale))
+	}
+	if args.Cursor != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("cursor: ")
+		b.WriteString(quoteMemQL(args.Cursor))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // LibraryDocumentHistory -- Read owned document history metadata, with a version cursor and branch provenance.
 type LibraryDocumentHistoryArgs struct {
 	ArtifactId       string

@@ -1503,21 +1503,26 @@ Backups use a plus action, a full-page form, a schedule, and a hidden-file switc
 
 - **FILTERS PRECEDE PAGINATION.** `libraryArtifactsBrowse` and its oldest-first
   companion apply archive, kind, source, account, labels, folder and text filters
-  on the server, including the legacy missing-folder/root equivalence. Each
-  filter has an independent retained cursor. Exact folder counts and label
-  choices use `libraryBrowseFacets`, which folds every authorized source page
-  without sending the artifact population to the browser. Backing file metadata
-  is read for the selected inspector, not for every list row.
+  on the server. Each filter has an independent retained cursor. Exact folder
+  counts and label choices use `libraryBrowseFacets`, which reduces one
+  authorized current population in one database read. It sends counts and
+  labels, without transporting every artifact to the browser. Backing file
+  metadata is read for the selected inspector.
 
-- **THE SEARCH PANEL'S OWN QUESTIONS READ THE WHOLE PLACE** (Nov 2026). The
-  Head's search button opens a hidden panel (DESIGN.md, after rule 3). Its
-  search is the server's `search`; its kind of file (one extension and MIME
-  table, `filters.ts` `fileKindOf`), Added window and Name, Size and Kind
-  orders are not server filters, so while one is set `useLibrary.ts` reads
-  every page of the place before the list answers, and a ten-row page is
-  never sorted or called empty on its own. Size reads the owner's file rows
-  (`libraryFilesForOwner`) only while it is chosen. Tests:
-  `test/files/places.test.tsx`, `test/files/filters.test.ts`.
+- **DERIVED FILTERS AND ORDERS RETURN TEN-ROW PAGES.** The Head's search button
+  opens a hidden panel (DESIGN.md, after rule 3). Name, Size and Kind ordering,
+  file-type filters, and Added windows use `libraryBrowsePage`. The server reads
+  the authorized population once, applies the derived question, and returns
+  ten rows plus a continuation cursor. It reads size metadata only for Size;
+  the browser no longer drains every artifact and file page before answering.
+  Extension, MIME and format rules are shared in
+  `integrations/library/file_kinds.json`. Cursors carry the filter scope,
+  caller and initial time bound, so another replica can continue them while
+  rechecking current authorization. Live file-size changes reseed Size pages.
+  A source population above 100,000 fails explicitly and asks for narrower
+  folder/search scope; it never produces truncated counts or a partial sort.
+  Tests: `test/files/places.test.tsx`, `test/files/filters.test.ts`, and
+  `integrations/library/browse_page_db_test.go`.
 
 - **RECURSIVE ACTIONS REQUIRE COMPLETE MEMBERSHIP.** Folder archive previews
   read every page of the selected subtree, including archived files. Execution
