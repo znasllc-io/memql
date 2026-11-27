@@ -33,6 +33,16 @@ const (
 // integration, which reads them under the site owner's borrowed authority.
 const callsClientUnreadableReason = "its rows are the calls integration's bookkeeping (digests of bearer keys, passes and links, seats, the admission queue, media server credentials' names); the browser reaches calls only through the integration, which reads them as the site's owner, and a raw read would be an oracle for guessed secrets"
 
+// callsQuestionUnreadableReason is why the moderated Questions queue's rows are
+// client-unreadable. Unlike the rest of the calls concepts they hold a
+// participant's own words: a pending question is readable natively only by its
+// author's current admission and an authorized host, and the calls integration
+// decides that per row (integrations/calls/questions.go). The rows are written as
+// the site's owner, so the tier alone would admit that owner and a cluster owner
+// to a raw read, and the bus would carry the text to any automation. Every calls
+// concept is on the list (TestCallsConceptsAreServerWrittenAndUnreadable).
+const callsQuestionUnreadableReason = "its rows hold participants' private question text, which the calls integration shows only to the author's current admission and an authorized host (and a selected question to the room); a raw read would hand every pending question to the site's owner and a cluster owner, and a graph event would carry the text to any automation"
+
 // clientUnreadableConcepts are the concepts whose rows NO CLIENT READS, by any
 // path, whatever the row tier would say. The value is the reason, and a concept
 // does not go on this list without one.
@@ -86,6 +96,7 @@ var clientUnreadableConcepts = map[string]string{
 	"v1:calls:messageReceipt":       callsClientUnreadableReason,
 	"v1:calls:messageRate":          callsClientUnreadableReason,
 	"v1:calls:workflowState":        callsClientUnreadableReason,
+	"v1:calls:workflowQuestion":     callsQuestionUnreadableReason,
 	"v1:calls:resourceState":        callsClientUnreadableReason,
 	"v1:calls:delegationState":      callsClientUnreadableReason,
 	"v1:calls:agentAdmissionState":  callsClientUnreadableReason,

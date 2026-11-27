@@ -21,8 +21,11 @@ func (s *Service) Workflow(ctx context.Context, site callrules.SiteRef, token st
 	if err != nil {
 		return out, err
 	}
-	if WorkflowScope(req.Action) == "" {
+	if WorkflowScope(req.Action) == "" || req.Question != nil && !callrules.QuestionAction(req.Action) {
 		return out, callrules.ErrInvalid
+	}
+	if callrules.QuestionAction(req.Action) {
+		return s.workflowQuestions(ctx, site, token, req)
 	}
 	if req.Action == "bind_booking" || req.Action == "snapshot_binding" {
 		return s.workflowBooking(ctx, site, token, req)
@@ -39,6 +42,9 @@ func (s *Service) Workflow(ctx context.Context, site callrules.SiteRef, token st
 }
 
 func WorkflowScope(action string) string {
+	if callrules.QuestionAction(action) {
+		return "questions"
+	}
 	switch action {
 	case "catalog", "list", "validate", "simulate", "snapshot", "snapshot_binding":
 		return "skills_read"

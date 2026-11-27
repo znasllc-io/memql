@@ -1547,6 +1547,50 @@
       }
     },
     {
+      "concept": "v1:calls:workflowQuestion",
+      "file": "calls/concepts.memql",
+      "fields": [
+        "accountId",
+        "authorAdmission",
+        "authorKeyId",
+        "body",
+        "expiresAt",
+        "ownerUserId",
+        "revision",
+        "roomDeadline",
+        "roomId",
+        "runId",
+        "siteId",
+        "stateData",
+        "status",
+        "submittedAt"
+      ],
+      "required": [
+        "authorAdmission",
+        "authorKeyId",
+        "body",
+        "expiresAt",
+        "ownerUserId",
+        "revision",
+        "roomDeadline",
+        "roomId",
+        "runId",
+        "siteId",
+        "stateData",
+        "status",
+        "submittedAt"
+      ],
+      "enums": {
+        "status": [
+          "dismissed",
+          "pending",
+          "resolved",
+          "selected",
+          "withdrawn"
+        ]
+      }
+    },
+    {
       "concept": "v1:calls:workflowState",
       "file": "calls/concepts.memql",
       "fields": [

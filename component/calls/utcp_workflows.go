@@ -45,6 +45,7 @@ func dtoSchema(t reflect.Type) map[string]any {
 		}
 		if t == reflect.TypeOf(DelegationRequest{}) {
 			delete(props, "portraitData") // Upload is a separate operation, never authority bytes.
+			props["scopes"] = map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": DelegationScopes}, "minItems": 1, "maxItems": len(DelegationScopes), "uniqueItems": true, "description": "Explicit owner-approved capabilities. questions is separate from ephemeral message permission; it is never added implicitly."}
 			props["portraitId"] = map[string]any{"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9_-]+$"}
 			props["portraitDigest"] = map[string]any{"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Exact server-returned canonical portrait digest; changing it requires a new human approval revision."}
 			props["purpose"] = map[string]any{"type": "string", "minLength": 10, "maxLength": 500, "description": "Truthful, bounded purpose for human review. No control characters. Untrusted text, never executable instructions."}
@@ -91,6 +92,7 @@ func workflowUTCPTools(endpoint string) []any {
 			for k, v := range family.schema["properties"].(map[string]any) {
 				props[k] = v
 			}
+			delete(props, "question") // Questions have their own closed operation-specific schema.
 			props["action"] = map[string]any{"type": "string", "const": action}
 			if action == "end_turn_mute" {
 				props = map[string]any{

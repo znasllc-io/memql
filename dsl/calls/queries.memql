@@ -5,7 +5,7 @@
 // conjunct, as siteAccessSessionByToken does; actor.userId scoping alone is not the fix for a digest lookup,
 // because a client-callable lookup by digest is an oracle for guessed secrets.
 
-use common.traits.{ isOpen, isActiveRecord, statusIsActive }
+use common.traits.{ isOpen, isActiveRecord, statusIsActive, statusIsPending }
 
 /// actor.userId scoping is not the fix: only native portrait authorization may read this row.
 @serverOnly
@@ -1100,4 +1100,37 @@ query seat callsPortraitOccupiedSeats {
  filter row => row.siteId == args.siteId && row.keyId == args.keyId && (row.status == "admitted" || row.status == "in_call") && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
  paginate 101
  shape callsSeatFull
+}
+
+/// Complete bounded native queue metadata; actor.userId scoping is not the fix: native room/admission gates control it.
+@serverOnly
+@actor
+@cache(0)
+query workflowQuestion callsQuestionInventory {
+ args { siteId string! roomId string! }
+ filter row => row.siteId == args.siteId && row.roomId == args.roomId && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ sort "row.id", "asc"
+ paginate 100
+ shape callsQuestionMetadata
+}
+/// Private exact submission; actor.userId scoping is not the fix: native author/host/selected checks are mandatory.
+@serverOnly
+@actor
+@cache(0)
+query workflowQuestion callsQuestionById {
+ args { id string! }
+ filter row => row.id == args.id && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ paginate 1
+ shape callsQuestionFull
+}
+/// Pending-only cursor page; actor.userId scoping is not the fix: only the native visibility decision supplies authorAdmission.
+@serverOnly
+@actor
+@cache(0)
+query workflowQuestion callsQuestionPage {
+ args { ids []string! }
+ filter row => row.id in args.ids && statusIsPending(row) && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ sort "row.id", "asc"
+ paginate 20
+ shape callsQuestionFull
 }

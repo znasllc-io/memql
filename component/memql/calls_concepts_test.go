@@ -23,7 +23,7 @@ var callsConcepts = []string{
 	"v1:calls:invitationBudget", "v1:calls:invitationLink", "v1:calls:invitationReceipt",
 	"v1:calls:key", "v1:calls:mediaServer", "v1:calls:messageRate", "v1:calls:messageReceipt", "v1:calls:policy", "v1:calls:processingRate", "v1:calls:processingReceipt", "v1:calls:processingState", "v1:calls:queueEntry",
 	"v1:calls:reportAccessAudit", "v1:calls:reportCase", "v1:calls:resourceState", "v1:calls:room", "v1:calls:scheduledCall", "v1:calls:seat", "v1:calls:session",
-	"v1:calls:simulatedWalletEntry", "v1:calls:workflowState",
+	"v1:calls:simulatedWalletEntry", "v1:calls:workflowQuestion", "v1:calls:workflowState",
 }
 
 // TestCallsConceptsAreServerWrittenAndUnreadable pins the two declarations the calls
@@ -57,6 +57,21 @@ func TestCallsConceptsAreServerWrittenAndUnreadable(t *testing.T) {
 		if strings.HasPrefix(name, "v1:calls:") && memorynodes.All()[name] == nil {
 			t.Errorf("clientUnreadableConcepts names %s, which the calls namespace does not declare", name)
 		}
+	}
+}
+
+// The moderated Questions queue's listing names its own reason: its rows hold a
+// participant's words, not the bookkeeping digests callsClientUnreadableReason
+// describes, so the shared reason would tell the next reader the wrong thing about
+// what a raw read or a graph event would expose.
+func TestCallsQuestionsAreUnreadableForTheirTextsReason(t *testing.T) {
+	const questions = "v1:calls:workflowQuestion"
+	reason, listed := clientUnreadableConcepts[questions]
+	if !listed {
+		t.Fatalf("%s is not on clientUnreadableConcepts", questions)
+	}
+	if reason == callsClientUnreadableReason || !strings.Contains(reason, "question text") {
+		t.Errorf("%s is listed with %q; it should say that its rows hold private question text", questions, reason)
 	}
 }
 
