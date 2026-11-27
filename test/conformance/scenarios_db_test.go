@@ -6,7 +6,8 @@ package conformance
 //
 // A scenario runs automations the product SHIPS, named from the embedded tree
 // and never copied: a copy can pass while the shipped automation breaks. It
-// writes its seed rows through the tree's own mutations, fires each automation
+// writes its seed rows through the tree's own mutations and the bounded
+// account-access seed described below, fires each automation
 // the way its trigger would -- a schedule tick, or the very event a write
 // published on the engine's bus -- and reads the rows back from the store.
 //
@@ -93,9 +94,12 @@ type scenarioCase struct {
 }
 
 // scenarioSeed is one write through a shipped mutation, as the scenario's
-// owner unless As names another actor.
+// owner unless As names another actor. Builtin is limited to the governed
+// account-access setup in scenario_account_access_test.go; it is not a general
+// executor or a way to seed raw authority rows.
 type scenarioSeed struct {
 	Mutation string         `json:"mutation"`
+	Builtin  string         `json:"builtin"`
 	Args     map[string]any `json:"args"`
 	As       *scenarioActor `json:"as"`
 }
@@ -286,6 +290,16 @@ func checkScenarioShape(t *testing.T, where string, sc scenarioCase, autos map[s
 		return err == nil && fn != nil && fn.FunctionKind == "mutation"
 	}
 	for i, seed := range sc.Seed {
+		if seed.Builtin != "" {
+			if err := validateScenarioAccountAccessSeed(seed); err != nil {
+				t.Errorf("%s: seed %d: %v", where, i, err)
+			}
+			fn, err := eng.Functions().Get(seed.Builtin)
+			if err != nil || fn == nil || fn.FunctionKind != "builtin" {
+				t.Errorf("%s: seed %d names builtin %q, which the tree does not ship", where, i, seed.Builtin)
+			}
+			continue
+		}
 		if !isMutation(seed.Mutation) {
 			t.Errorf("%s: seed %d names mutation %q, which the tree does not ship", where, i, seed.Mutation)
 		}
@@ -587,6 +601,10 @@ func (v *variant) seed() {
 	v.t.Helper()
 	v.mark()
 	for i, s := range v.sc.Seed {
+		if s.Builtin != "" {
+			v.seedAccountAccess(fmt.Sprintf("seed %d", i), s)
+			continue
+		}
 		v.write(fmt.Sprintf("seed %d", i), s.Mutation, s.Args, s.As)
 	}
 }

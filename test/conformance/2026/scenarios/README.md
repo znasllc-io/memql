@@ -42,6 +42,17 @@ has none, nor any `.memql` file.
 - **`seed`** writes rows through shipped mutations, as a cluster owner at
   internal origin, or as the actor `"as": { "userId": ..., "role": ... }`
   names.
+- **`seed.builtin: "accountAccessUpdate"`** is the one bounded exception:
+  account setup may assign an app ceiling (`apps`) or tagged people as
+  `member`, with their apps (`members`). It names an explicit tagged owner
+  and account, reads the current revision through `accountAccess`, then calls
+  the governed writer as that actor without internal origin. A supplied
+  revision, ownership transfer, untagged identity or other builtin is refused.
+  The campaigns scenario uses its persisted owner, canonical account group
+  and these operations: a role label without a user row is not authority, and
+  a historical raw grant is not an account's app ceiling. The helper records
+  its deterministic membership ids for fixture cleanup and stops on native
+  refusal; it never changes runtime policy to make a fixture pass.
 - **`fire`** is the steps after the seeds, in order. A step is either an
   automation run or a write through a mutation (the `seed` form). An
   automation runs on a schedule tick (`"schedule": true`) or on an event. The

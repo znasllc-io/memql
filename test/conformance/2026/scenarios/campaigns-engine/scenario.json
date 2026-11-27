@@ -38,13 +38,19 @@
               "$id": "organization"
             },
             "name": "Scenario Organization"
+          },
+          "as": {
+            "userId": {
+              "$id": "owner"
+            },
+            "role": "owner"
           }
         },
         {
           "mutation": "writeGroup",
           "args": {
             "groupId": {
-              "$id": "organization-group"
+              "$id": "acct-organization"
             },
             "name": "Scenario Organization Members",
             "kind": "account",
@@ -55,82 +61,45 @@
           }
         },
         {
-          "mutation": "writeGroupMembership",
+          "builtin": "accountAccessUpdate",
+          "as": {
+            "userId": {
+              "$id": "owner"
+            },
+            "role": "owner"
+          },
           "args": {
-            "membershipId": {
-              "$id": "author-membership"
-            },
-            "groupId": {
-              "$id": "organization-group"
-            },
             "accountId": {
               "$id": "organization"
             },
+            "operation": "apps",
+            "apps": [
+              "app:email"
+            ]
+          }
+        },
+        {
+          "builtin": "accountAccessUpdate",
+          "as": {
             "userId": {
-              "$id": "author"
+              "$id": "owner"
             },
-            "origin": "added",
-            "status": "active"
-          }
-        },
-        {
-          "mutation": "writeGrant",
+            "role": "owner"
+          },
           "args": {
-            "grantId": {
-              "$id": "grant-read-app-email"
+            "accountId": {
+              "$id": "organization"
             },
-            "subjectKind": "group",
-            "subjectId": {
-              "$id": "organization-group"
-            },
-            "verb": "read",
-            "resourceType": "app:email",
-            "effect": "allow"
-          }
-        },
-        {
-          "mutation": "writeGrant",
-          "args": {
-            "grantId": {
-              "$id": "grant-read-data"
-            },
-            "subjectKind": "group",
-            "subjectId": {
-              "$id": "organization-group"
-            },
-            "verb": "read",
-            "resourceType": "data",
-            "effect": "allow"
-          }
-        },
-        {
-          "mutation": "writeGrant",
-          "args": {
-            "grantId": {
-              "$id": "grant-create-data"
-            },
-            "subjectKind": "group",
-            "subjectId": {
-              "$id": "organization-group"
-            },
-            "verb": "create",
-            "resourceType": "data",
-            "effect": "allow"
-          }
-        },
-        {
-          "mutation": "writeGrant",
-          "args": {
-            "grantId": {
-              "$id": "grant-update-data"
-            },
-            "subjectKind": "group",
-            "subjectId": {
-              "$id": "organization-group"
-            },
-            "verb": "update",
-            "resourceType": "data",
-            "effect": "allow"
+            "operation": "members",
+            "userIds": [
+              {
+                "$id": "author"
+              }
+            ],
+            "role": "member",
+            "apps": [
+              "app:email"
+            ]
           }
         },
         {
@@ -309,6 +278,49 @@
               "ownerUserId": {
                 "$id": "v1:identity:user:author"
               }
+            }
+          },
+          {
+            "concept": "v1:accounts:account",
+            "id": {
+              "$id": "organization"
+            },
+            "payload": {
+              "ownerUserId": {
+                "$id": "v1:identity:user:owner"
+              },
+              "allowedApps": [
+                "app:email"
+              ]
+            }
+          },
+          {
+            "concept": "v1:identity:groupMembership",
+            "id": {
+              "$id": "acct-organization-{tag}-author-{tag}"
+            },
+            "payload": {
+              "groupId": {
+                "$id": "v1:identity:group:acct-organization"
+              },
+              "userId": {
+                "$id": "v1:identity:user:author"
+              },
+              "organizationRole": "member",
+              "allowedApps": [
+                "app:email"
+              ],
+              "status": "active"
+            }
+          },
+          {
+            "concept": "v1:identity:user",
+            "id": {
+              "$id": "author"
+            },
+            "payload": {
+              "role": "writer",
+              "active": true
             }
           }
         ]
