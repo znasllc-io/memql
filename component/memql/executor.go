@@ -107,6 +107,13 @@ func (s *bunStore) InsertMemoryNode(ctx context.Context, node *memorynodes.Memor
 		return fmt.Errorf("memory node concept is required")
 	}
 
+	if accountAuthorityConcept(node.Concept) {
+		return s.insertAuthorityNode(ctx, node)
+	}
+	return s.insertMemoryNodeRow(ctx, node)
+}
+
+func (s *bunStore) insertMemoryNodeRow(ctx context.Context, node *memorynodes.MemoryNode) error {
 	// ON CONFLICT DO NOTHING on the (id, "createdAt") PK.
 	// Two simultaneous mutations with the same deterministic id can
 	// land at the same microsecond -- React StrictMode in dev fires

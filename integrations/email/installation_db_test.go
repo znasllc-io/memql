@@ -46,6 +46,7 @@ func TestEmailInstallationResumesOnIndependentReplica(t *testing.T) {
 		}
 		instances[n] = &azureSetup{store: &connectionStore{engine: installationTestStore{ConfigWriter: NewConfigWriter(e), prefix: prefix}, gateDB: replicaGatePool(t)}, installation: installationFixture(), readAssertion: func(string) ([]byte, error) { return []byte("pod.projected.signature"), nil }}
 	}
+	seedEmailOwner(t, instances[0].store.engine, fmt.Sprintf("installation-owner-%d", time.Now().UnixNano()))
 	created := map[string]bool{}
 	clusterID := func() string {
 		var c azureClusterConnection

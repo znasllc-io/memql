@@ -72,6 +72,7 @@ const (
 type AccountScopeExpression struct {
 	// Field is the payload property naming the row's account, as declared
 	// in `@rowAuthz(..., account="<field>")`.
+	OwnerField   string
 	Field        string
 	Organization bool
 	RowID        bool
@@ -186,6 +187,7 @@ func (s *accountScope) admitsAny(value any) bool {
 // request's context, and a memo that remembered the outer caller's groups
 // would hand them to the inner one.
 type accountScopeMemo struct {
+	access sync.Map
 	once   sync.Once
 	engine *MemQLEngine
 	scope  *accountScope
@@ -574,6 +576,15 @@ func accountAdmitsRow(ctx context.Context, decl *langparser.RowAuthzDecl, payloa
 	if !present {
 		return false
 	}
+	if memo, _ := ctx.Value(accountScopeMemoKey{}).(*accountScopeMemo); memo != nil && memo.engine != nil && decl.Owner != "" {
+		peers, valid := memo.engine.developerPeerOwners(ctx)
+		if !valid {
+			return false
+		}
+		if _, denied := peers[BareShortId(stringFromAny(row[decl.Owner]))]; denied && !memo.engine.ownedAccountScope(ctx).admitsAny(value) {
+			return false
+		}
+	}
 	return scope.admitsAny(value)
 }
 
@@ -635,6 +646,10 @@ func treeHasAccountScope(expr ExpressionNode) bool {
 // A RankExempt node is not a row term and answers its caller constant
 // before any of them.
 func (e *MemQLEngine) accountScopeComparison(ctx context.Context, n *AccountScopeExpression) ExpressionNode {
+	return e.privateAccountPredicate(ctx, n.OwnerField, n.Field, e.accountScopeComparisonBase(ctx, n))
+}
+
+func (e *MemQLEngine) accountScopeComparisonBase(ctx context.Context, n *AccountScopeExpression) ExpressionNode {
 	if n.RankExempt {
 		return &constantBoolExpression{value: !organizationOperator(ctx) || accountsStaff(ctx)}
 	}

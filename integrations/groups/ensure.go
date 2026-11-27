@@ -71,6 +71,29 @@ func (i *Integration) handleGroupEnsureForAccount(ctx context.Context, args map[
 		})
 	}
 
+	ensureOwner := func() error {
+		if owner := memql.BareShortId(rowString(account, "ownerUserId")); owner != "" {
+			members, err := i.store.MembersOfGroup(ctx, AccountGroupID(accountID))
+			if err != nil {
+				return err
+			}
+			present := false
+			for _, m := range members {
+				if m.Status == StatusActive && sameUser(m.UserID, owner) {
+					present = true
+				}
+			}
+			if !present {
+				if err := i.store.WriteMembership(ctx, Membership{ID: MembershipID(AccountGroupID(accountID), owner), GroupID: AccountGroupID(accountID), UserID: owner, Origin: OriginAdded, Status: StatusActive}, "", ""); err != nil {
+					return err
+				}
+			}
+		}
+
+		return nil
+
+	}
+
 	presentation, err := workflowhost.Run(ctx, "accountGroupPresentation", map[string]any{"accountId": accountID, "name": strings.TrimSpace(rowString(account, "name"))}, workflowhost.Options{})
 	if err != nil {
 		return nil, err
@@ -97,6 +120,9 @@ func (i *Integration) handleGroupEnsureForAccount(ctx context.Context, args map[
 				return nil, err
 			}
 		}
+		if err := ensureOwner(); err != nil {
+			return nil, err
+		}
 		return i.node("groupEnsureForAccount", map[string]any{
 			"accountId": accountID, "groupId": existing.ID, "created": false,
 		})
@@ -111,6 +137,9 @@ func (i *Integration) handleGroupEnsureForAccount(ctx context.Context, args map[
 		Status:      StatusActive,
 	}
 	if err := i.store.WriteGroup(ctx, g); err != nil {
+		return nil, err
+	}
+	if err := ensureOwner(); err != nil {
 		return nil, err
 	}
 	return i.node("groupEnsureForAccount", map[string]any{

@@ -1383,7 +1383,9 @@ tiers** (four sites switch on the owned tier and a new tier value falls
 silently out of all four):
 
 - `rankVisible` -- reads widen to the owner OR anyone at or above the OWNER'S
-  rank (D2; peers included, `<=`).
+  rank (D2, `<=`), excluding developer peers. Sharing an account also does
+  not admit another developer's private rows; the account owner retains oversight.
+  SQL pagination and subscription gates use the same exclusion.
 - `rankStrict` -- writes widen to your own row or one owned by someone STRICTLY
   below you (D3), **and WITHDRAW the cluster-owner write escape**. Requires
   `rankVisible`.
@@ -1454,6 +1456,15 @@ catalog slug or alias. `roleCreate` / `roleUpdate` / `roleDeactivate` author
 one under rank-below-creator, rank-not-taken, grants-a-subset-of-the-caller's
 and predefined-immutable; `auth.MayAssignRole` is the ONE rule both assignment
 seams call. [access-model.md](docs/public/operate/auth/access-model.md).
+
+**Account hierarchy (2026-11-26):** each primary or client account has one
+owner, named by `accounts:account.ownerUserId`. `accountAccessUpdate` transfers
+ownership atomically; ordinary role assignment and invitations cannot add an
+owner. The canonical account membership carries Developer, Admin, Member or
+Viewer. Account managers manage only lower roles, and client managers distribute
+only apps within the primary owner's account ceiling. `accountAccess` supplies
+the reduced management roster. See the
+[design record](docs/superpowers/specs/2026-11-26-account-hierarchy-design.md).
 
 **A GRANT is what a person or a group holds over and above their role** (epic
 memql#5287): `v1:rbac:grant`, one `allow` / `deny` per `(verb, resource)`,

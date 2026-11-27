@@ -7,7 +7,6 @@ import {
   Facts,
   Head,
   Panel,
-  RankMark,
   RecordRow,
   Subhead,
 } from "../../kit";
@@ -18,7 +17,7 @@ import { Grid } from "./GridView";
 import { heldPairs } from "./grid";
 import { RefusalLine } from "./PersonPage";
 import { personName, roleHolds, type PersonRow, type RoleRow } from "./rows";
-import { ladderDescending, type RoleCatalog } from "./useRoles";
+import { type RoleCatalog } from "./useRoles";
 
 // ONE ROLE: where it sits, what it holds, and who holds it.
 
@@ -43,7 +42,6 @@ export function RolePage({
   onBack: () => void;
   onOpenPerson: (userId: string) => void;
 }) {
-  const ladder = useMemo(() => ladderDescending(catalog.roles), [catalog.roles]);
   const held = useMemo(() => heldPairs(catalog.grants, role.slug), [catalog.grants, role.slug]);
   const callerHolds = useMemo(() => heldPairs(catalog.grants, viewerRole), [catalog.grants, viewerRole]);
   const [draft, setDraft] = useState<string[] | null>(null);
@@ -90,25 +88,8 @@ export function RolePage({
         <Head navigationKey={`role:${role.id}`} title={role.name} meta={role.slug} back={{ label: "Roles", onSelect: onBack }} />
 
         <Panel label={`Where ${role.name} sits`}>
-          <Subhead>The ladder</Subhead>
-          <ul className="os-role-ladder" aria-label="This cluster's roles, strongest first">
-            {ladder.map((rung) => (
-              <li
-                key={rung.slug}
-                className="os-role-rung"
-                data-current={rung.slug === role.slug ? "" : undefined}
-              >
-                <span className="os-role-rung-line" data-static="true">
-                  <RankMark actorRole={viewerRole} ownerRole={rung.slug} />
-                  <span className="os-role-rung-name">{rung.name}</span>
-                  <span className="os-role-slug">{rung.slug}</span>
-                  {rung.slug === role.slug ? <span className="os-role-rung-held">this one</span> : null}
-                </span>
-              </li>
-            ))}
-          </ul>
+          <Subhead>{role.name}</Subhead>
           <Facts>
-            <Fact label="Rank" value={String(role.rank)} mono />
             <Fact
               label="Scope"
               value={account === null ? (role.accountId === "" ? "Everywhere" : role.accountId) : accountName(account)}

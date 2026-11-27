@@ -139,6 +139,13 @@ func (i *Integration) handleGroupCreate(ctx context.Context, args map[string]any
 		return nil, refusal(CodeGroupNotFound, "a group needs a name")
 	}
 	accountID := memql.BareShortId(strings.TrimSpace(asString(args["accountId"])))
+	if native, ok := i.store.engine.(accountAccessEngine); ok && accountID != "" {
+		result, err := native.ManageAccount(ctx, accountID, map[string]any{"operation": "createGroup", "name": name, "description": asString(args["description"])})
+		if err != nil {
+			return nil, err
+		}
+		return i.node("groupCreate", result)
+	}
 	if err := i.requireOrganizationCapability(ctx, c, accountID, auth.VerbCreate); err != nil {
 		return nil, err
 	}
@@ -183,6 +190,19 @@ func (i *Integration) handleGroupUpdate(ctx context.Context, args map[string]any
 	if err != nil {
 		return nil, err
 	}
+	if native, ok := i.store.engine.(accountAccessEngine); ok && g.AccountID != "" {
+		change := map[string]any{"operation": "updateGroup", "groupId": g.ID}
+		for _, field := range []string{"name", "description"} {
+			if value, present := args[field]; present {
+				change[field] = value
+			}
+		}
+		result, err := native.ManageAccount(ctx, g.AccountID, change)
+		if err != nil {
+			return nil, err
+		}
+		return i.node("groupUpdate", result)
+	}
 	if err := i.requireOrganizationCapability(ctx, c, g.AccountID, auth.VerbUpdate); err != nil {
 		return nil, err
 	}
@@ -212,6 +232,19 @@ func (i *Integration) handleGroupArchive(ctx context.Context, args map[string]an
 	g, err := i.requireActiveGroup(ctx, asString(args["groupId"]))
 	if err != nil {
 		return nil, err
+	}
+	if native, ok := i.store.engine.(accountAccessEngine); ok && g.AccountID != "" {
+		change := map[string]any{"operation": "archiveGroup", "groupId": g.ID}
+		for _, field := range []string{"name", "description"} {
+			if value, present := args[field]; present {
+				change[field] = value
+			}
+		}
+		result, err := native.ManageAccount(ctx, g.AccountID, change)
+		if err != nil {
+			return nil, err
+		}
+		return i.node("groupArchive", result)
 	}
 	if err := i.requireOrganizationCapability(ctx, c, g.AccountID, auth.VerbUpdate); err != nil {
 		return nil, err
@@ -249,6 +282,17 @@ func (i *Integration) handleGroupMemberAdd(ctx context.Context, args map[string]
 	g, err := i.requireActiveGroup(ctx, asString(args["groupId"]))
 	if err != nil {
 		return nil, err
+	}
+	if native, ok := i.store.engine.(accountAccessEngine); ok && g.AccountID != "" {
+		operation := "members"
+		if g.Kind == KindCustom {
+			operation = "groupMembers"
+		}
+		result, err := native.ManageAccount(ctx, g.AccountID, map[string]any{"operation": operation, "groupId": g.ID, "userIds": []string{asString(args["userId"])}})
+		if err != nil {
+			return nil, err
+		}
+		return i.node("groupMemberAdd", result)
 	}
 	if err := i.requireOrganizationCapability(ctx, c, g.AccountID, auth.VerbUpdate); err != nil {
 		return nil, err
@@ -304,6 +348,26 @@ func (i *Integration) handleGroupMemberRemove(ctx context.Context, args map[stri
 	target := memql.BareShortId(strings.TrimSpace(asString(args["userId"])))
 	if target == "" {
 		return nil, refusal(CodeTargetUserNotFound, "a membership needs a user id")
+	}
+	if native, ok := i.store.engine.(accountAccessEngine); ok {
+		g, err := i.store.GroupByID(ctx, asString(args["groupId"]))
+		if err != nil {
+			return nil, err
+		}
+		if g != nil && g.AccountID != "" && g.Status == StatusActive {
+			operation := "members"
+			if g.Kind == KindCustom {
+				operation = "groupMembers"
+			}
+			if sameUser(target, c.userID) {
+				operation = "leave"
+			}
+			result, err := native.ManageAccount(ctx, g.AccountID, map[string]any{"operation": operation, "groupId": g.ID, "userIds": []string{target}, "remove": true})
+			if err != nil {
+				return nil, err
+			}
+			return i.node("groupMemberRemove", result)
+		}
 	}
 	self := sameUser(target, c.userID)
 	// A person may ALWAYS remove themselves, and needs no capability to do

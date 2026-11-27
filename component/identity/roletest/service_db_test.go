@@ -75,6 +75,12 @@ func realService(t *testing.T) (*Service, *memql.MemQLEngine) {
 func seedOperator(t *testing.T, s *Service, role string) context.Context {
 	t.Helper()
 	id := "v1:identity:user:" + uuid.NewString()
+	// Operators belong to this test, including their later role versions.
+	// Retaining them would turn the next test's owner into a second owner.
+	t.Cleanup(func() {
+		_, err := s.Store.DirectDB().ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE concept='v1:identity:user' AND id=$1`, id)
+		require.NoError(t, err)
+	})
 	ctx := identity.ContextWithSystemCredentialActor(context.Background())
 	require.NoError(t, s.Store.CreateUserOnFirstLogin(auth.ContextWithInternalOrigin(ctx), id, "Operator", "operator-"+uuid.NewString()+"@example.test", role, false, identity.UserProfileSeed{}))
 	// JWT MapClaims decodes numeric dates as float64. Exercise that wire shape,
@@ -156,7 +162,7 @@ func TestRealPersonaAcrossReplicasAndRevocation(t *testing.T) {
 	require.NoError(t, err)
 	_, err = otherEngine.Execute(viewer, fmt.Sprintf(`mutation renameLibraryFolder(folderId: %s, name: "Edited")`, langparser.QuoteString(folder)))
 	require.NoError(t, err)
-	stranger := seedOperator(t, one, "owner")
+	stranger := seedOperator(t, one, "developer")
 	second, err := one.Start(stranger, "reader")
 	require.NoError(t, err)
 	otherViewer := personaContext(t, two, otherEngine, second.Token)

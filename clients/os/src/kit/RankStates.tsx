@@ -56,7 +56,7 @@ export function SurfaceRefused({
         Opening it takes{" "}
         <span className="os-role-slug">{describeResource(resource)}</span>.{" "}
         {actorRung
-          ? <>You are signed in as <span className="os-role-slug">{actorRung.slug}</span>.</>
+          ? <>You are signed in as <span className="os-role-slug">{actorRung.name}</span>.</>
           : <>Your role has not been reported by the cluster.</>}
       </p>
       <p className="os-caption os-rank-refused-next">
@@ -103,9 +103,6 @@ export function PeerRowReadOnly({
   /** The owner as a person, when the surface already has them. */
   ownerName?: string;
 }) {
-  const owner = ownerRole ? roleRungOf(ownerRole) : null;
-  const actor = roleRungOf(actorRole);
-  const samerung = owner !== null && actor !== null && owner.slug === actor.slug;
   return (
     <div className="os-rank-readonly" data-os-rank-readonly>
       <RankMark actorRole={actorRole} ownerRole={ownerRole} />
@@ -114,14 +111,7 @@ export function PeerRowReadOnly({
           Read-only — {ownerName ?? "someone else"} owns this.
         </p>
         <p className="os-caption">
-          {samerung ? (
-            <>
-              They are a <span className="os-role-slug">{owner?.slug}</span>, the same rank
-              as you. You can change rows owned by people below your rank.
-            </>
-          ) : (
-            <>You can read it because of your rank, and change only rows you own.</>
-          )}
+          This row belongs to {ownerName ?? "another person"}. Only its owner or an authorized account manager can change it.
         </p>
       </div>
     </div>

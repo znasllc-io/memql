@@ -94,7 +94,7 @@ func TestARunIsDrivenOverRealRows(t *testing.T) {
 	account := "pr10b-account-" + suffix
 
 	// ---- the source and its pipeline, through their real writes ----
-	if _, err := eng.Execute(seederCtx(), fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Pipelines driver test")`,
+	if _, err := eng.Execute(accountSeeder(t, eng, owner), fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Pipelines driver test")`,
 		langparser.QuoteString(account))); err != nil {
 		t.Fatalf("createClientAccount: %v", err)
 	}
@@ -351,7 +351,7 @@ func newTakeoverRig(t *testing.T, manifest string, compute pipelines.Compute) *t
 	suffix := strings.ReplaceAll(id.NewShortId(), "-", "")[:12]
 	owner, repo := "takeover-owner-"+suffix, "acme-"+suffix+"/shop"
 	pkgID, account := "takeover-pkg-"+suffix, "takeover-account-"+suffix
-	if _, err := eng.Execute(seederCtx(), fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Pipelines takeover test")`,
+	if _, err := eng.Execute(accountSeeder(t, eng, owner), fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Pipelines takeover test")`,
 		langparser.QuoteString(account))); err != nil {
 		t.Fatalf("createClientAccount: %v", err)
 	}

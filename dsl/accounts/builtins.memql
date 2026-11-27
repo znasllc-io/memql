@@ -193,3 +193,28 @@ builtin accountMoves {
   after      string   @description("The nextCursor of the previous page.")
   limit      integer  @description("Moves per page: 50 when absent, at most 200.")
 }
+
+/// Read the account manager's reduced roster and current access revision.
+@executor("accountAccess")
+builtin accountAccess {
+  accountId string!
+}
+
+/// Atomically change account roles, membership, app ceilings or ownership.
+/// The engine resolves the caller's current account authority in the write
+/// transaction; global principal capabilities are neither required nor granted.
+@executor("accountAccessUpdate")
+builtin accountAccessUpdate {
+  name string
+  description string
+  accountId string!
+  revision string
+  operation enum("members", "groupMembers", "apps", "groupApps", "transfer", "createGroup", "updateGroup", "archiveGroup", "leave", "revokeInvitation")!
+  invitationId string
+  userIds []string
+  userId string
+  groupId string
+  role string
+  remove bool
+  apps []string
+}

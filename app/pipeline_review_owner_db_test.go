@@ -46,10 +46,10 @@ func TestPipelineIndependentReviewRestoresCurrentSourceOwner(t *testing.T) {
 	internal := auth.ContextWithInternalOrigin(ownerCtx)
 	scheduler := auth.ContextWithInternalOrigin(auth.ContextWithSystemActor(context.Background(), "pipeline-test"))
 	templateMutation(t, writer, internal, "identity.createUserOnFirstLogin", map[string]any{"userId": owner, "displayName": "Pipeline owner", "primaryEmail": owner + "@example.test", "role": "developer", "internal": false})
-	templateMutation(t, writer, scheduler, "createClientAccount", map[string]any{"accountId": account, "name": "Review test"})
+	templateMutation(t, writer, internal, "createClientAccount", map[string]any{"accountId": account, "name": "Review test"})
 	templateMutation(t, writer, ownerCtx, "createPackage", map[string]any{"accountId": account, "packageId": source, "name": "Review source", "sourceKind": "repo", "repoUrl": "https://github.com/acme/repo.git", "credentialId": credential})
 	t.Cleanup(func() {
-		_, err := db.Exec(`DELETE FROM "MemoryNodes" WHERE payload->>'ownerUserId' IN (?, ?) OR id IN (?, ?)`, owner, "v1:identity:user:"+owner, "v1:identity:user:"+owner, "v1:contacts:clientAccount:"+account)
+		_, err := db.Exec(`DELETE FROM "MemoryNodes" WHERE payload->>'ownerUserId' IN (?, ?) OR id IN (?, ?)`, owner, "v1:identity:user:"+owner, "v1:identity:user:"+owner, "v1:accounts:account:"+account)
 		require.NoError(t, err)
 	})
 

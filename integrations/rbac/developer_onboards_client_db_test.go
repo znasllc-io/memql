@@ -63,12 +63,11 @@ func seededCatalogWithModerator(t *testing.T, account string) *testCatalog {
 }
 
 // The apps a client's group needs, as the Users > Access screen writes them,
-// and the organization each is answered in: Deployables and Email are decided
-// per organization (the engine's organization gate), Files and its share part
-// are a person's own and answered once, with no organization.
+// and the organization each is answered in. Delegated app access is bounded
+// by that organization's ceiling, including Files and its share part.
 var clientApps = []struct{ verb, resource, inAccount string }{
-	{"read", "app:files", ""},
-	{"execute", "app:files/share", ""},
+	{"read", "app:files", "account"},
+	{"execute", "app:files/share", "account"},
 	{"read", "app:deployables", "account"},
 	{"read", "app:email", "account"},
 }

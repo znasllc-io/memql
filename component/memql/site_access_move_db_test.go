@@ -46,7 +46,7 @@ func TestASiteWithLiveAccessCodesCannotChangeOrganization(t *testing.T) {
 	seedPrincipal(t, eng, owner, auth.RoleWriter)
 	seedPrincipal(t, eng, operator, auth.RoleOwner)
 	for _, account := range []string{acme, beta} {
-		require.NoError(t, organizationInsert(t, eng, groupSeedCtx(), conceptAccountsAccount, account,
+		require.NoError(t, seedOrganizationAccount(t, eng, account,
 			map[string]any{"name": account, "status": "active", "domainStatus": "unverified"}))
 		seedGroup(t, eng, "g-"+account, account, "account", account)
 	}

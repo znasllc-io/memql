@@ -107,12 +107,12 @@ func seedFiringRule(t *testing.T, eng *memql.MemQLEngine) (context.Context, stri
 			t.Fatalf("%s: %v", q, err)
 		}
 	}
-	execute(system, fmt.Sprintf(`insert("v1:identity:user", id=%s, payload={"displayName":"Rule author","primaryEmail":"%s@example.test","role":"owner","active":true})`,
+	execute(system, fmt.Sprintf(`insert("v1:identity:user", id=%s, payload={"displayName":"Rule author","primaryEmail":"%s@example.test","role":"developer","active":true})`,
 		langparser.QuoteString(user), user))
 
 	// The owner authors the rule inside an organization, exactly as the
 	// campaigns db test does: every campaign input is organization-owned.
-	owner := auth.ContextWithToken(auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: user, Role: auth.RoleOwner}), &auth.TokenInfo{Subject: user})
+	owner := auth.ContextWithToken(auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: user, Role: auth.RoleDeveloper}), &auth.TokenInfo{Subject: user})
 	q := langparser.QuoteString
 	execute(owner, fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Fired count organization")`, q(account)))
 	execute(owner, fmt.Sprintf(`mutation createAudience(audienceId: %s, name: "Fired count audience", accountId: %s)`, q(audience), q(account)))

@@ -55,7 +55,7 @@ func TestRecurringCampaignsAcrossReplicas(t *testing.T) {
 	actor := func(user string, role auth.Role) context.Context {
 		return auth.ContextWithToken(auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: user, Role: role}), &auth.TokenInfo{Subject: user})
 	}
-	owner := actor(user, auth.RoleOwner)
+	owner := actor(user, auth.RoleDeveloper)
 	system := auth.ContextWithInternalOrigin(auth.ContextWithToken(auth.ContextWithAccess(context.Background(), auth.SystemActor("single-send-test")), &auth.TokenInfo{Subject: "single-send-test"}))
 	execute := func(ctx context.Context, q string) {
 		t.Helper()
@@ -63,7 +63,8 @@ func TestRecurringCampaignsAcrossReplicas(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	execute(system, fmt.Sprintf(`insert("v1:identity:user", id=%s, payload={"primaryEmail":%s,"displayName":"Sender","role":"owner","active":true})`, langparser.QuoteString(user), langparser.QuoteString(user+"@example.test")))
+	cleanupCampaignUser(t, user)
+	execute(system, fmt.Sprintf(`insert("v1:identity:user", id=%s, payload={"primaryEmail":%s,"displayName":"Sender","role":"developer","active":true})`, langparser.QuoteString(user), langparser.QuoteString(user+"@example.test")))
 	execute(owner, call("mutation", "createClientAccount", arg{"accountId", org}, arg{"name", "Receipt client"}))
 	execute(owner, call("mutation", "createAudience", arg{"audienceId", audience}, arg{"accountId", org}, arg{"name", "Newsletter"}))
 	execute(owner, call("mutation", "createSenderIdentity", arg{"senderIdentityId", identity}, arg{"accountId", org}, arg{"address", "hello@client.test"}, arg{"fromName", "Client"}))
@@ -236,6 +237,7 @@ func TestRecurringCampaignsAcrossReplicas(t *testing.T) {
 	}
 
 	peerID := suffix + "-peer"
+	cleanupCampaignUser(t, peerID)
 	execute(system, fmt.Sprintf(`insert("v1:identity:user", id=%s, payload={"primaryEmail":%s,"displayName":"Peer","role":"owner","active":true})`, langparser.QuoteString(peerID), langparser.QuoteString(peerID+"@example.test")))
 	peer := actor(peerID, auth.RoleOwner)
 	current := read(workers[0])

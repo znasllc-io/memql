@@ -83,7 +83,11 @@ func TestFyloBusinessRoleCannotCrossAccountsOrChangeDeploymentControl(t *testing
 		put("v1:identity:user", person, map[string]any{"displayName": person, "primaryEmail": person + "@example.test", "role": "reader", "active": true})
 	}
 	for _, a := range []string{account, foreign} {
-		put("v1:accounts:account", a, map[string]any{"name": a, "status": "active", "domainStatus": "unverified"})
+		put("v1:identity:user", a+"-owner", map[string]any{"displayName": "Account owner", "primaryEmail": a + "@example.test", "role": "viewer", "active": true})
+		put("v1:accounts:account", a, map[string]any{"name": a, "ownerUserId": a + "-owner", "status": "active", "domainStatus": "unverified"})
+		_, err := db.ExecContext(context.Background(), `UPDATE "MemoryNodes" SET payload=jsonb_set(payload,'{allowedApps}','["app:deployables","app:email","app:pipelines"]'::jsonb) WHERE concept='v1:accounts:account' AND id=?`, "v1:accounts:account:"+a)
+		require.NoError(t, err)
+		eng.InvalidateCacheForConcept("v1:accounts:account")
 		owner := peer
 		if a == foreign {
 			owner = user // Ownership must not override the scoped role.

@@ -56,8 +56,8 @@ func TestRepositorySourceRegistrationRestoresAcrossReplicasWithoutChangingDeploy
 	})
 	owner, stranger := "registration-owner-"+suffix, "registration-other-"+suffix
 	seedTiePrincipal(t, first, owner, auth.RoleOwner)
-	seedTiePrincipal(t, first, stranger, auth.RoleOwner)
-	ctx, other := tieActorCtx(owner, auth.RoleOwner), tieActorCtx(stranger, auth.RoleOwner)
+	seedTiePrincipal(t, first, stranger, auth.RoleDeveloper)
+	ctx, other := tieActorCtx(owner, auth.RoleOwner), tieActorCtx(stranger, auth.RoleDeveloper)
 	account := "registration-account-" + suffix
 	mustExecute(t, first, ctx, fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Registration tests")`, langparser.QuoteString(account)))
 	sealed, fp, err := secret.Encrypt(grantUserToken)

@@ -190,7 +190,7 @@ func TestGithubAppGrantResolutionIsOwnerScopedOverRealRows(t *testing.T) {
 	i.depsOnce.Do(func() { i.deps = deps })
 
 	accountId := "grant-account-" + suffix
-	mustExecute(t, eng, tieSeederCtx(), fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Grant test account")`, langparser.QuoteString(accountId)))
+	createTieAccount(t, eng, accountId)
 	mustExecute(t, eng, ctxA, fmt.Sprintf(
 		`mutation createPackage(packageId: %s, name: "acme", sourceKind: "repo", repoUrl: %s, credentialId: %s, accountId: %s)`,
 		langparser.QuoteString(packageId), langparser.QuoteString(repoUrl), langparser.QuoteString(credentialId), langparser.QuoteString(accountId)))

@@ -9,11 +9,14 @@ package wholesalepack_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"testing"
 
+	"github.com/uptrace/bun/driver/pgdriver"
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/database/dbtest"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 )
@@ -61,11 +64,22 @@ func seedSiteIn(t *testing.T, eng *memql.MemQLEngine, siteID, owner, storeID, ac
 // Copied from packs/reviewspack/live_helpers_e2e_test.go.
 func seedOrganization(t *testing.T, eng *memql.MemQLEngine, account string) string {
 	t.Helper()
-	payload, _ := json.Marshal(map[string]any{"name": account, "status": "active", "domainStatus": "unverified"})
+	owner := account + "-owner"
+	if _, err := eng.Execute(seedCtx(), `insert("v1:identity:user", id=`+quote(owner)+`, payload={"displayName":"Account owner","primaryEmail":`+quote(owner+"@example.test")+`,"role":"viewer","active":true})`); err != nil {
+		t.Fatal(err)
+	}
+	payload, _ := json.Marshal(map[string]any{"name": account, "status": "active", "domainStatus": "unverified", "ownerUserId": owner})
 	if _, err := eng.Execute(seedCtx(), fmt.Sprintf(`insert(%s, id=%s, payload=%s)`,
 		langparser.QuoteString("v1:accounts:account"), langparser.QuoteString(account), string(payload))); err != nil {
 		t.Fatalf("seed organization: %v", err)
 	}
+	// The primary owner has assigned Deployables and Email to this client.
+	db := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN())))
+	defer db.Close()
+	if _, err := db.ExecContext(context.Background(), `UPDATE "MemoryNodes" SET payload=jsonb_set(payload,'{allowedApps}','["app:deployables","app:email"]'::jsonb) WHERE concept='v1:accounts:account' AND id=$1`, "v1:accounts:account:"+account); err != nil {
+		t.Fatal(err)
+	}
+	eng.InvalidateCacheForConcept("v1:accounts:account")
 	group := "acct-" + account
 	seedGroup(t, eng, group, "account", account)
 	return group

@@ -316,7 +316,7 @@ func TestSiteAccessCodeViewCarriesTheCopiedAccountSoAStaleCopyCanBeSeen(t *testi
 	site := "v1:platform:site:" + ids.site
 	seedPrincipal(t, eng, ids.owner, auth.RoleWriter)
 	for _, account := range []string{acme, beta} {
-		require.NoError(t, organizationInsert(t, eng, groupSeedCtx(), conceptAccountsAccount, account,
+		require.NoError(t, seedOrganizationAccount(t, eng, account,
 			map[string]any{"name": account, "status": "active", "domainStatus": "unverified"}))
 	}
 	// The site is Beta's now.
@@ -841,7 +841,7 @@ func TestSiteAccessListIsJudgedByTheOrganizationGate(t *testing.T) {
 	seedPrincipal(t, eng, person, auth.RoleWriter)
 	seedPrincipal(t, eng, betaMember, auth.RoleWriter)
 	for _, account := range []string{acme, beta} {
-		require.NoError(t, organizationInsert(t, eng, groupSeedCtx(), conceptAccountsAccount, account,
+		require.NoError(t, seedOrganizationAccount(t, eng, account,
 			map[string]any{"name": account, "status": "active", "domainStatus": "unverified"}))
 		seedGroup(t, eng, "g-"+account, account, "account", account)
 	}

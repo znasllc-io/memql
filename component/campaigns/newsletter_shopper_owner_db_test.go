@@ -62,6 +62,7 @@ func TestAStorefrontSignupBorrowsTheOwnerTheEdgeStamps(t *testing.T) {
 		}
 		return memql.MaterializeRows(result)
 	}
+	cleanupCampaignUser(t, user)
 	execute(system, fmt.Sprintf(`insert("v1:identity:user", id=%s, payload={"primaryEmail":%s,"displayName":"Owner","role":"owner","active":true})`, langparser.QuoteString(user), langparser.QuoteString(user+"@example.test")))
 	execute(owner, call("mutation", "createClientAccount", arg{"accountId", org}, arg{"name", "Storefront client"}))
 	execute(owner, call("mutation", "createAudience", arg{"audienceId", audience}, arg{"accountId", org}, arg{"name", "Newsletter"}))

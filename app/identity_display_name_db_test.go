@@ -278,7 +278,8 @@ func testIdentityDisplayNameSurvivesLegacyServiceReadBeforeRename(t *testing.T, 
 	after := displayNameStoredPayload(t, db, target)
 	require.Equal(t, "writer", after["role"])
 	require.Equal(t, "Name saved by another replica", after["displayName"])
-	for _, field := range []string{"primaryEmail", "phone", "preferences", "signInPolicy", "revocationEpoch"} {
+	require.Equal(t, before["revocationEpoch"].(float64)+1, after["revocationEpoch"], "role changes revoke prior credentials")
+	for _, field := range []string{"primaryEmail", "phone", "preferences", "signInPolicy"} {
 		require.Equal(t, before[field], after[field], "preserve %s", field)
 	}
 }

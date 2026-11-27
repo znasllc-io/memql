@@ -221,8 +221,10 @@ issue. The caller must hold `update` on `principal` (an INVITATION needs
 `create` on `admission` or on `principal` instead -- there is no principal yet,
 and the create-versus-update split is what lets a role invite people
 without being able to re-role them), must outrank the target's current rung, and
-must outrank the new one. An owner may name another owner; nobody else may name
-a peer. A role holding a principal verb the caller lacks is refused whatever the
+must outrank the new one. Every account has exactly one owner. Changing that
+owner requires an explicit account ownership transfer, which retains the
+previous owner as a developer. Role assignment and invitations cannot add an
+owner or demote the current owner. Nobody may assign a peer. A role holding a principal verb the caller lacks is refused whatever the
 ranks say -- a custom role may outrank admin and hold fewer principal verbs, so
 rank alone would let it mint an admin. The developer role holds every principal
 verb from 2026-11-25 and manages people ranked below it, never an owner.
@@ -806,6 +808,30 @@ per request into the actor's account set, the way the rank scope already works
 -- so **subscriptions decide with the same function**, and a member's live feed
 carries their client's rows with no further work.
 
+### Account roles and app access
+
+Accounts marks the cluster's `self` account as **Primary account**. Every account
+has one owner and can have multiple Developers, Admins, Members and Viewers.
+The primary owner chooses which apps a client account receives. That client's
+owner and lower managers can invite people, organize custom groups and distribute
+only those apps. Managers may change only people below their own account role;
+ownership has a separate transfer action. Client roles grant no cluster role.
+
+Account managers receive the account's app access. Members and Viewers receive
+apps assigned to them directly and through their custom groups. Explicit denials
+still apply. Removing an app from the account removes access without requiring
+every group's grants to be rewritten. Existing memberships without an explicit
+app assignment retain their grants within that account ceiling.
+
+Developers do not gain access to each other's private data from equal rank or
+shared account membership. Explicit sharing remains separate, and the account
+owner retains oversight. Query pagination and live subscriptions enforce the
+same boundary.
+
+Accounts' People view and Users' group views use a shared searchable multi-select
+picker and named role choices. Failed writes retain the draft; stale permission
+edits require a refresh. Role displays use names without numeric levels.
+
 ### What is declared, and what is not
 
 `account="accountId"` on `v1:platform:site` and the campaigns concepts;
@@ -828,7 +854,12 @@ because an owned row admits its owner's inserts.
 
 ### Who may place whom
 
-`update` on `group`, plus rank governance: a caller may add or remove somebody
+For account-bound groups, current account authority is checked transactionally:
+Owner, Developer and Admin can manage only lower account roles. The primary
+owner can add an existing person; client managers invite new people into their
+account. The owner cannot leave their account before transferring ownership.
+
+For legacy unbound groups, `update` on `group`, plus rank governance: a caller may add or remove somebody
 who ranks **strictly below** them, and may remove themselves. **Nobody adds
 themselves** -- that is the escalation guard, not politeness. Note that
 developer (300) outranks admin (200), so an admin may not place a developer.

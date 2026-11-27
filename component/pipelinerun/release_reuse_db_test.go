@@ -49,7 +49,7 @@ func TestAReleaseReusesItsTreeOverRealRows(t *testing.T) {
 	repo := "acme-" + suffix + "/shop"
 	pkgID := "reuse-pkg-" + suffix
 	account := "reuse-account-" + suffix
-	if _, err := eng.Execute(seederCtx(), fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Same tree test")`,
+	if _, err := eng.Execute(accountSeeder(t, eng, owner), fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Same tree test")`,
 		langparser.QuoteString(account))); err != nil {
 		t.Fatalf("createClientAccount: %v", err)
 	}

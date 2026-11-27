@@ -50,7 +50,11 @@ func TestOrganizationDataPermissionsThroughExecuteQuery(t *testing.T) {
 	}
 	put("v1:identity:user", user, map[string]any{"displayName": "Scoped reader", "primaryEmail": user + "@example.test", "role": "reader", "active": true})
 	for _, account := range []string{a, b} {
-		put("v1:accounts:account", account, map[string]any{"name": account, "status": "active", "domainStatus": "unverified"})
+		put("v1:identity:user", account+"-owner", map[string]any{"displayName": "Account owner", "primaryEmail": account + "@example.test", "role": "viewer", "active": true})
+		put("v1:accounts:account", account, map[string]any{"name": account, "ownerUserId": account + "-owner", "status": "active", "domainStatus": "unverified"})
+		_, err := db.ExecContext(context.Background(), `UPDATE "MemoryNodes" SET payload=jsonb_set(payload,'{allowedApps}','["app:deployables","app:email"]'::jsonb) WHERE concept='v1:accounts:account' AND id=?`, "v1:accounts:account:"+account)
+		require.NoError(t, err)
+		eng.InvalidateCacheForConcept("v1:accounts:account")
 		execute(fmt.Sprintf(`mutation writeGroup(groupId: %s, name: %s, kind: "account", accountId: %s, status: "active")`, quote("g-"+account), quote(account), quote(account)))
 		execute(fmt.Sprintf(`mutation writeGroupMembership(membershipId: %s, groupId: %s, userId: %s, origin: "added", status: "active", accountId: %s)`, quote("m-"+account), quote("g-"+account), quote(user), quote(account)))
 		put("v1:campaigns:audience", "aud-"+account, map[string]any{"name": account, "status": "active", "accountId": account, "ownerUserId": user})
@@ -208,7 +212,11 @@ func TestOrganizationGroupManagementThroughExecuteQuery(t *testing.T) {
 		put("v1:identity:user", id, map[string]any{"displayName": id, "primaryEmail": id + "@example.test", "role": "reader", "active": true})
 	}
 	for _, account := range []string{a, b} {
-		put("v1:accounts:account", account, map[string]any{"name": account, "status": "active", "domainStatus": "unverified"})
+		put("v1:identity:user", account+"-owner", map[string]any{"displayName": "Account owner", "primaryEmail": account + "@example.test", "role": "viewer", "active": true})
+		put("v1:accounts:account", account, map[string]any{"name": account, "ownerUserId": account + "-owner", "status": "active", "domainStatus": "unverified"})
+		_, err := db.ExecContext(context.Background(), `UPDATE "MemoryNodes" SET payload=jsonb_set(payload,'{allowedApps}','["app:deployables","app:email"]'::jsonb) WHERE concept='v1:accounts:account' AND id=?`, "v1:accounts:account:"+account)
+		require.NoError(t, err)
+		eng.InvalidateCacheForConcept("v1:accounts:account")
 		execute(fmt.Sprintf(`mutation writeGroup(groupId: %s, name: %s, kind: "account", accountId: %s, status: "active")`, quote("g-"+account), quote(account), quote(account)))
 		peer := peerA
 		if account == b {

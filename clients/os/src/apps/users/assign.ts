@@ -30,8 +30,7 @@ import { roleHolds, type GrantRow, type RoleRow } from "./rows";
 //     by `kind`, NOT by whether `targetRole` is empty -- see AssignKind.
 //  3. the caller must govern the person as they stand today (strictly above
 //     them, or an owner).
-//  4. the new rung must sit strictly below the caller's own -- unless the
-//     caller is an owner, the carve-out that makes a second owner possible.
+//  4. the new role must sit below the caller’s; ownership is transferred separately.
 //  5. RE-ROLING ONLY (memql#5236): the new role must hold no `principal` verb
 //     the caller does not, whatever the ranks say. A re-role hands authority
 //     over immediately; an invitation opens a door the recipient must still
@@ -48,6 +47,7 @@ import { roleHolds, type GrantRow, type RoleRow } from "./rows";
 /** Why a rung is not offered, or "" when it is. */
 export type RungRefusal =
   | ""
+  | "ownershipTransfer"
   | "inactive"
   | "notAUserManager"
   | "targetOutranks"
@@ -108,10 +108,9 @@ export function rungRefusal(rung: RoleRow, ctx: AssignContext): RungRefusal {
     return "targetOutranks";
   }
 
-  // Rule 4, with the owner carve-out: two owners share a rank, so a strict
-  // comparison cannot express owner -> owner and a cluster could never name a
-  // second owner or hand itself on.
-  if (!ctx.callerIsOwner && rung.rank >= ctx.callerRank) return "aboveCaller";
+  // Ownership changes through an atomic account transfer.
+  if (rung.slug === "owner" || ctx.targetIsOwner) return "ownershipTransfer";
+  if (rung.rank >= ctx.callerRank) return "aboveCaller";
 
   // Rule 5 -- RE-ROLING ONLY. See the rule list above for why, and for why
   // putting it back on the invitation kind is the bug rather than the fix.
@@ -169,6 +168,8 @@ export function rungSentence(refusal: RungRefusal): string {
       return "Your role does not carry changing what somebody is.";
     case "targetOutranks":
       return "This person ranks at or above you.";
+    case "ownershipTransfer":
+      return "Transfer ownership in the account’s People settings.";
     case "aboveCaller":
       return "This rung is at or above your own.";
     case "authorityBeyond":

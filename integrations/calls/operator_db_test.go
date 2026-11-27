@@ -502,6 +502,10 @@ func (w *world) principal(id string, role auth.Role) {
 func (w *world) organization(account, group string) {
 	w.t.Helper()
 	w.insert("v1:accounts:account", account, map[string]any{"name": account, "status": "active", "domainStatus": "unverified"})
+	// The client was assigned Deployables before its owner enabled Calls.
+	_, err := w.db.ExecContext(context.Background(), `UPDATE "MemoryNodes" SET payload=jsonb_set(payload,'{allowedApps}','["app:deployables"]'::jsonb) WHERE concept='v1:accounts:account' AND id=?`, "v1:accounts:account:"+account)
+	require.NoError(w.t, err)
+	w.eng.InvalidateCacheForConcept("v1:accounts:account")
 	w.mutate(seedContext(), "writeGroup", map[string]any{
 		"groupId": group, "name": group, "kind": "account", "accountId": account, "status": "active",
 	})

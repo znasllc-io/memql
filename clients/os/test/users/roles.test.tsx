@@ -1,4 +1,5 @@
-import { act, screen, within } from "@testing-library/react";
+import { chooseOption, openSelect } from "../selectControl";
+import { screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { readTheBar } from "../readTheBar";
 
@@ -281,52 +282,31 @@ describe("proposing a slot on the ladder", () => {
     expect(placementSentence(210, ladder)).toContain("just above Admin");
   });
 
-  it("says a rank at developer and above is staff", async () => {
+  it("describes cluster authority using role names", async () => {
     const view = mount(seed());
     await click(await screen.findByRole("button", { name: "New role" }));
-    await screen.findByRole("heading", { name: "New role" });
     const { fireEvent } = await import("@testing-library/react");
-    await act(async () => {
-      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Field engineer" } });
-    });
-    if (!screen.queryByLabelText("Rank")) { await readTheBar(); await click(screen.getByRole("button", { name: "Next" })); }
-    await act(async () => {
-      fireEvent.change(screen.getByLabelText("Rank"), { target: { value: "320" } });
-    });
-    expect(
-      await screen.findByText(/A role at this rank is staff: in every account's group, standing/),
-    ).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Field engineer" } });
+    await readTheBar(); await click(screen.getByRole("button", { name: "Next" }));
+    chooseOption(screen.getByRole("combobox", { name: "Authority" }), "Above Developer");
+    expect(await screen.findByText(/A cluster role at this level can reach every account/)).toBeTruthy();
+    expect(screen.queryByLabelText("Rank")).toBeNull();
     view.unmount();
   });
-
-  it("refuses a taken rank and a rank at or above the caller's, in words", async () => {
+  it("offers only available positions below the caller", async () => {
     const view = mount(seed(), "admin");
-    // An admin holds no create-on-role here, so the rail is not offered at all
-    // -- which is the honest answer, and the case the list test pins.
-    expect(screen.queryByRole("button", { name: "New role" })).toBeNull();
-    view.unmount();
-
+    expect(screen.queryByRole("button", { name: "New role" })).toBeNull(); view.unmount();
     const owner = mount(seed());
     await click(await screen.findByRole("button", { name: "New role" }));
     const { fireEvent } = await import("@testing-library/react");
-    await act(async () => {
-      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Taken" } });
-    });
-    if (!screen.queryByLabelText("Rank")) { await readTheBar(); await click(screen.getByRole("button", { name: "Next" })); }
-    await act(async () => {
-      fireEvent.change(screen.getByLabelText("Rank"), { target: { value: "200" } });
-    });
-    expect(await screen.findByText(/Rank 200 is taken/)).toBeTruthy();
-
-    if (!screen.queryByLabelText("Rank")) { await readTheBar(); await click(screen.getByRole("button", { name: "Next" })); }
-    await act(async () => {
-      fireEvent.change(screen.getByLabelText("Rank"), { target: { value: "400" } });
-    });
-    expect(await screen.findByText(/at or above your own/)).toBeTruthy();
-    const bar = screen.getByRole("group", { name: "What you can do with this" });
-    expect(within(bar).queryByRole("button", { name: "Create role" })).toBeNull();
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Reviewer" } });
+    await readTheBar(); await click(screen.getByRole("button", { name: "Next" }));
+    const options = within(openSelect(screen.getByRole("combobox", { name: "Authority" }))).getAllByRole("option");
+    expect(options.some(option => option.textContent?.includes("Owner"))).toBe(false);
+    expect(options.map(option => option.textContent).join(" ")).not.toMatch(/\d/);
     owner.unmount();
   });
+
 });
 
 // ===========================================================================

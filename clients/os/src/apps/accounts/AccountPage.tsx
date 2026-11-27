@@ -91,7 +91,7 @@ export interface AccountPageProps {
   archive: ArchiveAccountState;
   onArchived: () => void;
   /** Opens the Users app on one of this client's groups. */
-  onOpenGroup?: (groupId: string) => void;
+  onOpenGroup?: (groupId: string, accountId: string) => void;
   /** Opens the domain setup wizard. */
   onConfigureDomains?: () => void;
   /** Opens the primary account on its Data tab, where rows in no account are placed. */

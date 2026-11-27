@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 
-import { Chip, Input, RankMark } from "../../kit";
+import { Input, MultiPicker, RoleSelect } from "../../kit";
 import { rungRefusal, rungSentence, type AssignContext } from "./assign";
 import { personName, type GroupRow, type PersonRow, type RoleRow } from "./rows";
 
@@ -98,16 +98,7 @@ export function PeoplePicker({
   );
 }
 
-/**
- * One or several groups, as toggles.
- *
- * TOGGLES RATHER THAN A `<select multiple>`: a native multi-select drops every selection the moment somebody
- * clicks without a modifier, on a control whose job is "one or two groups".
- *
- * Archived groups are offered only when already chosen -- a person being
- * invited should not be offered a group that grants nothing, and a selection
- * already made must stay removable.
- */
+/** Search and select groups. Archived groups remain removable when selected. */
 export function GroupPicker({
   groups,
   selected,
@@ -125,64 +116,12 @@ export function GroupPicker({
   /** One at a time: picking replaces rather than adds. */
   single?: boolean;
 }) {
-  const offered = useMemo(() => {
-    const held = new Set(selected);
-    return groups.filter((g) => g.status === "active" || held.has(g.id));
-  }, [groups, selected]);
-
-  function toggle(groupId: string) {
-    if (single) {
-      onChange(selected.includes(groupId) ? [] : [groupId]);
-      return;
-    }
-    onChange(
-      selected.includes(groupId)
-        ? selected.filter((id) => id !== groupId)
-        : [...selected, groupId],
-    );
-  }
-
-  if (offered.length === 0) {
-    return <p className="os-caption">No groups yet. The Groups section is where they are made.</p>;
-  }
-
-  return (
-    <div className="os-group-picker" role="group" aria-label={label}>
-      {offered.map((group) => {
-        const on = selected.includes(group.id);
-        // The client's name only when it SAYS something the group's name does
-        // not: an account-kind group is named after its client, so rendering
-        // both reads "Acme Acme".
-        const named = accountNameOf?.(group.accountId) ?? "";
-        const account = named === group.name ? "" : named;
-        return (
-          <button
-            key={group.id}
-            type="button"
-            className="os-account-label"
-            data-on={on || undefined}
-            aria-pressed={on}
-            onClick={() => toggle(group.id)}
-          >
-            {group.name}
-            {account === "" ? null : <span className="os-caption"> {account}</span>}
-            {group.status === "archived" ? <span className="os-caption"> archived</span> : null}
-          </button>
-        );
-      })}
-    </div>
-  );
+  const offered = groups.filter(group => group.status === "active" || selected.includes(group.id));
+  return <MultiPicker label={label} single={single} selected={selected} onChange={onChange}
+    choices={offered.map(group => ({ id: group.id, label: group.name, description: accountNameOf?.(group.accountId) || undefined }))} />;
 }
 
-/**
- * The cluster's ladder, with the offered rule applied.
- *
- * EVERY RUNG IS DRAWN. An unoffered one is dashed and carries its own reason as
- * a title, rather than being dropped: a ladder that showed a different number
- * of rungs on two people's pages would leave the reader with nothing to explain
- * the difference. `assign.ts` states the rule and mirrors
- * `auth.MayAssignRole`; the server is the authority either way.
- */
+/** Shared role selector with the server assignment policy reflected in its options. */
 export function RoleLadderPicker({
   rungs,
   value,
@@ -202,34 +141,7 @@ export function RoleLadderPicker({
   label: string;
   busy?: boolean;
 }) {
-  return (
-    // `data-picker` is what turns an unoffered rung dashed: the same markup
-    // draws a RECORD on the role page, where nothing is being offered and
-    // every rung would otherwise read as refused.
-    <ul className="os-role-ladder" data-picker="" aria-label={label}>
-      {rungs.map((rung) => {
-        const refusal = rungRefusal(rung, context);
-        const offered = refusal === "";
-        const current = rung.slug === value || rung.aliases.includes(value);
-        return (
-          <li key={rung.slug} className="os-role-rung" data-offered={offered ? "" : undefined} data-current={current ? "" : undefined}>
-            <button
-              type="button"
-              className="os-role-rung-line"
-              aria-pressed={current}
-              disabled={!offered || busy || current}
-              title={offered ? undefined : rungSentence(refusal)}
-              onClick={() => onChange(rung.slug)}
-            >
-              <RankMark actorRole={actorRole} ownerRole={rung.slug} />
-              <span className="os-role-rung-name">{rung.name}</span>
-              <span className="os-role-slug">{rung.slug}</span>
-              {rung.accountId === "" ? null : <Chip title="Scoped to one client">scoped</Chip>}
-              {current ? <span className="os-role-rung-held">held</span> : null}
-            </button>
-          </li>
-        );
-      })}
-    </ul>
-  );
+  void actorRole;
+  return <RoleSelect label={label} value={value} onChange={onChange} disabled={busy}
+    options={rungs.map(rung => ({ value: rung.slug, label: rung.name, disabled: rungRefusal(rung, context) !== "", reason: rungSentence(rungRefusal(rung, context)) }))} />;
 }

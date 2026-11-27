@@ -78,6 +78,16 @@ func TestTheCallbackJudgesThePersonAtTheCallbackAgainstARealEngine(t *testing.T)
 	// setRole writes a new version of the person's row: a demotion between
 	// begin and callback, as an admin's edit would make it.
 	setRole := func(role auth.Role) {
+		// Arrange the post-transfer role snapshot without invoking the ownership
+		// ceremony: this test judges the provider callback's fresh authority read.
+		result, err := raw.ExecContext(context.Background(), `UPDATE "MemoryNodes" SET payload=jsonb_set(payload,'{role}',to_jsonb($1::text)) WHERE concept='v1:identity:user' AND id=$2`, string(role), "v1:identity:user:"+dev)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if count, _ := result.RowsAffected(); count > 0 {
+			eng.InvalidateCacheForConcept("v1:identity:user")
+			return
+		}
 		seed("v1:identity:user", dev, map[string]any{
 			"displayName": "Callback Dev", "primaryEmail": dev + "@connect.example.test", "role": string(role), "active": true,
 		})
@@ -250,6 +260,16 @@ func TestAFirstConnectIsJudgedOnTheStoreTierBeforeAnyWrite(t *testing.T) {
 		cleanup = append(cleanup, concept+":"+id)
 	}
 	setRole := func(role auth.Role) {
+		// Arrange the post-transfer role snapshot without invoking the ownership
+		// ceremony: this test judges the provider callback's fresh authority read.
+		result, err := raw.ExecContext(context.Background(), `UPDATE "MemoryNodes" SET payload=jsonb_set(payload,'{role}',to_jsonb($1::text)) WHERE concept='v1:identity:user' AND id=$2`, string(role), "v1:identity:user:"+writer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if count, _ := result.RowsAffected(); count > 0 {
+			eng.InvalidateCacheForConcept("v1:identity:user")
+			return
+		}
 		seed("v1:identity:user", writer, map[string]any{
 			"displayName": "First Connect", "primaryEmail": writer + "@connect.example.test", "role": string(role), "active": true,
 		})

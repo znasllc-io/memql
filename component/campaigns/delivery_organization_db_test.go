@@ -56,6 +56,7 @@ func TestRuleDeliveryPersistsOrganizationAndOwnerWithoutFalseCampaign(t *testing
 			t.Fatalf("%s: %v", q, err)
 		}
 	}
+	cleanupCampaignUser(t, user)
 	execute(system, fmt.Sprintf(`insert("v1:identity:user", id=%s, payload={"displayName":"Rule owner","primaryEmail":"%s@example.test","role":"owner","active":true})`, langparser.QuoteString(user), user))
 	owner := auth.ContextWithToken(auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: user, Role: auth.RoleOwner}), &auth.TokenInfo{Subject: user})
 	execute(owner, fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Rule organization")`, langparser.QuoteString(account)))
@@ -135,6 +136,7 @@ func TestSingleSendDeliveriesAreKeyedByTheirRequestInTheDatabase(t *testing.T) {
 			t.Fatalf("%s: %v", q, err)
 		}
 	}
+	cleanupCampaignUser(t, user)
 	execute(system, fmt.Sprintf(`insert("v1:identity:user", id=%s, payload={"displayName":"Request owner","primaryEmail":"%s@example.test","role":"owner","active":true})`, langparser.QuoteString(user), user))
 	owner := auth.ContextWithToken(auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: user, Role: auth.RoleOwner}), &auth.TokenInfo{Subject: user})
 	execute(owner, fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Request organization")`, langparser.QuoteString(account)))

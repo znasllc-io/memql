@@ -1,14 +1,16 @@
+import { AccountAccessEditor } from "../accounts/AccountAccessEditor";
+import { AccountPicker } from "../accounts/AccountPicker";
 import { RoleTestingSection } from "./RoleTestingSection";
 import { listCount } from "../../kit/RecordRow";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Concepts } from "@znasllc-io/memql-sdk-core/client";
 
-import { Check, Head, Panel, SetupGroup, gateFor } from "../../kit";
-import { useSession } from "../../chrome/access";
+import { Check, ContentSkeleton, Head, Notice, Panel, SetupGroup, gateFor } from "../../kit";
+import { useSession, useSessionIfPresent } from "../../chrome/access";
 import { AppLogsSection } from "../../logs/AppLogsSection";
 import { useOsIfPresent } from "../../chrome/state";
 import type { OsAppProps } from "../../system/registry";
-import { useAccountOptions } from "../accounts/tie";
+import { useAccountOptions, useAccountOptionsFeed } from "../accounts/tie";
 import { useUsersActions } from "./actions";
 import { GroupsSection } from "./GroupsSection";
 import { PeopleSection } from "./PeopleSection";
@@ -51,9 +53,11 @@ const USERS_LOG_CONCEPTS = [
 ] as const;
 
 export function UsersApp(props: OsAppProps & { store?: UsersSettingsStore }) {
+  const access = useSessionIfPresent()?.access;
   // Access keeps the original settings/access door and its own reads. A
   // moved-section-only grant must not seed People, Groups or role catalogs.
   if (props.sectionId === "access") return <AccessSection intent={props.intent} consumeIntent={props.consumeIntent} />;
+  if (access?.everyAccount === false && !["owner", "developer", "admin"].includes(access.role)) return <AccountUsersApp {...props} />;
   return <UsersDirectoryApp {...props} />;
 }
 
@@ -340,4 +344,23 @@ function UsersSettingsSection({
       </Panel>
     </div>
   );
+}
+
+function AccountUsersApp({ intent, consumeIntent }: OsAppProps) {
+  const feed = useAccountOptionsFeed(true), accounts = feed.accounts;
+  const [selected, setSelected] = useState("");
+  const [group, setGroup] = useState("");
+  const accountId = selected || accounts[0]?.id || "";
+  useEffect(() => {
+    const next = intent?.payload["groupId"];
+    const account = intent?.payload["accountId"];
+    if (typeof account === "string" && typeof next === "string") { setSelected(account); setGroup(next === `acct-${account}` ? "" : next); if (intent) consumeIntent?.(intent.id); }
+    else if (typeof next === "string" && next.startsWith("acct-")) { setSelected(next.slice(5)); setGroup(""); if (intent) consumeIntent?.(intent.id); }
+  }, [intent, consumeIntent]);
+  return <div className="os-action-pane"><div className="os-action-body os-app-stack">
+    <Head title="People and groups" />
+    <AccountPicker id="users-account" label="Account" required accounts={accounts} value={accountId} onChange={value => { setSelected(value); setGroup(""); }} />
+    {group ? <button className="os-button" onClick={() => setGroup("")}>All people</button> : null}
+    {accountId ? <AccountAccessEditor key={`${accountId}:${group}`} accountId={accountId} groupId={group || undefined} onOpenGroup={setGroup} /> : feed.error ? <Notice tone="warn" sentence="Accounts could not be loaded." detail={feed.error} /> : feed.state === "seeding" ? <ContentSkeleton label="Loading accounts" /> : <p className="os-caption">No accounts are available to manage.</p>}
+  </div></div>;
 }

@@ -1,3 +1,6 @@
+import { accountAccessFixture } from "../accountAccessFixture";
+import { rowsResult } from "./harness";
+import { chooseOption } from "../selectControl";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -56,104 +59,84 @@ async function openDetail(connection: Conn): Promise<HTMLElement> {
   return openAccountTab("People");
 }
 
-function peopleBand(ledger: HTMLElement): HTMLElement {
-  const title = within(ledger).getByText("People");
-  const band = title.closest("article");
-  if (band === null) throw new Error("no People band");
-  return band as HTMLElement;
+const ada = { id: "ada", name: "Ada", email: "ada@example.test", role: "viewer", apps: [] };
+const grace = { id: "grace", name: "Grace", email: "grace@example.test", role: "viewer", apps: [] };
+function connectionFor(over: Parameters<typeof accountAccessFixture>[0] = {}) {
+  return fakeConnection({ clientAccountsAll: [accountRow({ id: "a1" })], accountAccess: accountAccessFixture(over) as never });
+}
+async function pick(label: string, name: string) {
+  fireEvent.change(screen.getByRole("combobox", { name: label }), { target: { value: name } });
+  fireEvent.click(await screen.findByRole("option", { name: new RegExp(name) }));
 }
 
-// ===========================================================================
-// THE PEOPLE BAND
-// ===========================================================================
-// It is FIRST among the bands because it is the one the other five are about:
-// the people are who the deployables, the files, the knowledge and the
-// campaigns are for.
-
-describe("the People band", () => {
-  it("counts DISTINCT people across the client's groups", async () => {
-    // Somebody in two of a client's groups is one person. Summing memberships
-    // would report "3 in 2 groups" for two people, which is a number this
-    // window invented.
-    const ledger = await openDetail(
-      fakeConnection({
-        clientAccountsAll: [accountRow({ id: "a1" })],
-        groupsForAccount: [
-          { id: "g1", name: "Acme" },
-          { id: "g2", name: "Acme leads" },
-        ],
-        membersOfGroup: {
-          g1: [
-            { id: "m1", groupId: "g1", userId: "u1", status: "active" },
-            { id: "m2", groupId: "g1", userId: "u2", status: "active" },
-          ],
-          g2: [{ id: "m3", groupId: "g2", userId: "u1", status: "active" }],
-        },
-      }),
-    );
-    const band = peopleBand(ledger);
-    await waitFor(() => expect(within(band).getByText("2")).toBeTruthy());
-    expect(within(band).getByText("in 2 groups")).toBeTruthy();
-    expect(within(band).getByText("Acme leads")).toBeTruthy();
+describe("account people management", () => {
+  it("shows each member once with one owner and plain role labels", async () => {
+    const state = accountAccessFixture();
+    await openDetail(connectionFor({ people: [...state.people, ada] }));
+    const members = await screen.findByRole("list", { name: "Account members" });
+    expect(within(members).getAllByRole("listitem")).toHaveLength(2);
+    expect(within(members).getByText("Owner")).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: "Role for Account owner" })).toBeNull();
+    expect(screen.getByRole("combobox", { name: "Role for Ada" }).textContent).toBe("Viewer");
   });
-
-  it("does not count a membership somebody has left", async () => {
-    const ledger = await openDetail(
-      fakeConnection({
-        clientAccountsAll: [accountRow({ id: "a1" })],
-        groupsForAccount: [{ id: "g1", name: "Acme" }],
-        membersOfGroup: {
-          g1: [
-            { id: "m1", groupId: "g1", userId: "u1", status: "active" },
-            { id: "m2", groupId: "g1", userId: "u2", status: "removed" },
-          ],
-        },
-      }),
-    );
-    const band = peopleBand(ledger);
-    await waitFor(() => expect(within(band).getByText("1")).toBeTruthy());
-  });
-
-  it("renders a refusal in the server's own words rather than a zero", async () => {
-    // The reads carry `@requiresRank("admin")`. Rendering a refusal as "0
-    // people" would be this window inventing a fact about a client -- the
-    // ledger's standing rule.
-    const ledger = await openDetail(
-      fakeConnection({
-        clientAccountsAll: [accountRow({ id: "a1" })],
-        groupsForAccount: new Error("reading groups is admin and above"),
-      }),
-    );
-    const band = peopleBand(ledger);
-    await waitFor(() => expect(within(band).getByText("Not yours to read")).toBeTruthy());
-    expect(within(band).getByText("reading groups is admin and above")).toBeTruthy();
-    expect(within(band).queryByText("0")).toBeNull();
-  });
-
-  it("hands off to Users on the group, by intent", async () => {
-    const ledger = await openDetail(
-      fakeConnection({
-        clientAccountsAll: [accountRow({ id: "a1" })],
-        groupsForAccount: [{ id: "g1", name: "Acme" }],
-        membersOfGroup: { g1: [{ id: "m1", groupId: "g1", userId: "u1", status: "active" }] },
-      }),
-    );
-    const band = peopleBand(ledger);
-    await waitFor(() => expect(within(band).getByRole("button", { name: "Acme" })).toBeTruthy());
-    await act(async () => {
-      fireEvent.click(within(band).getByRole("button", { name: "Acme" }));
+  it("keeps a batch selected when saving fails, then submits it atomically", async () => {
+    const state = accountAccessFixture({ candidates: [ada, grace] });
+    const conn = connectionFor(state);
+    const read = conn.query.executeNamed.getMockImplementation()!;
+    let fail = true;
+    conn.query.executeNamed.mockImplementation(async (name, call) => {
+      if (name !== "accountAccessUpdate") return read(name, call);
+      if (fail) throw new Error("Access changed; refresh before retrying");
+      return rowsResult([accountAccessFixture({ people: [...state.people, ada, grace], revision: "revision-two" }) as never]);
     });
-    expect(h.opened).toEqual([
-      { appId: "users", sectionId: "groups", payload: { groupId: "g1" } },
-    ]);
+    await openDetail(conn);
+    await screen.findByText("Account owner");
+    await pick("People", "Ada"); await pick("People", "Grace");
+    chooseOption(screen.getByRole("combobox", { name: "Role for selected people" }), "Member");
+    fireEvent.click(screen.getByRole("button", { name: "Add selected people" }));
+    expect(await screen.findByText("Access changed; refresh before retrying")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add selected people" }).hasAttribute("disabled")).toBe(false);
+    fail = false;
+    fireEvent.click(screen.getByRole("button", { name: "Add selected people" }));
+    await waitFor(() => expect(screen.getByRole("list", { name: "Account members" }).textContent).toContain("Grace"));
+    const writes = conn.query.executeNamed.mock.calls.filter(([name]) => name === "accountAccessUpdate");
+    expect(writes).toHaveLength(2);
+    expect(writes[1]?.[1]).toContain('userIds: ["ada", "grace"]');
+    expect(writes[1]?.[1]).toContain('role: "member"');
+    expect(writes[1]?.[1]).toContain('revision: "revision-one"');
   });
-
-  it("points at Users when the client has no group yet", async () => {
-    const ledger = await openDetail(
-      fakeConnection({ clientAccountsAll: [accountRow({ id: "a1" })], groupsForAccount: [] }),
-    );
-    const band = peopleBand(ledger);
-    await waitFor(() => expect(within(band).getByText("in no groups yet")).toBeTruthy());
-    expect(within(band).getByText("Users is where these are added.")).toBeTruthy();
+  it("requires selecting a successor before the explicit transfer action", async () => {
+    const state = accountAccessFixture();
+    const conn = connectionFor({ people: [...state.people, ada] });
+    await openDetail(conn); await screen.findByText("Account owner");
+    fireEvent.click(screen.getByRole("button", { name: "Transfer ownership" }));
+    expect(screen.getByRole("button", { name: "Transfer ownership" }).hasAttribute("disabled")).toBe(true);
+    await pick("New owner", "Ada");
+    fireEvent.click(screen.getByRole("button", { name: "Transfer ownership" }));
+    await waitFor(() => expect(conn.query.executeNamed.mock.calls.some(([name, call]) => name === "accountAccessUpdate" && call.includes('operation: "transfer"') && call.includes('userId: "ada"'))).toBe(true));
+  });
+  it("opens a custom group in Users", async () => {
+    await openDetail(connectionFor({ groups: [{ id: "reviewers", name: "Reviewers", kind: "custom", apps: [], userIds: [] }] }));
+    fireEvent.click(await screen.findByRole("button", { name: "Reviewers" }));
+    expect(h.opened).toEqual([{ appId: "users", sectionId: "groups", payload: { groupId: "reviewers", accountId: "a1" } }]);
+  });
+  it("keeps a refusal distinct from an empty roster and allows retry", async () => {
+    const conn = fakeConnection({ clientAccountsAll: [accountRow({ id: "a1" })], accountAccess: new Error("This account requires a manager") });
+    await openDetail(conn);
+    expect(await screen.findByText("This account requires a manager")).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Account members" })).toBeNull();
+    conn.query.executeNamed.mockResolvedValue(rowsResult([accountAccessFixture() as never]));
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Account owner")).toBeTruthy();
+  });
+  it("retains the invitation link when email delivery fails", async () => {
+    const conn = connectionFor();
+    conn.dispatcher.sendAndWait.mockResolvedValue({ identityAdminResult: { ok: true, errorCode: 0, invitationUrl: "https://identity.example.test/invitation?code=example", invitationEmailSent: false, invitationEmailError: "Mail is unavailable" } });
+    await openDetail(conn); await screen.findByText("Account owner");
+    fireEvent.change(screen.getByLabelText("Invite by email"), { target: { value: "new@example.test" } });
+    fireEvent.click(screen.getByRole("button", { name: "Invite" }));
+    expect(await screen.findByText("Mail is unavailable")).toBeTruthy();
+    expect(screen.getByText("https://identity.example.test/invitation?code=example")).toBeTruthy();
+    expect(conn.dispatcher.sendAndWait.mock.calls[0]?.[0]).toMatchObject({ identityAdmin: { issueUserInvitation: { role: "viewer", groupIds: ["acct-a1"] } } });
   });
 });

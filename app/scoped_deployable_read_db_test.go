@@ -73,7 +73,8 @@ func TestScopedDeployableReadsThroughWireKeepOrganizationRowsAndTotals(t *testin
 		put("v1:identity:user", person, map[string]any{"displayName": person, "primaryEmail": person + "@example.test", "role": "reader", "active": true})
 	}
 	for _, account := range []string{a, b} {
-		put("v1:accounts:account", account, map[string]any{"name": account, "status": "active", "domainStatus": "unverified"})
+		put("v1:accounts:account", account, map[string]any{"name": account, "ownerUserId": peer, "status": "active", "domainStatus": "unverified"})
+		seedAccountApps(t, eng, db, account, "app:deployables", "app:pipelines")
 		execute(fmt.Sprintf(`mutation writeGroup(groupId: %s, name: %s, kind: "account", accountId: %s, status: "active")`, quote("g-"+account), quote(account), quote(account)))
 		execute(fmt.Sprintf(`mutation writeGroupMembership(membershipId: %s, groupId: %s, userId: %s, origin: "added", status: "active", accountId: %s)`, quote("m-"+account), quote("g-"+account), quote(user), quote(account)))
 		ids = append(ids, "v1:identity:group:g-"+account, "v1:identity:groupMembership:m-"+account)

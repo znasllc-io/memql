@@ -67,7 +67,7 @@ func TestARetriedStepIsOneRowOverRealRows(t *testing.T) {
 	suffix := strings.ReplaceAll(id.NewShortId(), "-", "")[:12]
 	owner, repo := "retry-owner-"+suffix, "acme-"+suffix+"/shop"
 	pkgID, account := "retry-pkg-"+suffix, "retry-account-"+suffix
-	if _, err := eng.Execute(seederCtx(), fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Pipelines retry test")`,
+	if _, err := eng.Execute(accountSeeder(t, eng, owner), fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Pipelines retry test")`,
 		langparser.QuoteString(account))); err != nil {
 		t.Fatalf("createClientAccount: %v", err)
 	}

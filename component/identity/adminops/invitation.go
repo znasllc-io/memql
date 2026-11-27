@@ -108,9 +108,17 @@ func (s *Service) IssueUserInvitation(ctx context.Context, in UserInvitation) Re
 		detail["sharedMailbox"] = true
 	}
 
-	act, refusal, allowed := s.authorizeAdmission(ctx, "issuing a user invitation", detail)
-	if !allowed {
-		return refusal
+	act, scopedRole, scoped := s.accountInvitationAuthority(ctx, role, in.GroupIds)
+	if !scoped {
+		var refusal Result
+		var allowed bool
+		act, refusal, allowed = s.authorizeAdmission(ctx, "issuing a user invitation", detail)
+		if !allowed {
+			return refusal
+		}
+	} else {
+		role = "viewer"
+		detail["role"], detail["accountRole"] = role, scopedRole
 	}
 	if email == "" {
 		return fail(CodeInvalidArgument, s.emit(ctx, identity.AuditCategoryAdmin, "user_invitation_issued",
@@ -143,7 +151,7 @@ func (s *Service) IssueUserInvitation(ctx context.Context, in UserInvitation) Re
 	// is no principal to look up, and accepting makes the recipient a member of
 	// every group the invitation carries. So a scoped role is issuable exactly
 	// when one of those groups is an active group of its organization.
-	if role != "" {
+	if role != "" && !scoped {
 		if !auth.IsValidRole(auth.Role(role)) {
 			return fail(CodeInvalidArgument, s.emit(ctx, identity.AuditCategoryAdmin, "user_invitation_issued",
 				act, "", email, detail, identity.AuditOutcomeFailure, "unknown_role"),
@@ -186,7 +194,11 @@ func (s *Service) IssueUserInvitation(ctx context.Context, in UserInvitation) Re
 
 	// The groups this invitation carries, validated BEFORE anything is
 	// written (epic memql#5165, section G).
-	groups, refusalReason, groupErr := s.validateInvitationGroups(ctx, in.GroupIds, inviterRankOf(act), role)
+	inviterRank := inviterRankOf(act)
+	if scoped {
+		inviterRank = auth.AccountRoleRank(scopedRole)
+	}
+	groups, refusalReason, groupErr := s.validateInvitationGroups(ctx, in.GroupIds, inviterRank, role)
 	if groupErr != nil {
 		outcome := identity.AuditOutcomeBlocked
 		code := int32(CodeInvalidArgument)

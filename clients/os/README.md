@@ -581,11 +581,10 @@ Five things about it are the rules a FOURTH app gets wrong by default.
   reason it cannot be `rank < myRank`: developer (300) ranks ABOVE admin (200)
   and holds strictly fewer `principal` verbs, so rank alone would let a
   developer mint an admin who can then re-role anybody; and an account-scoped
-  role is holdable only by a member of that account. An unoffered rung is
-  DRAWN and dashed with its reason as a title -- never dropped, because a
-  ladder with a different number of rungs on two people's pages leaves the
-  reader nothing to explain the difference. The server is the authority
-  either way; this decides what is offered.
+  role is holdable only by a member of that account. `RoleSelect` shows human
+  role names; unavailable choices carry an explanatory hint. Ownership is
+  transferred in account settings and is never an assignable role option.
+  The server remains the authority for every change.
 - **There is NO membership feed, and there must not be.**
   `v1:identity:groupMembership` is one row per person per group in the
   cluster, forever, including the removed ones the concept keeps as history --
@@ -609,12 +608,27 @@ Five things about it are the rules a FOURTH app gets wrong by default.
   grant from the shell. Both sides keep working, which is why it is a gate and
   not a review note.
 
-Two shapes this app owns and other apps import: `PeoplePicker`, `GroupPicker`
-and `RoleLadderPicker` are built here and exported (the `AccountPicker`
-precedent -- the kit gains nothing domain-shaped), and `refusals.ts` keys copy
-on the typed codes `integrations/groups` and `integrations/rbac` raise, with
-`test/users/refusals.test.ts` reading those Go files so a code the engine grows
-cannot arrive unnamed.
+Account management uses `AccountAccessEditor` from both Accounts and Users.
+Its `accountAccess` response is a reduced, account-scoped roster. Client managers
+never need the global user directory. Read-on-open/reconnect snapshots show their
+read time and offer Refresh; successful writes replace the snapshot, and a server
+revision refuses stale edits. `accountAccessUpdate` commits batches, ownership
+transfer and app assignments atomically. The primary owner chooses a client's app
+ceiling; its owner, developers and admins manage that account, while members and
+viewers receive apps directly or through custom groups. Managers receive the
+account's app ceiling. Owner is a single account reference, never a membership role.
+
+`MultiPicker` in the kit reuses Fleet's search-and-add interaction for people,
+groups and apps. It retains checked choices across search, paging and failures.
+`RoleSelect` and `RoleTag` show readable names without numeric rank graphics.
+`GroupPicker` and the cluster role picker remain domain adapters over these shared
+controls. `InvitationDelivery` preserves the one-time link when delivery fails.
+The account roster includes scoped pending Viewer invitations and their revoke
+control; invitation issuance still uses the IdentityAdmin credential lifecycle.
+
+The existing global directory and legacy unbound/archived group views retain
+their scoped live feeds. `refusals.ts` maps integration refusal codes, with
+`test/users/refusals.test.ts` checking that new codes remain named.
 
 Every section is a view union with ONE `Head` per view, the
 `DeployablesSection` sibling-views form, and `test/users/layout.test.tsx`

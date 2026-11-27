@@ -1,16 +1,15 @@
 import { UserPlus } from "lucide-react";
+import { InvitationDelivery } from "./InvitationDelivery";
 import { Wizard } from "../../kit/Wizard";
 import { useEffect, useMemo, useState } from "react";
 import type { UserInvitationResult } from "@znasllc-io/memql-sdk-core/identityadmin";
 
 import {
   Chip,
-  CopyValue,
   Fact,
   Facts,
   Head,
   Input,
-  Notice,
   Panel,
   Subhead,
   formatMoment,
@@ -305,22 +304,7 @@ function InvitedPersonPage({
       <div className="os-action-body os-app-stack">
         <Head navigationKey={"invitation-sent"} title={email || "Invited"} meta="Invited" back={{ label: "People", onSelect: onBack }} />
 
-        {result === null ? null : (
-          <Notice
-            tone={result.emailSent ? "info" : "warn"}
-            sentence={
-              result.emailSent
-                ? "The invitation is on its way."
-                : result.emailError === ""
-                  ? "The invitation exists, and no mail is wired on this cluster."
-                  : "The invitation exists, and the email did not go out."
-            }
-            next="This link is shown once. The cluster kept only its hash, so it cannot be retrieved again."
-            detail={result.emailError === "" ? undefined : result.emailError}
-          >
-            <CopyValue value={result.url} label="Invitation link" />
-          </Notice>
-        )}
+        {result ? <InvitationDelivery result={result} /> : null}
 
         <Panel label="What this invitation says">
           <Subhead>Invitation</Subhead>

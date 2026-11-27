@@ -50,7 +50,7 @@ func TestAPushCarriesForwardOverRealRows(t *testing.T) {
 	repo := "acme-" + suffix + "/shop"
 	pkgID := "carry-pkg-" + suffix
 	account := "carry-account-" + suffix
-	if _, err := eng.Execute(seederCtx(), fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Carry forward test")`,
+	if _, err := eng.Execute(accountSeeder(t, eng, owner), fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Carry forward test")`,
 		langparser.QuoteString(account))); err != nil {
 		t.Fatalf("createClientAccount: %v", err)
 	}

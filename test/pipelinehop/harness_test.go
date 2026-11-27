@@ -348,10 +348,18 @@ func (c *cluster) connectWith(t *testing.T, label, delivery string, compute pipe
 		changed: []string{"main.go"},
 		files:   files,
 	})
-	if _, err := c.a.eng.Execute(seedCtx(), fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: %s)`,
+	if _, err := c.a.eng.Execute(seedCtx(), `insert("v1:identity:user", id=`+langparser.QuoteString(s.owner)+`, payload={"displayName":"Source owner","primaryEmail":`+langparser.QuoteString(s.owner+"@example.test")+`,"role":"developer","active":true})`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.a.eng.Execute(auth.ContextWithInternalOrigin(signedIn(s.owner)), fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: %s)`,
 		langparser.QuoteString(account), langparser.QuoteString("Pipelines hop "+label))); err != nil {
 		t.Fatalf("createClientAccount: %v", err)
 	}
+	// This client has been assigned the apps used by its connected source.
+	if _, err := c.direct.ExecContext(context.Background(), `UPDATE "MemoryNodes" SET payload=jsonb_set(payload,'{allowedApps}','["app:deployables","app:pipelines"]'::jsonb) WHERE concept='v1:accounts:account' AND id=$1`, "v1:accounts:account:"+account); err != nil {
+		t.Fatal(err)
+	}
+	c.a.eng.InvalidateCacheForConcept("v1:accounts:account")
 	if _, err := c.a.eng.Execute(signedIn(s.owner), fmt.Sprintf(
 		`mutation createPackage(accountId: %s, packageId: %s, name: "shop", sourceKind: "repo", repoUrl: %s, credentialId: %s)`,
 		langparser.QuoteString(account), langparser.QuoteString(pkg),

@@ -22,10 +22,10 @@ import (
 type scopedEmailStatisticsCatalog struct{ scopedOrganizationWireCatalog }
 
 func (c scopedEmailStatisticsCatalog) Holds(slug, verb, resource string) bool {
-	return slug == "owner" || slug == c.role && verb == auth.VerbRead && (resource == auth.ResourceData || resource == "app:email")
+	return slug == "owner" || (slug == "developer" || slug == c.role) && verb == auth.VerbRead && (resource == auth.ResourceData || resource == "app:email")
 }
 func (c scopedEmailStatisticsCatalog) Grants(slug string) []auth.VerbResource {
-	if slug == c.role {
+	if slug == "developer" || slug == c.role {
 		return []auth.VerbResource{{Verb: auth.VerbRead, Resource: auth.ResourceData}, {Verb: auth.VerbRead, Resource: "app:email"}}
 	}
 	return nil
@@ -82,7 +82,8 @@ func TestScopedEmailStatisticsThroughWireHonorsOrganizationDenials(t *testing.T)
 		put("v1:identity:user", person, map[string]any{"displayName": person, "primaryEmail": person + "@example.test", "role": "reader", "active": true})
 	}
 	for _, account := range []string{a, b} {
-		put("v1:accounts:account", account, map[string]any{"name": account, "status": "active", "domainStatus": "unverified"})
+		put("v1:accounts:account", account, map[string]any{"name": account, "ownerUserId": peer, "status": "active", "domainStatus": "unverified"})
+		seedAccountApps(t, eng, db, account, "app:email")
 		execute(fmt.Sprintf(`mutation writeGroup(groupId:%s,name:%s,kind:"account",accountId:%s,status:"active")`, quote("g-"+account), quote(account), quote(account)))
 		execute(fmt.Sprintf(`mutation writeGroupMembership(membershipId:%s,groupId:%s,userId:%s,origin:"added",status:"active",accountId:%s)`, quote("m-"+account), quote("g-"+account), quote(user), quote(account)))
 		ids = append(ids, "v1:identity:group:g-"+account, "v1:identity:groupMembership:m-"+account)
@@ -162,9 +163,9 @@ func TestScopedEmailStatisticsThroughWireHonorsOrganizationDenials(t *testing.T)
 	call("foreign-deny-does-not-stop-own", "", float64(3), true)
 	// Same user's full memberships and foreign ownership cannot lift a role
 	// fence. Changing to an actual operator below is explicit test setup.
-	put("v1:identity:user", user, map[string]any{"role": "owner"})
+	put("v1:identity:user", user, map[string]any{"role": "developer"})
 	wire.Close()
-	wire = newScopedReadWire(t, eng, user, auth.RoleOwner)
+	wire = newScopedReadWire(t, eng, user, auth.RoleDeveloper)
 	call("operator-with-account-deny", "", float64(15), true)
 	call("operator-orphan", `,accountIds:[`+quote(orphan)+`]`, float64(5), true)
 	call("operator-denied-account", `,accountIds:[`+quote(b)+`]`, nil, true)

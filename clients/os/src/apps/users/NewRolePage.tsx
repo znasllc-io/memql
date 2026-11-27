@@ -7,7 +7,6 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Field,
   Input,
-  RankMark,
   Select,
   roleRungOf,
   type Stop,
@@ -161,7 +160,7 @@ export function NewRolePage({
       name: "Start from",
       state: baseSlug === "" ? "waiting" : "done",
       sentence: "A role to start from.",
-      answer: base === null ? "" : `${base.name}, rank ${rank}`,
+      answer: base === null ? "" : base.name,
       body: (
         <>
           <Select id="role-base" label="Start from" value={baseSlug} onChange={chooseBase}>
@@ -172,47 +171,26 @@ export function NewRolePage({
               </option>
             ))}
           </Select>
-          <ul className="os-role-ladder" aria-label="Where this role would sit">
-            {[...ladder, { ...(base ?? emptyRole()), slug: derived || "new", name: name.trim() || "This role", rank }]
-              .sort((a, b) => b.rank - a.rank)
-              .map((rung) => (
-                <li
-                  key={`${rung.slug}:${rung.rank}`}
-                  className="os-role-rung"
-                  data-current={rung.slug === (derived || "new") ? "" : undefined}
-                >
-                  <span className="os-role-rung-line" data-static="true">
-                    <RankMark actorRole={viewerRole} ownerRole={rung.slug} />
-                    <span className="os-role-rung-name">{rung.name}</span>
-                    <span className="os-role-slug">{rung.rank}</span>
-                  </span>
-                </li>
-              ))}
-          </ul>
-          <Field label="Rank">
-            <Input
-              id="role-rank"
-              label="Rank"
-              value={String(rank)}
-              onChange={(next) => setRank(Number(next.replace(/[^0-9]/g, "")) || 0)}
-            />
+          <Field label="Authority">
+            <Select id="role-authority" label="Authority" value={String(rank)} onChange={value => setRank(Number(value))}>
+              {[null, ...ladder].map(rung => ({ rung, rank: proposeRank(rung, ladder, callerRank) })).filter(choice => choice.rank < callerRank).map(choice =>
+                <option key={choice.rank} value={String(choice.rank)}>{choice.rung ? `Above ${choice.rung.name}` : "Below existing roles"}</option>)}
+            </Select>
           </Field>
           <p className="os-caption">{placementSentence(rank, ladder)}</p>
           {accountId === "" && rank >= developerRank ? (
             <p className="os-caption">
-              A role at this rank is staff: in every account's group, standing.
+              A cluster role at this level can reach every account.
             </p>
           ) : null}
           {rankTaken ? (
             <p className="os-caption">
-              Rank {rank} is taken. Two rungs at one rank have no order between them, so the cluster
-              refuses it.
+              That position is already taken. Choose another authority level.
             </p>
           ) : null}
           {rankTooHigh ? (
             <p className="os-caption">
-              Rank {rank} is at or above your own. A role you could not be given is one you cannot
-              make.
+              Choose an authority level below your own role.
             </p>
           ) : null}
         </>
@@ -286,26 +264,12 @@ export function NewRolePage({
       ]
     : [];
 
-  stops.push({ id: "review", name: "Review", sentence: "Check, then create.", state: "ahead", body: <Facts><Fact label="Role" value={name.trim()} /><Fact label="Rank" value={rank} /><Fact label="Scope" value={accountNameFrom(accounts, accountId) || "Cluster-wide"} /><Fact label="Permissions" value={grants.length} /></Facts> });
+  stops.push({ id: "review", name: "Review", sentence: "Check, then create.", state: "ahead", body: <Facts><Fact label="Role" value={name.trim()} /><Fact label="Authority" value={placementSentence(rank, ladder)} /><Fact label="Scope" value={accountNameFrom(accounts, accountId) || "Cluster-wide"} /><Fact label="Permissions" value={grants.length} /></Facts> });
   const busy = actions.busyKey === `role:new:${derived}`;
   const ready = open === 0 ? name.trim() !== "" && derived !== "" : open === 1 ? rank > 0 && !rankTaken && !rankTooHigh : answered;
   const footer: Act[] = busy ? [] : [{ label: "Cancel", text: true, onAct: onBack }];
   if (open === 4) footer.push(...acts);
   else if (ready && !busy) footer.push({ label: "Next", tone: "primary", onAct: () => go(open + 1) });
-  return <Wizard icon={<Shield size={20} aria-hidden />} title="New role" label="What this role is" back={{ label: "Roles", onSelect: onBack }} steps={stops.map((stop, index) => ({ ...stop, state: index === open ? "open" : index < open ? "done" : index <= furthest ? "waiting" : "ahead" }))} open={stops[open]!.id} onOpen={id => { const index = stops.findIndex(stop => stop.id === id); if (!busy && index >= 0 && index <= furthest) setOpen(index); }} status={{ word: busy ? "Creating role" : open === 4 ? "Ready to create" : stops[open]!.name, detail: open === 1 && !ready ? "Choose a free rank below your own." : undefined, tone: busy ? "busy" : "none" }} acts={footer} notices={<RefusalLine actions={actions} />} />;
+  return <Wizard icon={<Shield size={20} aria-hidden />} title="New role" label="What this role is" back={{ label: "Roles", onSelect: onBack }} steps={stops.map((stop, index) => ({ ...stop, state: index === open ? "open" : index < open ? "done" : index <= furthest ? "waiting" : "ahead" }))} open={stops[open]!.id} onOpen={id => { const index = stops.findIndex(stop => stop.id === id); if (!busy && index >= 0 && index <= furthest) setOpen(index); }} status={{ word: busy ? "Creating role" : open === 4 ? "Ready to create" : stops[open]!.name, detail: open === 1 && !ready ? "Choose an authority level below your own role." : undefined, tone: busy ? "busy" : "none" }} acts={footer} notices={<RefusalLine actions={actions} />} />;
 
-}
-
-function emptyRole(): RoleRow {
-  return {
-    id: "",
-    slug: "",
-    name: "",
-    rank: 0,
-    description: "",
-    predefined: false,
-    active: true,
-    aliases: [],
-    accountId: "",
-  };
 }

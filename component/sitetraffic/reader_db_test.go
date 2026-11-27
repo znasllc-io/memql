@@ -152,7 +152,8 @@ func seedDeployable(t *testing.T, eng *memql.MemQLEngine, owner, slug string) st
 	account, group := "account-"+id, "group-"+id
 	seed := auth.ContextWithInternalOrigin(operatorCtx("traffic-seeder"))
 	for _, query := range []string{
-		fmt.Sprintf(`insert("v1:accounts:account", id=%s, payload={"name": "Traffic fixture", "status": "active", "domainStatus": "unverified"})`, langparser.QuoteString(account)),
+		fmt.Sprintf(`insert("v1:identity:user", id=%s, payload={"displayName":"Account owner","primaryEmail":%s,"role":"viewer","active":true})`, langparser.QuoteString(account+"-owner"), langparser.QuoteString(account+"@example.test")),
+		fmt.Sprintf(`insert("v1:accounts:account", id=%s, payload={"name":"Traffic fixture","ownerUserId":%s,"status":"active","domainStatus":"unverified"})`, langparser.QuoteString(account), langparser.QuoteString(account+"-owner")),
 		fmt.Sprintf(`mutation writeGroup(groupId: %s, name: "Traffic fixture", kind: "account", accountId: %s, status: "active")`, langparser.QuoteString(group), langparser.QuoteString(account)),
 		fmt.Sprintf(`mutation writeGrant(grantId: %s, subjectKind: "user", subjectId: %s, verb: "execute", resourceType: "app:deployables/publish", effect: "allow", grantedBy: "traffic-seeder")`, langparser.QuoteString(auth.GrantRowID(auth.SubjectKindUser, owner, auth.VerbExecute, "app:deployables/publish")), langparser.QuoteString(owner)),
 		fmt.Sprintf(`mutation writeGroupMembership(membershipId: %s, groupId: %s, userId: %s, accountId: %s, origin: "added", status: "active")`, langparser.QuoteString(group+"-"+owner), langparser.QuoteString(group), langparser.QuoteString(owner), langparser.QuoteString(account)),
@@ -161,6 +162,11 @@ func seedDeployable(t *testing.T, eng *memql.MemQLEngine, owner, slug string) st
 			t.Fatalf("seed deployable organization: %v", err)
 		}
 	}
+	// The fixture account has been assigned Deployables by its primary owner.
+	if _, err := trafficEngineState.db.ExecContext(context.Background(), `UPDATE "MemoryNodes" SET payload=jsonb_set(payload,'{allowedApps}','["app:deployables"]'::jsonb) WHERE concept='v1:accounts:account' AND id=?`, "v1:accounts:account:"+account); err != nil {
+		t.Fatal(err)
+	}
+	eng.InvalidateCacheForConcept("v1:accounts:account")
 	q := fmt.Sprintf(
 		`mutation createSite(siteId: %s, accountId: %s, hostname: %s, bundleRef: %s, status: "live")`,
 		langparser.QuoteString(id),

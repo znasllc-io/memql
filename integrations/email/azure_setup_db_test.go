@@ -97,8 +97,13 @@ func TestAzureSetupSessionSurvivesReplicaHopAndRefusesAnotherActor(t *testing.T)
 	actor := func(user string) context.Context {
 		return auth.ContextWithToken(auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: user, Role: auth.RoleOwner}), &auth.TokenInfo{Subject: user})
 	}
+	seedEmailOwner(t, NewConfigWriter(first), suffix+"-owner")
 	owner := actor(suffix + "-owner")
 	for _, id := range []string{account, other, "self"} {
+		accountID := id
+		t.Cleanup(func() {
+			_, _ = db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE concept='v1:accounts:account' AND id=?`, "v1:accounts:account:"+accountID)
+		})
 		if _, err := first.Execute(owner, renderConfigCall("createClientAccount", map[string]string{"accountId": id, "name": id})); err != nil {
 			t.Fatal(err)
 		}

@@ -25,6 +25,19 @@ import (
 // seedGroup writes a group row through the real @serverOnly mutation.
 func seedGroup(t *testing.T, eng *MemQLEngine, id, name, kind, accountId string) {
 	t.Helper()
+	// Organization fixtures now include the account's explicit app ceiling.
+	// A group pointing at no account is not an authorization grant.
+	if accountId != "" {
+		_, found, err := authorityRow(context.Background(), eng.database(), conceptAccount, accountId)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !found {
+			owner := "fixture-owner-" + BareShortId(accountId)
+			seedPrincipal(t, eng, owner, auth.Role("viewer"))
+			seedAuthorityFixture(t, eng, conceptAccount, accountId, map[string]any{"name": name, "status": "active", "ownerUserId": owner, "domainStatus": "unverified", "allowedApps": []string{"app:deployables", "app:email", "app:users", "app:accounts"}})
+		}
+	}
 	q := fmt.Sprintf(
 		`mutation writeGroup(groupId: %s, name: %s, kind: %s, accountId: %s, status: "active")`,
 		langparser.QuoteString(id), langparser.QuoteString(name),

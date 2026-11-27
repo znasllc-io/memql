@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/znasllc-io/memql/component/auth"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
@@ -33,7 +34,9 @@ func TestAnOmittedOptionalArgLeavesItsStampFieldUntouched(t *testing.T) {
 	suffix := uniqueSuffix("partialstamp")
 	accountId := "acct-" + suffix
 
-	ctx := groupSeedCtx()
+	owner := "owner-" + suffix
+	seedPrincipal(t, eng, owner, auth.RoleOwner)
+	ctx := auth.ContextWithInternalOrigin(rankActorCtx(owner, auth.RoleOwner))
 
 	// Create the account, then fill every domain field in one call.
 	mustExec(t, eng, ctx, fmt.Sprintf(

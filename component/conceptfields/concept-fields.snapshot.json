@@ -11,6 +11,8 @@
       "concept": "v1:accounts:account",
       "file": "accounts/concepts.memql",
       "fields": [
+        "accessRevision",
+        "allowedApps",
         "configuredAt",
         "defaultDomain",
         "defaultSenderIdentityId",
@@ -3669,6 +3671,7 @@
       "file": "identity/concepts.memql",
       "fields": [
         "accountId",
+        "allowedApps",
         "archivedAt",
         "description",
         "kind",
@@ -3698,7 +3701,9 @@
       "fields": [
         "accountId",
         "addedBy",
+        "allowedApps",
         "groupId",
+        "organizationRole",
         "origin",
         "ownerUserId",
         "removedAt",
@@ -3713,6 +3718,12 @@
         "userId"
       ],
       "enums": {
+        "organizationRole": [
+          "admin",
+          "developer",
+          "member",
+          "viewer"
+        ],
         "origin": [
           "added",
           "domain",

@@ -1,3 +1,4 @@
+import { accountAccessFixture } from "../accountAccessFixture";
 import type { ReactNode } from "react";
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { vi } from "vitest";
@@ -69,6 +70,7 @@ function fakeSubscriptions(): FakeSubscriptions {
 }
 
 export interface FakeSeed {
+  accountAccess?: Row | Error;
   clientAccountsAll?: Row[];
   clientAccountsBrowse?: Row[];
   senderIdentities?: Row[];
@@ -166,6 +168,12 @@ export function fakeConnection(seed: FakeSeed = {}) {
         return rowsResult(seed.membersOfGroup?.[groupId] ?? []);
       }),
       executeNamed: vi.fn(async (name: string, filter: string) => {
+        if (name === "accountAccess" || name === "accountAccessUpdate") {
+          if (seed.accountAccess instanceof Error) throw seed.accountAccess;
+          const id = /accountId:\s*"([^"]*)"/.exec(filter)?.[1] ?? "a1";
+          return rowsResult([seed.accountAccess ?? accountAccessFixture({ accountId: id, invitations: Array.isArray(seed.invitationsForAccount) ? seed.invitationsForAccount.map(row => ({ id: String(row["id"]), email: String(row["inviteeEmail"]), expiresAt: "2030-01-01T00:00:00Z", groupIds: [`acct-${id}`] })) : [] }) as unknown as Row]);
+        }
+
         // The two builtins the page calls BY NAME until the SDK generates
         // them (account row ownership, section H).
         if (name === "accountInventory" || name === "accountAssignmentStatus") {

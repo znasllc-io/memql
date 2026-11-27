@@ -33,11 +33,11 @@ func TestRepositoryAuthorityEngineBoundary(t *testing.T) {
 	})
 	t.Run("SourceVisibilityAndTrustedBinding", func(t *testing.T) {
 		account, source, credential := id.NewShortId(), id.NewShortId(), id.NewShortId()
-		seed := auth.ContextWithInternalOrigin(auth.ContextWithSystemActor(context.Background(), "authority-test"))
-		templateMutation(t, writer, seed, "createClientAccount", map[string]any{"accountId": account, "name": "Authority test"})
+		templateMutation(t, writer, internal, "identity.createUserOnFirstLogin", map[string]any{"userId": owner, "displayName": "Repository maintainer", "primaryEmail": owner + "@example.test", "role": "developer", "internal": false})
+		templateMutation(t, writer, internal, "createClientAccount", map[string]any{"accountId": account, "name": "Authority test"})
 		templateMutation(t, writer, ownerCtx, "createPackage", map[string]any{"accountId": account, "packageId": source, "name": "Engine", "sourceKind": "repo", "repoUrl": "https://github.com/Example/Engine.git", "credentialId": credential})
 		t.Cleanup(func() {
-			_, err := db.Exec(`DELETE FROM "MemoryNodes" WHERE id = ?`, "v1:contacts:clientAccount:"+account)
+			_, err := db.Exec(`DELETE FROM "MemoryNodes" WHERE id = ?`, "v1:accounts:account:"+account)
 			require.NoError(t, err)
 		})
 		row, err := a.repositoryAuthoritySource(ownerCtx, source, false)

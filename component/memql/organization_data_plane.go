@@ -49,6 +49,9 @@ func (e *MemQLEngine) OrganizationDataPlaneEnforced(ctx context.Context, query s
 		if err != nil || fn.FunctionKind != "builtin" {
 			return false
 		}
+		if (fn.Name == "accountAccess" && fn.Executor == "accountAccess") || (fn.Name == "accountAccessUpdate" && fn.Executor == "accountAccessUpdate") {
+			return true
+		}
 		if organizationCollectionRead(fn, builtin.Args) {
 			return true
 		}

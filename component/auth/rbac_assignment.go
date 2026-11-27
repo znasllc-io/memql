@@ -32,7 +32,8 @@ type AssignRefusal string
 
 const (
 	// AssignAllowed is the zero value: no refusal.
-	AssignAllowed AssignRefusal = ""
+	AssignAllowed           AssignRefusal = ""
+	AssignOwnershipTransfer AssignRefusal = "ownership_transfer_required"
 	// AssignUnknownRole -- the slug names no role this cluster can assign.
 	// Covers a typo, a role that never existed, and a DEACTIVATED one (D8:
 	// a retired role stays as history and cannot be handed out).
@@ -147,16 +148,12 @@ func MayAssignRole(
 		return AssignTargetOutranks
 	}
 
-	// THE NEW-RANK BOUND, with the owner carve-out.
-	//
-	// CanCreatePrincipal is `newRank < actorRank`, which refuses owner -> owner
-	// (400 is not below 400) and would make a second owner unmakeable through
-	// every path in the product: a cluster with one owner and no way to name
-	// another, including no way for that owner to hand the cluster on.
-	// GovernPrincipal carries the identical carve-out on the target half
-	// ("an owner manages everyone"), for the identical reason -- two owners
-	// share a rank, so a strict comparison cannot express them.
-	if !actorP.IsOwner && !CanCreatePrincipal(actorP, roleRank(Role(newSlug))) {
+	// Ownership has one slot. Ordinary assignments and invitations cannot
+	// add an owner or demote the current one; transfer changes both atomically.
+	if newSlug == "owner" || normalizeSlug(targetCurrentSlug) == "owner" {
+		return AssignOwnershipTransfer
+	}
+	if !CanCreatePrincipal(actorP, roleRank(Role(newSlug))) {
 		return AssignAboveCaller
 	}
 
@@ -206,6 +203,8 @@ func AssignRefusalSentence(refusal AssignRefusal, actorRole Role, newSlug string
 	switch refusal {
 	case AssignAllowed:
 		return ""
+	case AssignOwnershipTransfer:
+		return "use the account ownership transfer to change its single owner"
 	case AssignUnknownRole:
 		return newSlug + " is not a role this cluster can assign"
 	case AssignNotAUserManager:

@@ -98,13 +98,18 @@ func TestDeliveryConsumersKeepTheirOperationalAuthority(t *testing.T) {
 	author := auth.ContextWithUserActor(ctx, id+"-author")
 	seeder := auth.ContextWithToken(auth.ContextWithInternalOrigin(auth.ContextWithAccess(ctx,
 		&auth.AccessContext{UserId: id + "-seeder", Role: auth.RoleOwner, Unranked: true, Synthetic: true})), &auth.TokenInfo{Subject: id + "-seeder"})
-	for _, user := range []struct{ suffix, role, name string }{{"author", "writer", "Author"}, {"recipient", "reader", "Actual recipient"}} {
+	for _, user := range []struct{ suffix, role, name string }{{"account-owner", "developer", "Account owner"}, {"author", "writer", "Author"}, {"recipient", "reader", "Actual recipient"}} {
 		_, err := eng.Execute(seeder, fmt.Sprintf(`insert("v1:identity:user", id=%s, payload={"primaryEmail":%s,"displayName":%s,"role":%s,"active":true})`,
 			langparser.QuoteString(id+"-"+user.suffix), langparser.QuoteString(id+"-"+user.suffix+"@example.test"), langparser.QuoteString(user.name), langparser.QuoteString(user.role)))
 		require.NoError(t, err)
 	}
 	account, group, template, rule := id+"-account", id+"-group", id+"-template", id+"-rule"
-	run(seeder, "mutation", "createClientAccount", map[string]any{"accountId": account, "name": "Delivery test"})
+	accountOwner := auth.ContextWithInternalOrigin(signedIn(id + "-account-owner"))
+	run(accountOwner, "mutation", "createClientAccount", map[string]any{"accountId": account, "name": "Delivery test"})
+	// The client has Email assigned before its author publishes a template.
+	_, err = db.ExecContext(ctx, `UPDATE "MemoryNodes" SET payload=jsonb_set(payload,'{allowedApps}','["app:email"]'::jsonb) WHERE concept='v1:accounts:account' AND id=?`, "v1:accounts:account:"+account)
+	require.NoError(t, err)
+	eng.InvalidateCacheForConcept("v1:accounts:account")
 	run(seeder, "mutation", "writeGroup", map[string]any{"groupId": group, "name": "Delivery test", "kind": "account", "accountId": account, "status": "active"})
 	run(seeder, "mutation", "writeGroupMembership", map[string]any{"membershipId": id + "-membership", "groupId": group, "userId": id + "-author", "origin": "added", "status": "active", "accountId": account})
 	content := map[string]any{"subject": "Notice for {{displayName}}", "textBody": "private body for {{displayName}}", "htmlBody": "<p>private body for {{displayName}}</p>"}

@@ -187,7 +187,23 @@ func newWorld(t *testing.T, name string) *world {
 	}
 	t.Cleanup(w.sweep)
 	w.principal(w.owner, auth.RoleWriter)
-	w.principal(w.operator, auth.RoleOwner)
+	// Several race rounds share one test database and therefore one primary
+	// owner. Reuse it instead of inventing an additional cluster owner.
+	var principals []memorynodes.MemoryNode
+	require.NoError(t, db.NewSelect().Model(&principals).DistinctOn("id").Where("concept = ?", "v1:identity:user").OrderExpr(`id ASC, "createdAt" DESC`).Scan(context.Background()))
+	existingOwner := ""
+	for _, row := range principals {
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal(row.Payload, &payload))
+		if payload["active"] == true && payload["role"] == "owner" {
+			existingOwner = memql.BareShortId(row.ID)
+		}
+	}
+	if existingOwner != "" {
+		w.operator = existingOwner
+	} else {
+		w.principal(w.operator, auth.RoleOwner)
+	}
 	w.principal(w.member, auth.RoleWriter)
 	w.principal(w.stranger, auth.RoleWriter)
 	w.organization(w.account, w.group)
@@ -244,6 +260,9 @@ func (w *world) principal(id string, role auth.Role) {
 func (w *world) organization(account, group string) {
 	w.t.Helper()
 	w.insert("v1:accounts:account", account, map[string]any{"name": account, "status": "active", "domainStatus": "unverified"})
+	_, err := w.db.ExecContext(context.Background(), `UPDATE "MemoryNodes" SET payload=jsonb_set(payload,'{allowedApps}','["app:deployables"]'::jsonb) WHERE concept='v1:accounts:account' AND id=?`, "v1:accounts:account:"+account)
+	require.NoError(w.t, err)
+	w.eng.InvalidateCacheForConcept("v1:accounts:account")
 	w.mutate(seedContext(), "writeGroup", map[string]any{
 		"groupId": group, "name": group, "kind": "account", "accountId": account, "status": "active",
 	})
@@ -1616,8 +1635,7 @@ func TestRemoveIsSoft(t *testing.T) {
 
 func TestEveryOperatorActIsAudited(t *testing.T) {
 	w := newWorld(t, "audit")
-	operatorID := "ac-audit-operator-" + w.suffix
-	w.principal(operatorID, auth.RoleOwner)
+	operatorID := w.operator
 	operator := auth.ContextWithAccess(context.Background(), &auth.AccessContext{
 		UserId: operatorID, Role: auth.RoleOwner, PrimaryEmail: operatorID + "@example.test",
 	})

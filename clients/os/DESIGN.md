@@ -318,6 +318,12 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
   sends it, and nowhere else: not in a draft, the browser's storage, the page
   context or a step's answer line. Keep it through a refusal so it can be
   corrected in place, and drop it the moment it is saved.
+- Accounts, people and groups use `MultiPicker` for searchable batch selection,
+  using the same search-and-add row as Fleet sharing. Keep selections across
+  search and paging, submit once with Add, and retain the draft when saving fails.
+  Roles use the shared `RoleSelect` and `RoleTag`: human names, no numeric levels,
+  tick stacks or rank ladders. Ownership is a separate transfer with its consequence
+  stated before the final action; show the primary account explicitly.
 - Sharing gives each shared resource (models, fleet workbenches) its own toggle
   in one section, with one divider between the two groups whatever their state.
   A group's Users and groups collection appears beneath its toggle only while

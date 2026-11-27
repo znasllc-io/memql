@@ -71,6 +71,7 @@ func TestAnOverLongNameIsRefusedInAPlainSentence(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	cleanupCampaignUser(t, user)
 	if _, err := engine.Execute(system, fmt.Sprintf(`insert("v1:identity:user", id=%s, payload={"primaryEmail":%s,"displayName":"Sender","role":"owner","active":true})`, langparser.QuoteString(user), langparser.QuoteString(user+"@example.test"))); err != nil {
 		t.Fatal(err)
 	}

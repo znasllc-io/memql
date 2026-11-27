@@ -33,7 +33,7 @@ func TestPersonalSourceScopedAdmissionUsesRealDeclarationsAndOwnedRows(t *testin
 	})
 	suffix := uniqueSuffix("personal-source")
 	account, user, other := "account-"+suffix, "user-"+suffix, "other-"+suffix
-	if err := organizationInsert(t, e, groupSeedCtx(), conceptAccountsAccount, account, map[string]any{"name": account, "status": "active", "domainStatus": "unverified"}); err != nil {
+	if err := seedOrganizationAccount(t, e, account, map[string]any{"name": account, "status": "active", "domainStatus": "unverified"}); err != nil {
 		t.Fatal(err)
 	}
 	seedPrincipal(t, e, user, auth.Role("source-manager"))
@@ -42,7 +42,7 @@ func TestPersonalSourceScopedAdmissionUsesRealDeclarationsAndOwnedRows(t *testin
 	// Another membership denies these app permissions. Its deny must not hide
 	// the personal setup authorized through the role's own account.
 	beta := "beta-" + suffix
-	if err := organizationInsert(t, e, groupSeedCtx(), conceptAccountsAccount, beta, map[string]any{"name": beta, "status": "active", "domainStatus": "unverified"}); err != nil {
+	if err := seedOrganizationAccount(t, e, beta, map[string]any{"name": beta, "status": "active", "domainStatus": "unverified"}); err != nil {
 		t.Fatal(err)
 	}
 	seedGroup(t, e, "g-"+beta, "Other source users", "account", beta)
@@ -59,8 +59,8 @@ func TestPersonalSourceScopedAdmissionUsesRealDeclarationsAndOwnedRows(t *testin
 	catalog := &personalSourceCatalog{capabilityFake: &capabilityFake{
 		ranks: map[string]int{"source-manager": 140, "owner": 400},
 		grants: map[string]map[auth.VerbResource]bool{"source-manager": {
-			{Verb: auth.VerbRead, Resource: auth.ResourceData}:            true,
-			{Verb: auth.VerbRead, Resource: "app:pipelines"}:            true,
+			{Verb: auth.VerbRead, Resource: auth.ResourceData}:               true,
+			{Verb: auth.VerbRead, Resource: "app:pipelines"}:                 true,
 			{Verb: auth.VerbExecute, Resource: "app:pipelines/repositories"}: true,
 		}},
 	}, account: account}

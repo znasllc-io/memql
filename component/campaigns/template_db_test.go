@@ -64,6 +64,7 @@ func TestTemplatePublicationChecksExactRevisionAcrossReplicas(t *testing.T) {
 	}
 	system := auth.ContextWithInternalOrigin(auth.ContextWithAccess(context.Background(), auth.SystemActor("template-tests")))
 	system = auth.ContextWithToken(system, &auth.TokenInfo{Subject: "template-tests"})
+	cleanupCampaignUser(t, user)
 	run(system, fmt.Sprintf(`insert("v1:identity:user", id=%s, payload={"primaryEmail":"%s@example.test","displayName":"Template owner","role":"owner","active":true})`, langparser.QuoteString(user), user))
 	run(owner, fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Template client")`, langparser.QuoteString(account)))
 	content := func(subject string) map[string]any {

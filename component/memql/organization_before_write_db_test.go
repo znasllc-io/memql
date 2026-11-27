@@ -57,7 +57,7 @@ func TestTheOrganizationBoundaryJudgesTheRowBeforeWriteHooksProduced(t *testing.
 
 	suffix := uniqueSuffix("orgbw")
 	acme := "acme-" + suffix
-	if err := organizationInsert(t, eng, groupSeedCtx(), conceptAccountsAccount, acme, map[string]any{"name": acme, "status": "active", "domainStatus": "unverified"}); err != nil {
+	if err := seedOrganizationAccount(t, eng, acme, map[string]any{"name": acme, "status": "active", "domainStatus": "unverified"}); err != nil {
 		t.Fatalf("seed organization: %v", err)
 	}
 	store := "store-" + suffix

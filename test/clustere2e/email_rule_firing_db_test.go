@@ -310,6 +310,15 @@ func TestAnEmailRuleFiresOnceWhereItsWriteHappened(t *testing.T) {
 	suffix := strconv.FormatInt(time.Now().UnixNano(), 36)
 	short, org, template, rule := "fire-user-"+suffix, "fire-org-"+suffix, "fire-tpl-"+suffix, "fire-rule-"+suffix
 	owner := "v1:identity:user:" + short
+	// Each replica fixture owns its primary owner; the next test cannot
+	// introduce a second one into the same database.
+	t.Cleanup(func() {
+		db := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
+		defer db.Close()
+		if _, err := db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE (concept='v1:identity:user' AND id=$1) OR (concept='v1:accounts:account' AND id=$2)`, owner, "v1:accounts:account:"+org); err != nil {
+			t.Errorf("remove replica fixture authority: %v", err)
+		}
+	})
 	ownerEmail := short + "@example.test"
 	subject := "Todo added " + suffix
 	q := langparser.QuoteString

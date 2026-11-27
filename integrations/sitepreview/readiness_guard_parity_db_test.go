@@ -264,7 +264,16 @@ func TestReadinessAndTheGuardAgreeForACallerWhoCannotReadTheStore(t *testing.T) 
 	must(seeder, fmt.Sprintf(`mutation writeGrant(grantId: %s, subjectKind: "user", subjectId: %s, verb: "execute", resourceType: "app:deployables/publish", effect: "allow", grantedBy: "sitepreview-parity-seeder")`,
 		langparser.QuoteString(grantId), langparser.QuoteString(writerId)))
 	// A writer creates a site inside an organization they belong to.
+	ownerID := "sitepreview-parity-seeder-" + suffix
+	must(seeder, fmt.Sprintf(`insert("v1:identity:user", id=%s, payload={"displayName":"Parity owner","primaryEmail":%s,"role":"owner","active":true})`, langparser.QuoteString(ownerID), langparser.QuoteString(ownerID+"@example.test")))
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE concept='v1:identity:user' AND id=?`, "v1:identity:user:"+ownerID)
+	})
 	must(seeder, fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Parity organization")`, langparser.QuoteString(account)))
+	if _, err := db.ExecContext(context.Background(), `UPDATE "MemoryNodes" SET payload=jsonb_set(payload,'{allowedApps}','["app:deployables"]'::jsonb) WHERE concept='v1:accounts:account' AND id=?`, "v1:accounts:account:"+account); err != nil {
+		t.Fatal(err)
+	}
+	eng.InvalidateCacheForConcept("v1:accounts:account")
 	must(seeder, fmt.Sprintf(`mutation writeGroup(groupId: %s, name: %s, kind: "account", accountId: %s, status: "active")`,
 		langparser.QuoteString(group), langparser.QuoteString(group), langparser.QuoteString(account)))
 	must(seeder, fmt.Sprintf(`mutation writeGroupMembership(membershipId: %s, groupId: %s, userId: %s, origin: "added", status: "active")`,

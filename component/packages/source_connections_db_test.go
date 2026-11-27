@@ -22,8 +22,8 @@ func TestSourceConnectionsPersistOwnedBindingsAndPreserveExistingPackages(t *tes
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 	a, b := "source-owner-"+suffix, "source-stranger-"+suffix
 	seedTiePrincipal(t, eng, a, auth.RoleOwner)
-	seedTiePrincipal(t, eng, b, auth.RoleOwner)
-	ctx, other := tieActorCtx(a, auth.RoleOwner), tieActorCtx(b, auth.RoleOwner)
+	seedTiePrincipal(t, eng, b, auth.RoleDeveloper)
+	ctx, other := tieActorCtx(a, auth.RoleOwner), tieActorCtx(b, auth.RoleDeveloper)
 	account, credential := "source-account-"+suffix, "source-grant-"+suffix
 	mustExecute(t, eng, ctx, fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Source test account")`, langparser.QuoteString(account)))
 	sealed, fingerprint, err := secret.Encrypt(grantUserToken)

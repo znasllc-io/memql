@@ -2,7 +2,7 @@ import { AddButton } from "../../kit/AddButton";
 import { useEffect, useMemo, useState } from "react";
 import { Shield } from "lucide-react";
 
-import { Button, Chip, Head, Notice, RankMark, RecordRow, RecordList } from "../../kit";
+import { Button, Chip, Head, Notice, RecordRow, RecordList } from "../../kit";
 import { AccountChip } from "../accounts/AccountPicker";
 import { accountName, type AccountRow } from "../accounts/rows";
 import type { UsersActions } from "./actions";
@@ -143,7 +143,6 @@ function RoleLine({
   role,
   accounts,
   holders,
-  viewerRole,
   onOpen,
 }: {
   role: RoleRow;
@@ -157,7 +156,6 @@ function RoleLine({
     <RecordRow
       icon={<Shield size={16} aria-hidden />}
       name={role.name}
-      secondary={role.slug}
       state={role.active ? "Active" : "Retired"}
       tone={role.active ? "accent" : "muted"}
       current={role.active}
@@ -169,7 +167,6 @@ function RoleLine({
         </span>
       }
     >
-      <RankMark actorRole={viewerRole} ownerRole={role.slug} />
       {role.predefined ? (
         <span className="os-caption">predefined</span>
       ) : account !== null ? (

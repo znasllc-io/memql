@@ -1,3 +1,4 @@
+import { AccountAccessEditor } from "../accounts/AccountAccessEditor";
 import { useAskActivity } from "../../ask/AskProvider";
 import { RecordList, listCount } from "../../kit/RecordRow";
 import { useSessionIfPresent } from "../../chrome/access";
@@ -47,7 +48,7 @@ import { OrganizationApps } from "./OrganizationApps";
 // allow grants open, set here (OrganizationApps) for whoever manages access,
 // while the group is active. An archived group grants nobody anything.
 
-export function GroupPage({
+function LegacyGroupPage({
   group,
   people: clusterPeople,
   peopleAvailable = false,
@@ -310,4 +311,26 @@ export function GroupPage({
       />
     </div>
   );
+}
+
+/** Account groups share the same permission editor as the account itself. */
+export function GroupPage(props: Parameters<typeof LegacyGroupPage>[0]) {
+  if (!props.group.accountId || props.group.status !== "active") return <LegacyGroupPage {...props} />;
+  return <ManagedGroupPage key={props.group.id} {...props} />;
+}
+function ManagedGroupPage({ group, onBack, onOpenAccount, actions }: Parameters<typeof LegacyGroupPage>[0]) {
+  const [canManage, setCanManage] = useState(false);
+  const [editing, setEditing] = useState(false), [name, setName] = useState(group.name), [description, setDescription] = useState(group.description);
+  return <div className="os-action-pane"><div className="os-action-body os-app-stack">
+    <Head navigationKey={`group:${group.id}`} title={group.name} back={{ label: "Groups", onSelect: onBack }}>
+      <Button onClick={() => onOpenAccount(group.accountId)}>Open account</Button>
+      {canManage && group.kind === "custom" ? <Button onClick={() => setEditing(!editing)}>Edit group</Button> : null}
+    </Head>
+    {editing ? <Panel label="Group details"><Input id={`name-${group.id}`} label="Name" value={name} onChange={setName} /><Input id={`description-${group.id}`} label="Description" value={description} onChange={setDescription} />
+      <Button disabled={!name.trim()} busy={!!actions.busyKey} onClick={() => void actions.groupUpdate(group.id, name, description).then(saved => { if (saved) setEditing(false); })}>Save</Button>
+      <Button onClick={() => setEditing(false)}>Cancel</Button><RefusalLine actions={actions} />
+    </Panel> : null}
+    <AccountAccessEditor key={group.id} accountId={group.accountId} groupId={group.id} onAuthority={setCanManage} />
+    {canManage && group.kind === "custom" ? <Button tone="danger" busy={!!actions.busyKey} onClick={() => void actions.groupArchive(group.id).then(saved => { if (saved) onBack(); })}>Archive group</Button> : null}
+  </div></div>;
 }

@@ -61,6 +61,7 @@ func TestARootsOnlyReadSkipsTheRelationships(t *testing.T) {
 		UserId: "rootsonly-seeder", Role: auth.RoleOwner, Unranked: true, Synthetic: true,
 	}), &auth.TokenInfo{Subject: "rootsonly-seeder"}))
 	owner := "v1:identity:user:rootsonly-owner-" + suffix
+	seedPrincipal(t, eng, owner, auth.RoleWriter)
 	insert := func(concept, rowID string, payload map[string]any) {
 		t.Helper()
 		encoded, err := json.Marshal(payload)
@@ -69,7 +70,7 @@ func TestARootsOnlyReadSkipsTheRelationships(t *testing.T) {
 			langparser.QuoteString(concept), langparser.QuoteString(rowID), encoded))
 		require.NoError(t, err)
 	}
-	insert("v1:accounts:account", account, map[string]any{"name": "Acme", "status": "active", "domainStatus": "unverified"})
+	insert("v1:accounts:account", account, map[string]any{"name": "Acme", "ownerUserId": owner, "status": "active", "domainStatus": "unverified"})
 	insert("v1:platform:package", pkg, map[string]any{
 		"name": "desk", "sourceKind": "repo", "status": "active", "ownerUserId": owner, "accountId": account,
 	})

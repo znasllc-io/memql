@@ -32,6 +32,7 @@ import (
 // silently put every filed-away client back in the default list.
 func TestClientAccountsAllAnswersWithAndWithoutTheArchiveFlag(t *testing.T) {
 	eng, _, ctx := sharedReadMergeEngine(t)
+	seedPrincipal(t, eng, "accounts-probe", auth.RoleOwner)
 
 	// A cluster owner: v1:accounts:account declares
 	// @rowAuthz(owner="ownerUserId", clusterOwner) and the read ANDs the tier
@@ -119,7 +120,9 @@ func TestClientAccountsAllDoesNotReportAnUnsupportedArgsField(t *testing.T) {
 // write would land somewhere else or fail, and the owner would answer the
 // setup question to no effect.
 func TestFirstRunSaveResolvesTheBareSelfId(t *testing.T) {
-	eng, _, ctx := sharedReadMergeEngine(t)
+	eng := hierarchyTestEngine(t)
+	ctx := groupSeedCtx()
+	seedPrincipal(t, eng, "accounts-probe", auth.RoleOwner)
 	owner := auth.ContextWithAccess(ctx, &auth.AccessContext{
 		UserId: "v1:identity:user:accounts-probe",
 		Role:   auth.RoleOwner,

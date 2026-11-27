@@ -43,6 +43,10 @@ func TestJoiningPoliciesUseSavedSettingsAcrossReplicas(t *testing.T) {
 	ctx := identity.ContextWithSystemCredentialActor(t.Context())
 	stamp := fmt.Sprint(time.Now().UnixNano())
 	owner := "joining-owner-" + stamp
+	t.Cleanup(func() {
+		_, err := db.NewDelete().Model((*concept.MemoryNode)(nil)).Where("id = ?", "v1:identity:user:"+owner).Exec(context.Background())
+		require.NoError(t, err)
+	})
 	require.NoError(t, first.CreateUserOnFirstLogin(ctx, owner, "Owner", owner+"@team.test", "owner", true, identity.UserProfileSeed{}))
 	ownerCtx := auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: owner, Role: auth.RoleOwner, PrimaryEmail: owner + "@team.test"})
 	boot := identity.Config{BaseURL: "https://identity.example.test", RegistrationMode: identity.RegistrationModeOpen, InternalDefaultRole: "owner", InternalDomains: []string{"stale.test"}}

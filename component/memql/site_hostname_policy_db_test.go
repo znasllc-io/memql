@@ -70,7 +70,7 @@ func installSiteOrganizationCapabilities(t *testing.T, extra ...auth.VerbResourc
 func siteOrganizationMemberCtx(t *testing.T, eng *MemQLEngine, userID, accountID string) context.Context {
 	t.Helper()
 	seedPrincipal(t, eng, userID, auth.RoleWriter)
-	if err := organizationInsert(t, eng, groupSeedCtx(), conceptAccountsAccount, accountID, map[string]any{"name": accountID, "status": "active", "domainStatus": "unverified"}); err != nil {
+	if err := seedOrganizationAccount(t, eng, accountID, map[string]any{"name": accountID, "status": "active", "domainStatus": "unverified"}); err != nil {
 		t.Fatalf("seed organization: %v", err)
 	}
 	seedGroup(t, eng, "group-"+accountID, accountID, "account", accountID)

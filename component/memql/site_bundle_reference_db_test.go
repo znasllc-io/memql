@@ -23,7 +23,7 @@ func TestABeforeWriteHookIsHeldToTheSiteVersionRule(t *testing.T) {
 
 	suffix := uniqueSuffix("siteref")
 	account := "acme-" + suffix
-	if err := organizationInsert(t, eng, groupSeedCtx(), conceptAccountsAccount, account, map[string]any{"name": account, "status": "active", "domainStatus": "unverified"}); err != nil {
+	if err := seedOrganizationAccount(t, eng, account, map[string]any{"name": account, "status": "active", "domainStatus": "unverified"}); err != nil {
 		t.Fatalf("seed organization: %v", err)
 	}
 	user := "hook-author-" + suffix

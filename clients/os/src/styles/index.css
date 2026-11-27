@@ -1553,7 +1553,7 @@ button.os-ask-attachment:hover { border-color: color-mix(in srgb, var(--os-accen
   border: 1px solid var(--os-line);
   border-radius: var(--os-radius-sm);
   background: var(--os-surface);
-  color: var(--os-text);
+  color: var(--os-ink);
   font-family: var(--os-font-mono);
   font-size: var(--os-text-sm);
   resize: vertical;
@@ -16036,4 +16036,34 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
   text-align: center;
   background: var(--os-ground);
   color: var(--os-ink);
+}
+
+/* Shared search-and-add controls for account people, groups and app access. */
+.os-multi-picker { min-width: 0; width: 100%; }
+.os-multi-picker-option { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 10px 12px; border: 0; background: transparent; color: var(--os-ink); text-align: left; cursor: pointer; font: inherit; }
+.os-multi-picker-option[data-active] { background: var(--os-hover); }
+.os-multi-picker-option[aria-selected="true"] { color: var(--os-accent); }
+.os-multi-picker-option > span { min-width: 0; display: grid; gap: 3px; }
+.os-multi-picker-option strong { font-weight: 500; overflow-wrap: anywhere; }
+.os-multi-picker-option small { color: var(--os-muted); overflow-wrap: anywhere; }
+.os-multi-picker-empty { padding: 10px 12px; }
+.os-multi-picker-more { width: 100%; border: 0; background: transparent; padding: 10px; color: var(--os-accent); font: inherit; cursor: pointer; }
+.os-role-tag { font-size: 12px; font-weight: 500; line-height: 1.5; color: var(--os-muted); }
+.os-account-access { display: grid; gap: 20px; min-width: 0; }
+.os-account-person { display: grid; grid-template-columns: minmax(0, 1fr) 140px 104px; gap: 12px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--os-rail); }
+.os-account-person-name { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
+.os-account-person-name strong { font-weight: 500; }
+.os-account-access-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+@media (max-width: 560px) { .os-account-person { grid-template-columns: minmax(0, 1fr) auto; } .os-account-person > .os-field { grid-column: 1; } }
+
+.os-role-select { padding: 0; margin: 0; border: 0; min-width: 0; }
+
+.os-account-access > section { display: grid; gap: 8px; min-width: 0; }
+.os-account-access-actions:empty { display: none; }
+.os-account-access .os-caption { white-space: normal; }
+.os-account-access { grid-template-columns: minmax(0, 1fr); }
+.os-account-person > .os-role-select .os-select { width: 100%; }
+@media (max-width: 560px) {
+  .os-account-person { grid-template-columns: minmax(0, 1fr) 112px; }
+  .os-account-person > .os-account-access-actions { grid-column: 2; justify-content: flex-end; }
 }

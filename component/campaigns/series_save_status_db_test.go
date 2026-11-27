@@ -73,6 +73,7 @@ func TestSavingASeriesNeverChangesWhetherItRuns(t *testing.T) {
 			t.Fatalf("%s: %v", q, err)
 		}
 	}
+	cleanupCampaignUser(t, user)
 	execute(system, fmt.Sprintf(`insert("v1:identity:user", id=%s, payload={"primaryEmail":%s,"displayName":"Editor","role":"owner","active":true})`, langparser.QuoteString(user), langparser.QuoteString(user+"@example.test")))
 	execute(owner, call("mutation", "createClientAccount", arg{"accountId", org}, arg{"name", "Repeating client"}))
 	execute(owner, call("mutation", "createAudience", arg{"audienceId", audience}, arg{"accountId", org}, arg{"name", "Newsletter"}))

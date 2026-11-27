@@ -1,3 +1,4 @@
+import { openSelect } from "../selectControl";
 import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { installSeededAccess, seededAccessFor } from "../seededAccess";
@@ -97,10 +98,10 @@ async function openAda(connection: Conn, role = "owner", showDeactivated = false
 
 /** The rungs the ladder is offering, by their accessible state. */
 function offeredRungs(): string[] {
-  const ladder = screen.getByRole("list", { name: /The cluster's roles/ });
+  const ladder = openSelect(screen.getByRole("combobox", { name: /The cluster's roles/ }));
   return within(ladder)
-    .getAllByRole("button")
-    .filter((node) => !(node as HTMLButtonElement).disabled)
+    .getAllByRole("option")
+    .filter((node) => node.getAttribute("aria-disabled") !== "true")
     .map((node) => node.textContent ?? "");
 }
 
@@ -113,13 +114,13 @@ function offeredRungs(): string[] {
 // out any of them, and they find out otherwise by being refused.
 
 describe("the offered rungs", () => {
-  it("offers an owner every rung below their own, and their own", async () => {
+  it("offers an owner lower roles and keeps ownership transfer separate", async () => {
     await openAda(seed());
     const offered = offeredRungs().join(" ");
     // The owner carve-out: two owners share a rank, so a strict comparison
     // cannot express owner -> owner, and a cluster could never name a second
     // owner or hand itself on.
-    expect(offered).toContain("Owner");
+    expect(offered).not.toContain("Owner");
     expect(offered).toContain("Admin");
     expect(offered).toContain("Viewer");
   });
@@ -141,7 +142,7 @@ describe("the offered rungs", () => {
     // would offer them four rungs the server refuses one by one.
     await openAda(seed(), "developer");
     expect(offeredRungs()).toEqual([]);
-    expect(screen.getByText(/does not carry changing what somebody is/)).toBeTruthy();
+    expect(screen.getAllByText(/does not carry changing what somebody is/).length).toBeGreaterThan(0);
   });
 
   it("does not offer a scoped role to somebody outside that client's group", async () => {
@@ -149,7 +150,7 @@ describe("the offered rungs", () => {
     // different number of rungs on two people's pages would leave the reader
     // with nothing to explain the difference.
     const view = await openAda(seed());
-    const ladder = screen.getByRole("list", { name: /The cluster's roles/ });
+    const ladder = openSelect(screen.getByRole("combobox", { name: /The cluster's roles/ }));
     expect(within(ladder).getByText("Acme lead")).toBeTruthy();
     expect(offeredRungs().join(" ")).not.toContain("Acme lead");
     view.unmount();
@@ -221,8 +222,8 @@ describe("changing a role", () => {
     connection.dispatcher.sendAndWait.mockResolvedValue(adminOk());
     await openAda(connection);
 
-    const ladder = screen.getByRole("list", { name: /The cluster's roles/ });
-    await click(within(ladder).getByRole("button", { name: /Admin/ }));
+    const ladder = openSelect(screen.getByRole("combobox", { name: /The cluster's roles/ }));
+    await click(within(ladder).getByRole("option", { name: /^Admin/ }));
 
     await waitFor(() =>
       expect(connection.dispatcher.sendAndWait).toHaveBeenCalledWith(
@@ -235,8 +236,7 @@ describe("changing a role", () => {
       ),
     );
     await waitFor(() => {
-      const held = within(screen.getByRole("list", { name: /The cluster's roles/ })).getByText("held");
-      expect(held.closest("button")?.textContent).toContain("Admin");
+      expect(screen.getByRole("combobox", { name: /The cluster's roles/ }).textContent).toContain("Admin");
     });
   });
 
@@ -247,12 +247,11 @@ describe("changing a role", () => {
     );
     await openAda(connection);
 
-    const ladder = screen.getByRole("list", { name: /The cluster's roles/ });
-    await click(within(ladder).getByRole("button", { name: /Admin/ }));
+    const ladder = openSelect(screen.getByRole("combobox", { name: /The cluster's roles/ }));
+    await click(within(ladder).getByRole("option", { name: /^Admin/ }));
 
     expect(await screen.findByText(/an inviter cannot grant above their own role/)).toBeTruthy();
-    const held = within(screen.getByRole("list", { name: /The cluster's roles/ })).getByText("held");
-    expect(held.closest("button")?.textContent).toContain("Member");
+    expect(screen.getByRole("combobox", { name: /The cluster's roles/ }).textContent).toContain("Member");
   });
 });
 

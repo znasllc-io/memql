@@ -90,7 +90,7 @@ func TestMaterializeDB_SharedCompositionKeepsSourcesPrivate(t *testing.T) {
 		}
 	}
 	for _, query := range []string{
-		fmt.Sprintf(`insert("v1:accounts:account", id=%q, payload={"name": "Shared composition", "status": "active", "domainStatus": "unverified"})`, account),
+		fmt.Sprintf(`insert("v1:accounts:account", id=%q, payload={"name": "Shared composition", "ownerUserId":%q,"status": "active", "domainStatus": "unverified"})`, account, owner),
 		"mutation " + call("writeGroup", map[string]any{"groupId": group, "name": "Shared composition", "kind": "account", "accountId": account, "status": "active"}),
 		"mutation " + call("writeGroupMembership", map[string]any{"membershipId": group + "-" + member, "groupId": group, "userId": member, "accountId": account, "origin": "added", "status": "active"}),
 	} {

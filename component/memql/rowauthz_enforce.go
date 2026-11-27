@@ -170,7 +170,7 @@ func orAccountScope(base ExpressionNode, decl *langparser.RowAuthzDecl) Expressi
 	if decl == nil || strings.TrimSpace(decl.Account) == "" {
 		return base
 	}
-	account := &AccountScopeExpression{Field: strings.TrimSpace(decl.Account)}
+	account := &AccountScopeExpression{Field: strings.TrimSpace(decl.Account), OwnerField: strings.TrimSpace(decl.Owner)}
 	if base == nil {
 		return account
 	}

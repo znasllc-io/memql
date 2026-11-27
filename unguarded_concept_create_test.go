@@ -107,6 +107,16 @@ func TestNoUnguardedDirectToStoreConceptCreate(t *testing.T) {
 		// THE guarded write path. This is the call every mutation funnels
 		// into, after executeWrite has run the validators above.
 		"component/memql/executor_mutation.go": "the mutation executor -- the one guarded write path",
+		// Account access owns one advisory-locked transaction: resolving the
+		// current actor, checking revision and hierarchy, transferring ownership,
+		// and appending every affected row commit together. Re-entering the
+		// executor would use another connection and break that invariant. Its
+		// closed writer accepts only account/user/group/membership/invitation;
+		// native operations compose payloads, never caller-selected concepts or
+		// raw payloads. The store independently enforces the owner invariant.
+		// account_access_db_test covers stale callers, peer escalation, failed
+		// batch rollback, concurrent transfers, and ordinary-writer bypasses.
+		"component/memql/account_access.go": "closed account authority transaction with current-actor checks, revision fencing and shared store invariants",
 
 		// Unit tests of Concept.Create itself, against in-memory fakes
 		// (&capturingStore{}, &fakeConceptStore{}, &redactionStore{}). No
@@ -123,7 +133,7 @@ func TestNoUnguardedDirectToStoreConceptCreate(t *testing.T) {
 		"component/database/memory-nodes/concept_secret_redaction_test.go": "Concept.Create unit test against a fake store",
 
 		// THE OUTBOX APPEND (epic memql#4378, D5), and the only entry here
-		// that is a real write on a real store. It earns the exemption on
+		// for the row delivery transaction. It earns the exemption on
 		// an argument, not on convenience:
 		//
 		//   - It CANNOT go through executeWrite, because it runs INSIDE

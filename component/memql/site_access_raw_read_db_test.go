@@ -57,7 +57,7 @@ func newAccessReadFixture(t *testing.T, eng *MemQLEngine, name string) accessRea
 	seedPrincipal(t, eng, f.operator, auth.RoleOwner)
 	seedPrincipal(t, eng, f.member, auth.RoleWriter)
 	seedPrincipal(t, eng, f.other, auth.RoleWriter)
-	require.NoError(t, organizationInsert(t, eng, groupSeedCtx(), conceptAccountsAccount, ids.account,
+	require.NoError(t, seedOrganizationAccount(t, eng, ids.account,
 		map[string]any{"name": ids.account, "status": "active", "domainStatus": "unverified"}))
 	seedGroup(t, eng, "g-"+ids.account, "Acme", "account", ids.account)
 	seedMembership(t, eng, "g-"+ids.account, f.member, "active")

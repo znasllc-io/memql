@@ -71,7 +71,7 @@ func TestANotifyStageDeliversOverRealRows(t *testing.T) {
 	hook := "https://discord.com/api/webhooks/4242/pr6d-token-" + suffix
 
 	// ---- the source, its channel and its pipeline, through their writes ----
-	if _, err := eng.Execute(seederCtx(), fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Pipelines notify test")`,
+	if _, err := eng.Execute(accountSeeder(t, eng, owner), fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Pipelines notify test")`,
 		langparser.QuoteString(account))); err != nil {
 		t.Fatalf("createClientAccount: %v", err)
 	}

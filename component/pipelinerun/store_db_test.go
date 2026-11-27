@@ -101,6 +101,17 @@ func seederCtx() context.Context {
 	return auth.ContextWithToken(ctx, &auth.TokenInfo{Subject: "pr10a-seeder"})
 }
 
+// accountSeeder persists the person who will own the fixture account. A
+// synthetic scheduler cannot own an organization.
+func accountSeeder(t *testing.T, eng *memqlengine.MemQLEngine, owner string) context.Context {
+	t.Helper()
+	q := fmt.Sprintf(`insert("v1:identity:user", id=%s, payload={"displayName":"Pipeline owner","primaryEmail":%s,"role":"developer","active":true})`, langparser.QuoteString(owner), langparser.QuoteString(owner+"@example.test"))
+	if _, err := eng.Execute(seederCtx(), q); err != nil {
+		t.Fatal(err)
+	}
+	return auth.ContextWithInternalOrigin(signedIn(owner))
+}
+
 // signedIn is a person as the stream interceptor presents one: the access
 // context the owner conjuncts read, and the token a write's createdBy reads.
 // The owner is a developer, because registering a source is Deployables'
@@ -129,7 +140,7 @@ func TestTheDSLStoreOverRealRows(t *testing.T) {
 	// A source belongs to an organization that must exist, so the test
 	// writes its own rather than leaning on a boot seed.
 	account := "pr10a-account-" + suffix
-	if _, err := eng.Execute(seederCtx(), fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Pipelines store test")`,
+	if _, err := eng.Execute(accountSeeder(t, eng, owner), fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Pipelines store test")`,
 		langparser.QuoteString(account))); err != nil {
 		t.Fatalf("createClientAccount: %v", err)
 	}
@@ -546,7 +557,7 @@ func TestTheChannelsAndTheOutboxOverRealRows(t *testing.T) {
 	suffix := strings.ReplaceAll(id.NewShortId(), "-", "")[:12]
 	owner, stranger := "pr6c-owner-"+suffix, "pr6c-stranger-"+suffix
 	account := "pr6c-account-" + suffix
-	if _, err := eng.Execute(seederCtx(), fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Channels store test")`,
+	if _, err := eng.Execute(accountSeeder(t, eng, owner), fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Channels store test")`,
 		langparser.QuoteString(account))); err != nil {
 		t.Fatalf("createClientAccount: %v", err)
 	}

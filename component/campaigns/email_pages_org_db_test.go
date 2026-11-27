@@ -3,6 +3,7 @@ package campaigns
 import (
 	"context"
 	"fmt"
+	"github.com/znasllc-io/memql/component/auth"
 	"strings"
 	"testing"
 	"time"
@@ -23,8 +24,9 @@ func TestEmailPagesShowAnOrganizationTheAutomationOwnerDidNotCreate(t *testing.T
 	n := f.newEmptyNewsletter(t, "page-org")
 
 	operatorID := n.suffix + "-operator"
-	n.execute(t, n.system, fmt.Sprintf(`insert("v1:identity:user", id=%s, payload={"primaryEmail":%s,"displayName":"Operator","role":"owner","active":true})`, langparser.QuoteString(operatorID), langparser.QuoteString(operatorID+"@example.test")))
-	operator := digestOwner(operatorID)
+	cleanupCampaignUser(t, operatorID)
+	n.execute(t, n.system, fmt.Sprintf(`insert("v1:identity:user", id=%s, payload={"primaryEmail":%s,"displayName":"Operator","role":"developer","active":true})`, langparser.QuoteString(operatorID), langparser.QuoteString(operatorID+"@example.test")))
+	operator := layoutActor(operatorID, auth.RoleDeveloper)
 
 	org, audience := n.suffix+"-operated-org", n.suffix+"-operated-aud"
 	n.execute(t, operator, call("mutation", "createClientAccount", arg{"accountId", org}, arg{"name", "Brightside"}))
@@ -71,8 +73,9 @@ func TestAnAutomationEmailNamesAnOrganizationItsOwnerDidNotCreate(t *testing.T) 
 	n.worker.journeyGate = NewWorker(n.worker.store.engine, nil, nil, quietLogger(), gatePoolFor(t)).journeyGate
 
 	operatorID := n.suffix + "-operator"
-	n.execute(t, n.system, fmt.Sprintf(`insert("v1:identity:user", id=%s, payload={"primaryEmail":%s,"displayName":"Operator","role":"owner","active":true})`, langparser.QuoteString(operatorID), langparser.QuoteString(operatorID+"@example.test")))
-	operator := digestOwner(operatorID)
+	cleanupCampaignUser(t, operatorID)
+	n.execute(t, n.system, fmt.Sprintf(`insert("v1:identity:user", id=%s, payload={"primaryEmail":%s,"displayName":"Operator","role":"developer","active":true})`, langparser.QuoteString(operatorID), langparser.QuoteString(operatorID+"@example.test")))
+	operator := layoutActor(operatorID, auth.RoleDeveloper)
 	org, audience := n.suffix+"-operated-org", n.suffix+"-operated-aud"
 	n.execute(t, operator, call("mutation", "createClientAccount", arg{"accountId", org}, arg{"name", "Brightside"}))
 

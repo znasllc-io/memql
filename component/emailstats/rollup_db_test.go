@@ -169,8 +169,13 @@ func newFixture(t *testing.T) *fixture {
 	f.template, f.campaign, f.rule = f.suffix+"-tpl", f.suffix+"-camp", f.suffix+"-rule"
 
 	system := auth.ContextWithToken(auth.ContextWithAccess(context.Background(), auth.SystemActor("email-statistics-test")), &auth.TokenInfo{Subject: "email-statistics-test"})
-	f.exec(system, fmt.Sprintf(`insert("v1:identity:user", id=%s, payload={"displayName":"Statistics owner","primaryEmail":"%s@example.test","role":"owner","active":true})`, langparser.QuoteString(f.user), f.user))
-	f.owner = auth.ContextWithToken(auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: f.user, Role: auth.RoleOwner}), &auth.TokenInfo{Subject: f.user})
+	t.Cleanup(func() {
+		if _, err := db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE concept='v1:identity:user' AND id IN (?,?)`, f.user, "v1:identity:user:"+f.user); err != nil {
+			t.Errorf("remove fixture owner: %v", err)
+		}
+	})
+	f.exec(system, fmt.Sprintf(`insert("v1:identity:user", id=%s, payload={"displayName":"Statistics owner","primaryEmail":"%s@example.test","role":"developer","active":true})`, langparser.QuoteString(f.user), f.user))
+	f.owner = auth.ContextWithToken(auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: f.user, Role: auth.RoleDeveloper}), &auth.TokenInfo{Subject: f.user})
 
 	f.mutate("createClientAccount", map[string]any{"accountId": f.account, "name": "Statistics organization"})
 	f.removeAccountWhenDone()
