@@ -60,7 +60,6 @@ import {
   FILE_TYPES,
   FILES_SORTS,
   fileKindOf,
-  needsWholePlace,
   type AddedWithin,
   type FilesFilter,
   type FilesPlace,
@@ -732,9 +731,6 @@ export function BrowseSection({
     filter.folderId !== ""));
   // Folders is a question only folders answer: the file list steps aside.
   const foldersOnly = filter.type === "folders";
-  // While the whole place is still being read for an order or filter the
-  // pages cannot answer (useLibrary.ts), an empty list is not yet an answer.
-  const draining = !shared && !sharingPlace && !foldersOnly && needsWholePlace(filter) && artifacts.hasMore;
   const emptyText = narrowed
     ? "Nothing matches. Clear the search or filters to see your files."
     : shared
@@ -1179,7 +1175,7 @@ export function BrowseSection({
             rowId={(r) => r.id}
             fingerprint={artifactFingerprint}
             label={headTitle}
-            emptyText={draining ? undefined : emptyText}
+            emptyText={emptyText}
             renderRow={(row, tick) => {
               // What the list row used to print beside the name -- where the
               // file came from, its folder while searching, its desk -- now
@@ -1219,7 +1215,7 @@ export function BrowseSection({
               it, and it exists only while there IS something to undo -- a
               standing Clear control over a full list would be exactly the
               furniture rule 2 removes. */}
-          {narrowed && listedCount === 0 && tasks.length === 0 && !draining ? (
+          {narrowed && listedCount === 0 && tasks.length === 0 ? (
             <div className="os-files-clear">
               <Button onClick={clearFilters}>Clear the search and filters</Button>
             </div>

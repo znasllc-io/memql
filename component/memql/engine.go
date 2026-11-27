@@ -763,6 +763,8 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 	// node. Its provider guard is local; callbacks never travel through RPC.
 	ctx = e.modelSeam.withProviderAdmission(ctx)
 	startTime := time.Now()
+	metricName := ""
+	defer func() { metrics.QueryDuration(metricName, time.Since(startTime), err != nil) }()
 	if err := auth.ValidateRoleTestContext(ctx); err != nil {
 		return nil, err
 	}
@@ -841,6 +843,7 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 	if err != nil {
 		return nil, err
 	}
+	metricName = plan.SourceFunction
 
 	// SURFACE AUTHORIZATION (epic memql#4832, D6; epic memql#5166, D11).
 	// Every construct this call expanded that declares an actor-rank floor

@@ -30,8 +30,6 @@ type accountAccessState struct {
 	invitations            map[string]memorynodes.MemoryNode
 }
 
-// staged-data: MUST-NOT-GATE -- these rows are authorization evidence. Only
-// the reduced, authorized roster is returned by accountAccessBuiltin.
 func loadAccountAccess(ctx context.Context, db bun.IDB, accountID string) (*accountAccessState, error) {
 	account, found, err := authorityRow(ctx, db, conceptAccount, accountID)
 	if err != nil {

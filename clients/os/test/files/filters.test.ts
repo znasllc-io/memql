@@ -9,7 +9,7 @@ import {
   fileKindOf,
   filterMenuPick,
   filterMenuValue,
-  needsWholePlace,
+  usesServerDirectory,
   otherFiltersOn,
   labelsOf,
   LABEL_ANY,
@@ -20,10 +20,8 @@ import {
 import { SOURCE_VALUES } from "../../src/apps/files/concepts";
 import { artifactFromRow, type ArtifactRow } from "../../src/apps/files/rows";
 
-// The list derivation (design D1): kind / source / archived / search / folder
-// scope / sort, as ONE pure fold over the artifacts snapshot. Client-side on
-// purpose -- `folderId == ""` cannot match pre-field rows server-side, and the
-// owner-scoped set is small.
+// The browser applies the directory's predicates to live updates and keeps
+// their ordering consistent with the server's retained page boundary.
 
 function make(over: Partial<Row> & { id: string }): ArtifactRow {
   return artifactFromRow({
@@ -224,13 +222,21 @@ describe("the search panel's kind of file, Added window and sorts", () => {
     expect(order("kind")).toEqual(["a-doc", "a-report", "a-made", "a-video"]);
   });
 
-  it("asks for the whole place only for what the server's pages cannot answer", () => {
-    expect(needsWholePlace(DEFAULT_FILTER)).toBe(false);
-    expect(needsWholePlace({ ...DEFAULT_FILTER, sort: "oldest" })).toBe(false);
-    expect(needsWholePlace({ ...DEFAULT_FILTER, type: "folders" })).toBe(false);
-    expect(needsWholePlace({ ...DEFAULT_FILTER, sort: "name" })).toBe(true);
-    expect(needsWholePlace({ ...DEFAULT_FILTER, type: "images" })).toBe(true);
-    expect(needsWholePlace({ ...DEFAULT_FILTER, added: "7d" })).toBe(true);
+  it("keeps mixed-case ID ties in the server cursor's order", () => {
+    const rows = [make({ id: "a-row", title: "Same.pdf" }), make({ id: "B-row", title: "Same.pdf" })];
+    for (const sort of ["name", "kind", "size", "oldest"] as const) {
+      expect([...rows].sort(compareRows(sort)).map(row => row.id)).toEqual(["B-row", "a-row"]);
+    }
+    expect([...rows].sort(compareRows("newest")).map(row => row.id)).toEqual(["a-row", "B-row"]);
+  });
+
+  it("uses the server directory for derived filters and display orders", () => {
+    expect(usesServerDirectory(DEFAULT_FILTER)).toBe(false);
+    expect(usesServerDirectory({ ...DEFAULT_FILTER, sort: "oldest" })).toBe(false);
+    expect(usesServerDirectory({ ...DEFAULT_FILTER, type: "folders" })).toBe(false);
+    expect(usesServerDirectory({ ...DEFAULT_FILTER, sort: "name" })).toBe(true);
+    expect(usesServerDirectory({ ...DEFAULT_FILTER, type: "images" })).toBe(true);
+    expect(usesServerDirectory({ ...DEFAULT_FILTER, added: "7d" })).toBe(true);
   });
 });
 

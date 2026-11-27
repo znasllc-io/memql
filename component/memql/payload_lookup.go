@@ -37,6 +37,8 @@ type payloadEquality struct {
 // trusts the latest-row index -- so TestPayloadLookupsAreTheMigratedLookupIndexes
 // holds the list to the migrated catalog in both directions.
 var payloadLookups = []payloadLookup{
+	{index: "memory_nodes_library_folder_lookup_idx", field: "folderId", concepts: []string{"v1:library:artifact"}},
+	{index: "memory_nodes_library_run_lookup_idx", field: "producedByRunId", concepts: []string{"v1:library:artifact"}},
 	{index: "memory_nodes_email_provider_lookup_idx", field: "providerMessageId", concepts: []string{"v1:email:sendOperation"}},
 	{index: "memory_nodes_work_journal_lookup_idx", field: "runId", concepts: []string{"v1:work:step", "v1:work:approval", "v1:work:modelCall", "v1:work:observation"}},
 	{index: "memory_nodes_work_run_owner_lookup_idx", field: "ownerUserId", concepts: []string{"v1:work:run"}, coarse: true},

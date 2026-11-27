@@ -35,6 +35,8 @@ func authorityRows(ctx context.Context, db bun.IDB, concept string) ([]memorynod
 	return rows, err
 }
 
+// staged-data: MUST-NOT-GATE -- this row is authorization evidence. Hiding
+// a staged owner would let ownership validation miss the existing authority.
 func authorityRow(ctx context.Context, db bun.IDB, concept, id string) (memorynodes.MemoryNode, bool, error) {
 	var rows []memorynodes.MemoryNode
 	bare := BareShortId(id)

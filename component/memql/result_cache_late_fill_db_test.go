@@ -22,7 +22,9 @@ func (h *pauseCacheRead) BeforeQuery(ctx context.Context, _ *bun.QueryEvent) con
 	return ctx
 }
 func (h *pauseCacheRead) AfterQuery(ctx context.Context, e *bun.QueryEvent) {
-	if ctx.Value(pauseCacheReadKey{}) != true || e.Err != nil || !strings.HasPrefix(e.Query, "SELECT") || !strings.Contains(e.Query, "MemoryNodes") || !strings.Contains(e.Query, "id IN (") {
+	point := strings.Contains(e.Query, "public.memql_latest_node(")
+	batch := strings.Contains(e.Query, "MemoryNodes") && strings.Contains(e.Query, "id IN (")
+	if ctx.Value(pauseCacheReadKey{}) != true || e.Err != nil || !strings.HasPrefix(e.Query, "SELECT") || !(point || batch) {
 		return
 	}
 	h.once.Do(func() {

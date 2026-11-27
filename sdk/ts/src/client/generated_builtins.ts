@@ -4171,6 +4171,55 @@ QueryClient.prototype.libraryBrowseFacets = function (this: QueryClient, args: L
   return this.executeNamed("libraryBrowseFacets", buildLibraryBrowseFacets(args), opts);
 };
 
+/** One Library page after file type, Added and display sorting, reduced on the server. */
+export interface LibraryBrowsePageArgs {
+  archived?: boolean;
+  folderId?: string;
+  kind?: string;
+  source?: string;
+  accountId?: string;
+  label?: string;
+  search?: string;
+  ids?: string[];
+  folderIds?: string[];
+  sourceRefs?: string[];
+  sort?: string;
+  fileType?: string;
+  since?: string;
+  locale?: string;
+  cursor?: string;
+}
+
+export function buildLibraryBrowsePage(args: LibraryBrowsePageArgs): string {
+  const parts: string[] = [];
+  if (args.archived !== undefined) parts.push("archived: " + renderMemQLValue(args.archived));
+  if (args.folderId !== undefined) parts.push("folderId: " + renderMemQLValue(args.folderId));
+  if (args.kind !== undefined) parts.push("kind: " + renderMemQLValue(args.kind));
+  if (args.source !== undefined) parts.push("source: " + renderMemQLValue(args.source));
+  if (args.accountId !== undefined) parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.label !== undefined) parts.push("label: " + renderMemQLValue(args.label));
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  if (args.ids !== undefined) parts.push("ids: " + renderMemQLValue(args.ids));
+  if (args.folderIds !== undefined) parts.push("folderIds: " + renderMemQLValue(args.folderIds));
+  if (args.sourceRefs !== undefined) parts.push("sourceRefs: " + renderMemQLValue(args.sourceRefs));
+  if (args.sort !== undefined) parts.push("sort: " + renderMemQLValue(args.sort));
+  if (args.fileType !== undefined) parts.push("fileType: " + renderMemQLValue(args.fileType));
+  if (args.since !== undefined) parts.push("since: " + renderMemQLValue(args.since));
+  if (args.locale !== undefined) parts.push("locale: " + renderMemQLValue(args.locale));
+  if (args.cursor !== undefined) parts.push("cursor: " + renderMemQLValue(args.cursor));
+  return "builtin libraryBrowsePage(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryBrowsePage(args: LibraryBrowsePageArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryBrowsePage = function (this: QueryClient, args: LibraryBrowsePageArgs = {} as LibraryBrowsePageArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryBrowsePage", buildLibraryBrowsePage(args), opts);
+};
+
 /** Read owned document history metadata, with a version cursor and branch provenance. */
 export interface LibraryDocumentHistoryArgs {
   artifactId: string;

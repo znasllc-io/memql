@@ -141,6 +141,7 @@ func (i *Integration) IntegrationName() string { return "library" }
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return append([]memql.IntegrationCapability{
 		{Name: "browseFacets", Handler: i.handleBrowseFacets},
+		{Name: "browsePage", Handler: i.handleBrowsePage},
 		{Name: "trainingLessonsPage", Handler: i.handleTrainingLessonsPage},
 		{Name: "saveTrainingLesson", Description: "Append one owner-reviewed manual lesson revision or decision.", Handler: i.handleSaveTrainingLesson},
 		{Name: "indexTrainingLesson", Description: "Index an exact enabled manual lesson revision.", Handler: i.handleIndexTrainingLesson},

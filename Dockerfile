@@ -325,6 +325,8 @@ COPY brand ./brand
 COPY sdk/ts ./sdk/ts
 COPY clients/os ./clients/os
 COPY scripts/os ./scripts/os
+# Files and the server use the same extension/MIME classification rules.
+COPY integrations/library/file_kinds.json ./integrations/library/file_kinds.json
 
 # Training imports the versioned evaluation catalog and setup from the same
 # files used by the operator runner. Include them in the isolated SPA build.

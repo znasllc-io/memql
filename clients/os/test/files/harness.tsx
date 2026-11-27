@@ -1,3 +1,5 @@
+import { compareRows, fileKindOf, type FilesSort } from "../../src/apps/files/filters";
+import { artifactFromRow } from "../../src/apps/files/rows";
 import { parseCall } from "../callArgs";
 import type { ReactNode } from "react";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
@@ -155,6 +157,17 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         const direction = name.endsWith("Oldest") ? 1 : -1;
         const rows = (args.archived === true ? [...new Map([...(seed.artifacts ?? []), ...(seed.archived ?? [])].map(row => [row.id, row])).values()] : seed.artifacts ?? []).filter(row => artifactMatches(row)).sort((a, b) => direction * (String(a.createdAt ?? "").localeCompare(String(b.createdAt ?? "")) || String(a.id).localeCompare(String(b.id))));
         return page(rows);
+      }
+      if (name === "libraryBrowsePage") {
+        const sizes = new Map((seed.files ?? []).map(row => [String(row.id), Number(row.size)]));
+        const rows = (args.archived === true ? [...new Map([...(seed.artifacts ?? []), ...(seed.archived ?? [])].map(row => [row.id, row])).values()] : seed.artifacts ?? [])
+          .filter(row => artifactMatches(row))
+          .filter(row => !args.fileType || args.fileType === "all" || fileKindOf(artifactFromRow(row)) === args.fileType)
+          .filter(row => !args.since || Date.parse(String(row.createdAt)) >= Date.parse(String(args.since)))
+          .map(row => ({ ...row, ...(args.sort === "size" && row.kind === "file" ? { browseSize: sizes.get(String(row.sourceConceptRef).split(":").pop() ?? "") } : {}) }))
+          .sort((a, b) => compareRows((args.sort ?? "newest") as FilesSort, row => row.browseSize)(artifactFromRow(a), artifactFromRow(b)));
+        const offset = Number(args.cursor ?? 0);
+        return rowsResult([{ rows: rows.slice(offset, offset + 10), cursor: offset + 10 < rows.length ? String(offset + 10) : "" }]);
       }
       if (name === "libraryArchivedFoldersBrowse") {
         const search = String(args.search ?? "").toLowerCase();

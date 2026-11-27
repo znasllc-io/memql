@@ -5635,6 +5635,7 @@ func LibraryArtifactsBuild(args LibraryArtifactsArgs) string {
 //
 // Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactsBrowse"] in generated_concepts.go).
 type LibraryArtifactsBrowseArgs struct {
+	AsOf        string
 	Archived    bool
 	ArchivedSet bool // set true to send archived; required because zero-value bool is ambiguous
 	FolderId    string
@@ -5657,7 +5658,12 @@ func (qc *QueryClient) LibraryArtifactsBrowse(ctx context.Context, args LibraryA
 func LibraryArtifactsBrowseBuild(args LibraryArtifactsBrowseArgs) string {
 	var b strings.Builder
 	b.WriteString("query libraryArtifactsBrowse(")
+	b.WriteString("asOf: ")
+	b.WriteString(quoteMemQL(args.AsOf))
 	if args.ArchivedSet {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
 		b.WriteString("archived: ")
 		b.WriteString(fmt.Sprintf("%v", args.Archived))
 	}
@@ -5732,6 +5738,7 @@ func LibraryArtifactsBrowseBuild(args LibraryArtifactsBrowseArgs) string {
 //
 // Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactsBrowseOldest"] in generated_concepts.go).
 type LibraryArtifactsBrowseOldestArgs struct {
+	AsOf        string
 	Archived    bool
 	ArchivedSet bool // set true to send archived; required because zero-value bool is ambiguous
 	FolderId    string
@@ -5754,7 +5761,12 @@ func (qc *QueryClient) LibraryArtifactsBrowseOldest(ctx context.Context, args Li
 func LibraryArtifactsBrowseOldestBuild(args LibraryArtifactsBrowseOldestArgs) string {
 	var b strings.Builder
 	b.WriteString("query libraryArtifactsBrowseOldest(")
+	b.WriteString("asOf: ")
+	b.WriteString(quoteMemQL(args.AsOf))
 	if args.ArchivedSet {
+		if b.Len() > 35 {
+			b.WriteString(", ")
+		}
 		b.WriteString("archived: ")
 		b.WriteString(fmt.Sprintf("%v", args.Archived))
 	}
@@ -6134,6 +6146,23 @@ func LibraryFileHistoryPageBuild(args LibraryFileHistoryPageArgs) string {
 	b.WriteString(fmt.Sprintf("%v", args.BeforeVersion))
 	b.WriteString(")")
 	return b.String()
+}
+
+// LibraryFileSizeRows -- Owned size metadata for server-side Library sorting; never file bytes.
+//
+// Bound concept: v1:library:file (machine-readable: BoundConcepts["libraryFileSizeRows"] in generated_concepts.go).
+type LibraryFileSizeRowsArgs struct {
+}
+
+// LibraryFileSizeRows calls the engine query libraryFileSizeRows.
+func (qc *QueryClient) LibraryFileSizeRows(ctx context.Context, args LibraryFileSizeRowsArgs) (*Result, error) {
+	call := LibraryFileSizeRowsBuild(args)
+	return qc.executeNamed(ctx, "libraryFileSizeRows", call)
+}
+
+func LibraryFileSizeRowsBuild(args LibraryFileSizeRowsArgs) string {
+	_ = args
+	return "query libraryFileSizeRows()"
 }
 
 // LibraryFileSizesForOwner -- The sizes of every file the caller holds, ARCHIVED INCLUDED -- the stored half of the storage quota (memql#4782, design C4). Archived files keep their bytes and keep counting: retention is real, and a quota that forgot archived rows would let 'archive then re-upload' mint unbounded storage. UNBOUNDED for the same fail-open reason as its session sibling; owner-scoped, two fields per row.

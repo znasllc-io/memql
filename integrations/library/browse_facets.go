@@ -9,13 +9,10 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
-	langparser "github.com/znasllc-io/memql/component/language/parser"
-	"github.com/znasllc-io/memql/component/memql"
 )
 
-// Reduce authorized metadata pages without retaining artifact rows. Unlike a
-// single @unbounded read, a successful result proves cursor exhaustion even
-// when the library exceeds the engine's per-read MaxResults ceiling.
+// Reduce one authorized current population. The engine applies the installed
+// query's owner, staged-data and row gates before any counts are computed.
 func (i *Integration) handleBrowseFacets(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	access, _ := auth.AccessFromContext(ctx)
 	if access == nil || access.UserId == "" {
@@ -32,24 +29,18 @@ func (i *Integration) handleBrowseFacets(ctx context.Context, args map[string]an
 			filters[key] = value
 		}
 	}
-	call, err := langparser.RenderCall("libraryArtifactFacetRows", filters)
+	rows, err := i.directoryRows(ctx, "libraryArtifactFacetRows", filters)
 	if err != nil {
 		return nil, err
 	}
 	folders := map[string]int{}
 	labels := map[string]bool{}
-	err = memql.WalkQueryPages(ctx, i.engine.Execute, "query "+call, 10000, func(result *memql.ExecuteResult) error {
-		for _, row := range memql.MaterializeRows(result.OutputPayload()) {
-			folder, _ := row["folderId"].(string)
-			folders[folder]++
-			for _, label := range stringSliceField(row, "labels") {
-				labels[label] = true
-			}
+	for _, row := range rows {
+		folder, _ := row["folderId"].(string)
+		folders[folder]++
+		for _, label := range stringSliceField(row, "labels") {
+			labels[label] = true
 		}
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("read library facets: %w", err)
 	}
 	folderIDs := make([]string, 0, len(folders))
 	for folder := range folders {

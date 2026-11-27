@@ -42,11 +42,14 @@ export interface ArtifactRow {
   /** Documents carry the training pipeline's verdict; others answer "". */
   validationStatus: string;
   createdAt: string;
+  /** Size supplied by the server directory only when sorting by size. */
+  browseSize?: number;
 }
 
 export function artifactFromRow(raw: Row): ArtifactRow {
   const row = flatten(raw);
   return {
+    ...(typeof row.browseSize === "number" ? { browseSize: row.browseSize } : {}),
     id: rowString(row, "id"),
     ownerUserId: rowString(row, "ownerUserId"),
     lens: rowString(row, "lens"),

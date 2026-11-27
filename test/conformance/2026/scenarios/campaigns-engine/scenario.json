@@ -3,7 +3,7 @@
   "scenarios": [
     {
       "name": "cluster-role-rule-stages-one-email-per-owner",
-      "description": "An active rule on new forge requests, for the cluster's owners, fires on a new request: it stages an email to the owner and records the firing. The same event delivered again is claimed already and sends nothing more.",
+      "description": "An active rule on new forge requests, for the cluster's owner, fires under a writer's delegated group grants and the account's explicit email access ceiling. It stages one email and records the firing; redelivery sends nothing more.",
       "seed": [
         {
           "mutation": "createUser",
@@ -33,11 +33,46 @@
         },
         {
           "mutation": "createClientAccount",
+          "as": {
+            "userId": {
+              "$id": "owner"
+            },
+            "role": "owner"
+          },
           "args": {
             "accountId": {
               "$id": "organization"
             },
             "name": "Scenario Organization"
+          }
+        },
+        {
+          "mutation": "writeGroup",
+          "args": {
+            "groupId": {
+              "$id": "acct-organization"
+            },
+            "name": "Scenario Account",
+            "kind": "account",
+            "accountId": {
+              "$id": "organization"
+            },
+            "status": "active"
+          }
+        },
+        {
+          "mutation": "writeGrant",
+          "args": {
+            "grantId": {
+              "$id": "account-email-ceiling"
+            },
+            "subjectKind": "group",
+            "subjectId": {
+              "$id": "acct-organization"
+            },
+            "verb": "read",
+            "resourceType": "app:email",
+            "effect": "allow"
           }
         },
         {
