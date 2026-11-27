@@ -63,8 +63,9 @@ import (
 // v0.23.0 (da2222f4778278fdf955758c005f38d1ecc8ff43) shipped this
 // warning. Its original deprecation/refusal dates remain historical facts.
 var releasedForms = map[string]string{
-	"deprecated_array_type":    "0.23.0",
-	"deprecated_allowed_roles": "0.24.0",
+	"deprecated_array_type":         "0.23.0",
+	"deprecated_allowed_roles":      "0.24.0",
+	"concept_belongs_to_undeclared": "0.32.0",
 }
 
 // versionFile is the tree's VERSION, at the repo root beside this test.

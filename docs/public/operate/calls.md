@@ -1197,6 +1197,44 @@ new billed server, new DNS names, or a device-control service:
    engine/client/template versions and served results. Health alone proves none of
    these authority properties. Unknown cleanup remains pending.
 
+#### Rolling back a drained media upgrade
+
+Keep calls disabled and confirm zero provider rooms, no active ingress pipeline,
+and completed native cleanup before rollback. Record whether the optional
+`resources` profile was enabled. Restore one reviewed backup bundle with its
+matching helper, Compose file, template and rendered configuration; preserve the
+current operator credentials and certificate directory. An enabled resource
+profile also needs its matching private `ingress.yaml`. Preserve ingress's
+`logging.driver: none` even when restoring older files.
+
+Restoring files alone does not replace running containers. The helper can report
+an unchanged configuration when Compose or helper files were replaced, so run an
+explicit recreation from the restored bundle. Use exactly the command matching
+the recorded profile. For an enabled resource worker:
+
+```bash
+docker compose --project-name memql-media --file /etc/memql-media/compose.yaml --profile resources up --detach --wait --force-recreate --remove-orphans
+```
+
+When resources were not enabled:
+
+```bash
+docker compose --project-name memql-media --file /etc/memql-media/compose.yaml up --detach --wait --force-recreate --remove-orphans
+```
+
+A profile change requires separate drained publisher removal; omitting the
+profile flag alone does not prove an existing ingress container stopped.
+Preserve the certificate directory, volumes, firewall rules and Secret during
+this recreation. Check the actual image/config versions, enabled service set,
+ingress log driver, private raw ports, public health/TURN, native-admission
+routing and cleanup before enabling calls again.
+
+A backup with legacy direct RTC routing is not a guarded rollback. Keep calls
+and the matching client disabled until the fixed admission boundary is restored
+and independently verified. Never reopen legacy direct RTC while that client is
+active. Record the rollback source versions and served evidence separately from
+the failed upgrade; health alone is insufficient.
+
 Offline configuration tests and pinned-Caddy validation are not production acceptance:
 
 ```bash
@@ -1269,8 +1307,9 @@ do not change a running container. This prevents future Docker retention and doe
 not erase historical logs or copies. Any historical key known to have been exposed
 must be revoked through the resource lifecycle.
 
-On an existing 2-vCPU/4-GB CPX21, first qualify one bounded synthetic resource plus an
-ordinary two-person call. Record host/container CPU, memory and restart state,
+On the existing host, first record its actual available CPUs and memory; do not
+infer them from an instance-type label. Qualify one bounded synthetic resource plus
+an ordinary two-person call. Record host/container CPU, memory and restart state,
 publication/recipient delivery, source bounds, stop/delete readback, old stream-key
 reentry refusal, and continuity of the ordinary call. If the worker refuses
 capacity, cannot sustain the test, or cleanup is unknown, keep resource availability
