@@ -128,3 +128,61 @@ func TestAccountHierarchyStaffDeveloperAssignsClientApps(t *testing.T) {
 	_, err = hierarchyCall(t, e, "developer-a", auth.Role("viewer"), account, map[string]any{"revision": fmt.Sprint(state["revision"]), "operation": "apps", "apps": []string{"app:deployables"}})
 	require.ErrorContains(t, err, "account_apps_refused")
 }
+
+// THE CLIENT ONBOARDING A PRIMARY DEVELOPER DOES ALONE, end to end on the
+// engine: give the client its apps, pass the invitation authority, place the
+// arrival, raise them to Admin, and the client opens exactly those apps.
+// The identity half of the invitation (a manager whose actorRole is
+// "developer" may issue a Viewer invitation into the client's account group)
+// is TestAccountManagerInvitationIsBoundedByCurrentAccountAuthority in
+// component/identity/adminops; this test proves the engine gives a primary
+// developer exactly the actorRole and group that test admits.
+func TestAccountHierarchyStaffDeveloperOnboardsAClient(t *testing.T) {
+	e, account, revision := hierarchyFixture(t)
+	seedPrincipal(t, e, "staff-dev", auth.RoleDeveloper)
+	seedPrincipal(t, e, "new-client", auth.Role("viewer"))
+	staff := func(args map[string]any) map[string]any {
+		t.Helper()
+		if args != nil {
+			args["revision"] = revision
+		}
+		state, err := hierarchyCall(t, e, "staff-dev", auth.RoleDeveloper, account, args)
+		require.NoError(t, err)
+		revision = fmt.Sprint(state["revision"])
+		return state
+	}
+
+	// 1. The client's apps: Files (sharing is its part), Email, Deployables
+	//    (reviews, sales and the store are its parts).
+	staff(map[string]any{"operation": "apps", "apps": []string{"app:deployables", "app:email", "app:files"}})
+
+	// 2. The invitation authority's two inputs (accountInvitationAuthority).
+	state := staff(nil)
+	require.Equal(t, "developer", state["actorRole"])
+	groups := map[any]bool{}
+	for _, g := range state["groups"].([]any) {
+		groups[g.(map[string]any)["id"]] = true
+	}
+	require.True(t, groups["acct-client"], "the client's account group is one a staff developer may invite into")
+
+	// 3. The accepted invitation places the arrival in that group, as a Viewer.
+	seedMembership(t, e, "acct-client", "new-client", "active")
+	state = staff(nil)
+	roles := map[any]any{}
+	for _, p := range state["people"].([]any) {
+		roles[p.(map[string]any)["id"]] = p.(map[string]any)["role"]
+	}
+	require.Equal(t, "viewer", roles["new-client"])
+
+	// 4. The primary developer raises them to Admin.
+	staff(map[string]any{"operation": "members", "userIds": []string{"new-client"}, "role": "admin"})
+
+	// 5. The client opens exactly the apps on the list, with write where it matters.
+	ctx := contextWithAccountScopeMemo(rankActorCtx("new-client", auth.Role("viewer")), e)
+	require.True(t, e.OrganizationCapable(ctx, account, auth.VerbRead, "app:files"))
+	require.True(t, e.OrganizationCapable(ctx, account, auth.VerbExecute, "app:files/share"))
+	require.True(t, e.OrganizationCapable(ctx, account, auth.VerbRead, "app:email"))
+	require.True(t, e.OrganizationCapable(ctx, account, auth.VerbRead, "app:deployables/reviews"))
+	require.False(t, e.OrganizationCapable(ctx, account, auth.VerbRead, "app:pipelines"), "nothing beyond the client's list")
+	require.False(t, e.OrganizationCapable(ctx, "other", auth.VerbRead, "app:files"), "nothing in another client's account")
+}
