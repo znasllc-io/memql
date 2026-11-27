@@ -60,6 +60,38 @@ The actual source must pass its privacy and delayed-read/gate tests before relea
 the metadata is for distinguishing a gate/read delay, protocol refusal and
 transport failure, not for declaring an unobserved cause.
 
+Client-budget refusals use closed composite labels in the same terminal fields:
+the operation and branch distinguish control size/rate, frame rate/bytes, decoding,
+AddTrack shape/rate/CID conflict/unknown SID/count/occupied source, pending or
+invalid publisher offers, and invalid answer/sync/layer/trickle requests. For
+example, `budget_add_track_source` and `budget_offer_pending` separate two
+different negotiation refusals without recording track IDs or SDP. Unknown
+labels remain `operation_failed`. Each existing budget is evaluated once, in its
+original order; the diagnostic labels themselves change no limit, permission,
+timeout or publication decision.
+One aggregate log window cannot identify a particular peer or prove the cause of
+its SDK error. Keep the measured failure and require a controlled reproduction
+before changing protocol behavior.
+
+A controlled real-WebSocket regression reproduces a separate supported SDK
+ordering: its unpublish callback completes before the publisher answer, so a
+replacement AddTrack can arrive while the original source remains reserved.
+The guard may now hold one new-CID, empty-SID replacement frame only when the
+existing source has a known provider SID and MID and the current pending offer
+explicitly disables that exact MID. Only a matched provider answer or explicit
+provider unpublish can release the captured reservation; caller state or elapsed
+time cannot. Unknown, active or early duplicates still fail closed. After release,
+all current reservation limits are checked again without charging the AddTrack
+or frame buckets twice, then native Forward freshly checks authority.
+
+This adds at most five seconds of waiting before the existing five-second Forward
+budget; it does not change native lease lifetimes or authorization deadlines.
+No budget mutex or native authority gate is held while waiting, and cancellation,
+provider disconnect, missing or mismatched evidence closes the connection. The
+controlled regression and its negative cases prove this ordering behavior, not
+that it caused the particular peer failure in the earlier aggregate live receipt.
+The deployed capacity profile must be rerun before claiming that failure resolved.
+
 The native repository-gate step also has a 45-minute aggregate bound. The earlier
 identical gate passed in 851 seconds, while a later run hit its 30-minute outer
 deadline after several packages passed. Its incomplete output establishes neither

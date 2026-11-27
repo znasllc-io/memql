@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/base64"
 	"io"
 	"net/url"
@@ -25,6 +26,7 @@ const (
 	mediaSignalByteBurst    = 1 << 20
 	mediaSignalAddRate      = 1
 	mediaSignalAddBurst     = 8
+	mediaSignalReleaseWait  = 5 * time.Second
 )
 
 // These are per-connection signalling/negotiation budgets. They do not police
@@ -56,11 +58,20 @@ type mediaSignalTrack struct {
 	sid    string
 	mid    string
 }
+type mediaSignalReplacement struct {
+	cid      string
+	prior    mediaSignalTrack
+	offer    *livekit.SessionDescription
+	released bool
+}
+
 type mediaSignalBudget struct {
 	mu                                   sync.Mutex
 	messages, bytes, additions, controls mediaSignalBucket
 	tracks                               map[string]mediaSignalTrack
 	offer                                *livekit.SessionDescription
+	released                             chan struct{}
+	replacementPending                   *mediaSignalReplacement
 }
 
 func newMediaSignalBudget(now time.Time) *mediaSignalBudget {
@@ -69,17 +80,36 @@ func newMediaSignalBudget(now time.Time) *mediaSignalBudget {
 		bytes:     newMediaSignalBucket(now, mediaSignalByteRate, mediaSignalByteBurst),
 		additions: newMediaSignalBucket(now, mediaSignalAddRate, mediaSignalAddBurst),
 		controls:  newMediaSignalBucket(now, 4, 16), tracks: map[string]mediaSignalTrack{},
+		released: make(chan struct{}),
 	}
 }
 func (b *mediaSignalBudget) frame(now time.Time, size int) bool {
+	return b.frameReason(now, size) == ""
+}
+func (b *mediaSignalBudget) frameReason(now time.Time, size int) string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.messages.allow(now, 1) && b.bytes.allow(now, size)
+	if !b.messages.allow(now, 1) {
+		return "budget_frame_rate"
+	}
+	if !b.bytes.allow(now, size) {
+		return "budget_frame_bytes"
+	}
+	return ""
 }
 func (b *mediaSignalBudget) control(now time.Time, size int) bool {
+	return b.controlReason(now, size) == ""
+}
+func (b *mediaSignalBudget) controlReason(now time.Time, size int) string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return size <= 125 && b.controls.allow(now, 1)
+	if size > 125 {
+		return "budget_control_size"
+	}
+	if !b.controls.allow(now, 1) {
+		return "budget_control_rate"
+	}
+	return ""
 }
 
 func mediaSignalSource(source livekit.TrackSource, kind livekit.TrackType) bool {
@@ -115,32 +145,140 @@ func mediaSignalAddShape(track *livekit.AddTrackRequest) bool {
 	return true
 }
 func (b *mediaSignalBudget) add(now time.Time, track *livekit.AddTrackRequest) bool {
-	if !mediaSignalAddShape(track) || !b.additions.allow(now, 1) {
-		return false
+	return b.addReason(now, track) == ""
+}
+func (b *mediaSignalBudget) addReason(now time.Time, track *livekit.AddTrackRequest) string {
+	if !mediaSignalAddShape(track) {
+		return "budget_add_track_shape"
 	}
+	if !b.additions.allow(now, 1) {
+		return "budget_add_track_rate"
+	}
+	return b.addReservationReason(track)
+}
+
+// The caller has already charged the AddTrack rate bucket exactly once.
+func (b *mediaSignalBudget) addReservationReason(track *livekit.AddTrackRequest) string {
 	if prior, ok := b.tracks[track.Cid]; ok {
-		return prior.source == track.Source && (track.Sid == "" || prior.sid == track.Sid)
+		if prior.source != track.Source || (track.Sid != "" && prior.sid != track.Sid) {
+			return "budget_add_track_cid_conflict"
+		}
+		return ""
 	}
 	if track.Sid != "" {
 		for _, prior := range b.tracks {
 			if prior.sid == track.Sid && prior.source == track.Source {
-				return true
+				return ""
 			}
 		}
-		return false
+		return "budget_add_track_sid_unknown"
 	}
 	// Reserve before the provider sees AddTrack. Muting or a caller-supplied
 	// SyncState cannot release a reservation; only a provider unpublish can.
 	if len(b.tracks) >= 4 {
-		return false
+		return "budget_add_track_count"
 	}
 	for _, prior := range b.tracks {
 		if prior.source == track.Source {
-			return false
+			return "budget_add_track_source"
 		}
 	}
 	b.tracks[track.Cid] = mediaSignalTrack{source: track.Source}
-	return true
+	return ""
+}
+
+// One serial client reader may hold one replacement frame while its already
+// forwarded unpublish offer awaits a provider answer. This never releases the
+// old reservation: only the provider path can do that. No native gate or budget
+// mutex is held across the bounded wait, and Forward rechecks native authority
+// after this method returns.
+func (b *mediaSignalBudget) requestAwaitRelease(ctx context.Context, now time.Time, request *livekit.SignalRequest) string {
+	add, ok := request.Message.(*livekit.SignalRequest_AddTrack)
+	if !ok {
+		return b.requestReason(now, request)
+	}
+	b.mu.Lock()
+	reason := b.addReason(now, add.AddTrack)
+	if (reason != "budget_add_track_source" && reason != "budget_add_track_count") || b.replacementPending != nil {
+		b.mu.Unlock()
+		return reason
+	}
+	pending, eligible := b.replacementRelease(add.AddTrack)
+	if !eligible {
+		b.mu.Unlock()
+		return reason
+	}
+	b.replacementPending = pending
+	released := b.released
+	b.mu.Unlock()
+	defer func() {
+		b.mu.Lock()
+		b.replacementPending = nil
+		b.mu.Unlock()
+	}()
+	bounded, cancel := context.WithTimeout(ctx, mediaSignalReleaseWait)
+	defer cancel()
+	for {
+		select {
+		case <-bounded.Done():
+			return reason
+		case <-released:
+		}
+		b.mu.Lock()
+		if bounded.Err() != nil {
+			b.mu.Unlock()
+			return reason
+		}
+		if pending.released {
+			// Revalidate all current count/source/CID/SID constraints, but do
+			// not spend the frame or AddTrack buckets a second time.
+			result := b.addReservationReason(add.AddTrack)
+			b.mu.Unlock()
+			return result
+		}
+		released = b.released
+		b.mu.Unlock()
+	}
+}
+
+// Called only after shape/rate checks. New caller CIDs with no provider SID can
+// replace a fully published source only if the current pending offer explicitly
+// disables its exact known MID. An early duplicate cannot wait for a later offer
+// because doing so would block the serial reader that must receive that offer.
+func (b *mediaSignalBudget) replacementRelease(track *livekit.AddTrackRequest) (*mediaSignalReplacement, bool) {
+	if b.offer == nil || track.Sid != "" {
+		return nil, false
+	}
+	if _, exists := b.tracks[track.Cid]; exists {
+		return nil, false
+	}
+	var offered sdp.SessionDescription
+	if offered.Unmarshal([]byte(b.offer.Sdp)) != nil {
+		return nil, false
+	}
+	for cid, prior := range b.tracks {
+		if prior.source != track.Source || prior.sid == "" || prior.mid == "" {
+			continue
+		}
+		for _, media := range offered.MediaDescriptions {
+			mid, present := media.Attribute("mid")
+			_, inactive := media.Attribute("inactive")
+			if present && mid == prior.mid && (inactive || media.MediaName.Port.Value == 0) {
+				return &mediaSignalReplacement{cid: cid, prior: prior, offer: b.offer}, true
+			}
+		}
+	}
+	return nil, false
+}
+
+// Call only while holding mu and only for a definitive provider release.
+func (b *mediaSignalBudget) releaseTrack(cid string, offer *livekit.SessionDescription) {
+	if pending := b.replacementPending; pending != nil && pending.cid == cid && pending.prior == b.tracks[cid] && (offer == nil || offer == pending.offer) {
+		pending.released = true
+	}
+	delete(b.tracks, cid)
+	close(b.released)
+	b.released = make(chan struct{})
 }
 
 func mediaSignalSDP(description *livekit.SessionDescription) bool {
@@ -240,31 +378,47 @@ func mediaSignalSync(state *livekit.SyncState) bool {
 }
 
 func (b *mediaSignalBudget) request(now time.Time, request *livekit.SignalRequest) bool {
+	return b.requestReason(now, request) == ""
+}
+
+// Closed composite labels identify the protocol operation and refusal branch.
+// They contain no request-derived strings and preserve the existing decisions,
+// short-circuit order and bucket mutations. Empty means the request is allowed.
+func (b *mediaSignalBudget) requestReason(now time.Time, request *livekit.SignalRequest) string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	switch body := request.Message.(type) {
 	case *livekit.SignalRequest_AddTrack:
-		return b.add(now, body.AddTrack)
+		return b.addReason(now, body.AddTrack)
 	case *livekit.SignalRequest_Offer:
-		return b.publisherOffer(body.Offer)
+		return b.publisherOfferReason(body.Offer)
 	case *livekit.SignalRequest_Answer:
-		return body.Answer != nil && mediaSignalSDP(body.Answer)
+		if body.Answer == nil || !mediaSignalSDP(body.Answer) {
+			return "budget_answer_shape"
+		}
 	case *livekit.SignalRequest_SyncState:
-		return mediaSignalSync(body.SyncState)
+		if !mediaSignalSync(body.SyncState) {
+			return "budget_sync_state_shape"
+		}
 	case *livekit.SignalRequest_UpdateLayers:
-		return body.UpdateLayers != nil && mediaSignalLayers(body.UpdateLayers.Layers)
+		if body.UpdateLayers == nil || !mediaSignalLayers(body.UpdateLayers.Layers) {
+			return "budget_update_layers_shape"
+		}
 	case *livekit.SignalRequest_Trickle:
-		return body.Trickle != nil && len(body.Trickle.CandidateInit) <= 4096
+		if body.Trickle == nil || len(body.Trickle.CandidateInit) > 4096 {
+			return "budget_trickle_shape"
+		}
 	case *livekit.SignalRequest_Mute, *livekit.SignalRequest_Subscription, *livekit.SignalRequest_TrackSetting,
 		*livekit.SignalRequest_Leave, *livekit.SignalRequest_SubscriptionPermission,
 		*livekit.SignalRequest_Ping, *livekit.SignalRequest_PingReq,
 		*livekit.SignalRequest_UpdateAudioTrack, *livekit.SignalRequest_UpdateVideoTrack:
-		return true
+		return ""
 	default:
 		// No client metadata mutation, provider simulation, data-track or blob
 		// service is part of Callkey's scoped signalling protocol.
-		return false
+		return "budget_request_unknown"
 	}
+	return ""
 }
 
 func (b *mediaSignalBudget) provider(response *livekit.SignalResponse, identity string) bool {
@@ -301,14 +455,14 @@ func (b *mediaSignalBudget) provider(response *livekit.SignalResponse, identity 
 		}
 		for cid, prior := range b.tracks {
 			if prior.sid == unpublished.TrackSid {
-				delete(b.tracks, cid)
+				b.releaseTrack(cid, nil)
 			}
 		}
 	}
 	if refused := response.GetRequestResponse(); refused != nil && refused.Reason != livekit.RequestResponse_OK && refused.Reason != livekit.RequestResponse_QUEUED {
 		if request := refused.GetAddTrack(); request != nil {
 			if prior, ok := b.tracks[request.Cid]; ok && prior.sid == "" && prior.source == request.Source {
-				delete(b.tracks, request.Cid)
+				b.releaseTrack(request.Cid, nil)
 			}
 		}
 	}
@@ -412,12 +566,18 @@ func (b *mediaSignalBudget) join(now time.Time, query url.Values) bool {
 // provider answer may release a reservation whose prior sending m-section was
 // explicitly disabled. A caller offer or SyncState alone never does so.
 func (b *mediaSignalBudget) publisherOffer(offer *livekit.SessionDescription) bool {
-	if offer == nil || offer.Type != "offer" || !mediaSignalSDP(offer) || b.offer != nil {
-		return false
+	return b.publisherOfferReason(offer) == ""
+}
+func (b *mediaSignalBudget) publisherOfferReason(offer *livekit.SessionDescription) string {
+	if offer == nil || offer.Type != "offer" || !mediaSignalSDP(offer) {
+		return "budget_offer_shape"
+	}
+	if b.offer != nil {
+		return "budget_offer_pending"
 	}
 	var parsed sdp.SessionDescription
 	if parsed.Unmarshal([]byte(offer.Sdp)) != nil {
-		return false
+		return "budget_offer_shape"
 	}
 	for _, media := range parsed.MediaDescriptions {
 		mid, _ := media.Attribute("mid")
@@ -436,7 +596,7 @@ func (b *mediaSignalBudget) publisherOffer(offer *livekit.SessionDescription) bo
 		}
 	}
 	b.offer = proto.Clone(offer).(*livekit.SessionDescription)
-	return true
+	return ""
 }
 func (b *mediaSignalBudget) publisherAnswer(answer *livekit.SessionDescription) {
 	if b.offer == nil || answer.Id != b.offer.Id || answer.Type != "answer" {
@@ -462,7 +622,7 @@ func (b *mediaSignalBudget) publisherAnswer(answer *livekit.SessionDescription) 
 	request, confirmed := disabled(&offered), disabled(&answered)
 	for cid, track := range b.tracks {
 		if track.mid != "" && request[track.mid] && confirmed[track.mid] {
-			delete(b.tracks, cid)
+			b.releaseTrack(cid, offer)
 		}
 	}
 }

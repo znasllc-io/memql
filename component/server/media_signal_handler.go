@@ -276,16 +276,16 @@ func mediaSignalRelay(ctx context.Context, admission *calls.MediaSignalAdmission
 		_ = downstream.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "signalling budget exceeded"), time.Now().Add(time.Second))
 	}
 	downstream.SetPingHandler(func(payload string) error {
-		if !budget.control(time.Now(), len(payload)) {
-			mediaSignalObserve(admission, "client_budget", time.Now(), errors.New("control budget exceeded"))
+		if reason := budget.controlReason(time.Now(), len(payload)); reason != "" {
+			mediaSignalObserve(admission, "client_budget", time.Now(), calls.Refuse(calls.ErrForbidden, reason, ""))
 			refuse()
 			return errors.New("signal control budget exceeded")
 		}
 		return downstream.WriteControl(websocket.PongMessage, []byte(payload), time.Now().Add(time.Second))
 	})
 	downstream.SetPongHandler(func(payload string) error {
-		if !budget.control(time.Now(), len(payload)) {
-			mediaSignalObserve(admission, "client_budget", time.Now(), errors.New("control budget exceeded"))
+		if reason := budget.controlReason(time.Now(), len(payload)); reason != "" {
+			mediaSignalObserve(admission, "client_budget", time.Now(), calls.Refuse(calls.ErrForbidden, reason, ""))
 			refuse()
 			return errors.New("signal control budget exceeded")
 		}
@@ -310,14 +310,23 @@ func mediaSignalRelay(ctx context.Context, admission *calls.MediaSignalAdmission
 				mediaSignalObserve(admission, "client_read", time.Now(), err)
 				return
 			}
-			if !budget.frame(time.Now(), len(data)) {
-				mediaSignalObserve(admission, "client_budget", time.Now(), errors.New("frame budget exceeded"))
+			if reason := budget.frameReason(time.Now(), len(data)); reason != "" {
+				mediaSignalObserve(admission, "client_budget", time.Now(), calls.Refuse(calls.ErrForbidden, reason, ""))
 				refuse()
 				return
 			}
 			var request livekit.SignalRequest
-			if mediaSignalDecode(kind, data, &request) != nil || request.Message == nil || !budget.request(time.Now(), &request) {
-				mediaSignalObserve(admission, "client_budget", time.Now(), errors.New("request shape or budget refused"))
+			reason := "budget_request_decode"
+			if mediaSignalDecode(kind, data, &request) == nil {
+				reason = budget.requestAwaitRelease(ctx, time.Now(), &request)
+			}
+			if reason != "" {
+				// Relay cancellation while waiting is transport cleanup, not
+				// evidence that a still-live client exceeded its source budget.
+				if ctx.Err() != nil {
+					return
+				}
+				mediaSignalObserve(admission, "client_budget", time.Now(), calls.Refuse(calls.ErrForbidden, reason, ""))
 				refuse()
 				return
 			}

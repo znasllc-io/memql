@@ -62,7 +62,12 @@ func mediaSignalFailure(err error) string {
 	case "media_barrier_unavailable", "media_connection_expired", "media_cleanup_pending", "media_connection_limit",
 		"media_admission_invalid", "media_admission_closed", "media_session_closed", "media_account_closed",
 		"media_permissions_changed", "media_permissions_pending", "media_server_unavailable", "media_authority_changed",
-		"media_connection_closed", "media_processing_lease_closed":
+		"media_connection_closed", "media_processing_lease_closed",
+		"budget_control_size", "budget_control_rate", "budget_frame_rate", "budget_frame_bytes",
+		"budget_request_decode", "budget_request_unknown", "budget_add_track_shape", "budget_add_track_rate",
+		"budget_add_track_cid_conflict", "budget_add_track_sid_unknown", "budget_add_track_count", "budget_add_track_source",
+		"budget_offer_shape", "budget_offer_pending", "budget_answer_shape", "budget_sync_state_shape",
+		"budget_update_layers_shape", "budget_trickle_shape":
 		return reason
 	}
 	return "operation_failed"

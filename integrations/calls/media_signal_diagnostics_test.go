@@ -57,3 +57,27 @@ func TestMediaSignalDiagnosticsIgnoresPassiveWaitAndBoundsCounters(t *testing.T)
 	var absent *mediaSignalTrace
 	require.NotPanics(t, func() { absent.record("forward", time.Second, errors.New("ignored")); absent.finish() })
 }
+
+func TestMediaSignalDiagnosticsBudgetLabelsKeepFirstFailureClosed(t *testing.T) {
+	reasons := []string{"budget_control_size", "budget_control_rate", "budget_frame_rate", "budget_frame_bytes", "budget_request_decode", "budget_request_unknown", "budget_add_track_shape", "budget_add_track_rate", "budget_add_track_cid_conflict", "budget_add_track_sid_unknown", "budget_add_track_count", "budget_add_track_source", "budget_offer_shape", "budget_offer_pending", "budget_answer_shape", "budget_sync_state_shape", "budget_update_layers_shape", "budget_trickle_shape"}
+	for _, reason := range reasons {
+		require.Equal(t, reason, mediaSignalFailure(callrules.Refuse(callrules.ErrForbidden, reason, "PRIVATE_DETAIL")))
+		require.Equal(t, "operation_failed", mediaSignalFailure(callrules.Refuse(callrules.ErrForbidden, reason+"_PRIVATE_ID", "PRIVATE_DETAIL")))
+	}
+	var output bytes.Buffer
+	trace := &mediaSignalTrace{logger: slog.New(slog.NewJSONHandler(&output, nil)), started: time.Now()}
+	trace.record("client_budget", 0, callrules.Refuse(callrules.ErrForbidden, "budget_offer_pending", "PRIVATE_SDP"))
+	done := make(chan struct{}, 8)
+	for range 8 {
+		go func() { trace.record("close", time.Millisecond, context.Canceled); trace.finish(); done <- struct{}{} }()
+	}
+	for range 8 {
+		<-done
+	}
+	require.NotContains(t, output.String(), "PRIVATE")
+	require.Equal(t, 1, strings.Count(output.String(), "\n"))
+	var receipt map[string]any
+	require.NoError(t, json.Unmarshal(output.Bytes(), &receipt))
+	require.Equal(t, "client_budget", receipt["first_failure_phase"])
+	require.Equal(t, "budget_offer_pending", receipt["first_failure"])
+}
