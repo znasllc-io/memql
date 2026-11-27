@@ -486,10 +486,13 @@ func TestPresentationDatabaseEntitlementLossRestoresOnlyWorkflowRestriction(t *t
 	cfg, e := decodeUsageConfig(copy.UsageConfig)
 	require.NoError(t, e)
 	cfg.Insights = false
+	cfg.RateVersion = callrules.PreviewRateVersion
+	require.True(t, callrules.ValidCallConfiguration(cfg), "test confirmed entitlement loss, not malformed configuration")
 	raw, e := json.Marshal(cfg)
 	require.NoError(t, e)
 	copy.UsageConfig = string(raw)
-	active, reason := f.cw.svc.presentationEffective(ctx, copy, v)
+	active, reason, e := f.cw.svc.presentationEffective(ctx, copy, v)
+	require.NoError(t, e)
 	require.False(t, active)
 	require.Equal(t, "presentation_insights_unavailable", reason)
 	mode := f.commerce.Mode

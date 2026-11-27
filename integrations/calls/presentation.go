@@ -247,18 +247,28 @@ func (s *Service) reconcilePresentation(ctx context.Context, hint roomRow) error
 		p := v.Presentation
 		workflowInvalidatePresentation(v, s.now())
 		if p.Active {
-			if active, reason := s.presentationEffective(ctx, room, v); !active {
+			active, reason, e := s.presentationEffective(ctx, room, v)
+			if e != nil {
+				return e
+			}
+			if !active {
 				p.Active = false
 				p.Pending = true
 				p.Revision++
 				p.Reason = reason
 			}
 		}
-		if p.Speaker.SeatID != "" && !s.presentationCurrent(ctx, room, p.Speaker) {
-			p.Speaker = presentationAdmission{}
-			p.SpeakerExpiresAt = time.Time{}
-			p.Pending = true
-			p.Revision++
+		if p.Speaker.SeatID != "" {
+			current, e := s.presentationCurrent(ctx, room, p.Speaker)
+			if e != nil {
+				return e
+			}
+			if !current {
+				p.Speaker = presentationAdmission{}
+				p.SpeakerExpiresAt = time.Time{}
+				p.Pending = true
+				p.Revision++
+			}
 		}
 		if p.Applied == nil {
 			p.Applied = map[string]presentationApplied{}

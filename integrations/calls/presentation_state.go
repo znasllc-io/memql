@@ -79,33 +79,86 @@ func (s *Service) presentationAdmission(ctx context.Context, r roomRow, seat sea
 	}
 	return p, base, nil
 }
-func (s *Service) presentationCurrent(ctx context.Context, r roomRow, p presentationAdmission) bool {
+
+// Only concrete native loss releases workflow-owned permissions. A failed read
+// is not evidence that a presenter left or that the account lost entitlement.
+func (s *Service) presentationCurrent(ctx context.Context, r roomRow, p presentationAdmission) (bool, error) {
 	seat, e := s.store.seatByID(ctx, r.OwnerUserID, p.SeatID)
-	if e != nil || seat == nil || !p.matches(*seat) {
-		return false
+	if e != nil {
+		return false, e
+	}
+	if seat == nil || !p.matches(*seat) {
+		return false, nil
+	}
+	if p.ResourceID != "" {
+		// An owner-revoked resource has no browser session to inspect. Its
+		// exact durable lease proves loss, while an unreadable resource row
+		// remains unknown. DeleteIngress completion is still independently
+		// required by presentationResourcesMatch before any new presenter.
+		d, e := s.store.resourceState(ctx, r.OwnerUserID, r.SiteID, seat.KeyID)
+		if e != nil {
+			return false, e
+		}
+		current := false
+		for _, lease := range d.State.Leases {
+			if lease.ID == p.LeaseID && lease.ResourceID == p.ResourceID && lease.RoomID == r.ID && lease.SeatID == p.SeatID && lease.Identity == p.Identity {
+				current = (lease.Status == "awaiting_source" || lease.Status == "publishing") && s.now().Before(lease.ExpiresAt)
+				break
+			}
+		}
+		if !current {
+			return false, nil
+		}
 	}
 	current, _, e := s.presentationAdmission(ctx, r, *seat)
-	return e == nil && current.ResourceID == p.ResourceID && current.LeaseID == p.LeaseID
+	if e != nil {
+		switch callrules.ReasonOf(e) {
+		case "presentation_admission_changed", "presentation_resource_changed", "media_admission_closed", "media_session_closed", "media_account_closed", "delegation_inactive", "delegation_scope", "agent_acceptance_required", "agent_approval_changed", "agent_review_expired", "agent_review_closed", "agent_admission_closed":
+			return false, nil
+		default:
+			// In particular media_session_unavailable can mean an inconsistent
+			// inventory, not a proven departure. Unknown/corrupt state stays closed.
+			return false, e
+		}
+	}
+	return current.ResourceID == p.ResourceID && current.LeaseID == p.LeaseID, nil
 }
-func (s *Service) presentationEffective(ctx context.Context, r roomRow, v *workflowState) (bool, string) {
+func (s *Service) presentationEffective(ctx context.Context, r roomRow, v *workflowState) (bool, string, error) {
 	if v == nil || v.Run == nil || v.Presentation == nil || !v.Presentation.Active {
-		return false, ""
+		return false, "", nil
 	}
 	p := v.Presentation
 	if p.RunID != v.Run.ID || p.VisitID != v.Run.VisitID || workflowTerminal(v.Run) {
-		return false, "presentation_visit_finished"
+		return false, "presentation_visit_finished", nil
 	}
 	n, ok := callrules.WorkflowNodeByID(v.Run.Definition, v.Run.NodeID)
 	if !ok || n.Type != "presentation" {
-		return false, "presentation_visit_finished"
+		return false, "presentation_visit_finished", nil
 	}
 	if e := s.workflowEntitlement(ctx, callrules.SiteRef{SiteID: r.SiteID, OwnerUserID: r.OwnerUserID}, r); e != nil {
-		return false, "presentation_insights_unavailable"
+		switch callrules.ReasonOf(e) {
+		case "workflow_insights_required":
+			// The shared admission refusal also covers malformed configuration.
+			// Only a successfully decoded configuration proves entitlement loss.
+			if _, decodeErr := decodeUsageConfig(r.UsageConfig); decodeErr != nil {
+				return false, "", decodeErr
+			}
+		case "workflow_family_unavailable", "workflow_call_deadline", "commerce_disabled", "adult_verification_required", "age_requirement_not_met", "payment_review_required", "provider_mode_changed":
+		default:
+			// A transient commerce read, unknown inventory or stale operator
+			// envelope cannot widen a durable policy or start a competing source.
+			return false, "", e
+		}
+		return false, "presentation_insights_unavailable", nil
 	}
-	if !s.presentationCurrent(ctx, r, p.Presenter) {
-		return false, "presentation_presenter_unavailable"
+	current, e := s.presentationCurrent(ctx, r, p.Presenter)
+	if e != nil {
+		return false, "", e
 	}
-	return true, ""
+	if !current {
+		return false, "presentation_presenter_unavailable", nil
+	}
+	return true, "", nil
 }
 func workflowInvalidatePresentation(v *workflowState, now time.Time) {
 	p := v.Presentation
@@ -263,7 +316,10 @@ func (s *Service) currentMediaGrant(ctx context.Context, r roomRow, b mediaSigna
 	if e != nil {
 		return base, e
 	}
-	active, _ := s.presentationEffective(ctx, r, v)
+	active, _, e := s.presentationEffective(ctx, r, v)
+	if e != nil {
+		return callrules.GrantSpec{}, e
+	}
 	if !active {
 		return base, nil
 	}
@@ -286,7 +342,11 @@ func (s *Service) presentationResourceStartAllowed(ctx context.Context, r roomRo
 	if e != nil {
 		return e
 	}
-	if active, _ := s.presentationEffective(ctx, r, v); active {
+	active, _, e := s.presentationEffective(ctx, r, v)
+	if e != nil {
+		return e
+	}
+	if active {
 		return accountRefusal("presentation_stop_other_resources")
 	}
 	return nil
