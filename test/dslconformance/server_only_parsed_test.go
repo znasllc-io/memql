@@ -208,6 +208,18 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "calls/mutations.memql", Name: "saveCallsProcessing"}:         true,
 		{Path: "calls/mutations.memql", Name: "saveCallsProcessingReceipt"}:  true,
 		{Path: "calls/mutations.memql", Name: "saveCallsProcessingRate"}:     true,
+		// Row ownership cannot prove the exact current seat/session/delegation or
+		// settle a provider handshake. Only the native guard may read the private
+		// session binding and fence pending/active signalling intent transitions;
+		// exposing these writes would let a caller erase unresolved admission work.
+		{Path: "calls/queries.memql", Name: "callsMediaSignalsById"}:     true,
+		{Path: "calls/queries.memql", Name: "callsMediaSessionsForSeat"}: true,
+		{Path: "calls/mutations.memql", Name: "saveCallsMediaSignals"}:   true,
+		// A borrowed site-owner actor is not the observed subject's consent or
+		// a current admitted recipient. Native gates bind exact parties, consent
+		// revision, withdrawal and replay order before an ephemeral media send.
+		{Path: "calls/queries.memql", Name: "callsObservationById"}:   true,
+		{Path: "calls/mutations.memql", Name: "saveCallsObservation"}: true,
 		// Application message authorization is an occupying admission and exact
 		// sequence, not deployable ownership. These private batches must not leak
 		// other participants' credentials, grants, sessions or keyed body receipts;

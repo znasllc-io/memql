@@ -31,6 +31,11 @@ var stayingKinds = map[string]string{
 	"v1:calls:reportCase":          "signin",
 	"v1:calls:reportAccessAudit":   "signin",
 	"v1:calls:agentPortrait":       "signin",
+	// Media handshake barriers and observation consent/replay state are bound
+	// to this cluster's current admissions and authority. Export/import must not
+	// reset unresolved handshakes or carry another session's consent forward.
+	"v1:calls:mediaSignalState": "signin",
+	"v1:calls:observationState": "signin",
 	// A credential is bound to this deployable origin and stays with sign-in authority.
 	"v1:calls:credential": "signin",
 	// Provider receipts and standing agent authority are bound to this account,
