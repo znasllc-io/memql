@@ -10,8 +10,9 @@ owner: znas
 # Callkey 0.32.1 release preparation
 
 This patch fixes creation of a pending media signalling intent after slow native
-admission and adds bounded diagnostics for the remaining production connection
-failure. It is release preparation, not a publication or deployment receipt.
+admission, preserves presenter restrictions when authority reads fail, and adds
+bounded diagnostics for the remaining production connection failure. It is
+release preparation, not a publication or deployment receipt.
 Cut and publish the exact verified source through the
 [native release workflow](../../public/operate/release-cutting.md), then verify
 the signed artifacts before selecting the installation update.
@@ -65,6 +66,16 @@ deadline after several packages passed. Its incomplete output establishes neithe
 CPU contention nor a hung test. Each package retains its 600-second bound, and
 the step's command, memory and CPU settings are unchanged. The final native run
 must succeed; a larger bound alone is not verification.
+
+Presenter reconciliation now distinguishes proven departure or entitlement loss
+from an unreadable native account, seat, resource or media-session inventory.
+An unknown read refuses signalling confirmation, forwarding and competing
+resource admission without widening provider permissions or changing the durable
+presenter policy. Known presenter departure, resource revocation, visit completion
+and valid Insights loss still release only workflow-owned restrictions. The
+combined isolated-database Presentation and MediaSignal regression passed all
+35 top-level tests with no skips. This includes an exact preceding-source
+regression that failed before the repair; it is not deployed-browser evidence.
 
 No database migration, public API shape, UTCP version or SDK version changes are
 required by these changes. Review the final source delta, preserve every failed
