@@ -1,34 +1,37 @@
 package calls
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	callrules "github.com/znasllc-io/memql/component/calls"
+	contentid "github.com/znasllc-io/memql/core/id"
 )
 
 // Published versions are pinned by approvals/bookings. New built-in behavior
 // must not silently rewrite any of the fourteen definitions already released.
+// These content fingerprints were migrated from the fourteen SHA-256 goldens
+// at 830d707bc only after every original golden matched the unchanged canonical
+// definition bytes, independently verified in Go and Python. No catalog content
+// was regenerated or changed when adopting the repository's core/id primitive.
 func TestWorkflowCatalogPreservesPublishedV1Definitions(t *testing.T) {
 	want := map[string]string{
-		"working-session":     "452919d921da55062f4668d077c138a1a725ec111b77a4877b1f57293e09d26f",
-		"one-on-one":          "c9b35225a8b23db882aef3897f325330e6b0d70c4412f4b79e522cabed342a3d",
-		"interview":           "7cdaa878b06ab0f39f14af6f24bd4be040742c1ee8daed9f47763ffd89cf10a8",
-		"presentation":        "8ea2884d04ef52a68e94a46eaf7e6d87e0693a000a814c08ff33474b996b8646",
-		"panel":               "d3bbea81cd7d651c248df9cadbda8fa538af2b3bc3d820ee4ed1f825a272ecc8",
-		"standup":             "ce5a55deb507a11b31ad87c4907245a74dc67500239893e689ed892cbdbcdc95",
-		"retrospective":       "10ecfafbe30667fadd0ade9940ac5f80e100857a38162eff498d97c0761e8992",
-		"planning":            "348475ea8e538640da2dce2fa711738dd4d30c2523e51ce0fdf81a029a963088",
-		"pair-programming":    "ba943b73b0a7afaf6f065f4fd4aa1d0ee89e5f17df9724223ac2fa27addb3877",
-		"study-group":         "4692ed8b2b87cb18e633ce9a3e87f850ea91e971ec016e89e757ce81360dd48b",
-		"tutoring":            "18c7dfb0c33a75a5879c68f7232825c7176280ec784b400adfdd80a2f956f600",
-		"supervised-learning": "5da7bc82b680750dd164da17986f0534946b718aacf4d0ba968cfa85acba8b77",
-		"office-hours":        "92eb5a39ba67ee75c2e05e4c98ea117de9b0ed998aab8f46390c7b9fd19b2db0",
-		"demonstration":       "644bfc5508001050ff68e4bb83a507062745b7cd1dc8364d2abb23f660441080",
+		"working-session":     "23276ac2a28545a7e5b274a3eeebb5c45b4a6db28cd697e3b0ba74df1d63454c",
+		"one-on-one":          "e1f69323c945d81955d45a0c67f384261ec9305b0edd83e8b2037662c1d2d010",
+		"interview":           "3c17ee057dbe034696eb2cf5c63c2c1df18843bbc0835bec70d9607b9b58efac",
+		"presentation":        "c59514c6d4b5683a9b383bbec380d0bc463fc3523fbc560f3fbffd6f0f949c12",
+		"panel":               "4db8bbe577498f2d4c044d7c3ed7834bd5b44c7afde9de6dffcdf5e985f2140d",
+		"standup":             "6e81f28db69b3fe881b1e614c4dd136c6b8d42a0ef5f04abba7a534da5733cf5",
+		"retrospective":       "f6077787ab65e33093dbab2abc3c208cb5692b677f72b311c93564c93941d89d",
+		"planning":            "af94070110b7ff12a0a02ed809ec0501d44e33d4976f5849dedf31602f15957e",
+		"pair-programming":    "17c7cc5f08b676e67b743bfbe0a820b69d4fced2d4f193317cfd0557dbe253e2",
+		"study-group":         "af713503e33d08206677ef4afbf18279ff45a4256e6927bf9b183d15cf28ffbf",
+		"tutoring":            "a4f51ec9e632ac76feb83a9220c0a155ad375ffe568621c9d63fc5a14f3162fb",
+		"supervised-learning": "e813d372c5d57b0f6da5562bf74768c358da2637d484d11ca3fb186e9b9f47dc",
+		"office-hours":        "a17250ea7c6f000a14fc762e2aa15e7c8765b14e9402b9de7d78f2aec4f208e5",
+		"demonstration":       "fee3eebf96dbb32dbbc33383bc192019aff00f8dbcb81a679256df287d0b497f",
 	}
 	var records []map[string]any
 	require.NoError(t, json.Unmarshal(workflowCatalogJSON, &records))
@@ -39,8 +42,8 @@ func TestWorkflowCatalogPreservesPublishedV1Definitions(t *testing.T) {
 		}
 		canonical, err := json.Marshal(record)
 		require.NoError(t, err)
-		digest := sha256.Sum256(canonical)
-		require.Equal(t, want[id], hex.EncodeToString(digest[:]), id+" v1 changed")
+		digest := contentid.New().FromString(string(canonical))
+		require.Equal(t, want[id], string(digest), id+" v1 changed")
 		delete(want, id)
 	}
 	require.Empty(t, want, "no previously published built-in may disappear")

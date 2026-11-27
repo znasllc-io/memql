@@ -46,6 +46,10 @@ func TestNoSHA256InIntegrations(t *testing.T) {
 	// -- specifically to remove the unguarded coupling a duplicated hash
 	// expression created, so the entry is gone rather than kept.)
 	allow := map[string]string{
+		"calls/media_signal.go":                  "derives the fixed native-to-Caddy guard credential with the exact SHA-256 byte algorithm also used by local/cloud OpenSSL helpers; core/id would break that authenticated protocol",
+		"calls/media_signal_auth.go":             "signs and verifies the native media admission proof with HMAC-SHA256; core/id is not a keyed cryptographic authentication primitive",
+		"calls/media_permissions_live_test.go":   "independently derives the fixed native-to-Caddy SHA-256 guard credential for real-provider permission and reconnect tests",
+		"calls/media_capacity_live_db_test.go":   "records standard SHA-256 checksums of exact source and prior receipt bytes for independently verifiable capacity evidence; these are byte-integrity receipts, not identifiers",
 		"calls/providers/webhooks.go":            "Stripe and Didit require HMAC-SHA256 webhook signatures over exact wire bytes; core/id is not the provider signature algorithm",
 		"calls/providers/providers_test.go":      "independently constructs provider HMAC-SHA256 webhook fixtures to test signature, replay and payload verification",
 		"calls/commerce_webhook_test.go":         "constructs Stripe/Didit protocol signatures for native commerce webhook integration tests",
