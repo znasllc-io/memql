@@ -201,6 +201,35 @@ func TestMediaSignalLiveNativeCapacity(t *testing.T) {
 	report["source_sha256"] = sourceDigests
 	report["go_version"] = runtime.Version()
 	headroom, sawEight := false, false
+	// A stopped single-room extension must not prevent a separately bounded
+	// multiroom profile after the operator has reviewed the earlier receipt.
+	// This carries only measured resource headroom, never admission authority.
+	if prior := os.Getenv("MEMQL_TEST_MEDIA_CAPACITY_HEADROOM_RECEIPT"); prior != "" {
+		if filepath.Clean(prior) != prior || filepath.Dir(prior) != "/private/tmp" || !strings.HasPrefix(filepath.Base(prior), "callkey-native-capacity-") || len(selected) != 1 || selected[0] != "2x8" {
+			t.Fatal("prior headroom is only for the bounded independent 2x8 profile")
+		}
+		raw, e := os.ReadFile(prior)
+		require.NoError(t, e)
+		var previous struct {
+			Cases []struct {
+				Case    string  `json:"case"`
+				Passed  bool    `json:"passed"`
+				Cleanup bool    `json:"cleanup_verified"`
+				CPU     float64 `json:"maximum_sampled_media_cpu_percent"`
+				RSS     float64 `json:"maximum_sampled_peer_rss_mib"`
+			} `json:"cases"`
+		}
+		require.NoError(t, json.Unmarshal(raw, &previous))
+		for _, row := range previous.Cases {
+			if row.Case == "1x8" && row.Passed && row.Cleanup && row.CPU > 0 && row.CPU < 100 && row.RSS > 0 && row.RSS < 3072 {
+				headroom = true
+				sawEight = true
+			}
+		}
+		require.True(t, headroom, "prior eight-peer measurement must establish bounded resource headroom")
+		digest := sha256.Sum256(raw)
+		report["prior_headroom_receipt_sha256"] = hex.EncodeToString(digest[:])
+	}
 	writeReceipt := func() {
 		report["cases"] = cases
 		raw, e := json.MarshalIndent(report, "", "  ")
@@ -240,6 +269,20 @@ func TestMediaSignalLiveNativeCapacity(t *testing.T) {
 			handler := httptest.NewServer(server.NewMediaSignalHandler(service))
 			defer handler.Close()
 			manifest := capacityManifest{Case: name, Origin: handler.URL + "/media", Seconds: 10}
+			owned := []string{}
+			// Registered before per-room cleanup so this final readback runs
+			// after deletion hooks even when a failed phase stops progression.
+			t.Cleanup(func() {
+				cleanup, stop := context.WithTimeout(context.Background(), 10*time.Second)
+				defer stop()
+				left, e := control.ListRooms(cleanup, &livekit.ListRoomsRequest{Names: owned})
+				row["cleanup_verified"] = e == nil && len(left.GetRooms()) == 0
+				if row["cleanup_verified"] != true {
+					t.Error("final capacity room cleanup readback failed")
+				}
+				row["passed"] = !t.Failed()
+				writeReceipt()
+			})
 			for roomIndex := 0; roomIndex < shape[0]; roomIndex++ {
 				account := first
 				if roomIndex > 0 {
@@ -249,6 +292,7 @@ func TestMediaSignalLiveNativeCapacity(t *testing.T) {
 				quoted := commerceDo(t, cw, account, callrules.AccountRequest{Action: "quote_call", ParticipantLimit: shape[1], DurationMinutes: 10})
 				start, e := cw.svc.Start(ctx, *account.result.Session, callrules.StartBody{Name: "Synthetic capacity host", Confirm: confirmed, QuoteID: quoted.Quote.QuoteID, IdempotencyKey: fmt.Sprintf("native-capacity-start-%d", roomIndex)})
 				require.NoError(t, e)
+				owned = append(owned, start.Call.ID)
 				nativeLocalSignalRoomCleanup(t, control, start.Call.ID)
 				room := capacityRoom{Room: start.Call.ID, Peers: []capacityPeer{{start.Join.Identity, start.Join.Pass}}}
 				for index := 1; index < shape[1]; index++ {
