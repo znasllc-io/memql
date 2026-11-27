@@ -142,6 +142,8 @@ func TestMediaPermissionsPinnedLocalNarrowRestoreAndReentry(t *testing.T) {
 	var received atomic.Int64
 	observation := make(chan lksdk.DataReceiveParams, 2)
 	var nonrecipientPackets atomic.Int64
+	var delayedScreenWindow atomic.Bool
+	var delayedScreenReceived atomic.Int64
 	connect := func() *lksdk.Room {
 		t.Helper()
 		callbacks := lksdk.NewRoomCallback()
@@ -180,6 +182,22 @@ func TestMediaPermissionsPinnedLocalNarrowRestoreAndReentry(t *testing.T) {
 	client := connect()
 	defer func() { client.Disconnect() }()
 	observerCallbacks := lksdk.NewRoomCallback()
+	observerCallbacks.OnTrackSubscribed = func(track *webrtc.TrackRemote, publication *lksdk.RemoteTrackPublication, _ *lksdk.RemoteParticipant) {
+		if publication.Source() != livekit.TrackSource_SCREEN_SHARE {
+			return
+		}
+		go func() {
+			_ = track.SetReadDeadline(time.Now().Add(80 * time.Second))
+			for {
+				if _, _, e := track.ReadRTP(); e != nil {
+					return
+				}
+				if delayedScreenWindow.Load() {
+					delayedScreenReceived.Add(1)
+				}
+			}
+		}()
+	}
 	observerCallbacks.OnDataReceived = func(_ []byte, params lksdk.DataReceiveParams) {
 		if params.Topic == callrules.ObservationProtocol {
 			nonrecipientPackets.Add(1)
@@ -284,6 +302,65 @@ func TestMediaPermissionsPinnedLocalNarrowRestoreAndReentry(t *testing.T) {
 	}
 	if err := publish(livekit.TrackSource_MICROPHONE); err != nil {
 		t.Fatal("allowed microphone publication failed")
+	}
+	awaitTracks([]livekit.TrackSource{livekit.TrackSource_MICROPHONE})
+	// AddTrack is acknowledged while broad authority is valid, but withhold
+	// every screen RTP packet until after narrowing and its provider readback.
+	// This exercises a queued publication, not merely a later AddTrack refusal.
+	delayedScreen, e := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8, ClockRate: 90000}, "delayed-screen", "fixture")
+	if e != nil {
+		t.Fatal("delayed screen fixture creation failed")
+	}
+	delayedPublication, e := client.LocalParticipant.PublishTrack(delayedScreen, &lksdk.TrackPublicationOptions{Source: livekit.TrackSource_SCREEN_SHARE, Name: "delayed screen fixture"})
+	if e != nil {
+		t.Fatal("broad-authority delayed AddTrack acknowledgement failed")
+	}
+	awaitTracks([]livekit.TrackSource{livekit.TrackSource_MICROPHONE})
+	current.Store(&narrow)
+	if _, e := permissions.UpdatePermissions(ctx, room, identity, narrow); e != nil {
+		t.Fatal("delayed screen permission narrowing/readback failed")
+	}
+	delayedScreenWindow.Store(true)
+	delayedStop := make(chan struct{})
+	defer func() { delayedScreenWindow.Store(false) }()
+	go func() {
+		ticker := time.NewTicker(20 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-streamCtx.Done():
+				return
+			case <-delayedStop:
+				return
+			case <-ticker.C:
+				_ = delayedScreen.WriteSample(media.Sample{Data: blackFrame, Duration: 20 * time.Millisecond})
+			}
+		}
+	}()
+	defer func() {
+		select {
+		case <-delayedStop:
+		default:
+			close(delayedStop)
+		}
+	}()
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
+		if contains(readParticipant(), livekit.TrackSource_SCREEN_SHARE) {
+			t.Fatal("queued screen appeared in provider inventory after narrowed permission readback")
+		}
+		if delayedScreenReceived.Load() != 0 {
+			t.Fatal("queued screen reached a subscriber after narrowed permission readback")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	close(delayedStop)
+	delayedScreenWindow.Store(false)
+	_ = client.LocalParticipant.UnpublishTrack(delayedPublication.SID())
+	awaitTracks([]livekit.TrackSource{livekit.TrackSource_MICROPHONE})
+	t.Log("queued AddTrack followed by narrowing and delayed screen RTP produced no observed screen inventory or subscriber RTP over 2 seconds")
+	current.Store(&full)
+	if _, e := permissions.UpdatePermissions(ctx, room, identity, full); e != nil {
+		t.Fatal("delayed screen fixture permission restoration failed")
 	}
 	if err := publish(livekit.TrackSource_SCREEN_SHARE); err != nil {
 		t.Fatal("initial screen publication failed")
