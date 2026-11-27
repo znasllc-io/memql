@@ -32,7 +32,9 @@ An upstream write has a five-second bound; the transport must honour its context
 
 Before forwarding, Begin persists a pending intent in `mediaSignalState`. A
 definitive upstream success must be confirmed before its initial response is
-released to the client. The initial handshake has 20 seconds. Confirmed sockets
+released to the client. The pending handshake has 20 seconds from intent creation,
+after admission reads and gate waits. Its creation and expiry share one timestamp,
+so slow admission cannot persist an already-invalid journal entry. Confirmed sockets
 have a 30-second lease, renewed by a native check at least every ten seconds.
 Current native authority remains required independently of either lease.
 
@@ -134,9 +136,11 @@ confirmed, including leases whose seats already departed. A live policy refuses
 new competing resource starts/switches. Existing selected-lease retries remain
 idempotent. This release does not provide an atomic combined stop-and-handoff.
 
-Regression evidence is in `media_signal_test.go` and `media_signal_db_test.go`:
-signed binding tampering, stale session/credential/grant and consented worker
-authority, managed resource leases, overlapping resume, in-flight revocation,
+Regression evidence is in `media_signal_test.go`, `media_signal_db_test.go` and
+`media_signal_epoch_db_test.go`: delayed admission preserves a readable pending
+journal and the exact 20-second forwarding bound; signed binding tampering, stale
+session/credential/grant and consented worker authority, managed resource leases,
+overlapping resume, in-flight revocation,
 late handshakes, replica recovery, journal bounds, provider failures and native
 permission readback. Transport bypass closure and actual LiveKit/browser
 acceptance are separate checks; native tests alone do not establish those facts.
