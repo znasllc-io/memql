@@ -965,3 +965,31 @@ func TestTheComposeFileIsValid(t *testing.T) {
 		t.Errorf("docker compose accepted compose.yaml with none of the MEDIA_* values set:\n%s", out)
 	}
 }
+
+func TestMediaLocalUpRetainsExplicitProviderSignalLimits(t *testing.T) {
+	f := newMediaFixture(t)
+	result, _, code := f.run(t, "local-up.sh", f.upArgs(f.dockerStub(), "--wait-seconds=0")...)
+	if code != 0 || !result.OK {
+		t.Fatal("local media render failed")
+	}
+	var config struct {
+		Limit map[string]int `yaml:"limit"`
+	}
+	if err := yaml.Unmarshal([]byte(readFile(t, filepath.Join(f.stateDir, "livekit.yaml"))), &config); err != nil {
+		t.Fatal(err)
+	}
+	for key, expected := range map[string]int{
+		"subscription_limit_video":        10,
+		"signal_message_size_limit":       1048576,
+		"max_api_request_body_size":       1048576,
+		"max_metadata_size":               4096,
+		"max_attributes_size":             4096,
+		"max_participant_name_length":     128,
+		"max_participant_identity_length": 128,
+		"max_room_name_length":            128,
+	} {
+		if config.Limit[key] != expected {
+			t.Fatalf("provider bound %s=%d, want %d", key, config.Limit[key], expected)
+		}
+	}
+}

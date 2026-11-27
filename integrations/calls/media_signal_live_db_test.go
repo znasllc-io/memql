@@ -37,6 +37,18 @@ func nativeLocalSignalOptIn(t *testing.T) (MediaCredential, *lksdk.RoomServiceCl
 	if err != nil || dsn.Host != "127.0.0.1:55432" || !strings.HasPrefix(dsn.Path, "/callkey_media_guard_") {
 		t.Fatal("native media qualification requires its named isolated local test database")
 	}
+	credential := nativeLocalSignalCredential(t, false)
+	return credential, lksdk.NewRoomServiceClient("http://127.0.0.1:7880", credential.Key, credential.Secret)
+}
+
+// Read only the reviewed local fixture's provider keys; never expose token or
+// credential values in test output. The separate webhook key is also a provider
+// refresh signer in pinned LiveKit (getFirstKeyPair iterates its configured map).
+func nativeLocalSignalCredential(t *testing.T, webhook bool) MediaCredential {
+	t.Helper()
+	if os.Getenv("MEMQL_TEST_MEDIA_NATIVE_LOCAL") != "1" {
+		t.Fatal("explicit local media fixture opt-in required")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	raw, err := exec.CommandContext(ctx, "kubectl", "--context", "k3d-memql", "-n", "memql", "get", "secret", "memql-calls-media", "-o", "json").Output()
@@ -60,10 +72,13 @@ func nativeLocalSignalOptIn(t *testing.T) (MediaCredential, *lksdk.RoomServiceCl
 		t.Fatal("refusing nonlocal media configuration")
 	}
 	credential := MediaCredential{Key: read(EnvMediaAPIKey), Secret: read(EnvMediaAPISecret)}
+	if webhook {
+		credential = MediaCredential{Key: read(EnvMediaWebhookKey), Secret: read(EnvMediaWebhookSecret)}
+	}
 	if credential.Key == "" || credential.Secret == "" {
 		t.Fatal("local media credentials missing")
 	}
-	return credential, lksdk.NewRoomServiceClient("http://127.0.0.1:7880", credential.Key, credential.Secret)
+	return credential
 }
 
 func nativeLocalSignalConfigure(t *testing.T, cw *callWorld, credential MediaCredential) {
@@ -75,6 +90,10 @@ func nativeLocalSignalConfigure(t *testing.T, cw *callWorld, credential MediaCre
 	}
 	if cw.svc.store.sealSecret(ctx, SecretMediaBootstrap, sealed, "isolated local signalling fixture") != nil {
 		t.Fatal("fixture credential sealing failed")
+	}
+	webhook, err := nativeLocalSignalCredential(t, true).seal()
+	if err != nil || cw.svc.store.sealSecret(ctx, SecretMediaWebhook, webhook, "isolated local signalling fixture webhook") != nil {
+		t.Fatal("fixture webhook credential sealing failed")
 	}
 	configured, err := cw.svc.store.MediaServerByID(ctx, BootstrapMediaServerID)
 	require.NoError(t, err)
@@ -167,7 +186,14 @@ func nativeSignalRefreshedToken(t *testing.T, connection *websocket.Conn, creden
 			if e != nil {
 				t.Fatal("provider refreshed token malformed")
 			}
-			if _, _, e = verifier.Verify(credential.Secret); e != nil {
+			signing := credential
+			if verifier.APIKey() != signing.Key {
+				signing = nativeLocalSignalCredential(t, true)
+			}
+			if verifier.APIKey() != signing.Key {
+				t.Fatal("provider refreshed token used an unregistered local issuer")
+			}
+			if _, _, e = verifier.Verify(signing.Secret); e != nil {
 				t.Fatal("provider refreshed token signature invalid")
 			}
 			return token

@@ -50,7 +50,7 @@ func (h *mediaSignalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	// Route mounts are exact; reconstruct the provider suffix without accepting
 	// caller-supplied destinations, encoded separators or body/form credentials.
-	if r.Method != http.MethodGet || path == "" || r.URL.RawPath != "" || len(r.URL.RawQuery) > mediaSignalLimit || r.ContentLength != 0 || h.service == nil {
+	if r.Method != http.MethodGet || path == "" || r.URL.RawPath != "" || len(r.URL.RawQuery) > mediaSignalQueryLimit || r.ContentLength != 0 || h.service == nil {
 		http.NotFound(w, r)
 		return
 	}
@@ -68,6 +68,11 @@ func (h *mediaSignalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		token = bearer
 	}
 	if token == "" || len(token) > 16384 || len(q["access_token"]) > 1 {
+		http.NotFound(w, r)
+		return
+	}
+	budget := newMediaSignalBudget(time.Now())
+	if !budget.join(time.Now(), q) {
 		http.NotFound(w, r)
 		return
 	}
@@ -167,9 +172,27 @@ func (h *mediaSignalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	definitive = true
+	var initial livekit.SignalResponse
+	if mediaSignalDecode(kind, first, &initial) != nil || !budget.provider(&initial, admission.Identity) {
+		http.NotFound(w, r)
+		return
+	}
 	if err = admission.Confirm(ctx); err != nil {
 		http.NotFound(w, r)
 		return
+	}
+	// The pinned provider sends its own authoritative participant inventory
+	// immediately after ReconnectResponse. Read that bounded inventory before
+	// releasing the socket, so a resume cannot reset the negotiation count for
+	// already published tracks. Unknown pending publications remain a separate
+	// provider/native durability constraint; client SyncState is never authority.
+	var buffered []mediaSignalFrame
+	if initial.GetReconnect() != nil {
+		buffered, err = mediaSignalResumeInventory(upstream, budget, admission.Identity)
+		if err != nil || admission.Forward(ctx, func(context.Context) error { return nil }) != nil {
+			http.NotFound(w, r)
+			return
+		}
 	}
 	_ = upstream.SetReadDeadline(time.Time{})
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
@@ -183,7 +206,12 @@ func (h *mediaSignalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if downstream.WriteMessage(kind, first) != nil {
 		return
 	}
-	mediaSignalRelay(r.Context(), admission, downstream, upstream)
+	for _, frame := range buffered {
+		if downstream.WriteMessage(frame.kind, frame.data) != nil {
+			return
+		}
+	}
+	mediaSignalRelay(r.Context(), admission, downstream, upstream, budget)
 }
 
 func mediaSignalInitial(kind int, data []byte, room, identity string) bool {
@@ -208,9 +236,26 @@ func mediaSignalDecode(kind int, data []byte, message proto.Message) error {
 	}
 }
 
-func mediaSignalRelay(ctx context.Context, admission *calls.MediaSignalAdmission, downstream, upstream *websocket.Conn) {
+func mediaSignalRelay(ctx context.Context, admission *calls.MediaSignalAdmission, downstream, upstream *websocket.Conn, budget *mediaSignalBudget) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	refuse := func() {
+		_ = downstream.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "signalling budget exceeded"), time.Now().Add(time.Second))
+	}
+	downstream.SetPingHandler(func(payload string) error {
+		if !budget.control(time.Now(), len(payload)) {
+			refuse()
+			return errors.New("signal control budget exceeded")
+		}
+		return downstream.WriteControl(websocket.PongMessage, []byte(payload), time.Now().Add(time.Second))
+	})
+	downstream.SetPongHandler(func(payload string) error {
+		if !budget.control(time.Now(), len(payload)) {
+			refuse()
+			return errors.New("signal control budget exceeded")
+		}
+		return nil
+	})
 	var writes sync.Mutex
 	forward := func(operation func(context.Context) error) error {
 		writes.Lock()
@@ -227,8 +272,13 @@ func mediaSignalRelay(ctx context.Context, admission *calls.MediaSignalAdmission
 			if err != nil {
 				return
 			}
+			if !budget.frame(time.Now(), len(data)) {
+				refuse()
+				return
+			}
 			var request livekit.SignalRequest
-			if mediaSignalDecode(kind, data, &request) != nil || request.Message == nil {
+			if mediaSignalDecode(kind, data, &request) != nil || request.Message == nil || !budget.request(time.Now(), &request) {
+				refuse()
 				return
 			}
 			if forward(func(ctx context.Context) error {
@@ -245,6 +295,11 @@ func mediaSignalRelay(ctx context.Context, admission *calls.MediaSignalAdmission
 		for {
 			kind, data, err := upstream.ReadMessage()
 			if err != nil {
+				return
+			}
+			var response livekit.SignalResponse
+			if mediaSignalDecode(kind, data, &response) != nil || !budget.provider(&response, admission.Identity) {
+				refuse()
 				return
 			}
 			_ = downstream.SetWriteDeadline(time.Now().Add(5 * time.Second))
@@ -275,4 +330,43 @@ func mediaSignalRelay(ctx context.Context, admission *calls.MediaSignalAdmission
 	cancel()
 	downstream.Close()
 	upstream.Close()
+}
+
+type mediaSignalFrame struct {
+	kind int
+	data []byte
+}
+
+func mediaSignalResumeInventory(upstream *websocket.Conn, budget *mediaSignalBudget, identity string) ([]mediaSignalFrame, error) {
+	var frames []mediaSignalFrame
+	size := 0
+	for len(frames) < 16 {
+		kind, data, err := upstream.ReadMessage()
+		if err != nil {
+			return nil, err
+		}
+		size += len(data)
+		if size > mediaSignalLimit {
+			break
+		}
+		var response livekit.SignalResponse
+		if mediaSignalDecode(kind, data, &response) != nil || !budget.provider(&response, identity) {
+			break
+		}
+		frames = append(frames, mediaSignalFrame{kind, data})
+		if update := response.GetUpdate(); update != nil {
+			for _, participant := range update.Participants {
+				if participant.Identity == identity {
+					budget.mu.Lock()
+					accepted := budget.seed(participant)
+					budget.mu.Unlock()
+					if accepted {
+						return frames, nil
+					}
+					return nil, errors.New("resume publication inventory exceeds envelope")
+				}
+			}
+		}
+	}
+	return nil, errors.New("resume publication inventory unavailable")
 }

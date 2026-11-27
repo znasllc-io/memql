@@ -95,6 +95,17 @@ room:
 # pending is a participant nobody hears.
 limit:
   subscription_limit_video: 10
+  # Defence in depth behind the fixed native signalling guard. The provider's
+  # num_tracks and bytes_per_sec fields only refuse node admission at sampled
+  # aggregate thresholds; they are NOT per-publisher RTP policers. Do not claim
+  # that either enforces the cooperative encoder quality/bitrate settings above.
+  signal_message_size_limit: 1048576
+  max_api_request_body_size: 1048576
+  max_metadata_size: 4096
+  max_attributes_size: 4096
+  max_participant_name_length: 128
+  max_participant_identity_length: 128
+  max_room_name_length: 128
 
 # The server's own TURN server, whose address and credentials LiveKit hands a
 # participant when it joins with a pass (the credentials are derived from the API secret
