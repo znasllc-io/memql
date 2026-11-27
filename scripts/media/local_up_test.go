@@ -472,6 +472,68 @@ func TestLocalUpRendersTheMediaServer(t *testing.T) {
 	}
 }
 
+// An ordinary later media-up must retain the explicitly enabled owner-side
+// publisher, including its WHIP address and private shared network namespace.
+// This uses only fake Docker/kubectl; it never starts a real ingress pipeline.
+func TestLocalUpRetainsConfiguredIngressBehindTheSignalGuard(t *testing.T) {
+	f := newMediaFixture(t)
+	for index, extra := range [][]string{{"--ingress=true", "--wait-seconds=0"}, {"--wait-seconds=0"}} {
+		env, _, code := f.run(t, "local-up.sh", f.upArgs(f.dockerStub(), extra...)...)
+		if code != 0 || !env.OK {
+			t.Fatalf("ingress render %d failed: exit=%d", index, code)
+		}
+		var cfg struct {
+			Ingress struct {
+				WHIPBaseURL string `yaml:"whip_base_url"`
+			} `yaml:"ingress"`
+		}
+		if err := yaml.Unmarshal([]byte(readFile(t, filepath.Join(f.stateDir, "livekit.yaml"))), &cfg); err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Ingress.WHIPBaseURL != "http://127.0.0.1:18080/whip" {
+			t.Fatal("configured local WHIP address was lost")
+		}
+		if mode(t, filepath.Join(f.stateDir, "ingress.yaml")) != 0o600 {
+			t.Fatal("ingress credentials are not private")
+		}
+		if !strings.Contains(readFile(t, filepath.Join(f.stateDir, "ingress.yaml")), "ws_url: ws://127.0.0.1:7880") {
+			t.Fatal("trusted ingress lost its private LiveKit namespace address")
+		}
+		if !strings.Contains(readFile(t, f.dockerLog), "--file "+filepath.Join(f.root, "deploy", "media", "compose.ingress.yaml")) {
+			t.Fatal("configured ingress overlay was omitted")
+		}
+		if !strings.Contains(readFile(t, filepath.Join(f.stateDir, "Caddyfile")), "header X-MemQL-Media-Signal ") {
+			t.Fatal("ingress retained by omitting the signal guard")
+		}
+		for _, credential := range f.credentials() {
+			if strings.Contains(readFile(t, f.dockerLog), credential) {
+				t.Fatal("compose invocation exposed ingress credentials")
+			}
+		}
+		// Check the next invocation independently of the first one's argv.
+		if err := os.WriteFile(f.dockerLog, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var overlay struct {
+		Services map[string]struct {
+			Ports       []string `yaml:"ports"`
+			NetworkMode string   `yaml:"network_mode"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal([]byte(readFile(t, filepath.Join(f.root, "deploy", "media", "compose.ingress.yaml"))), &overlay); err != nil {
+		t.Fatal(err)
+	}
+	if overlay.Services["ingress"].NetworkMode != "service:livekit" {
+		t.Fatal("trusted ingress must share only LiveKit's private network namespace")
+	}
+	for _, port := range []string{"127.0.0.1:18080:8080", "127.0.0.1:7885:7885/udp", "127.0.0.1:18081:8081"} {
+		if !slices.Contains(overlay.Services["livekit"].Ports, port) {
+			t.Fatal("configured loopback ingress port was lost")
+		}
+	}
+}
+
 // TestLocalUpDryRunWritesNothing: a dry run reads the cluster and renders the server's
 // configuration, to prove the Secret and the templates make one, but into a directory of
 // its own that it removes: the rendering carries both key pairs, and a run that reports
