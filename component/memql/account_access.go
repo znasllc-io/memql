@@ -166,6 +166,13 @@ func (s *accountAccessState) placesNewMembers(actor, target string) bool {
 	return BareShortId(s.account.ID) != "self" && s.staff(actor) && !s.staff(target)
 }
 
+// assignsApps: a client account's app list (its ceiling) is cluster staff's
+// to set -- the cluster owner's and, under D6, a cluster developer's. The
+// primary account has no list; a client's own managers only distribute it.
+func (s *accountAccessState) assignsApps(userID string) bool {
+	return BareShortId(s.account.ID) != "self" && s.staff(userID)
+}
+
 func (s *accountAccessState) manager(userID string) auth.AccountRole {
 	if s.clusterOwner(userID) {
 		return auth.AccountOwner
@@ -410,7 +417,7 @@ func (s *accountAccessState) roster(actor string) map[string]any {
 	sort.Slice(groups, func(i, j int) bool {
 		return fmt.Sprint(groups[i]["name"], groups[i]["id"]) < fmt.Sprint(groups[j]["name"], groups[j]["id"])
 	})
-	return map[string]any{"accountId": BareShortId(s.account.ID), "ownerUserId": s.owner(), "primary": BareShortId(s.account.ID) == "self", "actorRole": s.manager(actor), "clusterOwner": s.clusterOwner(actor), "revision": stringFromAny(accountRowPayload(s.account)["accessRevision"]), "apps": s.ceiling(), "people": people, "candidates": candidates, "groups": groups, "invitations": invitations}
+	return map[string]any{"accountId": BareShortId(s.account.ID), "ownerUserId": s.owner(), "primary": BareShortId(s.account.ID) == "self", "actorRole": s.manager(actor), "clusterOwner": s.clusterOwner(actor), "assignsApps": s.assignsApps(actor), "revision": stringFromAny(accountRowPayload(s.account)["accessRevision"]), "apps": s.ceiling(), "people": people, "candidates": candidates, "groups": groups, "invitations": invitations}
 }
 
 // Only active Viewer invitations wholly confined to this account can be
@@ -607,8 +614,8 @@ func (e *MemQLEngine) changeAccountAccess(ctx context.Context, tx bun.Tx, s *acc
 			return nil, err
 		}
 	case "apps":
-		if !s.clusterOwner(actor) || accountID == "self" {
-			return nil, errors.New("account_apps_refused: only the primary owner assigns client apps")
+		if !s.assignsApps(actor) {
+			return nil, errors.New("account_apps_refused: only the primary owner or a primary developer assigns client apps")
 		}
 		apps, err := normalizeAccessApps(args["apps"])
 		if err != nil {

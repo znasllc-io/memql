@@ -5,7 +5,7 @@ import { notifyGrantWritten } from "../../system/roles";
 import { flatten } from "../../kit/rows";
 
 export interface AccountPerson { id: string; name: string; email: string; role: string; apps: string[] }
-export interface AccountAccess { invitations?: { id: string; email: string; expiresAt: string; groupIds: string[] }[]; accountId: string; ownerUserId: string; primary: boolean; actorRole: string; clusterOwner: boolean; revision: string; apps: string[]; people: AccountPerson[]; candidates: AccountPerson[]; groups: { id: string; name: string; kind: string; apps: string[]; userIds: string[] }[] }
+export interface AccountAccess { invitations?: { id: string; email: string; expiresAt: string; groupIds: string[] }[]; accountId: string; ownerUserId: string; primary: boolean; actorRole: string; clusterOwner: boolean; assignsApps: boolean; revision: string; apps: string[]; people: AccountPerson[]; candidates: AccountPerson[]; groups: { id: string; name: string; kind: string; apps: string[]; userIds: string[] }[] }
 
 export function accountAccessCall(name: "accountAccess" | "accountAccessUpdate", args: Record<string, unknown>): string {
   return `builtin ${name}(${Object.entries(args).filter(([, value]) => value !== undefined).map(([key, value]) => `${key}: ${renderMemQLValue(value)}`).join(", ")})`;

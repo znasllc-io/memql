@@ -55,7 +55,7 @@ export function AccountAccessEditor({ accountId, groupId, memberIds, onChanged, 
       {!people.length ? <Caption>No people in this group yet.</Caption> : null}
     </section>
     {!data.primary ? <section aria-label="App access"><div className="os-account-access-actions"><strong>Apps</strong><Caption>{data.apps.length ? data.apps.map(app => availableApps.find(choice => choice.id === app)?.label ?? app).join(", ") : "No apps assigned"}</Caption>
-      {data.clusterOwner && !custom ? <Button disabled={access.busy} onClick={() => { setEditingApps("account"); setApps(data.apps); }}>Edit apps</Button> : null}
+      {data.assignsApps && !custom ? <Button disabled={access.busy} onClick={() => { setEditingApps("account"); setApps(data.apps); }}>Edit apps</Button> : null}
       {custom ? <Button disabled={access.busy} onClick={() => { setEditingApps("group"); setApps(group?.apps ?? []); }}>Assign apps to group</Button> : null}
     </div></section> : null}
     {editingApps ? <section aria-label="Choose apps"><MultiPicker label="Apps" choices={appChoices} selected={apps} onChange={setApps} disabled={access.busy} />

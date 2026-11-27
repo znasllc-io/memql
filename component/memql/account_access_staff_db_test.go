@@ -98,3 +98,33 @@ func TestAccountHierarchyStaffDoesNotPlacePeerStaff(t *testing.T) {
 	_, err = hierarchyCall(t, e, "staff-dev", auth.RoleDeveloper, account, map[string]any{"revision": fmt.Sprint(state["revision"]), "operation": "members", "userIds": []string{"staff-dev-2"}, "role": "viewer"})
 	require.ErrorContains(t, err, "account_member_refused")
 }
+
+// A client's app list (its ceiling) is cluster staff's to set: the cluster
+// owner's and, under D6, a cluster developer's. A client's own owner still
+// distributes only what that list holds. The roster says which, so the
+// Accounts screen offers Edit apps to exactly the people the engine accepts.
+func TestAccountHierarchyStaffDeveloperAssignsClientApps(t *testing.T) {
+	e, account, revision := hierarchyFixture(t)
+	seedPrincipal(t, e, "staff-dev", auth.RoleDeveloper)
+
+	state, err := hierarchyCall(t, e, "staff-dev", auth.RoleDeveloper, account, nil)
+	require.NoError(t, err)
+	require.Equal(t, true, state["assignsApps"])
+	state, err = hierarchyCall(t, e, "client-owner", auth.Role("viewer"), account, nil)
+	require.NoError(t, err)
+	require.Equal(t, false, state["assignsApps"], "a client's own owner distributes the list, never widens it")
+
+	state, err = hierarchyCall(t, e, "staff-dev", auth.RoleDeveloper, account, map[string]any{"revision": revision, "operation": "apps", "apps": []string{"app:deployables", "app:email", "app:files"}})
+	require.NoError(t, err)
+	require.ElementsMatch(t, []any{"app:deployables", "app:email", "app:files"}, state["apps"])
+	// The widened list reaches the client: its owner can now hand Files on.
+	state, err = hierarchyCall(t, e, "client-owner", auth.Role("viewer"), account, map[string]any{"revision": fmt.Sprint(state["revision"]), "operation": "members", "userIds": []string{"member"}, "role": "member", "apps": []string{"app:files"}})
+	require.NoError(t, err)
+	memberCtx := contextWithAccountScopeMemo(rankActorCtx("member", auth.Role("viewer")), e)
+	require.True(t, e.OrganizationCapable(memberCtx, account, auth.VerbRead, "app:files"))
+	// A client's own Developer is not staff: it distributes the list, never sets it.
+	state, err = hierarchyCall(t, e, "client-owner", auth.Role("viewer"), account, map[string]any{"revision": fmt.Sprint(state["revision"]), "operation": "members", "userIds": []string{"developer-a"}, "role": "developer"})
+	require.NoError(t, err)
+	_, err = hierarchyCall(t, e, "developer-a", auth.Role("viewer"), account, map[string]any{"revision": fmt.Sprint(state["revision"]), "operation": "apps", "apps": []string{"app:deployables"}})
+	require.ErrorContains(t, err, "account_apps_refused")
+}
