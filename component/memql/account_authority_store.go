@@ -35,6 +35,9 @@ func authorityRows(ctx context.Context, db bun.IDB, concept string) ([]memorynod
 	return rows, err
 }
 
+// staged-data: MUST-NOT-GATE -- this is the latest authorization evidence used
+// to validate an authority append. Hiding a staged restriction would let a write
+// ignore that restriction or treat an existing authority record as absent.
 func authorityRow(ctx context.Context, db bun.IDB, concept, id string) (memorynodes.MemoryNode, bool, error) {
 	var rows []memorynodes.MemoryNode
 	bare := BareShortId(id)
