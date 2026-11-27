@@ -1276,14 +1276,14 @@ func TestASeatIsToldWhetherItHostsAndWhenTheCountdownEnds(t *testing.T) {
 			Hands: []string{}, HandSequences: map[string]int64{started.Join.Identity: 0, in.Identity: 0}}
 		guestCall := cw.sessionCall(guest)
 		require.NotEmpty(t, guestCall.LeaveToken)
-		require.Equal(t, callrules.SeatCall{Messages: messages, Spotlight: &callrules.Spotlight{Revision: "0"}, RoomID: started.Call.ID, Identity: in.Identity, LeaveToken: guestCall.LeaveToken, Title: callTitle("", opened), OpenedAt: opened}, guestCall, "a guest was given host controls or a countdown while the host is in the call")
+		require.Equal(t, callrules.SeatCall{Messages: messages, Spotlight: &callrules.Spotlight{Revision: "0"}, MediaCleanup: &callrules.MediaCleanupStatus{State: "pending", Reason: "media_cleanup_unverified"}, RoomID: started.Call.ID, Identity: in.Identity, LeaveToken: guestCall.LeaveToken, Title: callTitle("", opened), OpenedAt: opened}, guestCall, "a guest was given host controls or a countdown while the host is in the call")
 
 		cw.clock.Advance(time.Minute)
 		left := cw.clock.Now()
 		require.NoError(t, cw.svc.Leave(ctx, hostSess))
 		messages.ObservedAt = cw.clock.Now().UnixMilli()
 		delete(messages.HandSequences, started.Join.Identity)
-		require.Equal(t, callrules.SeatCall{Messages: messages, Spotlight: &callrules.Spotlight{Revision: "0"}, RoomID: started.Call.ID, Identity: in.Identity, LeaveToken: guestCall.LeaveToken, CountdownKind: "host_left", Title: callTitle("", opened), OpenedAt: opened, CountdownEndsAt: left.Add(grace)}, cw.sessionCall(guest),
+		require.Equal(t, callrules.SeatCall{Messages: messages, Spotlight: &callrules.Spotlight{Revision: "0"}, MediaCleanup: &callrules.MediaCleanupStatus{State: "pending", Reason: "media_cleanup_unverified"}, RoomID: started.Call.ID, Identity: in.Identity, LeaveToken: guestCall.LeaveToken, CountdownKind: "host_left", Title: callTitle("", opened), OpenedAt: opened, CountdownEndsAt: left.Add(grace)}, cw.sessionCall(guest),
 			"a guest is not told when the call ends now that the host left")
 		require.Equal(t, callrules.SeatCall{}, cw.sessionCall(hostSess), "a host who left is told about a call it is not in")
 
