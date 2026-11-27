@@ -80,14 +80,24 @@ func (s *Service) observationAuthority(ctx context.Context, room roomRow) (*obse
 	if e != nil {
 		return nil, e
 	}
+	// A delegated publisher's managed source can inherit valid AgentData, but
+	// that ingress seat has no participant session capable of subject consent.
+	// One bounded exact lease lookup excludes it from both choices and delivery
+	// authority, including journals created before this classification existed.
+	resources, e := s.sessionResourceSeats(ctx, room, seats)
+	if e != nil {
+		return nil, e
+	}
 	a := &observationAuthority{service: s, ctx: ctx, room: room, seats: map[string]seatRow{}, eligible: map[string]bool{}, checked: map[string]bool{}}
 	for _, seat := range seats {
-		if seat.occupying() {
+		if seat.occupying() && !resources[seat.ID] {
 			a.seats[seat.Identity] = seat
 		}
 	}
 	for _, identity := range allowed {
-		a.eligible[identity] = true
+		if _, present := a.seats[identity]; present {
+			a.eligible[identity] = true
+		}
 	}
 	return a, nil
 }

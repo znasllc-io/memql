@@ -2226,6 +2226,19 @@ network tunnels.** A rendered terminal is video, not a remote terminal. Screen,
 camera and local command selection stay on the owner's device. Neither viewers
 nor session instructions can execute device commands through this surface.
 
+Managed resource seats are not consented-observation subjects or recipients.
+A resource published by a delegated agent can inherit that agent's approval
+metadata, but its ingress seat has no ordinary participant session that can
+consent or read observations. Native observation authority excludes exact
+managed room/seat/identity leases in one bounded account-journal read; the
+publisher's real reviewed-agent seat and legitimate people remain eligible.
+This classification is independent of lease expiry and cleanup status and does
+not grant or revoke media access. Requests naming the source are refused, and an
+older permission containing that source expires without another delivery.
+`TestObservationManagedDelegatedResourceIsNotAParty` covers the delegated
+creation path, human/agent choices, subject/recipient refusal, ordinary consent
+and delivery, and existing-journal refusal.
+
 `start` returns a private revocable ingress key; it never returns operator media
 credentials or an ingress-worker JWT. `stop` deletes the ingress definition and
 stream-key mapping. Human stop (including a co-host's Stop sharing) creates a
