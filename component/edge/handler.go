@@ -93,10 +93,11 @@ type Handler struct {
 	// previews caches resolved grants for previewCacheTTL and throttles the
 	// lastSeenAt write. Per replica, like hashCache beside it.
 	previews *previewCache
-	// hashCache holds one document's inline-script hash list per asset
-	// validator (scripthash.go). Same LRU as the bundle byte cache, and
-	// immutable for the same reason: the key names exact bytes, so a
-	// republish is a new key and there is no invalidation path.
+	// hashCache holds inline-script hashes per document validator (scripthash.go)
+	// and bounded indexing metadata in a distinct namespace (indexing.go).
+	// Same size-bounded LRU as the bundle byte cache: immutable keys name exact
+	// bytes, so republishing selects a new entry. Mutable indexing metadata
+	// and request-specific indexing decisions are never cached here.
 	hashCache *bundleCache
 	// hashSF coalesces concurrent misses on that cache, the way blob.go and
 	// resolve.go already guard their own cold paths.
@@ -458,6 +459,7 @@ func (h *Handler) serveResolved(w http.ResponseWriter, r *http.Request, site *Si
 		// twice per request.
 		etag, hasETag := assetETagFor(fsys, name, site.BundleRef)
 		h.setContentSecurityPolicy(w, r, site, fsys, name, etag, hasETag)
+		etag = h.setBundleIndexing(w, r, site, fsys, name, etag)
 		h.serveFile(w, r, fsys, name, etag, hasETag, policy)
 		return classifyServed(name, false)
 	}
@@ -470,6 +472,7 @@ func (h *Handler) serveResolved(w http.ResponseWriter, r *http.Request, site *Si
 			// on a hard reload while the root keeps working.
 			etag, hasETag := assetETagFor(fsys, "index.html", site.BundleRef)
 			h.setContentSecurityPolicy(w, r, site, fsys, "index.html", etag, hasETag)
+			etag = h.setBundleIndexing(w, r, site, fsys, "index.html", etag)
 			h.serveFile(w, r, fsys, "index.html", etag, hasETag, policy)
 			return pathClassFallback
 		}

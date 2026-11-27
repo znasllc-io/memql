@@ -1124,6 +1124,59 @@ edge repeats the full policy on every 304 for exactly this reason.
 
 ---
 
+## Opting a bundle into indexing restrictions
+
+A bundle may include a root `memql-indexing.json` (at most 4,096 bytes). The
+closed version 1 declaration has either exactly two fields:
+
+```json
+{"version":1,"mode":"disabled"}
+```
+
+or exactly four fields:
+
+```json
+{"version":1,"mode":"canonical","canonicalOrigin":"https://www.example.com","publicPaths":["/"]}
+```
+
+`disabled` adds `X-Robots-Tag: noindex, nofollow, noarchive` to all resolved
+HTML responses. `canonical` adds that restriction unless the request host
+matches the declared HTTPS authority and its literal path is one of the
+public paths, with no query string (including a bare `?`) or encoded alias.
+Host comparison is case-insensitive; aliases, trailing-dot hosts and other
+ports remain restricted. The origin must be lowercase HTTPS with no user
+information, path, trailing slash, query or fragment; omit the default port
+443. Up to 32 unique paths are allowed, each at most 1,024 bytes, absolute and
+normalized, without percent escapes, dot segments, repeated or trailing
+slashes (except `/`), queries or fragments. These are literal public HTML
+routes, not glob patterns. No origin is fetched or redirected to.
+
+The header applies to real HTML files and SPA fallbacks on GET, HEAD and
+304 responses, alongside the document's existing CSP. Canonical permission
+never removes an existing restrictive header, including candidate-preview
+restrictions. Static assets and native API routes keep their existing policy.
+A genuinely absent file leaves legacy bundles unchanged. A present empty,
+malformed, oversized, duplicate-key or unknown-field declaration, or an I/O
+failure reading it, refuses indexing. The declared policy cannot authorize
+indexing that the HTML itself refuses.
+
+The bounded metadata cache uses only an immutable published bundle's version
+and validator; host, path and query decisions are made on every request.
+Mutable `file://` metadata is reread with the same size limit. Transient read
+errors are not cached as absence. Publishing a new bundle selects a new policy
+cache key. Policy-only file edits also change the HTML validator, so a 304
+cannot retain a removed restriction. Blob metadata uses the existing bounded
+storage download with a five-second deadline; an unsupported bounded backend
+refuses indexing without an unbounded fallback. The edge uses the request authority, not forwarded-host headers;
+the normal HTTPS front door still owns transport enforcement.
+
+Indexing restrictions are crawler advice, not authentication or secrecy.
+Do not put private data in a public bundle. URL fragments do not reach the
+server, so an app must also protect fragment-driven and authenticated client
+states. This declaration neither reads account state nor changes access gates.
+
+---
+
 ## Caching: what the edge does, and putting a CDN in front of it
 
 Three layers cache a hosted site's bytes, and they compose because each one

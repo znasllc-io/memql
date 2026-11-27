@@ -280,3 +280,37 @@ func (a *azureBlobClient) Get(ctx context.Context, key string) ([]byte, error) {
 	}
 	return data, nil
 }
+
+// indexingMetadata bypasses Open's whole-object asset cache. A new implicit
+// metadata read on every HTML response must not download an unbounded object.
+// Ordinary assets keep their existing BlobClient contract; an unsupported
+// bounded metadata backend fails closed without calling its unbounded Get.
+func (b *blobFS) indexingMetadata() ([]byte, error) {
+	client, ok := b.client.(interface {
+		GetWithLimit(context.Context, string, int64) ([]byte, error)
+	})
+	if !ok {
+		return nil, errors.New("edge: bounded metadata download unavailable")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	data, err := client.GetWithLimit(ctx, b.prefix+bundleIndexingFile, bundleIndexingMaxBytes)
+	if errors.Is(err, ErrNotFound) {
+		return nil, fs.ErrNotExist
+	}
+	return data, err
+}
+
+func (a *azureBlobClient) GetWithLimit(ctx context.Context, key string, limit int64) ([]byte, error) {
+	downloader, ok := a.downloader.(interface {
+		DownloadWithLimit(context.Context, string, string, int64) ([]byte, error)
+	})
+	if !ok {
+		return nil, errors.New("edge: bounded metadata downloader unavailable")
+	}
+	data, err := downloader.DownloadWithLimit(ctx, a.container, key, limit)
+	if bloberror.HasCode(err, bloberror.BlobNotFound, bloberror.ResourceNotFound) {
+		return nil, ErrNotFound
+	}
+	return data, err
+}
