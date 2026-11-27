@@ -11,18 +11,22 @@ import (
 // WorkflowDefinition is declarative session guidance, never executable server code.
 // A published version is pinned into each run; visual positions have no authority.
 type WorkflowDefinition struct {
-	ID               string         `json:"id"`
-	Version          int            `json:"version"`
-	Revision         int64          `json:"revision"`
-	Status           string         `json:"status"`
-	Title            string         `json:"title"`
-	Description      string         `json:"description"`
-	Instructions     string         `json:"instructions"`
-	RequiresInsights bool           `json:"requiresInsights"`
-	Roles            []WorkflowRole `json:"roles"`
-	Nodes            []WorkflowNode `json:"nodes"`
-	Edges            []WorkflowEdge `json:"edges"`
-	EntryNodeID      string         `json:"entryNodeId"`
+	ID               string             `json:"id"`
+	Version          int                `json:"version"`
+	Revision         int64              `json:"revision"`
+	Status           string             `json:"status"`
+	Title            string             `json:"title"`
+	Description      string             `json:"description"`
+	Instructions     string             `json:"instructions"`
+	RequiresInsights bool               `json:"requiresInsights"`
+	Roles            []WorkflowRole     `json:"roles"`
+	Nodes            []WorkflowNode     `json:"nodes"`
+	Edges            []WorkflowEdge     `json:"edges"`
+	EntryNodeID      string             `json:"entryNodeId"`
+	Languages        []string           `json:"languages,omitempty"`
+	Materials        []WorkflowMaterial `json:"materials,omitempty"`
+	Inputs           []WorkflowField    `json:"inputs,omitempty"`
+	Outputs          []WorkflowField    `json:"outputs,omitempty"`
 }
 type WorkflowRole struct {
 	ID       string `json:"id"`
@@ -313,6 +317,7 @@ func ValidateWorkflow(d WorkflowDefinition) []WorkflowIssue {
 			add("nodes."+id, "unreachable", "All nodes must be reachable from the entry.")
 		}
 	}
+	issues = append(issues, workflowMetadataIssues(d)...)
 	issues = append(issues, workflowReadinessIssues(d)...)
 	if len(issues) == 0 {
 		repeats, found := workflowBuildRepeats(d, workflowRepeatSpecs(d))

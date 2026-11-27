@@ -231,6 +231,7 @@ func workflowProjection(run callrules.WorkflowRun, seat seatRow, agent bool, now
 	}
 	if !seat.Host {
 		r.Definition.Instructions = ""
+		r.Definition.Materials, r.Definition.Inputs, r.Definition.Outputs = nil, nil, nil
 	}
 	for i, n := range r.Definition.Nodes {
 		if !permitted(n.Visibility, n.RoleID) {

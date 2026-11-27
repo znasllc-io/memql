@@ -106,7 +106,20 @@ func dtoSchema(t reflect.Type) map[string]any {
 			props["status"] = map[string]any{"type": "string", "enum": []string{"running", "blocked", "joined"}}
 			props["allowedActions"] = map[string]any{"type": "array", "maxItems": 7, "uniqueItems": true, "items": map[string]any{"type": "string", "enum": []string{"next", "previous", "seek", "extend", "ack", "end_turn", "fallback"}}, "description": "Authoritative current branch controls. A joined branch has no actions. Global pause, resume, cancel and handoff act on the whole run."}
 		}
+		if t == reflect.TypeOf(WorkflowMaterial{}) || t == reflect.TypeOf(WorkflowField{}) {
+			props["id"] = map[string]any{"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$"}
+			props["label"] = map[string]any{"type": "string", "minLength": 1, "maxLength": 120}
+			props["description"] = map[string]any{"type": "string", "maxLength": 1000, "description": "Inert declaration, never a fetch target, credential or executable instruction. No call content is captured or stored by this metadata."}
+		}
+		if t == reflect.TypeOf(WorkflowField{}) {
+			props["type"] = map[string]any{"type": "string", "enum": []string{"text", "number", "boolean"}}
+			props["maxLength"] = map[string]any{"type": "integer", "minimum": 1, "maximum": 8000, "description": "Optional declared text bound; unavailable for number/boolean fields. This declaration does not submit or retain a value."}
+		}
 		if t == reflect.TypeOf(WorkflowDefinition{}) {
+			props["languages"] = map[string]any{"type": "array", "maxItems": 8, "uniqueItems": true, "items": map[string]any{"type": "string", "pattern": "^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8}){0,5}$"}}
+			for _, field := range []string{"materials", "inputs", "outputs"} {
+				props[field].(map[string]any)["maxItems"] = 16
+			}
 			props["nodes"].(map[string]any)["maxItems"] = 64
 			props["roles"].(map[string]any)["maxItems"] = 16
 		}
