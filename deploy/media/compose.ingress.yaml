@@ -12,6 +12,9 @@ services:
     network_mode: service:livekit
     depends_on: [livekit, redis]
     restart: unless-stopped
+    # The pinned provider can emit stream keys and authenticated child diagnostics.
+    # Keep operational evidence in native status/readback and container metrics.
+    logging: {driver: "none"}
     cpus: 4
     mem_limit: 4g
     environment:

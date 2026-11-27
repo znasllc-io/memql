@@ -76,12 +76,13 @@ write_files:
 # containers keep running while the daemon restarts. write_files runs at the start of the
 # first boot, before the packages are installed, so the daemon starts with it.
 #
-# EVERY CONTAINER LOGS TO THE JOURNAL, which the drop-in below keeps under a week. LiveKit
+# BASE CONTAINERS LOG TO THE JOURNAL, which the drop-in below keeps under a week. LiveKit
 # logs participant identities, rooms and connection details on every join and leave, and
 # the design keeps LiveKit's logs less than seven days (design section 11); Docker's
 # default json-file driver keeps them with no size or age limit for as long as the server
-# runs, and a server keeps its first boot. No service sets a driver of its own, so this is
-# every container's. docker logs and docker compose logs read the journald driver.
+# runs, and a server keeps its first boot. The optional ingress worker suppresses its
+# credential-bearing provider output with driver none. Other containers retain this
+# journal policy. docker logs and docker compose logs read the journald driver.
   - path: /etc/docker/daemon.json
     permissions: "0644"
     content: |
@@ -125,9 +126,7 @@ write_files:
   - path: /etc/memql-media/compose.yaml
     permissions: "0644"
     content: |
-      # The calls media server: LiveKit, its Redis, and Caddy with the layer-4 module, on
-      # the host's network. memql-media configure writes the two mounted files and starts
-      # it; nothing here is a credential.
+      # Fixed provider services; memql-media renders private configuration.
       name: memql-media
       services:
         livekit:
@@ -156,6 +155,7 @@ write_files:
           cpus: 1.25
           mem_limit: 1536m
           pids_limit: 256
+          logging: {driver: "none"}
           environment:
             INGRESS_CONFIG_FILE: /etc/livekit/ingress.yaml
           volumes:
@@ -441,7 +441,7 @@ write_files:
       enable_udp_url_pull: false
       rtc_config: {udp_port: 7885, node_ip: "${NODE_IP}", use_external_ip: false}
       cpu_cost: {whip_cpu_cost: 1.0, whip_bypass_transcoding_cpu_cost: 1.0, rtmp_cpu_cost: 1.0, url_cpu_cost: 1.0, min_idle_ratio: 0.1}
-      logging: {level: warn}
+      logging: {level: error}
       EOF
       }
 

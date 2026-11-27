@@ -620,8 +620,8 @@ func TestTheServerKeepsItsCallsThroughADockerRestart(t *testing.T) {
 // logs live less than seven days (design section 11). Ubuntu's Docker would keep every
 // container's log in json-file with no size or age limit, for as long as the server
 // runs -- and a server keeps its first boot until it is replaced. So the first boot sends
-// every container's log to the system journal (daemon.json's log-driver, the default for
-// every container, none of which sets its own) and caps the journal at six days and a
+// base container logs to the system journal (daemon.json's default log-driver;
+// ingress alone disables retained output) and caps the journal at six days and a
 // size: MaxRetentionSec deletes a journal file once its oldest entry is past six days,
 // MaxFileSec rotates files daily so a deletion takes at most a day's logs early and never
 // leaves one past the bound, and SystemMaxUse keeps the disk safe. journald is restarted
@@ -693,6 +693,13 @@ func TestTheServerKeepsItsLogsUnderAWeek(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, service := range compose.Services {
+		if name == "ingress" {
+			logging, ok := service["logging"].(map[string]any)
+			if !ok || len(logging) != 1 || logging["driver"] != "none" {
+				t.Error("ingress credential-bearing provider output must not be retained")
+			}
+			continue
+		}
 		if _, own := service["logging"]; own {
 			t.Errorf("the %s container sets a log driver of its own, outside the journal's cap", name)
 		}

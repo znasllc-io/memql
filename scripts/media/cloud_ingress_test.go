@@ -86,7 +86,7 @@ func TestCloudIngressIsOptionalAndResourceBounded(t *testing.T) {
 	if cfg.RTMP != -1 || cfg.WHIP != 8080 || cfg.Relay != 9090 || cfg.Health != 0 || cfg.Debug != 0 || cfg.Prometheus != 0 || cfg.UDPPull || cfg.RTC.UDP != 7885 || cfg.RTC.NodeIP != s.publicIPv4 || cfg.RTC.External {
 		t.Fatal("unexpected ingress input/listener or ICE address")
 	}
-	if !reflect.DeepEqual(cfg.CPU, map[string]float64{"whip_cpu_cost": 1, "whip_bypass_transcoding_cpu_cost": 1, "rtmp_cpu_cost": 1, "url_cpu_cost": 1, "min_idle_ratio": 0.1}) || !reflect.DeepEqual(cfg.Logging, map[string]string{"level": "warn"}) {
+	if !reflect.DeepEqual(cfg.CPU, map[string]float64{"whip_cpu_cost": 1, "whip_bypass_transcoding_cpu_cost": 1, "rtmp_cpu_cost": 1, "url_cpu_cost": 1, "min_idle_ratio": 0.1}) || !reflect.DeepEqual(cfg.Logging, map[string]string{"level": "error"}) {
 		t.Fatal("provider load-admission/log bounds changed")
 	}
 	if info, err := os.Stat(filepath.Join(s.etc, "ingress.yaml")); err != nil || info.Mode().Perm() != 0o600 {

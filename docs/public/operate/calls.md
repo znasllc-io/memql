@@ -1256,6 +1256,19 @@ dimensions, FPS and bitrate bounds. These container limits do not prove an inbou
 RTP bandwidth ceiling. Do not raise the server's seat or resource capacity from
 these configuration numbers.
 
+Both local and cloud ingress use the provider's `logging.level: error` setting
+and an ingress-only Docker `logging.driver: none`. The pinned provider logs raw
+stream keys in warnings, and its child/SDK error output is not a redacted interface.
+The level suppresses known key-bearing warnings; Docker's setting prevents retained
+stdout/stderr at every level. Other containers keep their existing log policy.
+Use sanitized native resource status, provider publication/cleanup readback, and
+container CPU, memory, exit and restart state for qualification. Do not attach or
+persist provider output with real credentials. Recreate an existing ingress container
+through the drained upgrade to apply its logging driver; configuration files alone
+do not change a running container. This prevents future Docker retention and does
+not erase historical logs or copies. Any historical key known to have been exposed
+must be revoked through the resource lifecycle.
+
 On an existing 2-vCPU/4-GB CPX21, first qualify one bounded synthetic resource plus an
 ordinary two-person call. Record host/container CPU, memory and restart state,
 publication/recipient delivery, source bounds, stop/delete readback, old stream-key
@@ -1295,12 +1308,13 @@ The base services and optional worker run on the host's network, from
 `/etc/memql-media/compose.yaml`, and Docker restarts them after a reboot. Docker runs
 with `live-restore`, so a restart of the Docker daemon, which Ubuntu's unattended
 security updates make when they update Docker, leaves the containers and their calls
-running. Every container logs to the system journal (Docker's `journald` log driver),
+running. The base containers log to the system journal (Docker's `journald` log driver),
 and the journal keeps nothing past six days and at most 1 GB, and does not forward to
 syslog, whose file Ubuntu keeps for about five weeks
 (`/etc/systemd/journald.conf.d/90-memql-media.conf`), so LiveKit's logs, which name
 participants' identities and rooms, live less than a week; `docker logs` and
-`docker compose logs` read them there. A
+`docker compose logs` read them there. The optional ingress container uses driver
+`none`, because its provider diagnostics can contain credentials. A
 server is made with the LiveKit and Redis versions the local target runs, and keeps them
 until an explicit drained upgrade or replacement: an upgrade of LiveKit
 is reviewed first, for both targets. The Caddy build is LiveKit's own, Caddy with the
