@@ -115,6 +115,15 @@ describe("account people management", () => {
     fireEvent.click(screen.getByRole("button", { name: "Transfer ownership" }));
     await waitFor(() => expect(conn.query.executeNamed.mock.calls.some(([name, call]) => name === "accountAccessUpdate" && call.includes('operation: "transfer"') && call.includes('userId: "ada"'))).toBe(true));
   });
+  it("offers Edit apps to a staff developer the engine lets assign them", async () => {
+    await openDetail(connectionFor({ actorRole: "developer", clusterOwner: false, assignsApps: true }));
+    expect(await screen.findByRole("button", { name: "Edit apps" })).toBeTruthy();
+  });
+  it("hides Edit apps from a client's own owner, who may not assign them", async () => {
+    await openDetail(connectionFor({ actorRole: "owner", clusterOwner: false, assignsApps: false }));
+    await screen.findByRole("list", { name: "Account members" });
+    expect(screen.queryByRole("button", { name: "Edit apps" })).toBeNull();
+  });
   it("opens a custom group in Users", async () => {
     await openDetail(connectionFor({ groups: [{ id: "reviewers", name: "Reviewers", kind: "custom", apps: [], userIds: [] }] }));
     fireEvent.click(await screen.findByRole("button", { name: "Reviewers" }));

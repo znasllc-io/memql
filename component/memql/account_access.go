@@ -142,11 +142,48 @@ func (s *accountAccessState) clusterOwner(userID string) bool {
 	return ok && activeAuthorityUser(p) && p["role"] == "owner"
 }
 
+// staff is the standing staff rule (groups-and-grants design, D6): developer
+// rank and above, cluster-wide (not a role scoped to one account), stand in
+// every account-kind group without a membership row.
+func (s *accountAccessState) staff(userID string) bool {
+	u, ok := s.users[BareShortId(userID)]
+	p := accountRowPayload(u)
+	role := auth.Role(stringFromAny(p["role"]))
+	// The zero-rank guard mirrors IsClusterOperator: a catalog without an active
+	// developer role must not make every unranked person staff (0 >= 0).
+	return ok && activeAuthorityUser(p) && auth.RoleAccountScope(role) == "" && auth.RoleRank(auth.RoleDeveloper) > 0 && auth.RoleRank(role) >= auth.RoleRank(auth.RoleDeveloper)
+}
+
+// placesNewMembers: who may put somebody not yet in this account into it.
+// The cluster owner anywhere; standing staff in client accounts only -- on the
+// primary account a membership change rewrites the person's cluster role, and
+// that stays the owner's. Staff never place a fellow staff member, who already
+// stands in every client account; a row would only misstate them.
+func (s *accountAccessState) placesNewMembers(actor, target string) bool {
+	if s.clusterOwner(actor) {
+		return true
+	}
+	return BareShortId(s.account.ID) != "self" && s.staff(actor) && !s.staff(target)
+}
+
+// assignsApps: a client account's app list (its ceiling) is cluster staff's
+// to set -- the cluster owner's and, under D6, a cluster developer's. The
+// primary account has no list; a client's own managers only distribute it.
+func (s *accountAccessState) assignsApps(userID string) bool {
+	return BareShortId(s.account.ID) != "self" && s.staff(userID)
+}
+
 func (s *accountAccessState) manager(userID string) auth.AccountRole {
 	if s.clusterOwner(userID) {
 		return auth.AccountOwner
 	}
-	return s.role(userID)
+	role := s.role(userID)
+	// Standing staff manage a client account as its Developer, under the
+	// client's owner. The primary account already maps cluster roles in role().
+	if role != auth.AccountOwner && BareShortId(s.account.ID) != "self" && s.staff(userID) {
+		return auth.AccountDeveloper
+	}
+	return role
 }
 
 func accessStrings(value any) []string {
@@ -367,7 +404,7 @@ func (s *accountAccessState) roster(actor string) map[string]any {
 			apps, _ := s.assignedApps(uid)
 			person["apps"] = apps
 			people = append(people, person)
-		} else if s.clusterOwner(actor) {
+		} else if s.placesNewMembers(actor, uid) {
 			candidates = append(candidates, person)
 		}
 	}
@@ -380,7 +417,7 @@ func (s *accountAccessState) roster(actor string) map[string]any {
 	sort.Slice(groups, func(i, j int) bool {
 		return fmt.Sprint(groups[i]["name"], groups[i]["id"]) < fmt.Sprint(groups[j]["name"], groups[j]["id"])
 	})
-	return map[string]any{"accountId": BareShortId(s.account.ID), "ownerUserId": s.owner(), "primary": BareShortId(s.account.ID) == "self", "actorRole": s.manager(actor), "clusterOwner": s.clusterOwner(actor), "revision": stringFromAny(accountRowPayload(s.account)["accessRevision"]), "apps": s.ceiling(), "people": people, "candidates": candidates, "groups": groups, "invitations": invitations}
+	return map[string]any{"accountId": BareShortId(s.account.ID), "ownerUserId": s.owner(), "primary": BareShortId(s.account.ID) == "self", "actorRole": s.manager(actor), "clusterOwner": s.clusterOwner(actor), "assignsApps": s.assignsApps(actor), "revision": stringFromAny(accountRowPayload(s.account)["accessRevision"]), "apps": s.ceiling(), "people": people, "candidates": candidates, "groups": groups, "invitations": invitations}
 }
 
 // Only active Viewer invitations wholly confined to this account can be
@@ -577,8 +614,8 @@ func (e *MemQLEngine) changeAccountAccess(ctx context.Context, tx bun.Tx, s *acc
 			return nil, err
 		}
 	case "apps":
-		if !s.clusterOwner(actor) || accountID == "self" {
-			return nil, errors.New("account_apps_refused: only the primary owner assigns client apps")
+		if !s.assignsApps(actor) {
+			return nil, errors.New("account_apps_refused: only the primary owner or a primary developer assigns client apps")
 		}
 		apps, err := normalizeAccessApps(args["apps"])
 		if err != nil {
@@ -665,7 +702,7 @@ func (e *MemQLEngine) changeAccountAccess(ctx context.Context, tx bun.Tx, s *acc
 			if uid == actor || !auth.MayManageAccountMember(role, current, memberNext) {
 				return nil, errors.New("account_member_refused: you can manage only roles below your own; transfer ownership separately")
 			}
-			if current == "" && !s.clusterOwner(actor) {
+			if current == "" && !s.placesNewMembers(actor, uid) {
 				return nil, errors.New("account_member_refused: add people through an account invitation first")
 			}
 			if op == "groupMembers" && current == "" {
