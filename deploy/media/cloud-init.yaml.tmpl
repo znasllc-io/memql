@@ -1,9 +1,7 @@
 #cloud-config
-# SECURITY QUALIFICATION: this legacy cloud topology still forwards provider signalling
-# directly to LiveKit and does NOT enforce the native issued-token admission fence.
-# The 2026-11-26 guard is implemented and qualified only in the local Compose target.
-# Do not claim immediate issued-token revocation or deploy Callkey on this template
-# until the fixed signalling boundary is ported and accepted on a cloud media target.
+# The fixed signalling boundary requires the matching native /media/rtc routes.
+# A rendered configuration is not cloud acceptance: qualify the actual target before
+# publishing the matching client. The private guard is distinct from participant JWTs.
 #
 # deploy/media/cloud-init.yaml.tmpl -- the first boot of a calls media server on a
 # rented host (Hetzner Cloud). scripts/media/provision-hetzner.sh renders it into the
@@ -34,9 +32,8 @@
 # A SERVER KEEPS ITS FIRST BOOT. cloud-init runs this once, so a running server keeps the
 # files it wrote and the images it pulled, and memql-media configure renders from those
 # files, not from the repository. A later change under deploy/media -- a LiveKit or Caddy
-# bump included -- reaches production only when the server is replaced by one made from
-# the new revision (docs/public/operate/calls.md, "Replacing a server"); until then the
-# local target can run what no production server does.
+# bump included -- requires an explicit drained upgrade or server replacement
+# (docs/public/operate/calls.md). Running configure with old files does not upgrade them.
 #
 # COMMENTS AT THE START OF A LINE, like this one, are the repository's and are not sent:
 # the provision script drops them (Hetzner takes at most 32 KiB of user data). Comments
@@ -45,7 +42,7 @@
 # THE LAYOUT IS LIVEKIT'S OWN for a self-hosted server (the generator behind its "Deploy
 # to a VM" guide, github.com/livekit/deploy, generate/templates at a6e5931): LiveKit,
 # Redis and Caddy with the layer-4 module, all on the host's network, Caddy routing port
-# 443 by TLS server name to LiveKit's signalling port and to its TURN server, and
+# 443 by TLS server name to the fixed HTTP guard and to its TURN server, and
 # obtaining both certificates. Where this differs, the reason is beside it:
 #   - the images are pinned by tag and digest, not `latest`;
 #   - Docker and Compose come from Ubuntu's archive (docker.io, docker-compose-v2), not a
@@ -59,8 +56,8 @@
 #     loopback, which Firefox refuses;
 #   - Caddy's configuration is JSON, which needs no adapter, and has no admin endpoint;
 #   - a host firewall (ufw) repeats the Hetzner firewall's rules, so the ports LiveKit
-#     listens on all interfaces for -- 7880, and 5349, plain TURN behind Caddy -- stay
-#     closed even if the cloud firewall is detached.
+#     uses behind Caddy -- loopback HTTP 7880/7884 and plain TURN 5349 -- stay closed
+#     even if the cloud firewall is detached. Public RTP/TURN remain provider-managed.
 
 package_update: true
 package_upgrade: true
@@ -188,22 +185,11 @@ write_files:
     content: |
       #!/usr/bin/env bash
       #
-      # memql-media -- this calls media server's own command, installed by its first boot
-      # (deploy/media/cloud-init.yaml.tmpl in the MemQL repository, which says why each part
-      # is as it is; the runbook is docs/public/operate/calls.md there).
-      #
-      #   memql-media configure --domain=<instance domain> [--node-ip=<IPv4>] [--wait-seconds=<n>] < media.env
-      #   memql-media rooms
-      #
-      # configure reads the eight MEMQL_CALLS_MEDIA_* values on stdin (NAME=value lines: the
-      # file the installation's memql-calls-media Secret is made from), renders LiveKit's and
-      # Caddy's configuration, (re)starts the server, and waits until LiveKit answers through
-      # Caddy and the TURN name's TLS verifies there. Run again, it changes nothing already
-      # in place. rooms prints how many rooms LiveKit holds; a drain waits for 0.
-      # MEMQL_MEDIA_* exist for its tests only.
-      #
-      # Exit codes: 0 ok | 2 bad argument | 3 refused (the values cannot configure this server)
-      #             | 4 prerequisite missing | 5 failed
+      # Runbook: docs/public/operate/calls.md in the matching MemQL revision.
+      # configure --domain=<domain> [--node-ip=<IPv4>] [--wait-seconds=<n>] < media.env
+      # rooms prints the current room count. configure reads eight values only on stdin,
+      # writes private configuration, restarts if changed and verifies public/TURN TLS.
+      # MEMQL_MEDIA_* overrides are for tests. Exit: 0 ok, 2 args, 3 refused, 4 prereq, 5 failed.
 
       set -euo pipefail
 
@@ -230,7 +216,7 @@ write_files:
       DOMAIN="" NODE_IP="" WAIT_SECONDS=180
       PROVIDER="" API_URL="" PUBLIC_URL="" SEATS=""
       API_KEY="" API_SECRET="" WEBHOOK_KEY="" WEBHOOK_SECRET=""
-      PUBLIC_HOST="" TURN_HOST="" WEBHOOK_URL="" CHANGED=""
+      PUBLIC_HOST="" TURN_HOST="" WEBHOOK_URL="" SIGNAL_GUARD="" CHANGED=""
 
       function info() { printf 'INFO:  %s\n' "$*" >&2; }
       function warn() { printf 'WARN:  %s\n' "$*" >&2; }
@@ -324,8 +310,7 @@ write_files:
           esac
       }
 
-      # The first SSH can arrive while the first boot still installs Docker. Its verdict is
-      # advice: what configure needs is checked next, by name.
+      # The first SSH may arrive before cloud-init finishes installing Docker.
       function wait_for_first_boot() {
           command -v "$CLOUD_INIT" >/dev/null 2>&1 || return 0
           info "waiting for this server's first boot to finish..."
@@ -340,6 +325,7 @@ write_files:
           command -v docker >/dev/null 2>&1 || fail 4 "Docker is not installed; see /var/log/cloud-init-output.log"
           docker info >/dev/null 2>&1 || fail 4 "the Docker daemon is not running: systemctl start docker"
           docker compose version >/dev/null 2>&1 || fail 4 "the Docker Compose plugin (docker-compose-v2) is not installed"
+          command -v sha256sum >/dev/null 2>&1 || fail 4 "sha256sum (coreutils) is not installed"
           [[ -r "$TEMPLATE" && -r "$COMPOSE_FILE" ]] || fail 4 "${MEDIA_DIR} lacks livekit.yaml.tmpl or compose.yaml, which the first boot writes"
       }
 
@@ -352,7 +338,6 @@ write_files:
           [[ "$NODE_IP" =~ $IPV4_PATTERN ]] || fail 4 "the metadata service did not answer with an IPv4 address; name it with --node-ip=<IPv4>"
       }
 
-      # Every value was validated: none holds & or \, which a bash replacement treats specially.
       function substitute() {
           local text="$1"
           shift
@@ -363,14 +348,45 @@ write_files:
           printf '%s' "$text"
       }
 
+      # Exact routes only: the native transport's purpose-bound guard admits an upstream
+      # RTC handshake; an issued participant JWT alone goes through native admission.
+      # The control API keeps LiveKit's server-JWT authentication on its fixed methods.
+      # Error request logging is excluded because provider URLs may carry access_token.
       function caddy_config() {
           cat <<EOF
       {
         "admin": {"disabled": true},
-        "logging": {"logs": {"default": {"level": "INFO"}}},
+        "logging": {"logs": {"default": {"level": "INFO", "exclude": ["http.log.error"]}}},
         "storage": {"module": "file_system", "root": "/data"},
         "apps": {
           "tls": {"certificates": {"automate": ["${PUBLIC_HOST}", "${TURN_HOST}"]}},
+          "http": {"servers": {"media_guard": {
+            "listen": ["127.0.0.1:7884"],
+            "automatic_https": {"disable": true},
+            "routes": [
+              {"match": [{"method": ["GET"], "path": ["/rtc", "/rtc/validate", "/rtc/v1", "/rtc/v1/validate"],
+                          "header": {"X-MemQL-Media-Signal": ["${SIGNAL_GUARD}"]}}],
+               "handle": [{"handler": "reverse_proxy", "upstreams": [{"dial": "127.0.0.1:7880"}],
+                           "headers": {"request": {"delete": ["X-MemQL-Media-Signal"]}}}], "terminal": true},
+              {"match": [{"method": ["GET"], "path": ["/rtc", "/rtc/validate", "/rtc/v1", "/rtc/v1/validate"]}],
+               "handle": [{"handler": "rewrite", "uri": "/media{http.request.uri}"},
+                          {"handler": "reverse_proxy", "upstreams": [{"dial": "api.${DOMAIN}:443"}],
+                           "headers": {"request": {"delete": ["X-MemQL-Media-Signal"], "set": {"Host": ["api.${DOMAIN}"]}}},
+                           "transport": {"protocol": "http", "tls": {"server_name": "api.${DOMAIN}"}}}], "terminal": true},
+              {"match": [{"method": ["POST"], "path": [
+                "/twirp/livekit.RoomService/CreateRoom", "/twirp/livekit.RoomService/DeleteRoom",
+                "/twirp/livekit.RoomService/ListRooms", "/twirp/livekit.RoomService/ListParticipants",
+                "/twirp/livekit.RoomService/GetParticipant", "/twirp/livekit.RoomService/RemoveParticipant",
+                "/twirp/livekit.RoomService/MutePublishedTrack", "/twirp/livekit.RoomService/UpdateParticipant",
+                "/twirp/livekit.RoomService/SendData", "/twirp/livekit.Ingress/CreateIngress",
+                "/twirp/livekit.Ingress/ListIngress", "/twirp/livekit.Ingress/DeleteIngress"]}],
+               "handle": [{"handler": "reverse_proxy", "upstreams": [{"dial": "127.0.0.1:7880"}],
+                           "headers": {"request": {"delete": ["X-MemQL-Media-Signal"]}}}], "terminal": true},
+              {"match": [{"method": ["GET"], "path": ["/"]}],
+               "handle": [{"handler": "reverse_proxy", "upstreams": [{"dial": "127.0.0.1:7880"}]}], "terminal": true},
+              {"handle": [{"handler": "static_response", "status_code": 404}], "terminal": true}
+            ]
+          }}},
           "layer4": {"servers": {"media": {
             "listen": [":443"],
             "routes": [
@@ -379,7 +395,7 @@ write_files:
                           {"handler": "proxy", "proxy_protocol": "v2", "upstreams": [{"dial": ["127.0.0.1:5349"]}]}]},
               {"match": [{"tls": {"sni": ["${PUBLIC_HOST}"]}}],
                "handle": [{"handler": "tls", "connection_policies": [{"alpn": ["http/1.1"]}]},
-                          {"handler": "proxy", "upstreams": [{"dial": ["127.0.0.1:7880"]}]}]}
+                          {"handler": "proxy", "upstreams": [{"dial": ["127.0.0.1:7884"]}]}]}
             ]
           }}}
         }
@@ -406,6 +422,10 @@ write_files:
           local raw text
           mkdir -p "$MEDIA_DIR" "${DATA_DIR}/caddy" || fail 5 "could not create ${MEDIA_DIR} and ${DATA_DIR}/caddy"
           chmod 0700 "$MEDIA_DIR" "${DATA_DIR}/caddy" || fail 5 "could not make ${MEDIA_DIR} private"
+          SIGNAL_GUARD="$(printf '%s' "memql-media-signal-v1:${API_SECRET}" | sha256sum)" \
+              || fail 5 "could not derive the private signalling guard"
+          SIGNAL_GUARD="${SIGNAL_GUARD%% *}"
+          [[ "$SIGNAL_GUARD" =~ ^[a-f0-9]{64}$ ]] || fail 5 "could not derive the private signalling guard"
           raw="$(cat "$TEMPLATE")" || fail 4 "could not read ${TEMPLATE}"
           text="$(substitute "$raw" \
               API_KEY "$API_KEY" API_SECRET "$API_SECRET" \

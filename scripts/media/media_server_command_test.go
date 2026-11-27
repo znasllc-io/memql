@@ -406,8 +406,8 @@ func TestConfigureRendersTheServerFromTheValuesOnStdin(t *testing.T) {
 	signal := routes["m1.media.example.com"]
 	if len(signal.Handle) != 2 || signal.Handle[0].Handler != "tls" || len(signal.Handle[0].ConnectionPolicies) != 1 ||
 		!slices.Equal(signal.Handle[0].ConnectionPolicies[0].ALPN, []string{"http/1.1"}) ||
-		signal.Handle[1].ProxyProtocol != "" || !slices.Equal(signal.Handle[1].Upstreams[0].Dial, []string{"127.0.0.1:7880"}) {
-		t.Errorf("the signalling route is %+v, want TLS ended here over HTTP/1.1 and the connection handed to 127.0.0.1:7880", signal)
+		signal.Handle[1].ProxyProtocol != "" || !slices.Equal(signal.Handle[1].Upstreams[0].Dial, []string{"127.0.0.1:7884"}) {
+		t.Errorf("the signalling route is %+v, want TLS ended here over HTTP/1.1 and the connection handed to the private guard on 127.0.0.1:7884", signal)
 	}
 
 	ups := s.upCalls(t)

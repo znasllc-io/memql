@@ -1039,7 +1039,7 @@ same template the local target uses (`deploy/media/livekit.yaml.tmpl`, with the
 server's public IPv4 from Hetzner's metadata, the webhook URL
 `https://api.<domain>/inbound/livekit`, and its TURN server on), renders Caddy's for the
 two names, starts the server, and waits until both names answer through Caddy: LiveKit
-at the public host, and a TLS handshake with a certificate for the TURN name (what
+health at the public host, and a TLS handshake with a certificate for the TURN name (what
 answers behind that name is TURN, so the handshake is the whole check; each attempt
 gives up after 10 seconds, so a name that never completes TLS cannot hold the command).
 If it reports either missing, the server is started but Caddy has no certificate for
@@ -1066,8 +1066,9 @@ token or secret, and the provision script never reads the media server's values 
 The keys arrive on the command's standard input instead: `ssh` carries it encrypted to
 the server it authenticated, the values are in no command line (which every process on
 a machine can read), in no container's environment, and in no file on the way, and the
-one copy written is the configuration the server runs on,
-`/etc/memql-media/livekit.yaml`, mode 0600 in a 0700 directory. What runs on the server
+credential copies are the configuration the server runs on: the two key pairs in
+`/etc/memql-media/livekit.yaml`, and the purpose-derived native signalling guard in
+`/etc/memql-media/caddy.json`, both mode 0600 in a 0700 directory. What runs on the server
 can sign passes with those keys, so the server is the one place outside the cluster
 that holds them.
 
@@ -1128,10 +1129,10 @@ until the bff restarts too a pass it mints is signed with the old key. So:
 
 A server keeps what its first boot wrote and pulled: the LiveKit template, the compose
 file, `memql-media` itself and the pinned images. `memql-media configure` renders from
-those files, never from the repository, so a later change under `deploy/media`, a
-LiveKit upgrade included, reaches production only on a server made from the new
-revision. Until then the local target, which renders from the checkout, can run what no
-production server runs. To move the installation from `m1` to `m2`:
+those files, never from the repository. Updating the repository alone changes nothing
+on an existing server. Use a reviewed drained upgrade for the fixed configuration
+boundary below, or replace the server when changing its infrastructure. To move the
+installation from `m1` to `m2`:
 
 1. Drain `m1`.
 2. Create `m2` from the new revision: steps 1 to 3 under its own name, with its own DNS
@@ -1140,6 +1141,73 @@ production server runs. To move the installation from `m1` to `m2`:
    media server MemQL records takes `m2`'s addresses and keys.
 4. Check that a call works, then switch calls back on.
 5. Remove `m1`, below.
+
+### Upgrading the fixed signalling boundary on an existing server
+
+The cloud renderer routes only `GET /rtc`, `/rtc/validate`, `/rtc/v1` and
+`/rtc/v1/validate` through `https://api.<domain>/media/rtc...`, with a fixed Host and
+verified TLS server name. Caddy removes a caller's `X-MemQL-Media-Signal` before that
+forward. The native BFF validates the issued token's native proof and current authority,
+journals the handshake, and calls the same configured media API URL with a private
+purpose-derived guard. Only the exact guard selects the loopback LiveKit RTC upstream.
+This prevents an issued participant JWT alone from selecting that upstream and avoids
+a proxy loop. The guard is SHA-256 of `memql-media-signal-v1:` plus the registry API
+secret. It is distinct from participant JWTs, but is **not** an independently random
+credential. API-secret rotation changes it on both sides.
+
+The existing public API URL is retained. Its exact POST RoomService methods and
+`/twirp/livekit.Ingress/{Create,List,Delete}Ingress` remain protected by LiveKit's
+administrative JWT checks; the private signal guard does not authorize control RPCs.
+There is no wildcard control route. Other methods and paths return 404, except exact
+root GET health. Raw LiveKit HTTP binds only `127.0.0.1:7880`; Caddy's intermediate HTTP
+listener binds only `127.0.0.1:7884`. Neither is a public listener. TURN's TLS SNI route,
+media UDP, and the existing public port 443 are unchanged. The three-container cloud
+base does not install an Ingress publisher merely by allowing its control methods.
+
+Perform this as maintenance on the existing host; it does not require provisioning a
+new billed server, new DNS names, or a device-control service:
+
+1. Deploy and verify the matching engine and front-door routes first. Confirm the
+   fixed native `/media/rtc` routes are served and the registry retains this media
+   server's exact API URL and credentials. Keep the matching client unpublished.
+2. Record the exact reviewed engine commit. Render `provision-hetzner.sh` with
+   `--dry-run=true` and the existing nonsecret server arguments; this makes no provider
+   request. From the returned `user_data`, extract only these three `write_files`
+   entries with a YAML parser: `/usr/local/sbin/memql-media`,
+   `/etc/memql-media/compose.yaml`, and `/etc/memql-media/livekit.yaml.tmpl`.
+   Retain their SHA-256 hashes with the commit. Do not execute the entire cloud-init
+   document on an existing host or replace its firewall, Docker daemon configuration,
+   certificate directory, or Secret.
+3. Drain the server as above and verify `ssh root@<ipv4> memql-media rooms` reports
+   zero. This configuration change recreates containers and interrupts media.
+   Preserve a private backup of the current three files and rendered configurations.
+   Copy only the three reviewed files over the existing authenticated owner SSH
+   connection, and install their declared modes. This is operator deployment access;
+   it adds no SSH endpoint to the application.
+4. Retrieve the existing eight-value media environment from the installation's
+   protected Secret or recovery store without printing it. Run
+   `ssh root@<ipv4> memql-media configure --domain=<domain> < media.env`.
+   Do not rotate credentials accidentally or include the environment in Git, argv,
+   evidence receipts, user data, or logs. Re-running unchanged input is idempotent.
+5. Before publishing, verify raw HTTP ports are unreachable remotely, anonymous and
+   participant-JWT control requests are denied, public RTC reaches native admission,
+   a valid native call connects without a proxy loop, and issued/refreshed-token
+   reentry after revocation is denied with provider cleanup readback. Exercise both
+   protocol paths, validation while connected, reconnect, and TURN. Record exact
+   engine/client/template versions and served results. Health alone proves none of
+   these authority properties. Unknown cleanup remains pending.
+
+Offline configuration tests and pinned-Caddy validation are not production acceptance:
+
+```bash
+GOMAXPROCS=2 go test -p 2 ./scripts/media -count=1
+MEMQL_TEST_MEDIA_CLOUD_GUARD=1 GOMAXPROCS=2 go test -p 2 ./scripts/media -run '^TestCloudSignallingGuardPinnedCaddyValidation$' -count=1
+```
+
+The opt-in starts a disposable, network-disabled container from the pinned production
+Caddy image with synthetic credentials. It validates the full rendered configuration
+without obtaining certificates or contacting a cloud provider. Only actual target
+checks establish that the upgraded production boundary is active.
 
 ### Removing a server
 
@@ -1164,7 +1232,7 @@ delete it with the last one.
 |---|---|---|
 | `livekit` | `livekit/livekit-server:v1.13.7`, pinned by digest | signalling and the control API on loopback port 7880, media on 7881/tcp and 7882/udp, TURN on 3478/udp and behind Caddy on 5349 |
 | `redis` | `redis:7.4-alpine`, pinned by digest | room state, on loopback, none of it kept: a restarted server starts empty and MemQL repairs its calls' rows |
-| `caddy` | `livekit/caddyl4:v2.11.3`, pinned by digest | port 443, routed by TLS server name: the public host to LiveKit's port 7880 over HTTP/1.1, the TURN name to its TURN server with the client's address in a PROXY header; the certificates for both |
+| `caddy` | `livekit/caddyl4:v2.11.3`, pinned by digest | port 443, routed by TLS server name: the public host to the fixed HTTP guard on loopback 7884, the TURN name to its TURN server with the client's address in a PROXY header; the certificates for both |
 
 All three run on the host's network, as LiveKit's own self-hosting layout runs them, from
 `/etc/memql-media/compose.yaml`, and Docker restarts them after a reboot. Docker runs
@@ -1177,7 +1245,7 @@ syslog, whose file Ubuntu keeps for about five weeks
 participants' identities and rooms, live less than a week; `docker logs` and
 `docker compose logs` read them there. A
 server is made with the LiveKit and Redis versions the local target runs, and keeps them
-until it is replaced ([Replacing a server](#replacing-a-server)): an upgrade of LiveKit
+until an explicit drained upgrade or replacement: an upgrade of LiveKit
 is reviewed first, for both targets. The Caddy build is LiveKit's own, Caddy with the
 layer-4 and YAML modules.
 
@@ -2145,11 +2213,11 @@ The optional [supervised family simulation](calls-family-local.md) binds child-s
 
 ### Local signalling admission boundary (2026-11-26)
 
-The local media target routes exactly `/rtc`, `/rtc/validate`, `/rtc/v1` and `/rtc/v1/validate` through the BFF native media admission boundary. LiveKit HTTP is private to its Compose network. Caddy owns port 7880: fixed RoomService/IngressService control RPCs keep their signed server authentication, and RTC additionally requires an internal derived guard credential. The credential stays in the 0600 rendered configuration and native transport; it is never a client credential. RTP still goes directly to LiveKit. Run `make frontdoor-paths` and deploy the matching BFF/front-door routes before applying `make media-up`. Existing ingress configuration is retained.
+The local media target routes exactly `/rtc`, `/rtc/validate`, `/rtc/v1` and `/rtc/v1/validate` through the BFF native media admission boundary. LiveKit HTTP is private to its Compose network. Caddy owns port 7880: fixed RoomService/Ingress control RPCs keep their signed server authentication, and RTC additionally requires an internal derived guard credential. The credential stays in the 0600 rendered configuration and native transport; it is never a client credential. RTP still goes directly to LiveKit. Run `make frontdoor-paths` and deploy the matching BFF/front-door routes before applying `make media-up`. Existing ingress configuration is retained.
 
 `go test ./component/server -run TestMediaSignal` checks transport fencing with fixture authority. `MEMQL_TEST_MEDIA_SIGNAL_LOCAL=1 go test ./component/server -run TestMediaSignalPinnedLocalProtocols -count=1` explicitly reads only the `k3d-memql` local media Secret, starts a temporary loopback fixture listener, and checks read-only native validation plus pinned provider v0/v1 Join and overlapping-socket Reconnect in disposable rooms. This transport fixture does not qualify native session/delegation revocation; those need native tests and actual-origin acceptance. It grants no persistent bypass.
 
-The cloud-init media template remains **unqualified for issued-token reentry closure**: its legacy L4 route reaches LiveKit directly. No cloud deployment or production closure is claimed. It must receive the same fixed admission boundary and independent acceptance before use for this guarantee. Old direct operator-minted RTC fixture tokens also lack native admission proof; tests must not reopen raw HTTP signalling to make them pass.
+The cloud-init media template implements the same fixed native admission boundary through a private HTTP router behind its existing TLS SNI route. Its cloud configuration tests and pinned-Caddy validation do **not** establish production issued-token reentry closure. An existing server retains its old files until the explicit drained upgrade above, and each cloud target requires independent acceptance before this guarantee is claimed. Old direct operator-minted RTC fixture tokens also lack native admission proof; tests must not reopen raw HTTP signalling to make them pass.
 
 Validation checks current native authority without opening, replacing or draining a signalling intent; it makes no provider-readiness claim. The connected-validation regression is covered by `MEMQL_TEST_MEDIA_NATIVE_LOCAL=1 MEMQL_REQUIRE_DB=1 go test ./integrations/calls -run TestMediaSignalLiveNative -count=1`, with `MEMQL_DATABASE_DSN` set to a dedicated `callkey_media_guard_*` database on `127.0.0.1:55432`. This isolated native/service/provider fixture checks real credential/session and delegation revocation, provider-refreshed JWT replay, overlapping reconnect and provider cleanup readback. It does not exercise the served user origin or its tester-code journey.
 
