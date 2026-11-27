@@ -86,7 +86,7 @@ func ValidQuestionText(text string) bool {
 }
 func ValidQuestionRequest(r WorkflowRequest) bool {
 	q := r.Question
-	if !QuestionAction(r.Action) || q == nil || r.Observation != nil || r.BranchID != "" || r.BranchVisitID != "" || r.Presentation != nil || r.BookingID != "" || r.Definition != nil || r.SkillID != "" || r.Version != 0 || r.RunID != "" || r.ExpectedRevision != 0 || r.ExpectedEpoch != 0 || r.IdempotencyKey != "" || r.NodeID != "" || r.Seconds != 0 || len(r.Bindings) != 0 || r.Acknowledged {
+	if !QuestionAction(r.Action) || q == nil || r.ResourceBindings != nil || r.Observation != nil || r.BranchID != "" || r.BranchVisitID != "" || r.Presentation != nil || r.BookingID != "" || r.Definition != nil || r.SkillID != "" || r.Version != 0 || r.RunID != "" || r.ExpectedRevision != 0 || r.ExpectedEpoch != 0 || r.IdempotencyKey != "" || r.NodeID != "" || r.Seconds != 0 || len(r.Bindings) != 0 || r.Acknowledged {
 		return false
 	}
 	if !ValidWorkflowID(q.RoomID) || !ValidWorkflowID(q.RunID) || len(q.Identity) == 0 || len(q.Identity) > 128 || len(q.Cursor) > 4096 || len(q.QueueRevision) > 64 {

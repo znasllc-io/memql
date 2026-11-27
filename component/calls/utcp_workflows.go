@@ -106,6 +106,25 @@ func dtoSchema(t reflect.Type) map[string]any {
 			props["status"] = map[string]any{"type": "string", "enum": []string{"running", "blocked", "joined"}}
 			props["allowedActions"] = map[string]any{"type": "array", "maxItems": 7, "uniqueItems": true, "items": map[string]any{"type": "string", "enum": []string{"next", "previous", "seek", "extend", "ack", "end_turn", "fallback"}}, "description": "Authoritative current branch controls. A joined branch has no actions. Global pause, resume, cancel and handoff act on the whole run."}
 		}
+		if t == reflect.TypeOf(WorkflowResourceSlot{}) {
+			props["id"] = map[string]any{"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$"}
+			props["label"] = map[string]any{"type": "string", "minLength": 1, "maxLength": 120}
+			props["kind"] = map[string]any{"type": "string", "enum": []string{"desktop", "window", "terminal", "camera", "microphone", "synthetic"}}
+			props["source"] = map[string]any{"type": "string", "enum": []string{"camera", "microphone", "screen_share", "screen_share_audio"}, "description": "Readiness observes the exact approved resource lease. Camera/microphone kinds use camera/microphone sources; other supported kinds use screen_share/screen_share_audio. Never starts a publisher or expands a media grant."}
+		}
+		if t == reflect.TypeOf(WorkflowResourceRef{}) || t == reflect.TypeOf(WorkflowResourceBinding{}) {
+			props["resourceId"] = map[string]any{"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$"}
+			props["revision"] = map[string]any{"type": "integer", "minimum": 1, "maximum": 2147483647}
+		}
+		if t == reflect.TypeOf(WorkflowRequirements{}) {
+			props["resourceIds"] = map[string]any{"type": "array", "maxItems": 4, "uniqueItems": true, "items": map[string]any{"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$"}}
+		}
+		if t == reflect.TypeOf(WorkflowRequest{}) || t == reflect.TypeOf(WorkflowBinding{}) || t == reflect.TypeOf(WorkflowRun{}) {
+			props["resourceBindings"].(map[string]any)["maxProperties"] = 8
+		}
+		if t == reflect.TypeOf(WorkflowResult{}) {
+			props["resourceOptions"].(map[string]any)["maxItems"] = 32
+		}
 		if t == reflect.TypeOf(WorkflowMaterial{}) || t == reflect.TypeOf(WorkflowField{}) {
 			props["id"] = map[string]any{"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$"}
 			props["label"] = map[string]any{"type": "string", "minLength": 1, "maxLength": 120}
@@ -120,6 +139,7 @@ func dtoSchema(t reflect.Type) map[string]any {
 			for _, field := range []string{"materials", "inputs", "outputs"} {
 				props[field].(map[string]any)["maxItems"] = 16
 			}
+			props["resources"].(map[string]any)["maxItems"] = 8
 			props["nodes"].(map[string]any)["maxItems"] = 64
 			props["roles"].(map[string]any)["maxItems"] = 16
 		}
@@ -175,6 +195,9 @@ func workflowUTCPTools(endpoint string) []any {
 			delete(props, "observation")  // Consent and untrusted text forwarding are separately scoped.
 			delete(props, "presentation") // Presentation actions have a closed revision-bound contract.
 			if family.name == "workflow" {
+				if action != "start" && action != "change" && action != "bind_booking" {
+					delete(props, "resourceBindings")
+				}
 				if action == "next" || action == "previous" || action == "seek" || action == "extend" || action == "ack" || action == "end_turn" {
 					for _, field := range []string{"branchId", "branchVisitId"} {
 						props[field] = map[string]any{"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$", "description": "Provide both branchId and its exact current branchVisitId for a parallel branch command, alongside the shared run revision/epoch. Omit both for outer guidance. Branch completion waits at join-all; it never advances a sibling."}

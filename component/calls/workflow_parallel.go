@@ -86,7 +86,7 @@ func workflowBuildParallels(d WorkflowDefinition, specs map[string]WorkflowParal
 			add("invalid_parallel", "A parallel controller needs two to four branches and exactly one edge to each branch entry.")
 			continue
 		}
-		if controller.DurationSeconds != 0 || controller.RoleID != "" || controller.Requirements != (WorkflowRequirements{}) || controller.Visibility != "all" && controller.Visibility != "host" {
+		if controller.DurationSeconds != 0 || controller.RoleID != "" || !EmptyWorkflowRequirements(controller.Requirements) || controller.Visibility != "all" && controller.Visibility != "host" {
 			add("invalid_parallel_controller", "Put timing, roles and readiness on branch steps, not the parallel controller.")
 			continue
 		}

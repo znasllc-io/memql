@@ -37,7 +37,7 @@ func workflowReadinessIssues(d WorkflowDefinition) []WorkflowIssue {
 			continue
 		}
 		badHelp := strings.TrimSpace(r.Help) == "" || len(r.Help) > 1000 || strings.IndexFunc(r.Help, func(r rune) bool { return unicode.IsControl(r) && r != '\n' && r != '\t' }) >= 0
-		if slices.Contains([]string{"repeat", "parallel", "effect", "finish"}, node.Type) || !(node.Requirements.Video || node.Requirements.ScreenShare || node.Requirements.SupervisorRoleID != "") || r.TimeoutSeconds < 1 || r.TimeoutSeconds > 3600 || badHelp {
+		if slices.Contains([]string{"repeat", "parallel", "effect", "finish"}, node.Type) || !(node.Requirements.Video || node.Requirements.ScreenShare || node.Requirements.SupervisorRoleID != "" || len(node.Requirements.ResourceIDs) > 0) || r.TimeoutSeconds < 1 || r.TimeoutSeconds > 3600 || badHelp {
 			issues = append(issues, WorkflowIssue{Path: "nodes." + node.ID + ".readiness", Code: "invalid_readiness", Message: "Readiness needs a declared media/supervisor condition, useful help and a timeout of 1–3600 seconds on a guidance step."})
 		}
 		if r.FallbackNodeID != "" && (!ValidWorkflowID(r.FallbackNodeID) || r.FallbackNodeID == node.ID || !slices.Contains(WorkflowNext(d, node.ID), r.FallbackNodeID) || len(WorkflowOrdinaryNext(d, node.ID)) == 0) {

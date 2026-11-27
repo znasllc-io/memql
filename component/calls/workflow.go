@@ -11,22 +11,23 @@ import (
 // WorkflowDefinition is declarative session guidance, never executable server code.
 // A published version is pinned into each run; visual positions have no authority.
 type WorkflowDefinition struct {
-	ID               string             `json:"id"`
-	Version          int                `json:"version"`
-	Revision         int64              `json:"revision"`
-	Status           string             `json:"status"`
-	Title            string             `json:"title"`
-	Description      string             `json:"description"`
-	Instructions     string             `json:"instructions"`
-	RequiresInsights bool               `json:"requiresInsights"`
-	Roles            []WorkflowRole     `json:"roles"`
-	Nodes            []WorkflowNode     `json:"nodes"`
-	Edges            []WorkflowEdge     `json:"edges"`
-	EntryNodeID      string             `json:"entryNodeId"`
-	Languages        []string           `json:"languages,omitempty"`
-	Materials        []WorkflowMaterial `json:"materials,omitempty"`
-	Inputs           []WorkflowField    `json:"inputs,omitempty"`
-	Outputs          []WorkflowField    `json:"outputs,omitempty"`
+	ID               string                 `json:"id"`
+	Version          int                    `json:"version"`
+	Revision         int64                  `json:"revision"`
+	Status           string                 `json:"status"`
+	Title            string                 `json:"title"`
+	Description      string                 `json:"description"`
+	Instructions     string                 `json:"instructions"`
+	RequiresInsights bool                   `json:"requiresInsights"`
+	Roles            []WorkflowRole         `json:"roles"`
+	Nodes            []WorkflowNode         `json:"nodes"`
+	Edges            []WorkflowEdge         `json:"edges"`
+	EntryNodeID      string                 `json:"entryNodeId"`
+	Resources        []WorkflowResourceSlot `json:"resources,omitempty"`
+	Languages        []string               `json:"languages,omitempty"`
+	Materials        []WorkflowMaterial     `json:"materials,omitempty"`
+	Inputs           []WorkflowField        `json:"inputs,omitempty"`
+	Outputs          []WorkflowField        `json:"outputs,omitempty"`
 }
 type WorkflowRole struct {
 	ID       string `json:"id"`
@@ -38,10 +39,11 @@ type WorkflowPosition struct {
 	Y float64 `json:"y"`
 }
 type WorkflowRequirements struct {
-	Video            bool   `json:"video,omitempty"`
-	ScreenShare      bool   `json:"screenShare,omitempty"`
-	SupervisorRoleID string `json:"supervisorRoleId,omitempty"`
-	Acknowledgment   bool   `json:"acknowledgment,omitempty"`
+	ResourceIDs      []string `json:"resourceIds,omitempty"`
+	Video            bool     `json:"video,omitempty"`
+	ScreenShare      bool     `json:"screenShare,omitempty"`
+	SupervisorRoleID string   `json:"supervisorRoleId,omitempty"`
+	Acknowledgment   bool     `json:"acknowledgment,omitempty"`
 }
 type WorkflowNode struct {
 	Readiness       *WorkflowReadinessSpec `json:"readiness,omitempty"`
@@ -79,32 +81,34 @@ type WorkflowSimulation struct {
 	Notes          []string `json:"notes"`
 }
 type WorkflowBinding struct {
-	BookingID string            `json:"bookingId"`
-	SkillID   string            `json:"skillId"`
-	Version   int               `json:"version"`
-	Revision  int64             `json:"revision"`
-	Bindings  map[string]string `json:"bindings"`
+	ResourceBindings map[string]WorkflowResourceRef `json:"resourceBindings,omitempty"`
+	BookingID        string                         `json:"bookingId"`
+	SkillID          string                         `json:"skillId"`
+	Version          int                            `json:"version"`
+	Revision         int64                          `json:"revision"`
+	Bindings         map[string]string              `json:"bindings"`
 }
 
 type WorkflowRequest struct {
-	BranchID         string               `json:"branchId,omitempty"`
-	BranchVisitID    string               `json:"branchVisitId,omitempty"`
-	Presentation     *PresentationRequest `json:"presentation,omitempty"`
-	Observation      *ObservationRequest  `json:"observation,omitempty"`
-	Question         *QuestionRequest     `json:"question,omitempty"`
-	BookingID        string               `json:"bookingId,omitempty"`
-	Action           string               `json:"action"`
-	Definition       *WorkflowDefinition  `json:"definition,omitempty"`
-	SkillID          string               `json:"skillId,omitempty"`
-	Version          int                  `json:"version,omitempty"`
-	RunID            string               `json:"runId,omitempty"`
-	ExpectedRevision int64                `json:"expectedRevision,omitempty"`
-	ExpectedEpoch    int64                `json:"expectedEpoch,omitempty"`
-	IdempotencyKey   string               `json:"idempotencyKey,omitempty"`
-	NodeID           string               `json:"nodeId,omitempty"`
-	Seconds          int64                `json:"seconds,omitempty"`
-	Bindings         map[string]string    `json:"bindings,omitempty"`
-	Acknowledged     bool                 `json:"acknowledged,omitempty"`
+	ResourceBindings map[string]WorkflowResourceRef `json:"resourceBindings,omitempty"`
+	BranchID         string                         `json:"branchId,omitempty"`
+	BranchVisitID    string                         `json:"branchVisitId,omitempty"`
+	Presentation     *PresentationRequest           `json:"presentation,omitempty"`
+	Observation      *ObservationRequest            `json:"observation,omitempty"`
+	Question         *QuestionRequest               `json:"question,omitempty"`
+	BookingID        string                         `json:"bookingId,omitempty"`
+	Action           string                         `json:"action"`
+	Definition       *WorkflowDefinition            `json:"definition,omitempty"`
+	SkillID          string                         `json:"skillId,omitempty"`
+	Version          int                            `json:"version,omitempty"`
+	RunID            string                         `json:"runId,omitempty"`
+	ExpectedRevision int64                          `json:"expectedRevision,omitempty"`
+	ExpectedEpoch    int64                          `json:"expectedEpoch,omitempty"`
+	IdempotencyKey   string                         `json:"idempotencyKey,omitempty"`
+	NodeID           string                         `json:"nodeId,omitempty"`
+	Seconds          int64                          `json:"seconds,omitempty"`
+	Bindings         map[string]string              `json:"bindings,omitempty"`
+	Acknowledged     bool                           `json:"acknowledged,omitempty"`
 }
 type WorkflowEvent struct {
 	ParallelVisitID string    `json:"parallelVisitId,omitempty"`
@@ -139,52 +143,54 @@ type WorkflowEffect struct {
 	Reason      string `json:"reason,omitempty"`
 }
 type WorkflowRun struct {
-	PreviousRunExit     *WorkflowRunExit          `json:"previousRunExit,omitempty"`
-	Readiness           *WorkflowReadinessWait    `json:"readiness,omitempty"`
-	Parallel            *WorkflowParallelProgress `json:"parallel,omitempty"`
-	Repeat              *WorkflowRepeatProgress   `json:"repeat,omitempty"`
-	SeekableNodeIDs     []string                  `json:"seekableNodeIds"`
-	Effect              *WorkflowEffect           `json:"effect,omitempty"`
-	ID                  string                    `json:"id"`
-	RoomID              string                    `json:"roomId"`
-	DefinitionID        string                    `json:"definitionId"`
-	DefinitionVersion   int                       `json:"definitionVersion"`
-	Definition          WorkflowDefinition        `json:"definition"`
-	Revision            int64                     `json:"revision"`
-	ControlEpoch        int64                     `json:"controlEpoch"`
-	Status              string                    `json:"status"`
-	NodeID              string                    `json:"nodeId"`
-	VisitID             string                    `json:"visitId"`
-	VisitNumber         int64                     `json:"visitNumber"`
-	StartedAt           time.Time                 `json:"startedAt"`
-	AnchorAt            time.Time                 `json:"anchorAt"`
-	ElapsedSeconds      int64                     `json:"elapsedSeconds"`
-	DurationSeconds     int64                     `json:"durationSeconds"`
-	OvertimeSeconds     int64                     `json:"overtimeSeconds"`
-	Bindings            map[string]string         `json:"bindings"`
-	AcknowledgedSeatIDs []string                  `json:"acknowledgedSeatIds"`
-	Hold                string                    `json:"hold"`
-	Blockers            []string                  `json:"blockers"`
-	AllowedActions      []string                  `json:"allowedActions"`
-	Events              []WorkflowEvent           `json:"events"`
-	History             []WorkflowVisit           `json:"history"`
-	ServerNow           time.Time                 `json:"serverNow"`
+	ResourceBindings    map[string]WorkflowResourceBinding `json:"resourceBindings,omitempty"`
+	PreviousRunExit     *WorkflowRunExit                   `json:"previousRunExit,omitempty"`
+	Readiness           *WorkflowReadinessWait             `json:"readiness,omitempty"`
+	Parallel            *WorkflowParallelProgress          `json:"parallel,omitempty"`
+	Repeat              *WorkflowRepeatProgress            `json:"repeat,omitempty"`
+	SeekableNodeIDs     []string                           `json:"seekableNodeIds"`
+	Effect              *WorkflowEffect                    `json:"effect,omitempty"`
+	ID                  string                             `json:"id"`
+	RoomID              string                             `json:"roomId"`
+	DefinitionID        string                             `json:"definitionId"`
+	DefinitionVersion   int                                `json:"definitionVersion"`
+	Definition          WorkflowDefinition                 `json:"definition"`
+	Revision            int64                              `json:"revision"`
+	ControlEpoch        int64                              `json:"controlEpoch"`
+	Status              string                             `json:"status"`
+	NodeID              string                             `json:"nodeId"`
+	VisitID             string                             `json:"visitId"`
+	VisitNumber         int64                              `json:"visitNumber"`
+	StartedAt           time.Time                          `json:"startedAt"`
+	AnchorAt            time.Time                          `json:"anchorAt"`
+	ElapsedSeconds      int64                              `json:"elapsedSeconds"`
+	DurationSeconds     int64                              `json:"durationSeconds"`
+	OvertimeSeconds     int64                              `json:"overtimeSeconds"`
+	Bindings            map[string]string                  `json:"bindings"`
+	AcknowledgedSeatIDs []string                           `json:"acknowledgedSeatIds"`
+	Hold                string                             `json:"hold"`
+	Blockers            []string                           `json:"blockers"`
+	AllowedActions      []string                           `json:"allowedActions"`
+	Events              []WorkflowEvent                    `json:"events"`
+	History             []WorkflowVisit                    `json:"history"`
+	ServerNow           time.Time                          `json:"serverNow"`
 }
 type WorkflowResult struct {
-	Presentation       *PresentationStatus  `json:"presentation,omitempty"`
-	Observations       *Observations        `json:"observations,omitempty"`
-	ObservationReceipt *ObservationReceipt  `json:"observationReceipt,omitempty"`
-	Questions          *Questions           `json:"questions,omitempty"`
-	QuestionReceipt    *QuestionReceipt     `json:"questionReceipt,omitempty"`
-	Effect             *WorkflowEffect      `json:"effect,omitempty"`
-	Binding            *WorkflowBinding     `json:"binding,omitempty"`
-	Catalog            []WorkflowDefinition `json:"catalog,omitempty"`
-	Definitions        []WorkflowDefinition `json:"definitions,omitempty"`
-	Definition         *WorkflowDefinition  `json:"definition,omitempty"`
-	Issues             []WorkflowIssue      `json:"issues,omitempty"`
-	Simulation         *WorkflowSimulation  `json:"simulation,omitempty"`
-	Run                *WorkflowRun         `json:"run,omitempty"`
-	ServerNow          time.Time            `json:"serverNow"`
+	ResourceOptions    []WorkflowResourceOption `json:"resourceOptions,omitempty"`
+	Presentation       *PresentationStatus      `json:"presentation,omitempty"`
+	Observations       *Observations            `json:"observations,omitempty"`
+	ObservationReceipt *ObservationReceipt      `json:"observationReceipt,omitempty"`
+	Questions          *Questions               `json:"questions,omitempty"`
+	QuestionReceipt    *QuestionReceipt         `json:"questionReceipt,omitempty"`
+	Effect             *WorkflowEffect          `json:"effect,omitempty"`
+	Binding            *WorkflowBinding         `json:"binding,omitempty"`
+	Catalog            []WorkflowDefinition     `json:"catalog,omitempty"`
+	Definitions        []WorkflowDefinition     `json:"definitions,omitempty"`
+	Definition         *WorkflowDefinition      `json:"definition,omitempty"`
+	Issues             []WorkflowIssue          `json:"issues,omitempty"`
+	Simulation         *WorkflowSimulation      `json:"simulation,omitempty"`
+	Run                *WorkflowRun             `json:"run,omitempty"`
+	ServerNow          time.Time                `json:"serverNow"`
 }
 
 var workflowID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$`)
@@ -318,6 +324,7 @@ func ValidateWorkflow(d WorkflowDefinition) []WorkflowIssue {
 		}
 	}
 	issues = append(issues, workflowMetadataIssues(d)...)
+	issues = append(issues, workflowResourceIssues(d)...)
 	issues = append(issues, workflowReadinessIssues(d)...)
 	if len(issues) == 0 {
 		repeats, found := workflowBuildRepeats(d, workflowRepeatSpecs(d))

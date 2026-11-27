@@ -67,7 +67,7 @@ func workflowBuildRepeats(d WorkflowDefinition, specs map[string]WorkflowRepeatS
 			add("invalid_repeat", "A repeat needs 1–8 rounds, one body entry and a distinct body exit.")
 			continue
 		}
-		if node.DurationSeconds != 0 || node.RoleID != "" || node.Requirements != (WorkflowRequirements{}) || node.Visibility != "all" && node.Visibility != "host" {
+		if node.DurationSeconds != 0 || node.RoleID != "" || !EmptyWorkflowRequirements(node.Requirements) || node.Visibility != "all" && node.Visibility != "host" {
 			add("invalid_repeat_controller", "Put timing, roles and readiness on the body steps, not the repeat controller.")
 			continue
 		}
