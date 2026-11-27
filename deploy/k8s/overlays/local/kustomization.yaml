@@ -80,6 +80,7 @@ resources:
   - os-front-door.yaml
   - vscode-front-door.yaml
   - edge-front-door.yaml
+  - edge-ingress-isolation.yaml
   - engine
   - package-storage.yaml
   # Local-only infrastructure (absent in base and the cloud overlay)
