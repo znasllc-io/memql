@@ -40,18 +40,19 @@ type WorkflowRequirements struct {
 	Acknowledgment   bool   `json:"acknowledgment,omitempty"`
 }
 type WorkflowNode struct {
-	Parallel        *WorkflowParallelSpec `json:"parallel,omitempty"`
-	Effect          *WorkflowEffectSpec   `json:"effect,omitempty"`
-	Repeat          *WorkflowRepeatSpec   `json:"repeat,omitempty"`
-	ID              string                `json:"id"`
-	Type            string                `json:"type"`
-	Label           string                `json:"label"`
-	Instructions    string                `json:"instructions,omitempty"`
-	Visibility      string                `json:"visibility"`
-	RoleID          string                `json:"roleId,omitempty"`
-	DurationSeconds int64                 `json:"durationSeconds,omitempty"`
-	Requirements    WorkflowRequirements  `json:"requirements,omitempty"`
-	Position        *WorkflowPosition     `json:"position,omitempty"`
+	Readiness       *WorkflowReadinessSpec `json:"readiness,omitempty"`
+	Parallel        *WorkflowParallelSpec  `json:"parallel,omitempty"`
+	Effect          *WorkflowEffectSpec    `json:"effect,omitempty"`
+	Repeat          *WorkflowRepeatSpec    `json:"repeat,omitempty"`
+	ID              string                 `json:"id"`
+	Type            string                 `json:"type"`
+	Label           string                 `json:"label"`
+	Instructions    string                 `json:"instructions,omitempty"`
+	Visibility      string                 `json:"visibility"`
+	RoleID          string                 `json:"roleId,omitempty"`
+	DurationSeconds int64                  `json:"durationSeconds,omitempty"`
+	Requirements    WorkflowRequirements   `json:"requirements,omitempty"`
+	Position        *WorkflowPosition      `json:"position,omitempty"`
 }
 type WorkflowEffectSpec struct {
 	Action string `json:"action"`
@@ -115,6 +116,8 @@ type WorkflowEvent struct {
 	RoleID          string    `json:"roleId,omitempty"`
 }
 type WorkflowVisit struct {
+	Outcome         string `json:"outcome,omitempty"`
+	Action          string `json:"action,omitempty"`
 	ParallelVisitID string `json:"parallelVisitId,omitempty"`
 	BranchID        string `json:"branchId,omitempty"`
 	RepeatVisitID   string `json:"repeatVisitId,omitempty"`
@@ -132,6 +135,8 @@ type WorkflowEffect struct {
 	Reason      string `json:"reason,omitempty"`
 }
 type WorkflowRun struct {
+	PreviousRunExit     *WorkflowRunExit          `json:"previousRunExit,omitempty"`
+	Readiness           *WorkflowReadinessWait    `json:"readiness,omitempty"`
 	Parallel            *WorkflowParallelProgress `json:"parallel,omitempty"`
 	Repeat              *WorkflowRepeatProgress   `json:"repeat,omitempty"`
 	SeekableNodeIDs     []string                  `json:"seekableNodeIds"`
@@ -282,7 +287,7 @@ func ValidateWorkflow(d WorkflowDefinition) []WorkflowIssue {
 		if n.Type != "finish" && len(out[id]) == 0 {
 			add("nodes."+id, "missing_finish", "Every path must reach a finish node.")
 		}
-		if n.Type != "condition" && n.Type != "parallel" && len(out[id]) > 1 {
+		if n.Type != "condition" && n.Type != "parallel" && len(WorkflowOrdinaryNext(d, id)) > 1 {
 			add("nodes."+id, "ambiguous_branch", "Multiple successors require an explicit condition node.")
 		}
 	}
@@ -308,6 +313,7 @@ func ValidateWorkflow(d WorkflowDefinition) []WorkflowIssue {
 			add("nodes."+id, "unreachable", "All nodes must be reachable from the entry.")
 		}
 	}
+	issues = append(issues, workflowReadinessIssues(d)...)
 	if len(issues) == 0 {
 		repeats, found := workflowBuildRepeats(d, workflowRepeatSpecs(d))
 		issues = append(issues, found...)

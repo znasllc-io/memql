@@ -78,6 +78,9 @@ func (s *Store) workflowState(ctx context.Context, owner, id string) (*workflowS
 			return nil, accountRefusal("workflow_state_unavailable")
 		}
 	}
+	if !workflowValidReadiness(&v) {
+		return nil, accountRefusal("workflow_state_unavailable")
+	}
 	if !workflowValidRepeat(&v) {
 		return nil, accountRefusal("workflow_state_unavailable")
 	}
@@ -99,6 +102,7 @@ func (s *Store) saveWorkflow(ctx context.Context, owner string, v *workflowState
 	if v.Run != nil && workflowTerminal(v.Run) {
 		workflowParallelArchive(v.Run, now)
 		v.Run.Repeat = nil
+		v.Run.Readiness = nil
 	}
 	workflowInvalidateMute(v)
 	workflowInvalidatePresentation(v, now)

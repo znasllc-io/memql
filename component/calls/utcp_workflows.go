@@ -68,6 +68,19 @@ func dtoSchema(t reflect.Type) map[string]any {
 			props["count"] = map[string]any{"type": "integer", "minimum": 1, "maximum": 8, "description": "Finite sequential rounds. Every path reaches the inclusive untilNodeId exit; rounds require fresh acknowledgments and never replay effects automatically."}
 			props["untilNodeId"] = map[string]any{"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$"}
 		}
+		if t == reflect.TypeOf(WorkflowReadinessSpec{}) {
+			props["timeoutSeconds"] = map[string]any{"type": "integer", "minimum": 1, "maximum": 3600}
+			props["help"] = map[string]any{"type": "string", "maxLength": 1000, "description": "Inert readiness guidance, subject to the node's visibility. Native authoring requires nonempty help; private participant projections redact it."}
+			props["fallbackNodeId"] = map[string]any{"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$", "description": "An extra declared outgoing alternative. Ordinary Next excludes it; elapsed timeout only permits an explicit authorized fallback request."}
+		}
+		if t == reflect.TypeOf(WorkflowVisit{}) {
+			props["outcome"] = map[string]any{"type": "string", "enum": []string{"completed", "skipped", "revisited", "abandoned"}}
+			props["action"] = map[string]any{"type": "string", "enum": []string{"next", "end_turn", "end_turn_mute", "previous", "seek", "fallback", "cancel", "change", "call_ended"}}
+		}
+		if t == reflect.TypeOf(WorkflowRunExit{}) {
+			props["outcome"] = map[string]any{"type": "string", "const": "abandoned"}
+			props["action"] = map[string]any{"type": "string", "const": "change"}
+		}
 		if t == reflect.TypeOf(WorkflowRepeatProgress{}) {
 			for _, field := range []string{"count", "iteration"} {
 				props[field] = map[string]any{"type": "integer", "minimum": 1, "maximum": 8}
@@ -91,7 +104,7 @@ func dtoSchema(t reflect.Type) map[string]any {
 		}
 		if t == reflect.TypeOf(WorkflowParallelBranch{}) {
 			props["status"] = map[string]any{"type": "string", "enum": []string{"running", "blocked", "joined"}}
-			props["allowedActions"] = map[string]any{"type": "array", "maxItems": 6, "uniqueItems": true, "items": map[string]any{"type": "string", "enum": []string{"next", "previous", "seek", "extend", "ack", "end_turn"}}, "description": "Authoritative current branch controls. A joined branch has no actions. Global pause, resume, cancel and handoff act on the whole run."}
+			props["allowedActions"] = map[string]any{"type": "array", "maxItems": 7, "uniqueItems": true, "items": map[string]any{"type": "string", "enum": []string{"next", "previous", "seek", "extend", "ack", "end_turn", "fallback"}}, "description": "Authoritative current branch controls. A joined branch has no actions. Global pause, resume, cancel and handoff act on the whole run."}
 		}
 		if t == reflect.TypeOf(WorkflowDefinition{}) {
 			props["nodes"].(map[string]any)["maxItems"] = 64
@@ -133,7 +146,7 @@ func workflowUTCPTools(endpoint string) []any {
 		schema  map[string]any
 		actions []string
 	}{
-		{"workflow", dtoSchema(reflect.TypeOf(WorkflowRequest{})), []string{"catalog", "list", "validate", "simulate", "save", "publish", "snapshot", "start", "pause", "resume", "next", "previous", "seek", "extend", "end_turn", "end_turn_mute", "change", "cancel", "ack", "handoff", "bind_booking", "snapshot_binding"}},
+		{"workflow", dtoSchema(reflect.TypeOf(WorkflowRequest{})), []string{"catalog", "list", "validate", "simulate", "save", "publish", "snapshot", "start", "pause", "resume", "next", "previous", "seek", "extend", "end_turn", "end_turn_mute", "change", "cancel", "ack", "handoff", "bind_booking", "snapshot_binding", "fallback"}},
 		{"resource", dtoSchema(reflect.TypeOf(ResourceRequest{})), []string{"list", "register", "update", "unregister", "start", "stop", "switch", "status"}},
 	} {
 		for _, action := range family.actions {
@@ -160,6 +173,11 @@ func workflowUTCPTools(endpoint string) []any {
 				}
 			}
 			props["action"] = map[string]any{"type": "string", "const": action}
+			if action == "fallback" {
+				props = map[string]any{"action": map[string]any{"type": "string", "const": action}, "runId": map[string]any{"type": "string", "maxLength": 80}, "expectedRevision": map[string]any{"type": "integer", "minimum": 1}, "expectedEpoch": map[string]any{"type": "integer", "minimum": 1}, "idempotencyKey": map[string]any{"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$"}, "branchId": map[string]any{"type": "string", "maxLength": 80}, "branchVisitId": map[string]any{"type": "string", "maxLength": 80}}
+				nested["required"] = []string{"action", "runId", "expectedRevision", "expectedEpoch", "idempotencyKey"}
+				nested["dependentRequired"] = map[string]any{"branchId": []string{"branchVisitId"}, "branchVisitId": []string{"branchId"}}
+			}
 			if action == "end_turn_mute" {
 				props = map[string]any{
 					"action":           map[string]any{"type": "string", "const": action},
@@ -174,6 +192,9 @@ func workflowUTCPTools(endpoint string) []any {
 			nested["properties"] = props
 			request := map[string]any{"type": "object", "properties": map[string]any{"action": map[string]any{"type": "string", "const": family.name}, family.name: nested}, "required": []string{"action", family.name}, "additionalProperties": false}
 			description := "Callkey " + family.name + " " + action + ". Uses the same native operation as the human interface. Requires separately approved scopes and exact skill versions/resource IDs. Live skill execution requires the room's paid Insights entitlement. Host holds and revision/epoch guards remain authoritative."
+			if action == "fallback" {
+				description += " Host only. A declared readiness timeout exposes a reviewed alternative, never automatic navigation. Send no nodeId. Native admission, Insights, paid deadline, exact grant/version/room, current acknowledgment and target readiness remain required. Parallel requests require the exact branchId and branchVisitId. Fallback stays inside its structured region and never dispatches media effects."
+			}
 			if action == "end_turn_mute" {
 				description += " Host only; requires BOTH skills_control and control. Explicitly review the assigned participant on the current turn or closed effect node before invocation. One durable intent pins that exact visit, participant and microphone publications. Retry the identical request and idempotency key: pending or uncertain retries only reconcile, never mute again. A completed effect confirms advancement; cancelled means no advancement, but already dispatched microphones may have been muted. Entry, resume and revisit never authorize automatic execution. Parallel branch effects are unavailable. Never unmute automatically."
 			}

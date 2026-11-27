@@ -76,13 +76,17 @@ func workflowAppendVisit(r *callrules.WorkflowRun, visit callrules.WorkflowVisit
 		r.History = r.History[len(r.History)-256:]
 	}
 }
-func workflowParallelArchive(r *callrules.WorkflowRun, now time.Time) {
+func workflowParallelArchive(r *callrules.WorkflowRun, now time.Time, actions ...string) {
+	action := "cancel"
+	if len(actions) > 0 {
+		action = actions[0]
+	}
 	if r.Parallel == nil {
 		return
 	}
 	for _, b := range r.Parallel.Branches {
 		if b.Status != "joined" {
-			workflowAppendVisit(r, callrules.WorkflowVisit{NodeID: b.NodeID, VisitID: b.VisitID, ElapsedSeconds: workflowBranchElapsed(r, b, now), ParallelVisitID: r.Parallel.ControllerVisitID, BranchID: b.ID})
+			workflowAppendVisit(r, callrules.WorkflowVisit{NodeID: b.NodeID, VisitID: b.VisitID, ElapsedSeconds: workflowBranchElapsed(r, b, now), ParallelVisitID: r.Parallel.ControllerVisitID, BranchID: b.ID, Outcome: "abandoned", Action: action})
 		}
 	}
 	r.Parallel = nil
@@ -117,6 +121,8 @@ func workflowBranchView(r *callrules.WorkflowRun, b callrules.WorkflowParallelBr
 	v := *r
 	v.Parallel, v.Repeat = nil, nil
 	v.NodeID, v.VisitID = b.NodeID, b.VisitID
+	v.Readiness = b.Readiness
+	v.PreviousRunExit = nil
 	v.AnchorAt, v.ElapsedSeconds, v.DurationSeconds = b.AnchorAt, b.ElapsedSeconds, b.DurationSeconds
 	v.AcknowledgedSeatIDs, v.Blockers = slices.Clone(b.AcknowledgedSeatIDs), slices.Clone(b.Blockers)
 	v.History = slices.Clone(b.History)
@@ -154,7 +160,8 @@ func (s *Service) workflowParallelObserve(ctx context.Context, site callrules.Si
 		if err != nil {
 			return false, err
 		}
-		if len(blockers) > 0 && (b.Status != "blocked" || !slices.Equal(b.Blockers, blockers)) {
+		waitChanged := workflowReadinessObserve(r.Definition, b.NodeID, b.VisitID, blockers, &b.Readiness, now)
+		if len(blockers) > 0 && (waitChanged || b.Status != "blocked" || !slices.Equal(b.Blockers, blockers)) {
 			b.ElapsedSeconds = workflowBranchElapsed(r, *b, now)
 			b.AnchorAt = time.Time{}
 			b.Status, b.Blockers = "blocked", blockers
@@ -173,7 +180,7 @@ func (s *Service) workflowParallelObserve(ctx context.Context, site callrules.Si
 	return changed, nil
 }
 func (s *Service) workflowParallelCommand(ctx context.Context, site callrules.SiteRef, room roomRow, r *callrules.WorkflowRun, seat seatRow, agent bool, req callrules.WorkflowRequest, now time.Time) error {
-	if r.Parallel == nil || !slices.Contains([]string{"next", "previous", "seek", "extend", "ack", "end_turn"}, req.Action) {
+	if r.Parallel == nil || !slices.Contains([]string{"next", "previous", "seek", "extend", "ack", "end_turn", "fallback"}, req.Action) {
 		return callrules.ErrInvalid
 	}
 	index := slices.IndexFunc(r.Parallel.Branches, func(b callrules.WorkflowParallelBranch) bool { return b.ID == req.BranchID })
@@ -192,7 +199,7 @@ func (s *Service) workflowParallelCommand(ctx context.Context, site callrules.Si
 	if !seat.Host && req.Action == "end_turn" && v.Status != "running" {
 		return accountRefusal("workflow_paused")
 	}
-	if !agent && seat.Host && slices.Contains([]string{"next", "previous", "seek", "extend"}, req.Action) {
+	if !agent && seat.Host && slices.Contains([]string{"next", "previous", "seek", "extend", "fallback"}, req.Action) {
 		r.ControlEpoch++
 		r.Hold = "human"
 	}
@@ -209,8 +216,8 @@ func (s *Service) workflowParallelCommand(ctx context.Context, site callrules.Si
 			workflowBranchEvent(r, *b, "acknowledged", "The assigned participant acknowledged this branch step.", now)
 		}
 	case "extend":
-		if req.Seconds < 1 || req.Seconds > 3600 || b.DurationSeconds+req.Seconds > 14400 {
-			return callrules.ErrInvalid
+		if err := workflowValidateExtension(b.DurationSeconds, workflowBranchElapsed(r, *b, now), req.Seconds, room.FundingDeadline, now); err != nil {
+			return err
 		}
 		b.DurationSeconds += req.Seconds
 		workflowBranchEvent(r, *b, "extended", "The host extended this branch's advisory time.", now)
@@ -221,13 +228,19 @@ func (s *Service) workflowParallelCommand(ctx context.Context, site callrules.Si
 		if !workflowAckReady(&v) {
 			return accountRefusal("workflow_acknowledgment_required")
 		}
-		if r.Status == "blocked" || b.Status == "blocked" {
+		if req.Action != "fallback" && (r.Status == "blocked" || b.Status == "blocked") {
 			return accountRefusal("workflow_requirements_unavailable")
 		}
 		region, _ := workflowParallelRegion(r, b.ID)
 		target := req.NodeID
 		join := false
 		switch req.Action {
+		case "fallback":
+			var err error
+			target, err = workflowFallbackTarget(&v, now)
+			if err != nil {
+				return err
+			}
 		case "previous":
 			target = workflowPreviousNode(&v)
 			if target == "" {
@@ -244,7 +257,7 @@ func (s *Service) workflowParallelCommand(ctx context.Context, site callrules.Si
 				}
 				join = true
 			} else {
-				next := callrules.WorkflowNext(v.Definition, b.NodeID)
+				next := callrules.WorkflowOrdinaryNext(v.Definition, b.NodeID)
 				if target == "" && len(next) == 1 {
 					target = next[0]
 				}
@@ -253,6 +266,7 @@ func (s *Service) workflowParallelCommand(ctx context.Context, site callrules.Si
 				}
 			}
 		}
+		var nextBlockers []string
 		if !join {
 			if !region.Body[target] {
 				return accountRefusal("workflow_branch_required")
@@ -261,16 +275,19 @@ func (s *Service) workflowParallelCommand(ctx context.Context, site callrules.Si
 			if err != nil {
 				return err
 			}
-			if len(blockers) != 0 {
+			nextBlockers = blockers
+			targetNode, _ := callrules.WorkflowNodeByID(r.Definition, target)
+			if len(blockers) != 0 && (req.Action == "fallback" || targetNode.Readiness == nil) {
 				return accountRefusal("workflow_requirements_unavailable")
 			}
 		}
-		visit := callrules.WorkflowVisit{NodeID: b.NodeID, VisitID: b.VisitID, ElapsedSeconds: workflowBranchElapsed(r, *b, now), ParallelVisitID: r.Parallel.ControllerVisitID, BranchID: b.ID}
+		visit := callrules.WorkflowVisit{NodeID: b.NodeID, VisitID: b.VisitID, ElapsedSeconds: workflowBranchElapsed(r, *b, now), ParallelVisitID: r.Parallel.ControllerVisitID, BranchID: b.ID, Outcome: workflowVisitOutcome(req.Action, b.NodeID, target), Action: req.Action}
 		b.History = append(b.History, visit)
 		if len(b.History) > 256 {
 			b.History = b.History[len(b.History)-256:]
 		}
 		workflowAppendVisit(r, visit)
+		b.Readiness = nil
 		if join {
 			b.ElapsedSeconds, b.AnchorAt, b.Status = visit.ElapsedSeconds, time.Time{}, "joined"
 			workflowBranchEvent(r, *b, "branch_joined", "This branch is waiting for the join-all barrier.", now)
@@ -282,7 +299,14 @@ func (s *Service) workflowParallelCommand(ctx context.Context, site callrules.Si
 			if r.Status != "running" {
 				b.AnchorAt = time.Time{}
 			}
-			b.AcknowledgedSeatIDs, b.Blockers = []string{}, []string{}
+			b.AcknowledgedSeatIDs, b.Blockers = []string{}, slices.Clone(nextBlockers)
+			if len(nextBlockers) > 0 {
+				b.Status = "blocked"
+				b.AnchorAt = time.Time{}
+			} else {
+				b.Status = "running"
+			}
+			workflowReadinessObserve(r.Definition, b.NodeID, b.VisitID, nextBlockers, &b.Readiness, now)
 			workflowBranchEvent(r, *b, "step_entered", n.Label, now)
 		}
 	}
@@ -298,6 +322,10 @@ func workflowParallelProjection(r *callrules.WorkflowRun, run callrules.Workflow
 	for i := range p.Branches {
 		b := &p.Branches[i]
 		b.AllowedActions, b.SeekableNodeIDs = []string{}, []string{}
+		if b.Readiness != nil {
+			wait := *b.Readiness
+			b.Readiness = &wait
+		}
 		b.History, b.Blockers, b.AcknowledgedSeatIDs = slices.Clone(b.History), slices.Clone(b.Blockers), slices.Clone(b.AcknowledgedSeatIDs)
 		b.ElapsedSeconds = workflowBranchElapsed(&run, *b, now)
 		b.OvertimeSeconds = 0
@@ -310,8 +338,11 @@ func workflowParallelProjection(r *callrules.WorkflowRun, run callrules.Workflow
 		view := workflowBranchView(&run, run.Parallel.Branches[i])
 		projected := workflowProjection(view, seat, agent, now)
 		b.AllowedActions = slices.DeleteFunc(projected.AllowedActions, func(action string) bool {
-			return !slices.Contains([]string{"next", "previous", "seek", "extend", "ack", "end_turn"}, action)
+			return !slices.Contains([]string{"next", "previous", "seek", "extend", "ack", "end_turn", "fallback"}, action)
 		})
+		if slices.Contains(run.Blockers, "insights_or_account_unavailable") {
+			b.AllowedActions = slices.DeleteFunc(b.AllowedActions, func(action string) bool { return action == "fallback" })
+		}
 		b.SeekableNodeIDs = projected.SeekableNodeIDs
 	}
 }

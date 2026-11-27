@@ -32,7 +32,7 @@ func workflowForwardTargets(r *callrules.WorkflowRun) []string {
 			return []string{region.AfterID}
 		}
 	}
-	return callrules.WorkflowNext(r.Definition, r.NodeID)
+	return callrules.WorkflowOrdinaryNext(r.Definition, r.NodeID)
 }
 func workflowRepeatRevisit(r *callrules.WorkflowRun, visit callrules.WorkflowVisit, regions map[string]callrules.WorkflowRepeatRegion) bool {
 	if visit.ParallelVisitID != "" {
@@ -71,7 +71,7 @@ func workflowSeekableNodes(r *callrules.WorkflowRun) []string {
 
 // Record the outgoing visit before changing the round. Otherwise the immutable
 // visit journal would incorrectly label an exit as part of the next iteration.
-func workflowMove(r *callrules.WorkflowRun, target string, advance bool, now time.Time) bool {
+func workflowMove(r *callrules.WorkflowRun, target string, advance bool, now time.Time, actions ...string) bool {
 	regions := callrules.WorkflowRepeatRegions(r.Definition)
 	var next *callrules.WorkflowRepeatProgress
 	if r.Repeat != nil {
@@ -104,7 +104,14 @@ func workflowMove(r *callrules.WorkflowRun, target string, advance bool, now tim
 			}
 		}
 	}
-	workflowEnter(r, target, now)
+	action := "next"
+	if !advance {
+		action = "seek"
+	}
+	if len(actions) > 0 {
+		action = actions[0]
+	}
+	workflowEnter(r, target, now, action)
 	r.Repeat = next
 	return true
 }

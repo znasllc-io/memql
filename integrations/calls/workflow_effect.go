@@ -456,7 +456,7 @@ func (s *Service) workflowReconcileMute(ctx context.Context, owner, stateID stri
 	}
 	if reason != "" {
 		workflowMuteFinish(v, "cancelled", reason)
-	} else if !workflowMove(v.Run, m.TargetNodeID, true, s.now()) {
+	} else if !workflowMove(v.Run, m.TargetNodeID, true, s.now(), "end_turn_mute") {
 		workflowMuteFinish(v, "cancelled", "workflow_repeat_navigation")
 	} else {
 		workflowMuteFinish(v, "completed", "")

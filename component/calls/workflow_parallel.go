@@ -33,19 +33,20 @@ type WorkflowParallelProgress struct {
 	Branches          []WorkflowParallelBranch `json:"branches"`
 }
 type WorkflowParallelBranch struct {
-	ID                  string          `json:"id"`
-	NodeID              string          `json:"nodeId"`
-	VisitID             string          `json:"visitId"`
-	Status              string          `json:"status"`
-	AnchorAt            time.Time       `json:"anchorAt"`
-	ElapsedSeconds      int64           `json:"elapsedSeconds"`
-	DurationSeconds     int64           `json:"durationSeconds"`
-	OvertimeSeconds     int64           `json:"overtimeSeconds"`
-	AcknowledgedSeatIDs []string        `json:"acknowledgedSeatIds"`
-	Blockers            []string        `json:"blockers"`
-	AllowedActions      []string        `json:"allowedActions"`
-	SeekableNodeIDs     []string        `json:"seekableNodeIds,omitempty"`
-	History             []WorkflowVisit `json:"history"`
+	Readiness           *WorkflowReadinessWait `json:"readiness,omitempty"`
+	ID                  string                 `json:"id"`
+	NodeID              string                 `json:"nodeId"`
+	VisitID             string                 `json:"visitId"`
+	Status              string                 `json:"status"`
+	AnchorAt            time.Time              `json:"anchorAt"`
+	ElapsedSeconds      int64                  `json:"elapsedSeconds"`
+	DurationSeconds     int64                  `json:"durationSeconds"`
+	OvertimeSeconds     int64                  `json:"overtimeSeconds"`
+	AcknowledgedSeatIDs []string               `json:"acknowledgedSeatIds"`
+	Blockers            []string               `json:"blockers"`
+	AllowedActions      []string               `json:"allowedActions"`
+	SeekableNodeIDs     []string               `json:"seekableNodeIds,omitempty"`
+	History             []WorkflowVisit        `json:"history"`
 }
 type WorkflowParallelRegion struct {
 	ControllerID, AfterID string

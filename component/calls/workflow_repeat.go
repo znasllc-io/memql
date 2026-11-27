@@ -157,6 +157,9 @@ func workflowPlan(d WorkflowDefinition, repeats map[string]WorkflowRepeatRegion)
 		}
 		node := nodes[id]
 		result := workflowPlannedRoute{seconds: node.DurationSeconds, visits: 1, nodes: []string{id}}
+		if node.Readiness != nil {
+			result.seconds += int64(node.Readiness.TimeoutSeconds)
+		}
 		if node.Type == "finish" {
 			result.seconds = 0
 		} else if id == stop {

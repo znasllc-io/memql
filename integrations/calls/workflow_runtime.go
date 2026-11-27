@@ -160,6 +160,8 @@ func (s *Service) workflowObserve(ctx context.Context, site callrules.SiteRef, r
 		return false, nil
 	}
 	if !room.open() || !room.FundingDeadline.IsZero() && !now.Before(room.FundingDeadline) {
+		workflowAbandonVisit(r, "call_ended", now)
+		workflowParallelArchive(r, now, "call_ended")
 		workflowFreeze(r, now)
 		r.Status = "cancelled"
 		r.Revision++
@@ -175,9 +177,10 @@ func (s *Service) workflowObserve(ctx context.Context, site callrules.SiteRef, r
 	if err != nil {
 		return false, err
 	}
+	waitChanged := workflowReadinessObserve(r.Definition, r.NodeID, r.VisitID, required, &r.Readiness, now)
 	blockers = append(blockers, required...)
 	if len(blockers) > 0 {
-		changed := r.Status != "blocked" || !slices.Equal(r.Blockers, blockers)
+		changed := waitChanged || r.Status != "blocked" || !slices.Equal(r.Blockers, blockers)
 		if changed {
 			workflowFreeze(r, now)
 			r.Status = "blocked"
@@ -201,6 +204,13 @@ func (s *Service) workflowObserve(ctx context.Context, site callrules.SiteRef, r
 // persisted definitions. Host-only and role-only text never enters that response.
 func workflowProjection(run callrules.WorkflowRun, seat seatRow, agent bool, now time.Time) callrules.WorkflowRun {
 	r := run
+	if run.Readiness != nil {
+		wait := *run.Readiness
+		r.Readiness = &wait
+	}
+	if !seat.Host {
+		r.PreviousRunExit = nil
+	}
 	workflowParallelProjection(&r, run, seat, agent, now)
 	if run.Repeat != nil {
 		frame := *run.Repeat
@@ -226,9 +236,19 @@ func workflowProjection(run callrules.WorkflowRun, seat seatRow, agent bool, now
 		if !permitted(n.Visibility, n.RoleID) {
 			r.Definition.Nodes[i].Instructions = ""
 			r.Definition.Nodes[i].Label = "Private step"
+			if n.Readiness != nil {
+				spec := *n.Readiness
+				spec.Help = ""
+				r.Definition.Nodes[i].Readiness = &spec
+			}
 		}
 	}
 	for _, event := range run.Events {
+		if permitted(event.Visibility, event.RoleID) {
+			r.Events = append(r.Events, event)
+		}
+	}
+	for _, event := range workflowParallelOvertimeEvents(run, now) {
 		if permitted(event.Visibility, event.RoleID) {
 			r.Events = append(r.Events, event)
 		}
@@ -238,6 +258,9 @@ func workflowProjection(run callrules.WorkflowRun, seat seatRow, agent bool, now
 		if permitted(n.Visibility, n.RoleID) {
 			r.Events = append(r.Events, callrules.WorkflowEvent{ID: r.VisitID + "-overtime", At: run.AnchorAt, Type: "overtime", NodeID: r.NodeID, VisitID: r.VisitID, Message: fmt.Sprintf("%d seconds over the advisory time. End turn when ready.", r.OvertimeSeconds), Visibility: n.Visibility, RoleID: n.RoleID})
 		}
+	}
+	if len(r.Events) > 256 {
+		r.Events = r.Events[len(r.Events)-256:]
 	}
 	if workflowTerminal(&r) {
 		if seat.Host && (!agent || r.Hold != "human") {
@@ -255,6 +278,9 @@ func workflowProjection(run callrules.WorkflowRun, seat seatRow, agent bool, now
 		}
 		if !agent && r.Hold == "human" {
 			r.AllowedActions = append(r.AllowedActions, "handoff")
+		}
+		if _, err := workflowFallbackTarget(&r, now); err == nil {
+			r.AllowedActions = append(r.AllowedActions, "fallback")
 		}
 		if r.Status != "blocked" && workflowAckReady(&r) {
 			node, _ := callrules.WorkflowNodeByID(r.Definition, r.NodeID)

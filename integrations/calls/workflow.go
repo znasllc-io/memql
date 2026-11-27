@@ -17,7 +17,10 @@ import (
 // and write is scoped to the authenticated account or an occupied seat's room.
 func (s *Service) Workflow(ctx context.Context, site callrules.SiteRef, token string, req callrules.WorkflowRequest) (callrules.WorkflowResult, error) {
 	out := callrules.WorkflowResult{ServerNow: s.now()}
-	if (req.BranchID == "") != (req.BranchVisitID == "") || req.BranchID != "" && (!callrules.ValidWorkflowID(req.BranchID) || !callrules.ValidWorkflowID(req.BranchVisitID) || !slices.Contains([]string{"next", "previous", "seek", "extend", "ack", "end_turn"}, req.Action)) {
+	if (req.BranchID == "") != (req.BranchVisitID == "") || req.BranchID != "" && (!callrules.ValidWorkflowID(req.BranchID) || !callrules.ValidWorkflowID(req.BranchVisitID) || !slices.Contains([]string{"next", "previous", "seek", "extend", "ack", "end_turn", "fallback"}, req.Action)) {
+		return out, callrules.ErrInvalid
+	}
+	if req.Action == "fallback" && !callrules.ValidWorkflowFallbackRequest(req) {
 		return out, callrules.ErrInvalid
 	}
 	site, err := checkSite(site)
@@ -71,7 +74,7 @@ func WorkflowScope(action string) string {
 		return "skills_read"
 	case "save", "publish":
 		return "skills_write"
-	case "start", "pause", "resume", "next", "previous", "seek", "extend", "end_turn", "end_turn_mute", "change", "cancel", "ack", "handoff", "bind_booking":
+	case "start", "pause", "resume", "next", "previous", "seek", "extend", "end_turn", "end_turn_mute", "change", "cancel", "ack", "handoff", "bind_booking", "fallback":
 		return "skills_control"
 	}
 	return ""
@@ -341,18 +344,16 @@ func workflowEvent(r *callrules.WorkflowRun, kind, msg string, now time.Time) {
 		r.Events = append([]callrules.WorkflowEvent(nil), r.Events[len(r.Events)-256:]...)
 	}
 }
-func workflowEnter(r *callrules.WorkflowRun, nodeID string, now time.Time) {
-	workflowParallelArchive(r, now)
-	if r.VisitID != "" {
-		visit := callrules.WorkflowVisit{NodeID: r.NodeID, VisitID: r.VisitID, ElapsedSeconds: callrules.WorkflowElapsed(*r, now)}
-		if r.Repeat != nil {
-			visit.RepeatVisitID, visit.RepeatIteration = r.Repeat.VisitID, r.Repeat.Iteration
-		}
-		r.History = append(r.History, visit)
-		if len(r.History) > 256 {
-			r.History = r.History[len(r.History)-256:]
-		}
+func workflowEnter(r *callrules.WorkflowRun, nodeID string, now time.Time, actions ...string) {
+	action := "next"
+	if len(actions) > 0 {
+		action = actions[0]
 	}
+	workflowParallelArchive(r, now, action)
+	if r.VisitID != "" {
+		workflowAppendVisit(r, workflowCurrentVisit(r, action, nodeID, now))
+	}
+	r.Readiness = nil
 	n, _ := callrules.WorkflowNodeByID(r.Definition, nodeID)
 	r.NodeID = nodeID
 	r.VisitNumber++
@@ -567,6 +568,17 @@ func (s *Service) workflowRunCommand(ctx context.Context, site callrules.SiteRef
 		return s.workflowMuteResponse(ctx, site, token, req, held.ID)
 	}
 	now := s.now()
+	if req.Action == "change" && v.Run != nil && !workflowTerminal(v.Run) {
+		// Commit the pause before validating the replacement. A failed change or
+		// interrupted request must never leave the previous guidance running.
+		// Retrying this old revision cannot install a replacement without review.
+		workflowPauseForChange(v.Run, agent, now)
+		if err = s.store.saveWorkflow(ctx, site.OwnerUserID, v, now); err != nil {
+			return out, err
+		}
+		projected := workflowProjection(*v.Run, *seat, agent, now)
+		out.Run = &projected
+	}
 	if req.Action == "start" || req.Action == "change" {
 		if v.Run != nil && !workflowTerminal(v.Run) && req.Action == "start" {
 			return out, accountRefusal("workflow_already_running")
@@ -601,6 +613,9 @@ func (s *Service) workflowRunCommand(ctx context.Context, site callrules.SiteRef
 		if req.Action == "change" && !agent {
 			r.Hold = "human"
 		}
+		if req.Action == "change" && v.Run != nil && !workflowTerminal(v.Run) {
+			r.PreviousRunExit = &callrules.WorkflowRunExit{RunID: v.Run.ID, NodeID: v.Run.NodeID, VisitID: v.Run.VisitID, Outcome: "abandoned", Action: "change", At: now}
+		}
 		workflowEnter(r, d.EntryNodeID, now)
 		blockers, e := s.workflowRequirements(ctx, site, *room, *r, r.NodeID)
 		if e != nil {
@@ -612,6 +627,7 @@ func (s *Service) workflowRunCommand(ctx context.Context, site callrules.SiteRef
 			r.Blockers = blockers
 			workflowEvent(r, "blocked", "Requirements need attention.", now)
 		}
+		workflowApplyReadiness(r, blockers, now)
 		v.Run = r
 	} else {
 		r := v.Run
@@ -640,7 +656,7 @@ func (s *Service) workflowRunCommand(ctx context.Context, site callrules.SiteRef
 			}
 			// A real human's intervention invalidates pending agent commands and requires
 			// an explicit human resume/handoff. Merely rereading the epoch is insufficient.
-			if !agent && seat.Host && slices.Contains([]string{"pause", "previous", "next", "seek", "extend", "cancel"}, req.Action) {
+			if !agent && seat.Host && slices.Contains([]string{"pause", "previous", "next", "seek", "extend", "cancel", "fallback"}, req.Action) {
 				r.ControlEpoch++
 				r.Hold = "human"
 			}
@@ -650,6 +666,7 @@ func (s *Service) workflowRunCommand(ctx context.Context, site callrules.SiteRef
 				r.Status = "paused"
 				workflowEvent(r, "paused", "Guidance paused. Call time and billing continue.", now)
 			case "cancel":
+				workflowAbandonVisit(r, "cancel", now)
 				workflowFreeze(r, now)
 				r.Status = "cancelled"
 				r.Blockers = []string{}
@@ -684,8 +701,8 @@ func (s *Service) workflowRunCommand(ctx context.Context, site callrules.SiteRef
 				if node.Type == "effect" {
 					return out, callrules.ErrInvalid
 				}
-				if req.Seconds < 1 || req.Seconds > 3600 || r.DurationSeconds+req.Seconds > 14400 {
-					return out, callrules.ErrInvalid
+				if err = workflowValidateExtension(r.DurationSeconds, callrules.WorkflowElapsed(*r, now), req.Seconds, room.FundingDeadline, now); err != nil {
+					return out, err
 				}
 				r.DurationSeconds += req.Seconds
 				workflowEvent(r, "extended", "The host extended this step's advisory time.", now)
@@ -701,6 +718,22 @@ func (s *Service) workflowRunCommand(ctx context.Context, site callrules.SiteRef
 					r.AcknowledgedSeatIDs = append(r.AcknowledgedSeatIDs, seat.ID)
 					workflowEvent(r, "acknowledged", "The assigned participant acknowledged this step.", now)
 				}
+			case "fallback":
+				if err = s.workflowEntitlement(ctx, site, *room); err != nil {
+					return out, err
+				}
+				target, e := workflowFallbackTarget(r, now)
+				if e != nil {
+					return out, e
+				}
+				blockers, e := s.workflowRequirements(ctx, site, *room, *r, target)
+				if e != nil {
+					return out, e
+				}
+				if len(blockers) > 0 {
+					return out, accountRefusal("workflow_requirements_unavailable")
+				}
+				workflowEnter(r, target, now, "fallback")
 			case "next", "end_turn", "previous", "seek":
 				node, _ := callrules.WorkflowNodeByID(r.Definition, r.NodeID)
 				if node.Type == "effect" && (req.Action == "next" || req.Action == "end_turn") {
@@ -747,14 +780,16 @@ func (s *Service) workflowRunCommand(ctx context.Context, site callrules.SiteRef
 				if e != nil {
 					return out, e
 				}
-				if len(blockers) > 0 {
+				targetNode, _ := callrules.WorkflowNodeByID(r.Definition, target)
+				if len(blockers) > 0 && targetNode.Readiness == nil {
 					return out, accountRefusal("workflow_requirements_unavailable")
 				}
 				wasPaused := r.Status == "paused"
-				if !workflowMove(r, target, req.Action == "next" || req.Action == "end_turn", now) {
+				if !workflowMove(r, target, req.Action == "next" || req.Action == "end_turn", now, req.Action) {
 					return out, accountRefusal("workflow_repeat_navigation")
 				}
-				if wasPaused && !workflowTerminal(r) {
+				workflowApplyReadiness(r, blockers, now)
+				if wasPaused && !workflowTerminal(r) && len(blockers) == 0 {
 					workflowFreeze(r, now)
 					r.Status = "paused"
 				}
@@ -774,7 +809,7 @@ func (s *Service) workflowRunCommand(ctx context.Context, site callrules.SiteRef
 	if err = s.workflowCurrentActor(ctx, site, token, *held, *seat, *room, req.Action); err != nil {
 		return callrules.WorkflowResult{ServerNow: s.now()}, err
 	}
-	if slices.Contains([]string{"start", "change", "resume", "handoff", "next", "previous", "seek", "end_turn"}, req.Action) {
+	if slices.Contains([]string{"start", "change", "resume", "handoff", "next", "previous", "seek", "end_turn", "fallback"}, req.Action) {
 		if err = s.workflowEntitlement(ctx, site, *room); err != nil {
 			return out, err
 		}
