@@ -1161,8 +1161,8 @@ administrative JWT checks; the private signal guard does not authorize control R
 There is no wildcard control route. Other methods and paths return 404, except exact
 root GET health. Raw LiveKit HTTP binds only `127.0.0.1:7880`; Caddy's intermediate HTTP
 listener binds only `127.0.0.1:7884`. Neither is a public listener. TURN's TLS SNI route,
-media UDP, and the existing public port 443 are unchanged. The three-container cloud
-base does not install an Ingress publisher merely by allowing its control methods.
+media UDP, and the existing public port 443 are unchanged. The base does not activate an Ingress publisher merely by allowing its control
+methods. The separate, explicit resource profile below enables the bounded worker.
 
 Perform this as maintenance on the existing host; it does not require provisioning a
 new billed server, new DNS names, or a device-control service:
@@ -1209,6 +1209,62 @@ Caddy image with synthetic credentials. It validates the full rendered configura
 without obtaining certificates or contacting a cloud provider. Only actual target
 checks establish that the upgraded production boundary is active.
 
+### Optional WHIP resources on the existing host
+
+After the fixed signalling upgrade, `memql-media configure --ingress=true` enables the
+`resources` Compose profile on that same host. It uses LiveKit Ingress 1.6.0 pinned to
+digest `sha256:8417446ede56ed378a83fc97bcdc335a328d62b5fb5b1061377f56741b3c276e`.
+The private `ingress.yaml` reuses the current operator API key pair, connects only to
+loopback LiveKit/Redis, and supplies the existing public media host as the native
+WHIP base URL. The owner still separately starts an exact approved resource lease;
+enabling the worker neither starts a publisher nor accesses a device. A subsequent
+configure without the flag retains an already configured worker. `--ingress=false`
+is refused; draining and removing an active publisher requires explicit maintenance.
+
+Only these WHIP paths reach the fixed local worker:
+
+| Methods | Path |
+|---|---|
+| POST, OPTIONS | `/whip` or `/whip/<streamKey>` |
+| PATCH, DELETE, OPTIONS | `/whip/<streamKey>/<resourceId>` |
+
+The identifiers must be 1–256 letters, digits, underscores or hyphens. The provider
+checks the native-created stream key; a participant JWT does not authorize resource
+input. Request bodies are capped at 128 KiB. Caddy removes the private signalling
+header, retains WHIP's stream-key authorization, and exposes no worker health,
+debug, RTMP, relay, URL-pull, or arbitrary proxy route. OPTIONS is the provider's
+bounded browser preflight, not a publication grant. RTMP is explicitly disabled
+(`rtmp_port: -1`), UDP URL pull is off, and the native adapter only creates WHIP input.
+The worker's internal HTTP relay binds loopback. Its raw WHIP HTTP port is private
+behind both firewalls; the provider itself listens on port 8080, so remote denial
+must be verified instead of assuming that listener is loopback.
+
+This optional input needs **UDP 7885** to the existing host in both its Hetzner
+firewall and UFW, in addition to the existing media rules. Review/add only that rule
+on the existing firewalls and preserve their SSH restrictions and other rules;
+configure deliberately does not rewrite either firewall. Keep raw TCP 8080, 8081,
+9090 and 1935 unreachable remotely. No new server, DNS name or public TCP listener
+is required. Existing TURN continues serving call participants; this WHIP worker's
+UDP input needs its own qualification on the owner's network.
+
+The worker is capped at **1.25 CPU, 1536 MiB and 256 processes**. The
+[pinned provider schema](https://github.com/livekit/ingress/blob/v1.6.0/pkg/config/config.go)
+`cpu_cost` assigns 1.0 CPU to a WHIP request and keeps a 0.1 idle ratio; this is the
+provider's measured-load admission, **not a hard one-publisher semaphore**. The
+native resource contract retains transcoding and its approved output codec, source,
+dimensions, FPS and bitrate bounds. These container limits do not prove an inbound
+RTP bandwidth ceiling. Do not raise the server's seat or resource capacity from
+these configuration numbers.
+
+On an existing 2-vCPU/4-GB CPX21, first qualify one bounded synthetic resource plus an
+ordinary two-person call. Record host/container CPU, memory and restart state,
+publication/recipient delivery, source bounds, stop/delete readback, old stream-key
+reentry refusal, and continuity of the ordinary call. If the worker refuses
+capacity, cannot sustain the test, or cleanup is unknown, keep resource availability
+pending and stop that test; do not bypass admission, increase the instance, or incur
+new provider charges. A rendered profile and the offline upgrade regression do not
+establish this target's capacity.
+
 ### Removing a server
 
 Drain it first. MemQL repairs a call's seats from what its media server reports, and a
@@ -1233,8 +1289,9 @@ delete it with the last one.
 | `livekit` | `livekit/livekit-server:v1.13.7`, pinned by digest | signalling and the control API on loopback port 7880, media on 7881/tcp and 7882/udp, TURN on 3478/udp and behind Caddy on 5349 |
 | `redis` | `redis:7.4-alpine`, pinned by digest | room state, on loopback, none of it kept: a restarted server starts empty and MemQL repairs its calls' rows |
 | `caddy` | `livekit/caddyl4:v2.11.3`, pinned by digest | port 443, routed by TLS server name: the public host to the fixed HTTP guard on loopback 7884, the TURN name to its TURN server with the client's address in a PROXY header; the certificates for both |
+| `ingress` (optional `resources` profile) | `livekit/ingress:v1.6.0`, pinned by digest | bounded WHIP input through Caddy, UDP 7885, trusted loopback publishing; RTMP disabled |
 
-All three run on the host's network, as LiveKit's own self-hosting layout runs them, from
+The base services and optional worker run on the host's network, from
 `/etc/memql-media/compose.yaml`, and Docker restarts them after a reboot. Docker runs
 with `live-restore`, so a restart of the Docker daemon, which Ubuntu's unattended
 security updates make when they update Docker, leaves the containers and their calls

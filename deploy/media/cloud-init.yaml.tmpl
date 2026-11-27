@@ -147,6 +147,19 @@ write_files:
           # Room state only, on loopback, and none of it kept: a restarted server starts
           # empty, and the engine's reconciliation repairs the calls' rows.
           command: ["redis-server", "--bind", "127.0.0.1", "--protected-mode", "yes", "--save", "", "--appendonly", "no"]
+        ingress:
+          profiles: [resources]
+          image: livekit/ingress:v1.6.0@sha256:8417446ede56ed378a83fc97bcdc335a328d62b5fb5b1061377f56741b3c276e
+          network_mode: host
+          depends_on: [livekit, redis]
+          restart: unless-stopped
+          cpus: 1.25
+          mem_limit: 1536m
+          pids_limit: 256
+          environment:
+            INGRESS_CONFIG_FILE: /etc/livekit/ingress.yaml
+          volumes:
+            - ./ingress.yaml:/etc/livekit/ingress.yaml:ro
         caddy:
           image: livekit/caddyl4:v2.11.3@sha256:9dd090159a6042a907dbff0ce9dda27a21d2a559dc7b03b60a8e6b1b60b8348e
           command: ["run", "--config", "/etc/caddy/caddy.json"]
@@ -167,6 +180,10 @@ write_files:
 {{LIVEKIT_TEMPLATE}}
 
 # memql-media, the server's own command (the operator's step). Why it reads stdin: above.
+# Keep detailed operator instructions here and in the runbook, outside the embedded
+# helper: Hetzner's 32KiB user-data limit includes every embedded comment. The optional
+# resources profile is explicit, bounded and retained; UDP7885 firewall admission is
+# a separate operator step, never a rewrite of an existing host's firewall rules.
 # What configure renders, per placeholder, is explained in the LiveKit template; the
 # Caddy configuration it writes is the layout above. A change of either recreates every
 # container, which ends every call on the server: the runbook drains a server first.
@@ -184,12 +201,6 @@ write_files:
     permissions: "0755"
     content: |
       #!/usr/bin/env bash
-      #
-      # Runbook: docs/public/operate/calls.md in the matching MemQL revision.
-      # configure --domain=<domain> [--node-ip=<IPv4>] [--wait-seconds=<n>] < media.env
-      # rooms prints the current room count. configure reads eight values only on stdin,
-      # writes private configuration, restarts if changed and verifies public/TURN TLS.
-      # MEMQL_MEDIA_* overrides are for tests. Exit: 0 ok, 2 args, 3 refused, 4 prereq, 5 failed.
 
       set -euo pipefail
 
@@ -203,8 +214,6 @@ write_files:
       COMPOSE_FILE="${MEDIA_DIR}/compose.yaml"
       TEMPLATE="${MEDIA_DIR}/livekit.yaml.tmpl"
 
-      # Values go into YAML double quotes through a bash substitution: no quote, backslash,
-      # ampersand or newline. Browsers reach the server on 443 only.
       LABEL='[a-z0-9]([a-z0-9-]*[a-z0-9])?'
       DNS_NAME="^${LABEL}(\.${LABEL})+$"
       KEY_PATTERN='^[A-Za-z0-9._-]+$'
@@ -213,7 +222,7 @@ write_files:
       OCTET='(0|[1-9][0-9]?|1[0-9][0-9]|2[0-4][0-9]|25[0-5])'
       IPV4_PATTERN="^${OCTET}\.${OCTET}\.${OCTET}\.${OCTET}$"
 
-      DOMAIN="" NODE_IP="" WAIT_SECONDS=180
+      DOMAIN="" NODE_IP="" WAIT_SECONDS=180 INGRESS_ENABLED=""
       PROVIDER="" API_URL="" PUBLIC_URL="" SEATS=""
       API_KEY="" API_SECRET="" WEBHOOK_KEY="" WEBHOOK_SECRET=""
       PUBLIC_HOST="" TURN_HOST="" WEBHOOK_URL="" SIGNAL_GUARD="" CHANGED=""
@@ -227,12 +236,15 @@ write_files:
           exit "$code"
       }
       function usage_fail() {
-          fail 2 "$1. Usage: memql-media configure --domain=<instance domain> [--node-ip=<IPv4>] [--wait-seconds=<n>] < media.env, or memql-media rooms"
+          fail 2 "$1. Usage: memql-media configure --domain=<instance domain> [--node-ip=<IPv4>] [--wait-seconds=<n>] [--ingress=true] < media.env, or memql-media rooms"
       }
       function refuse() { fail 3 "$1. Correct the values and run this command again."; }
-      function compose() { docker compose --project-name "$PROJECT" --file "$COMPOSE_FILE" "$@"; }
+      function compose() {
+          local -a profile=()
+          [[ -z "$INGRESS_ENABLED" ]] || profile=(--profile resources)
+          docker compose --project-name "$PROJECT" --file "$COMPOSE_FILE" ${profile[@]+"${profile[@]}"} "$@"
+      }
 
-      # A refusal names a flag, never what follows its '='.
       function parse_configure_args() {
           local arg
           for arg in "$@"; do
@@ -240,6 +252,7 @@ write_files:
                   --domain=*) DOMAIN="${arg#--domain=}" ;;
                   --node-ip=*) NODE_IP="${arg#--node-ip=}" ;;
                   --wait-seconds=*) WAIT_SECONDS="${arg#--wait-seconds=}" ;;
+                  --ingress=true) INGRESS_ENABLED=1 ;;
                   *) usage_fail "configure does not take ${arg%%=*}" ;;
               esac
           done
@@ -249,11 +262,9 @@ write_files:
           fi
           [[ "$WAIT_SECONDS" =~ ^[0-9]{1,5}$ ]] || usage_fail "--wait-seconds takes a whole number of seconds"
           WAIT_SECONDS=$((10#$WAIT_SECONDS))
+          [[ ! -f "${MEDIA_DIR}/ingress.yaml" ]] || INGRESS_ENABLED=1
       }
 
-      # The eight names only, each once (a second copy is a value the server and the Secret
-      # could disagree on). A line that is not NAME=value is refused by number: it may be a
-      # secret pasted on its own.
       function read_values() {
           local line name value number=0 seen=" "
           while IFS= read -r line || [[ -n "$line" ]]; do
@@ -280,8 +291,6 @@ write_files:
           done
       }
 
-      # The engine's rules (integrations/calls config.go) and the rendering's. A refusal names
-      # the value at fault and never repeats it.
       function validate_values() {
           local missing="" name
           for name in PROVIDER API_URL PUBLIC_URL SEATS API_KEY API_SECRET WEBHOOK_KEY WEBHOOK_SECRET; do
@@ -310,7 +319,6 @@ write_files:
           esac
       }
 
-      # The first SSH may arrive before cloud-init finishes installing Docker.
       function wait_for_first_boot() {
           command -v "$CLOUD_INIT" >/dev/null 2>&1 || return 0
           info "waiting for this server's first boot to finish..."
@@ -329,7 +337,6 @@ write_files:
           [[ -r "$TEMPLATE" && -r "$COMPOSE_FILE" ]] || fail 4 "${MEDIA_DIR} lacks livekit.yaml.tmpl or compose.yaml, which the first boot writes"
       }
 
-      # ICE candidates name the public IPv4: Hetzner's metadata says it, unless --node-ip does.
       function resolve_node_ip() {
           if [[ -z "$NODE_IP" ]]; then
               NODE_IP="$(curl -fsS --max-time 5 "${METADATA_URL}/public-ipv4" 2>/dev/null)" \
@@ -348,11 +355,12 @@ write_files:
           printf '%s' "$text"
       }
 
-      # Exact routes only: the native transport's purpose-bound guard admits an upstream
-      # RTC handshake; an issued participant JWT alone goes through native admission.
-      # The control API keeps LiveKit's server-JWT authentication on its fixed methods.
-      # Error request logging is excluded because provider URLs may carry access_token.
       function caddy_config() {
+          local whip_routes=""
+          if [[ -n "$INGRESS_ENABLED" ]]; then
+              whip_routes='{"match":[{"method":["POST","OPTIONS"],"path_regexp":{"pattern":"^/whip(/[A-Za-z0-9_-]{1,256})?$"}}],"handle":[{"handler":"request_body","max_size":131072},{"handler":"reverse_proxy","upstreams":[{"dial":"127.0.0.1:8080"}],"headers":{"request":{"delete":["X-MemQL-Media-Signal"]}}}],"terminal":true},
+                {"match":[{"method":["PATCH","DELETE","OPTIONS"],"path_regexp":{"pattern":"^/whip/[A-Za-z0-9_-]{1,256}/[A-Za-z0-9_-]{1,256}$"}}],"handle":[{"handler":"request_body","max_size":131072},{"handler":"reverse_proxy","upstreams":[{"dial":"127.0.0.1:8080"}],"headers":{"request":{"delete":["X-MemQL-Media-Signal"]}}}],"terminal":true},'
+          fi
           cat <<EOF
       {
         "admin": {"disabled": true},
@@ -384,6 +392,7 @@ write_files:
                            "headers": {"request": {"delete": ["X-MemQL-Media-Signal"]}}}], "terminal": true},
               {"match": [{"method": ["GET"], "path": ["/"]}],
                "handle": [{"handler": "reverse_proxy", "upstreams": [{"dial": "127.0.0.1:7880"}]}], "terminal": true},
+              ${whip_routes}
               {"handle": [{"handler": "static_response", "status_code": 404}], "terminal": true}
             ]
           }}},
@@ -403,7 +412,6 @@ write_files:
       EOF
       }
 
-      # 0600, through a temporary file and a rename, and only when the content differs.
       function write_if_changed() {
           local target="$1" tmp
           if [[ -f "$target" && "$(cat "$target")" == "$2" ]]; then
@@ -416,6 +424,25 @@ write_files:
           fi
           mv -f "$tmp" "$target" || fail 5 "could not write ${target}"
           CHANGED=1
+      }
+
+      function ingress_config() {
+          cat <<EOF
+      api_key: "${API_KEY}"
+      api_secret: "${API_SECRET}"
+      ws_url: ws://127.0.0.1:7880
+      redis: {address: "127.0.0.1:6379"}
+      rtmp_port: -1
+      whip_port: 8080
+      http_relay_port: 9090
+      health_port: 0
+      debug_handler_port: 0
+      prometheus_port: 0
+      enable_udp_url_pull: false
+      rtc_config: {udp_port: 7885, node_ip: "${NODE_IP}", use_external_ip: false}
+      cpu_cost: {whip_cpu_cost: 1.0, whip_bypass_transcoding_cpu_cost: 1.0, rtmp_cpu_cost: 1.0, url_cpu_cost: 1.0, min_idle_ratio: 0.1}
+      logging: {level: warn}
+      EOF
       }
 
       function render() {
@@ -433,6 +460,10 @@ write_files:
               BIND_ADDRESS 127.0.0.1 REDIS_ADDRESS 127.0.0.1:6379 NODE_IP "$NODE_IP" \
               TURN_ENABLED true TURN_DOMAIN "$TURN_HOST" TURN_TLS_PORT 5349 TURN_UDP_PORT 3478)"
           [[ "$text" != *"{{"* ]] || fail 5 "${TEMPLATE} has a value this command does not fill: the two come from different MemQL versions, so make the server again"
+          if [[ -n "$INGRESS_ENABLED" ]]; then
+              text+=$'\ningress:\n  whip_base_url: "https://'"${PUBLIC_HOST}"'/whip"'
+              write_if_changed "${MEDIA_DIR}/ingress.yaml" "$(ingress_config)"
+          fi
           write_if_changed "${MEDIA_DIR}/caddy.json" "$(caddy_config)"
           write_if_changed "${MEDIA_DIR}/livekit.yaml" "$text"
       }
@@ -440,11 +471,11 @@ write_files:
       function all_running() {
           local running
           running="$(compose ps --status running --services 2>/dev/null | sort | tr '\n' ' ')" || return 1
-          [[ "$running" == "caddy livekit redis " ]]
+          local expected="caddy livekit redis "
+          [[ -z "$INGRESS_ENABLED" ]] || expected="caddy ingress livekit redis "
+          [[ "$running" == "$expected" ]]
       }
 
-      # A container reads its configuration once, and compose does not recreate one for a
-      # changed mounted file: a change recreates them all, which ends every call on the server.
       function start() {
           if [[ -z "$CHANGED" ]] && all_running; then
               info "the server already runs this configuration"
@@ -454,22 +485,17 @@ write_files:
           if [[ -n "$CHANGED" ]]; then
               recreate=(--force-recreate)
           fi
-          info "starting the media server (LiveKit, Redis, Caddy)..."
+          info "starting the media server and configured resource publisher..."
           compose up --detach --wait --remove-orphans ${recreate[@]+"${recreate[@]}"} >&2 \
               || fail 5 "docker compose could not start the server; its output is above, and its logs: docker compose --project-name ${PROJECT} --file ${COMPOSE_FILE} logs"
       }
 
-      # LiveKit answers OK at its root: through Caddy, that proves the certificate, the route
-      # and the server together. --resolve pins the name to this host, so DNS is not checked.
       function public_host_answers() {
           local body
           body="$(curl --silent --max-time 5 --resolve "${PUBLIC_HOST}:443:127.0.0.1" "https://${PUBLIC_HOST}/" 2>/dev/null)" || body=""
           [[ "$body" == "OK" ]]
       }
 
-      # TURN answers behind its name, so only the TLS handshake through Caddy is checked,
-      # with the certificate verified for that name, and within a bound: a name that takes
-      # the connection and never completes TLS must not hold configure past its wait.
       function turn_name_answers() {
           timeout "$TLS_CHECK_SECONDS" "$OPENSSL" s_client -connect 127.0.0.1:443 -servername "$TURN_HOST" \
               -verify_hostname "$TURN_HOST" -verify_return_error </dev/null >/dev/null 2>&1
@@ -514,6 +540,9 @@ write_files:
           render
           start
           wait_for_answer
+          if [[ -n "$INGRESS_ENABLED" ]]; then
+              warn "WHIP needs UDP 7885 allowed in both host and cloud firewalls; raw TCP 8080/8081/9090 must remain closed. Resource capacity requires target qualification."
+          fi
           printf 'configured: browsers connect to %s; TURN is %s; webhooks go to %s\n' "$PUBLIC_URL" "$TURN_HOST" "$WEBHOOK_URL"
       }
 
@@ -538,7 +567,6 @@ write_files:
               *) usage_fail "the commands are configure and rooms" ;;
           esac
       }
-
       main "$@"
 
 # In order: the private directory (memql-media keeps it 0700 too), the socket buffers,

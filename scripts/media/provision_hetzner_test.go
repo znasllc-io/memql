@@ -764,13 +764,14 @@ func TestTheServerRunsTheReviewedImages(t *testing.T) {
 		"livekit": "livekit/livekit-server:v1.13.7@sha256:6fd3b7088874c4d119160dd688798dfec852bc014786d392caad15f6f63912a3",
 		"redis":   "redis:7.4-alpine@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe",
 		"caddy":   "livekit/caddyl4:v2.11.3@sha256:9dd090159a6042a907dbff0ce9dda27a21d2a559dc7b03b60a8e6b1b60b8348e",
+		"ingress": "livekit/ingress:v1.6.0@sha256:8417446ede56ed378a83fc97bcdc335a328d62b5fb5b1061377f56741b3c276e",
 	} {
 		if got := prod.Services[service].Image; got != image {
 			t.Errorf("%s runs %q, want %q", service, got, image)
 		}
 	}
-	if len(prod.Services) != 3 {
-		t.Errorf("the server's compose file defines %d services, want livekit, redis and caddy", len(prod.Services))
+	if len(prod.Services) != 4 {
+		t.Errorf("the server's compose file defines %d services, want livekit, redis, caddy and optional ingress", len(prod.Services))
 	}
 
 	var local composeFile

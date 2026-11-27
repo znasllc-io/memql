@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
@@ -19,14 +20,18 @@ import (
 
 type cloudHTTPRoute struct {
 	Match []struct {
-		Method []string            `json:"method"`
-		Path   []string            `json:"path"`
-		Header map[string][]string `json:"header"`
+		Method     []string            `json:"method"`
+		Path       []string            `json:"path"`
+		Header     map[string][]string `json:"header"`
+		PathRegexp struct {
+			Pattern string `json:"pattern"`
+		} `json:"path_regexp"`
 	} `json:"match"`
 	Handle []struct {
 		Handler    string `json:"handler"`
 		URI        string `json:"uri"`
 		StatusCode int    `json:"status_code"`
+		MaxSize    int    `json:"max_size"`
 		Upstreams  []struct {
 			Dial string `json:"dial"`
 		} `json:"upstreams"`
@@ -77,8 +82,12 @@ func cloudGuardRoutes(t *testing.T, s *serverFixture) []cloudHTTPRoute {
 	if !ok || len(config.Apps.HTTP.Servers) != 1 || !slices.Equal(server.Listen, []string{"127.0.0.1:7884"}) || !server.AutomaticHTTPS.Disable {
 		t.Fatal("the HTTP admission boundary must have only its private loopback listener")
 	}
-	if len(server.Routes) != 5 {
-		t.Fatalf("want native RTC, public RTC, fixed control, health, deny routes; got %d", len(server.Routes))
+	expected := 5
+	if _, err := os.Stat(filepath.Join(s.etc, "ingress.yaml")); err == nil {
+		expected = 7
+	}
+	if len(server.Routes) != expected {
+		t.Fatalf("want fixed native/control/health/deny and only enabled WHIP routes; got %d, want %d", len(server.Routes), expected)
 	}
 	for _, route := range server.Routes {
 		if !route.Terminal {
@@ -213,14 +222,22 @@ func TestCloudSignallingGuardPinnedCaddyValidation(t *testing.T) {
 	if os.Getenv("MEMQL_TEST_MEDIA_CLOUD_GUARD") != "1" {
 		t.Skip("set MEMQL_TEST_MEDIA_CLOUD_GUARD=1 for local pinned-Caddy validation")
 	}
-	s := newServerFixture(t)
-	if _, _, code := s.configure(t, "--wait-seconds=0"); code != 0 {
-		t.Fatalf("configure exit=%d", code)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "docker", "run", "--rm", "--network", "none", "--read-only", "--tmpfs", "/data", "--tmpfs", "/config", "--volume", filepath.Join(s.etc, "caddy.json")+":/etc/caddy/caddy.json:ro", "livekit/caddyl4:v2.11.3@sha256:9dd090159a6042a907dbff0ce9dda27a21d2a559dc7b03b60a8e6b1b60b8348e", "validate", "--config", "/etc/caddy/caddy.json")
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("pinned Caddy rejected rendered config: %v\n%s", err, output)
+	for _, ingress := range []bool{false, true} {
+		t.Run(fmt.Sprintf("ingress=%v", ingress), func(t *testing.T) {
+			s := newServerFixture(t)
+			args := []string{"--wait-seconds=0"}
+			if ingress {
+				args = append(args, "--ingress=true")
+			}
+			if _, _, code := s.configure(t, args...); code != 0 {
+				t.Fatalf("configure exit=%d", code)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, "docker", "run", "--rm", "--network", "none", "--read-only", "--tmpfs", "/data", "--tmpfs", "/config", "--volume", filepath.Join(s.etc, "caddy.json")+":/etc/caddy/caddy.json:ro", "livekit/caddyl4:v2.11.3@sha256:9dd090159a6042a907dbff0ce9dda27a21d2a559dc7b03b60a8e6b1b60b8348e", "validate", "--config", "/etc/caddy/caddy.json")
+			if output, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("pinned Caddy rejected rendered config: %v\n%s", err, output)
+			}
+		})
 	}
 }
