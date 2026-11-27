@@ -143,7 +143,16 @@ here on the old answer in the meantime is refused by the new one.
    Under that lock, the worker measures available space on the actual
    workspace filesystem: `min_free_disk_mib` for this step and for each step
    already running here. Low space or an unreadable measurement returns the
-   same retryable capacity refusal with an explanation. After checkout it
+   same retryable capacity refusal with an explanation. Before the first
+   checkout, discovery walks to an existing parent only when the path is
+   absent. It inspects the entry before following a symlink, so another
+   admitted slot creating the shared root cannot turn an earlier absence
+   into a false refusal. Directory symlinks remain supported; dangling
+   symlinks, files and unreadable entries still refuse. This boundary is
+   covered by `TestPipelineDiskAdmissionAcceptsWorkspaceCreatedDuringInspection`
+   and `TestPipelineDiskAdmissionDoesNotWalkPastUnreadablePath`; the existing
+   `TestPipelineStepsRunSideBySideUpToTheMachinesSlots` covers concurrent steps.
+   After checkout it
    measures again; a refusal can be retried only after owned checkout cleanup
    succeeds. Failed cleanup retains the reservation and requires recovery.
    The engine waits within the run ceiling without recording a test failure,

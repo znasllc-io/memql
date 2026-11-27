@@ -22,6 +22,13 @@ func TestPipelineDiskAdmissionUsesWorkspaceFilesystem(t *testing.T) {
 	if _, err := availablePipelineDiskBytes(root); err != nil {
 		t.Fatal(err)
 	}
+	link := filepath.Join(root, "directory-link")
+	if err := os.Symlink(root, link); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := pipelineFilesystemDirectory(link); err != nil || got != link {
+		t.Fatalf("directory symlink filesystem: %q %v", got, err)
+	}
 	for _, path := range []string{"relative", filepath.Join(root, "file"), filepath.Join(root, "dangling")} {
 		if path == filepath.Join(root, "file") {
 			if err := os.WriteFile(path, []byte("keep"), 0600); err != nil {
@@ -36,6 +43,57 @@ func TestPipelineDiskAdmissionUsesWorkspaceFilesystem(t *testing.T) {
 		if _, err := pipelineFilesystemDirectory(path); err == nil {
 			t.Errorf("admitted invalid workspace %q", path)
 		}
+	}
+}
+
+func TestPipelineDiskAdmissionDoesNotWalkPastUnreadablePath(t *testing.T) {
+	root := t.TempDir()
+	link := filepath.Join(root, "directory-link")
+	if err := os.Symlink(root, link); err != nil {
+		t.Fatal(err)
+	}
+	for _, operation := range []string{"lstat", "stat"} {
+		t.Run(operation, func(t *testing.T) {
+			stat, lstat := os.Stat, os.Lstat
+			unreadable := func(path string) (os.FileInfo, error) {
+				if path != link {
+					t.Fatalf("walked past an unreadable entry to %s", path)
+				}
+				return nil, &os.PathError{Op: operation, Path: path, Err: os.ErrPermission}
+			}
+			if operation == "stat" {
+				stat = unreadable
+			} else {
+				lstat = unreadable
+			}
+			if got, err := pipelineFilesystemDirectoryWithStat(link, stat, lstat); got != "" || !errors.Is(err, os.ErrPermission) {
+				t.Fatalf("unreadable workspace was not refused: %q %v", got, err)
+			}
+		})
+	}
+}
+
+func TestPipelineDiskAdmissionAcceptsWorkspaceCreatedDuringInspection(t *testing.T) {
+	root := t.TempDir()
+	workspace := filepath.Join(root, "pipelines")
+	created := false
+	lstat := func(path string) (os.FileInfo, error) {
+		if path == workspace && !created {
+			// Another admitted slot can create the shared root while this one
+			// discovers its filesystem. Create the real directory at that
+			// boundary, without precreating the fixture or relying on a sleep.
+			if err := os.MkdirAll(workspace, 0700); err != nil {
+				t.Fatal(err)
+			}
+			created = true
+		}
+		return os.Lstat(path)
+	}
+	if got, err := pipelineFilesystemDirectoryWithStat(workspace, os.Stat, lstat); err != nil || got != workspace {
+		t.Fatalf("concurrently created workspace filesystem: %q %v", got, err)
+	}
+	if !created {
+		t.Fatal("workspace creation boundary was not exercised")
 	}
 }
 

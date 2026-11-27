@@ -47,23 +47,33 @@ func checkPipelineDisk(workspace string, minimumMiB int, running int) error {
 // Before the first checkout the configured root may not exist. Only walk past
 // absent paths, never past inaccessible paths or a dangling symlink: otherwise
 // a different parent's free space could incorrectly admit the real target.
+// Inspect the entry before following a symlink. Another admitted slot can
+// create the root during discovery; Stat(ENOENT) followed by Lstat(success)
+// would otherwise return a stale absence error for that valid directory.
 func pipelineFilesystemDirectory(path string) (string, error) {
+	return pipelineFilesystemDirectoryWithStat(path, os.Stat, os.Lstat)
+}
+
+func pipelineFilesystemDirectoryWithStat(path string, stat, lstat func(string) (os.FileInfo, error)) (string, error) {
 	if !filepath.IsAbs(path) {
 		return "", fmt.Errorf("workspace path must be absolute")
 	}
 	path = filepath.Clean(path)
 	for {
-		info, err := os.Stat(path)
+		info, err := lstat(path)
 		if err == nil {
+			if info.Mode()&os.ModeSymlink != 0 {
+				info, err = stat(path)
+				if err != nil {
+					return "", err
+				}
+			}
 			if !info.IsDir() {
 				return "", fmt.Errorf("workspace path is not a directory")
 			}
 			return path, nil
 		}
 		if !os.IsNotExist(err) {
-			return "", err
-		}
-		if _, linkErr := os.Lstat(path); linkErr == nil || !os.IsNotExist(linkErr) {
 			return "", err
 		}
 		parent := filepath.Dir(path)
