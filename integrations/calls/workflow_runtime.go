@@ -11,6 +11,11 @@ import (
 )
 
 func (s *Service) workflowEntitlement(ctx context.Context, site callrules.SiteRef, room roomRow) error {
+	// Family/children's Skills remain a separate consent, entitlement and
+	// safety decision. A future billing flag must not silently enable them.
+	if familyRoom(room) {
+		return accountRefusal("workflow_family_unavailable")
+	}
 	cfg, err := decodeUsageConfig(room.UsageConfig)
 	if err != nil || !cfg.Insights || room.FundingMode != usageMeteredMode || room.UsageReservedCents <= 0 {
 		return accountRefusal("workflow_insights_required")
@@ -290,13 +295,26 @@ func (s *Service) ReconcileWorkflows(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if v == nil || v.Kind != "run" || workflowTerminal(v.Run) {
+		if v == nil || v.Kind != "run" || !workflowActive(v) {
 			return nil
 		}
 		return s.workflowReconcileOne(ctx, owner, v)
 	})
 }
 func (s *Service) workflowReconcileOne(ctx context.Context, owner string, v *workflowState) error {
+	roomHint, err := s.store.roomByID(memql.ContextWithFreshRead(ctx), owner, v.Run.RoomID)
+	if err != nil {
+		return err
+	}
+	if roomHint == nil {
+		return accountRefusal("workflow_room_unavailable")
+	}
+	if err := s.reconcilePresentation(ctx, *roomHint); err != nil {
+		return err
+	}
+	if workflowTerminal(v.Run) {
+		return nil
+	}
 	if err := s.workflowReconcileMute(ctx, owner, v.ID); err != nil {
 		return err
 	}

@@ -79,7 +79,10 @@ func (s *Service) mediaSeatBinding(ctx context.Context, r roomRow, seat seatRow)
 	if e != nil {
 		return mediaSignalBinding{}, e
 	}
-	b := mediaSignalBinding{Version: 1, RoomID: r.ID, Identity: seat.Identity, Kind: seat.Kind, SeatID: seat.ID, SessionID: sess.ID, KeyID: seat.KeyID, CredentialID: seat.CredentialID, JoinedAt: seat.JoinedAt, GrantID: agentContextGrant(ctx), ApprovalDigest: agentContextApproval(ctx)}
+	// Bind the participant's admission, never the operator currently inspecting
+	// it. An agent controller selecting a human presenter cannot lend its own
+	// delegation to that human's media session.
+	b := mediaSignalBinding{Version: 1, RoomID: r.ID, Identity: seat.Identity, Kind: seat.Kind, SeatID: seat.ID, SessionID: sess.ID, KeyID: seat.KeyID, CredentialID: seat.CredentialID, JoinedAt: seat.JoinedAt}
 	// A native reconnect need not carry the original Agent request context.
 	var agent struct{ GrantID, ApprovalDigest string }
 	if seat.AgentData != "" {
@@ -176,6 +179,9 @@ func (s *Service) authenticateMediaSignal(ctx context.Context, token string) (*r
 // Called with the room plus all relevant account/credential/grant gates held.
 // Native session and admission authority remains required even for refreshed JWTs.
 func (s *Service) checkMediaBinding(ctx context.Context, r roomRow, b mediaSignalBinding) error {
+	return s.checkMediaBindingCurrent(ctx, r, b, true)
+}
+func (s *Service) checkMediaBindingCurrent(ctx context.Context, r roomRow, b mediaSignalBinding, checkFamily bool) error {
 	if !b.valid() || b.RoomID != r.ID || !r.open() {
 		return accountRefusal("media_admission_closed")
 	}
@@ -229,8 +235,10 @@ func (s *Service) checkMediaBinding(ctx context.Context, r roomRow, b mediaSigna
 			return accountRefusal("media_account_closed")
 		}
 	}
-	if e := s.familySeatAllowedLocked(ctx, r, *seat); e != nil {
-		return e
+	if checkFamily {
+		if e := s.familySeatAllowedLocked(ctx, r, *seat); e != nil {
+			return e
+		}
 	}
 	if b.GrantID != "" {
 		site := callrules.SiteRef{SiteID: r.SiteID, OwnerUserID: r.OwnerUserID}

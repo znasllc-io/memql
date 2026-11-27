@@ -21,11 +21,17 @@ func (s *Service) Workflow(ctx context.Context, site callrules.SiteRef, token st
 	if err != nil {
 		return out, err
 	}
-	if WorkflowScope(req.Action) == "" || req.Question != nil && !callrules.QuestionAction(req.Action) {
+	if WorkflowScope(req.Action) == "" || req.Question != nil && !callrules.QuestionAction(req.Action) || req.Observation != nil && !callrules.ObservationAction(req.Action) || req.Presentation != nil && !callrules.PresentationAction(req.Action) {
 		return out, callrules.ErrInvalid
 	}
 	if callrules.QuestionAction(req.Action) {
 		return s.workflowQuestions(ctx, site, token, req)
+	}
+	if callrules.ObservationAction(req.Action) {
+		return s.workflowObservations(ctx, site, token, req)
+	}
+	if callrules.PresentationAction(req.Action) {
+		return s.workflowPresentation(ctx, site, token, req)
 	}
 	if req.Action == "bind_booking" || req.Action == "snapshot_binding" {
 		return s.workflowBooking(ctx, site, token, req)
@@ -38,10 +44,22 @@ func (s *Service) Workflow(ctx context.Context, site callrules.SiteRef, token st
 			return out, err
 		}
 	}
+	if err := s.presentationReconcileSession(ctx, site, token); err != nil {
+		return out, err
+	}
 	return s.workflowRunCommand(ctx, site, token, req)
 }
 
 func WorkflowScope(action string) string {
+	if action == "presentation_status" {
+		return "skills_read"
+	}
+	if action == "presentation_set" || action == "presentation_clear" {
+		return "skills_control"
+	}
+	if callrules.ObservationAction(action) {
+		return "observations"
+	}
 	if callrules.QuestionAction(action) {
 		return "questions"
 	}
@@ -101,7 +119,7 @@ func (s *Service) workflowAgentAllowed(ctx context.Context, site callrules.SiteR
 	if d == nil || d.SiteID != site.SiteID || d.KeyID != key || !d.State.RevokedAt.IsZero() || !s.now().Before(d.State.Request.ExpiresAt) {
 		return accountRefusal("delegation_inactive")
 	}
-	if !slices.Contains(d.State.Request.Scopes, WorkflowScope(action)) || action == "end_turn_mute" && !slices.Contains(d.State.Request.Scopes, "control") {
+	if !slices.Contains(d.State.Request.Scopes, WorkflowScope(action)) || (action == "end_turn_mute" || action == "presentation_set" || action == "presentation_clear") && !slices.Contains(d.State.Request.Scopes, "control") {
 		return accountRefusal("delegation_scope")
 	}
 	return s.commerceAdultAllowed(ctx, site, key)
@@ -465,6 +483,7 @@ func (s *Service) workflowRunCommand(ctx context.Context, site callrules.SiteRef
 			projected.AllowedActions = slices.DeleteFunc(projected.AllowedActions, func(action string) bool { return action == "end_turn_mute" })
 		}
 		out.Run = &projected
+		out.Presentation = s.presentationProjection(ctx, *room, v, *seat)
 	}
 	if req.Action == "snapshot" {
 		return out, nil
@@ -733,6 +752,7 @@ func (s *Service) workflowRunCommand(ctx context.Context, site callrules.SiteRef
 		projected.AllowedActions = slices.DeleteFunc(projected.AllowedActions, func(action string) bool { return action == "end_turn_mute" })
 	}
 	out.Run = &projected
+	out.Presentation = s.presentationProjection(ctx, *room, v, *seat)
 	out.ServerNow = now
 	return out, nil
 }

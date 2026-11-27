@@ -14,6 +14,14 @@ const mediaHandshakeTTL = 20 * time.Second
 const mediaSignalLeaseTTL = 30 * time.Second
 const mediaForwardBound = 5 * time.Second
 
+func (s *Service) CheckMediaSignal(ctx context.Context, token string) error {
+	r, _, _, b, _, err := s.authenticateMediaSignal(ctx, token)
+	if err != nil {
+		return err
+	}
+	return s.mediaSignalGated(ctx, *r, b, func(ctx context.Context, current roomRow) error { return s.checkMediaBinding(ctx, current, b) })
+}
+
 // BeginMediaSignal is a native admission, not a JWT-only preflight. A durable
 // pending intent precedes any upstream effect. Cross-replica room/account gates
 // order each bounded write with revocation; no gate spans the WS lifetime.
@@ -41,9 +49,15 @@ func (s *Service) BeginMediaSignal(ctx context.Context, token string) (*callrule
 	}
 	expires := s.now().Add(mediaHandshakeTTL)
 	name := "Callkey processing"
+	var grant callrules.GrantSpec
 	e = s.mediaSignalGated(ctx, *r, b, func(ctx context.Context, r roomRow) error {
 		if e := s.checkMediaBinding(ctx, r, b); e != nil {
 			return e
+		}
+		var err error
+		grant, err = s.currentMediaGrant(ctx, r, b)
+		if err != nil {
+			return err
 		}
 		j, e := s.store.mediaSignals(ctx, r)
 		if e != nil {
@@ -83,9 +97,23 @@ func (s *Service) BeginMediaSignal(ctx context.Context, token string) (*callrule
 		// callbacks. An old Close cannot remove the replacement. The new pending
 		// intent now carries uncertainty for both until LiveKit responds.
 		if supersede != "" {
-			j.remove(supersede)
+			prior := j.find(supersede)
+			if mediaPermissionNarrows(s.signalIntentGrant(r, *prior), grant) {
+				// A reconnect can race the gap between committing a policy and
+				// its deferred provider reconciliation. Never replace the broad
+				// active evidence with a narrow pending grant before removing it.
+				settled, err := s.drainMediaPermission(ctx, r, j, b.Identity, "")
+				if err != nil {
+					return err
+				}
+				if !settled {
+					return accountRefusal("media_cleanup_pending")
+				}
+			} else {
+				j.remove(supersede)
+			}
 		}
-		j.Intents = append(j.Intents, mediaSignalIntent{ID: intentID, Binding: b, State: "pending", CreatedAt: s.now(), ExpiresAt: expires})
+		j.Intents = append(j.Intents, mediaSignalIntent{ID: intentID, Binding: b, Grant: grant, GrantDigest: mediaGrantDigest(grant), State: "pending", CreatedAt: s.now(), ExpiresAt: expires})
 		return s.store.saveMediaSignals(ctx, r, j, s.now())
 	})
 	if e != nil {
@@ -93,7 +121,7 @@ func (s *Service) BeginMediaSignal(ctx context.Context, token string) (*callrule
 	}
 	// Ignore incoming provider permission claims: recompute the current native
 	// grant. The signed native proof survives provider refreshes unchanged.
-	upstream, e := mintPass(credential.Key, credential.Secret, callrules.SeatKind(b.Kind), r.MediaRoom, b.Identity, name, map[string]string{mediaAdmissionAttribute: proof}, MaxPassTTL, r.MessageProtocol != callrules.MessageProtocol)
+	upstream, e := mintPassWithSpec(credential.Key, credential.Secret, callrules.SeatKind(b.Kind), r.MediaRoom, b.Identity, name, map[string]string{mediaAdmissionAttribute: proof}, MaxPassTTL, grant)
 	if e != nil {
 		return nil, e
 	}
@@ -129,6 +157,32 @@ func (c *mediaSignalConnection) forward(ctx context.Context, fn func(context.Con
 		}
 		if e := s.checkMediaBinding(ctx, r, c.binding); e != nil {
 			return e
+		}
+		grant, e := s.currentMediaGrant(ctx, r, c.binding)
+		if e != nil {
+			return e
+		}
+		digest := mediaGrantDigest(grant)
+		if v.GrantDigest != digest {
+			// A pending pass was minted for the previous policy. Do not send
+			// it upstream after a policy change, even if Begin already returned.
+			if v.State == "pending" {
+				return accountRefusal("media_permissions_changed")
+			}
+			if mediaPermissionNarrows(s.signalIntentGrant(r, *v), grant) {
+				if _, e = s.drainMediaPermission(ctx, r, j, c.binding.Identity, ""); e != nil {
+					return e
+				}
+				return accountRefusal("media_permissions_changed")
+			}
+			if e = s.applyMediaPermission(ctx, r, c.binding.Identity, grant); e != nil {
+				return e
+			}
+			v.GrantDigest = digest
+			v.Grant = grant
+			if e = s.store.saveMediaSignals(ctx, r, j, s.now()); e != nil {
+				return e
+			}
 		}
 		// A provider operation is bounded, and a transport must respect the
 		// deadline on both dial and write. An error does not settle the intent.
@@ -173,6 +227,28 @@ func (c *mediaSignalConnection) confirm(ctx context.Context) error {
 		if allowed == nil && !s.now().Before(v.ExpiresAt) {
 			allowed = accountRefusal("media_connection_expired")
 		}
+		if allowed == nil {
+			grant, err := s.currentMediaGrant(ctx, r, c.binding)
+			if err != nil {
+				allowed = err
+			} else if digest := mediaGrantDigest(grant); digest != v.GrantDigest {
+				// The provider handshake may have landed after narrowing. Fence
+				// and remove it; never release a broad initial response. Widening
+				// can instead update/read back the current native grant.
+				if mediaPermissionNarrows(s.signalIntentGrant(r, *v), grant) {
+					_, allowed = s.drainMediaPermission(ctx, r, j, c.binding.Identity, c.id)
+					if allowed == nil {
+						allowed = accountRefusal("media_permissions_changed")
+					}
+				} else {
+					allowed = s.applyMediaPermission(ctx, r, c.binding.Identity, grant)
+					if allowed == nil {
+						v.GrantDigest = digest
+						v.Grant = grant
+					}
+				}
+			}
+		}
 		if allowed != nil {
 			v.State = "draining"
 		} else {
@@ -184,6 +260,23 @@ func (c *mediaSignalConnection) confirm(ctx context.Context) error {
 		}
 		return allowed
 	})
+}
+
+func (s *Service) applyMediaPermission(ctx context.Context, room roomRow, identity string, grant callrules.GrantSpec) error {
+	bounded, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	backend, err := s.backendFor(bounded, room)
+	if err != nil {
+		return accountRefusal("media_permissions_pending")
+	}
+	permissions, ok := backend.(MediaPermissionBackend)
+	if !ok {
+		return accountRefusal("media_permissions_pending")
+	}
+	if _, err := permissions.UpdatePermissions(bounded, room.MediaRoom, identity, grant); err != nil {
+		return accountRefusal("media_permissions_pending")
+	}
+	return nil
 }
 func (c *mediaSignalConnection) close(ctx context.Context, definitive bool) error {
 	c.mu.Lock()
@@ -377,6 +470,30 @@ func (s *Service) ReconcileMediaSignals(ctx context.Context, roomID string) (cal
 					out.Reason = "handshake_outcome_unknown"
 				} else if out.Reason == "" {
 					out.Reason = "media_connection_pending"
+				}
+			}
+		}
+		// A private ingress can reconnect after RemoveParticipant. Native
+		// denial is not completed resource cleanup until DeleteIngress has
+		// confirmed the revoked lease is stopped, even on an empty inventory.
+		resources, err := s.store.resourceStates(ctx)
+		if err != nil {
+			return err
+		}
+		for _, resource := range resources {
+			for _, lease := range resource.State.Leases {
+				if lease.RoomID != r.ID || !lease.active() {
+					continue
+				}
+				allowed, err := s.mediaResourceIdentityAllowed(ctx, r, lease.Identity)
+				if err != nil {
+					return err
+				}
+				if !allowed {
+					out.State = "pending"
+					if out.Reason == "" {
+						out.Reason = "resource_cleanup_pending"
+					}
 				}
 			}
 		}

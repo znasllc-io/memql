@@ -779,11 +779,13 @@ concept observationState {
 
 
 // The native signalling guard owns these bounded barriers. Unknown handshakes
-// are retained across replicas and restarts; TTL must never erase uncertainty.
+// are retained across replicas and restarts. Only superseded row versions age
+// out; keepLatest must never erase the current unresolved barrier.
 // @no-displayCard: private media transport admission metadata, with no content.
 @serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @belongsTo(account, via="siteId", stays="signin")
+@retention(ttl="1h", keepLatest=true, archive="none")
 concept mediaSignalState {
  siteId string!
  ownerUserId string!

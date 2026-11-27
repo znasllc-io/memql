@@ -5,6 +5,10 @@ The fixed signalling relay admits `/rtc`, `/rtc/validate`, `/rtc/v1` and
 proxy. Its upstream comes from the room's registered media server. Media packets
 still travel directly between the participant and LiveKit.
 
+Validation uses `CheckMediaSignal`, which never registers or replaces a signalling
+intent. Success says native authority is current, not that the provider is ready.
+Validating an already-connected pass cannot evict its socket.
+
 The native pass contains a second, pepper-HMAC-signed admission attribute. This
 binds the room, identity, seat generation, native session, credential, and exact
 delegated approval. A processing pass instead binds the exact consented native
@@ -45,6 +49,9 @@ intent is uncertain, reconciliation can remove an observed participant, but does
 not mistake one empty readback for proof that the original handshake cannot land
 later. A provider-generation reset recovery operation is not implemented; do not
 delete these records or describe an unobserved restart as confirmed cleanup.
+Superseded journal row versions expire after one hour with `keepLatest=true`;
+the latest unresolved barrier remains durable, rather than accumulating an
+unbounded history of heartbeat versions.
 
 During rollout, currently authorized legacy participants with no journal may
 remain until reconnect. Their status is `legacy_media_unverified`, never clear.
@@ -62,11 +69,61 @@ guard is SHA-256 of `memql-media-signal-v1:` followed by the media API secret.
 It is service-to-service authorization, not a browser credential. Neither a
 valid LiveKit user JWT nor the guard alone is a public native admission.
 
-`MediaPermissionBackend.UpdatePermissions` adds the explicit provider permission
-and readback seam for presenter/audience enforcement. It refuses unrestricted
-empty source lists and treats mismatched readback as pending enforcement. This
-seam alone does not enable a presentation policy or automatically activate any
-device.
+`MediaPermissionBackend.UpdatePermissions` supplies explicit publication
+permissions and provider readback. It refuses unrestricted empty source lists
+and treats mismatched readback as pending enforcement. Permission updates never
+automatically activate a device.
+
+## Presentation ownership and audience permissions
+
+`presentation_set`, `presentation_clear` and `presentation_status` use the shared
+human/agent Workflow boundary. A mutation requires the current host, exact
+run/visit/revision/control epoch and an idempotency key. Delegated mutation also
+requires both `skills_control` and `control`, the approved skill version and room,
+and no human control hold. Set requires an active presentation step and Insights;
+clear can restore this workflow's restrictions after the run or entitlement ends.
+Family/children's Skills remain explicitly unavailable.
+
+The policy binds its presenter and optional temporary speaker to the exact native
+seat identity and joined-at generation. The audience has independent microphone,
+camera and screen-share permissions; screen-share audio follows screen-share.
+A temporary speaker receives only the microphone permission already supported by
+its native kind, for at most 300 seconds. Presenter assignment never broadens an
+avatar to screen publishing. Public status names presenter/speaker ownership;
+only a host with current control authority receives eligible choices.
+
+Each signalling intent pins its native grant digest. A pending handshake for an
+older policy cannot be forwarded after narrowing. An already-sent handshake must
+be fenced, removed and confirmed absent before it can be settled; its first
+response is not released. Established connections with narrowing permissions are
+also fenced and disconnected. This deliberate interruption avoids relying on
+LiveKit's permission-update ordering for a previously acknowledged, delayed track.
+The client can obtain a fresh native pass and reconnect with devices off.
+Widening may use permission update/readback on the existing connection, without
+starting devices. Old/refreshed JWT claims never override the current desired
+grant; reconnect receives a newly minted restricted provider JWT.
+
+Presentation changes retain pending enforcement until narrowed participants are
+confirmed absent, other current permissions are read back, and no unresolved
+handshake can land with older permissions. Every
+provider confirmation is bound to participant SID and grant digest. Failures stay
+pending, including restoration after cancellation, completion, a new visit,
+Insights/authority loss or presenter departure. Restoration recomputes current
+native grants; it never replays a stale broad permission snapshot, unmutes a track
+or starts a device. A temporary-speaker expiry is checked by every guarded media
+operation and by the durable thirty-second workflow lifecycle pass, independently
+of any open UI. Native expiry and queued enforcement are distinct from provider
+readback and a confirmed media cutoff; the expiry timestamp is not an SRTP cutoff
+guarantee.
+
+Managed ingress retains its own owner credential and native lease. Assignment may
+select its existing native seat but cannot start a device or transfer ownership.
+Before a presentation is set, every active ingress lease in the room must be that
+exact selected lease; otherwise `presentation_stop_other_resources` asks for an
+explicit stop first. Preparing and revoking leases count until DeleteIngress is
+confirmed, including leases whose seats already departed. A live policy refuses
+new competing resource starts/switches. Existing selected-lease retries remain
+idempotent. This release does not provide an atomic combined stop-and-handoff.
 
 Regression evidence is in `media_signal_test.go` and `media_signal_db_test.go`:
 signed binding tampering, stale session/credential/grant and consented worker
@@ -74,3 +131,9 @@ authority, managed resource leases, overlapping resume, in-flight revocation,
 late handshakes, replica recovery, journal bounds, provider failures and native
 permission readback. Transport bypass closure and actual LiveKit/browser
 acceptance are separate checks; native tests alone do not establish those facts.
+
+Processing admission binds the exact current consented worker lease. The existing
+sampler provider grant permits room subscription; the trusted processing worker
+selects the lease's approved tracks. This signalling boundary does not provide
+cryptographic isolation of individual subscription targets for a custom sampler
+client holding that provider JWT.

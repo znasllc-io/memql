@@ -47,6 +47,14 @@ func MintPass(key, secret string, kind callrules.SeatKind, room, identity, name 
 	return mintPass(key, secret, kind, room, identity, name, attrs, ttl, true)
 }
 func mintPass(key, secret string, kind callrules.SeatKind, room, identity, name string, attrs map[string]string, ttl time.Duration, peerData bool) (string, error) {
+	spec, err := callrules.GrantFor(kind)
+	if err != nil {
+		return "", fmt.Errorf("calls: no pass for that seat: %w", err)
+	}
+	spec.CanPublishData = spec.CanPublishData && peerData
+	return mintPassWithSpec(key, secret, kind, room, identity, name, attrs, ttl, spec)
+}
+func mintPassWithSpec(key, secret string, kind callrules.SeatKind, room, identity, name string, attrs map[string]string, ttl time.Duration, spec callrules.GrantSpec) (string, error) {
 	switch {
 	case strings.TrimSpace(key) == "":
 		return "", errors.New("calls: a pass is signed with the media server's API key, and there is none")
@@ -59,9 +67,11 @@ func mintPass(key, secret string, kind callrules.SeatKind, room, identity, name 
 	case ttl <= 0 || ttl > MaxPassTTL:
 		return "", fmt.Errorf("calls: a pass lives more than no time and at most %s", MaxPassTTL)
 	}
-	spec, err := callrules.GrantFor(kind)
-	if err != nil {
-		return "", fmt.Errorf("calls: no pass for that seat: %w", err)
+	if _, err := callrules.GrantFor(kind); err != nil {
+		return "", err
+	}
+	if _, err := nativeParticipantPermission(spec); err != nil {
+		return "", err
 	}
 	// An empty source list is not "nothing" to LiveKit, it is "everything", whenever
 	// publishing is allowed at all (VideoGrant.GetCanPublishSource). The rules module
@@ -85,7 +95,7 @@ func mintPass(key, secret string, kind callrules.SeatKind, room, identity, name 
 	}
 	video.SetCanPublish(spec.CanPublish)
 	video.SetCanSubscribe(spec.CanSubscribe)
-	video.SetCanPublishData(spec.CanPublishData && peerData)
+	video.SetCanPublishData(spec.CanPublishData)
 	video.SetCanUpdateOwnMetadata(spec.CanUpdateOwnMetadata)
 	video.SetCanSubscribeMetrics(false)
 	video.SetCanManageAgentSession(false)

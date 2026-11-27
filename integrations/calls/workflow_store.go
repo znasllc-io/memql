@@ -22,6 +22,7 @@ type workflowOperation struct {
 	Revision           int64
 }
 type workflowState struct {
+	Presentation      *presentationIntent            `json:"presentation,omitempty"`
 	Mute              *workflowMuteIntent            `json:"mute,omitempty"`
 	Binding           *callrules.WorkflowBinding     `json:"binding,omitempty"`
 	BookingDigest     string                         `json:"bookingDigest,omitempty"`
@@ -80,6 +81,9 @@ func (s *Store) workflowState(ctx context.Context, owner, id string) (*workflowS
 	if !workflowValidMute(&v) {
 		return nil, accountRefusal("workflow_state_unavailable")
 	}
+	if !workflowValidPresentation(&v) {
+		return nil, accountRefusal("workflow_state_unavailable")
+	}
 	if v.Kind == "booking" && (v.Binding == nil || !callrules.ValidWorkflowID(v.Binding.BookingID) || !callrules.ValidWorkflowID(v.Binding.SkillID) || v.Binding.Revision < 1 || v.Binding.Version < 1 || len(v.Binding.Bindings) > 16 || len(v.BookingDigest) != 64) {
 		return nil, accountRefusal("workflow_state_unavailable")
 	}
@@ -87,6 +91,7 @@ func (s *Store) workflowState(ctx context.Context, owner, id string) (*workflowS
 }
 func (s *Store) saveWorkflow(ctx context.Context, owner string, v *workflowState, now time.Time) error {
 	workflowInvalidateMute(v)
+	workflowInvalidatePresentation(v, now)
 	data, err := json.Marshal(v)
 	if err != nil || len(data) > 1<<20 {
 		return accountRefusal("workflow_limit")
@@ -108,5 +113,5 @@ func (s *Store) saveWorkflow(ctx context.Context, owner string, v *workflowState
 // journal. Historical libraries, bookings and finished runs cannot fill the
 // active reconciliation scan and starve current calls.
 func workflowActive(v *workflowState) bool {
-	return v.Kind == "run" && v.Run != nil && !workflowTerminal(v.Run)
+	return v.Kind == "run" && v.Run != nil && (!workflowTerminal(v.Run) || v.Presentation != nil && v.Presentation.Pending)
 }

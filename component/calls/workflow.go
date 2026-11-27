@@ -75,20 +75,22 @@ type WorkflowBinding struct {
 }
 
 type WorkflowRequest struct {
-	Question         *QuestionRequest    `json:"question,omitempty"`
-	BookingID        string              `json:"bookingId,omitempty"`
-	Action           string              `json:"action"`
-	Definition       *WorkflowDefinition `json:"definition,omitempty"`
-	SkillID          string              `json:"skillId,omitempty"`
-	Version          int                 `json:"version,omitempty"`
-	RunID            string              `json:"runId,omitempty"`
-	ExpectedRevision int64               `json:"expectedRevision,omitempty"`
-	ExpectedEpoch    int64               `json:"expectedEpoch,omitempty"`
-	IdempotencyKey   string              `json:"idempotencyKey,omitempty"`
-	NodeID           string              `json:"nodeId,omitempty"`
-	Seconds          int64               `json:"seconds,omitempty"`
-	Bindings         map[string]string   `json:"bindings,omitempty"`
-	Acknowledged     bool                `json:"acknowledged,omitempty"`
+	Presentation     *PresentationRequest `json:"presentation,omitempty"`
+	Observation      *ObservationRequest  `json:"observation,omitempty"`
+	Question         *QuestionRequest     `json:"question,omitempty"`
+	BookingID        string               `json:"bookingId,omitempty"`
+	Action           string               `json:"action"`
+	Definition       *WorkflowDefinition  `json:"definition,omitempty"`
+	SkillID          string               `json:"skillId,omitempty"`
+	Version          int                  `json:"version,omitempty"`
+	RunID            string               `json:"runId,omitempty"`
+	ExpectedRevision int64                `json:"expectedRevision,omitempty"`
+	ExpectedEpoch    int64                `json:"expectedEpoch,omitempty"`
+	IdempotencyKey   string               `json:"idempotencyKey,omitempty"`
+	NodeID           string               `json:"nodeId,omitempty"`
+	Seconds          int64                `json:"seconds,omitempty"`
+	Bindings         map[string]string    `json:"bindings,omitempty"`
+	Acknowledged     bool                 `json:"acknowledged,omitempty"`
 }
 type WorkflowEvent struct {
 	ID         string    `json:"id"`
@@ -142,17 +144,20 @@ type WorkflowRun struct {
 	ServerNow           time.Time          `json:"serverNow"`
 }
 type WorkflowResult struct {
-	Questions       *Questions           `json:"questions,omitempty"`
-	QuestionReceipt *QuestionReceipt     `json:"questionReceipt,omitempty"`
-	Effect          *WorkflowEffect      `json:"effect,omitempty"`
-	Binding         *WorkflowBinding     `json:"binding,omitempty"`
-	Catalog         []WorkflowDefinition `json:"catalog,omitempty"`
-	Definitions     []WorkflowDefinition `json:"definitions,omitempty"`
-	Definition      *WorkflowDefinition  `json:"definition,omitempty"`
-	Issues          []WorkflowIssue      `json:"issues,omitempty"`
-	Simulation      *WorkflowSimulation  `json:"simulation,omitempty"`
-	Run             *WorkflowRun         `json:"run,omitempty"`
-	ServerNow       time.Time            `json:"serverNow"`
+	Presentation       *PresentationStatus  `json:"presentation,omitempty"`
+	Observations       *Observations        `json:"observations,omitempty"`
+	ObservationReceipt *ObservationReceipt  `json:"observationReceipt,omitempty"`
+	Questions          *Questions           `json:"questions,omitempty"`
+	QuestionReceipt    *QuestionReceipt     `json:"questionReceipt,omitempty"`
+	Effect             *WorkflowEffect      `json:"effect,omitempty"`
+	Binding            *WorkflowBinding     `json:"binding,omitempty"`
+	Catalog            []WorkflowDefinition `json:"catalog,omitempty"`
+	Definitions        []WorkflowDefinition `json:"definitions,omitempty"`
+	Definition         *WorkflowDefinition  `json:"definition,omitempty"`
+	Issues             []WorkflowIssue      `json:"issues,omitempty"`
+	Simulation         *WorkflowSimulation  `json:"simulation,omitempty"`
+	Run                *WorkflowRun         `json:"run,omitempty"`
+	ServerNow          time.Time            `json:"serverNow"`
 }
 
 var workflowID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$`)

@@ -10,6 +10,9 @@ import (
 // Media packets continue to travel directly between the client and LiveKit.
 type MediaSignalService interface {
 	BeginMediaSignal(context.Context, string) (*MediaSignalAdmission, error)
+	// Check validates native authority without registering/superseding a socket
+	// or touching provider state. Success is not a provider readiness report.
+	CheckMediaSignal(context.Context, string) error
 }
 
 // MediaSignalAdmission belongs to one transport connection, not its caller.

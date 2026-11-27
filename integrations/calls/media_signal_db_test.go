@@ -353,3 +353,49 @@ func TestMediaSignalDatabaseResourceExemptionRequiresExactLiveIngress(t *testing
 	require.NoError(t, e)
 	require.False(t, allowed)
 }
+
+func TestMediaSignalDatabaseValidationDoesNotReplaceOrDrainActiveSocket(t *testing.T) {
+	cw, _, start := mediaSignalFixture(t, "signal-validation")
+	if cw == nil {
+		return
+	}
+	ctx := context.Background()
+	lease, e := cw.svc.BeginMediaSignal(ctx, start.Join.Pass)
+	require.NoError(t, e)
+	require.NoError(t, lease.Confirm(ctx))
+	cw.media.setPresent(start.Call.ID, person(start.Join.Identity))
+	r, e := cw.svc.store.roomByID(ctx, cw.owner, start.Call.ID)
+	require.NoError(t, e)
+	before, e := cw.svc.store.mediaSignals(ctx, *r)
+	require.NoError(t, e)
+	require.NoError(t, cw.svc.CheckMediaSignal(ctx, start.Join.Pass))
+	require.NoError(t, cw.svc.CheckMediaSignal(ctx, start.Join.Pass))
+	after, e := cw.svc.store.mediaSignals(ctx, *r)
+	require.NoError(t, e)
+	require.Equal(t, before, after)
+	require.Empty(t, cw.media.removals())
+	require.NoError(t, lease.Forward(ctx, func(context.Context) error { return nil }))
+}
+
+func TestMediaSignalDatabaseFutureCleanupReceiptIsNotFresh(t *testing.T) {
+	cw, _, start := mediaSignalFixture(t, "signal-future-audit")
+	if cw == nil {
+		return
+	}
+	ctx := context.Background()
+	r, e := cw.svc.store.roomByID(ctx, cw.owner, start.Call.ID)
+	require.NoError(t, e)
+	j, e := cw.svc.store.mediaSignals(ctx, *r)
+	require.NoError(t, e)
+	j.LastVerifiedAt = cw.clock.Now().Add(time.Second)
+	release, e := cw.svc.gates(ctx, roomGate(r.ID))
+	require.NoError(t, e)
+	e = cw.svc.store.saveMediaSignals(ctx, *r, j, cw.clock.Now())
+	release()
+	require.NoError(t, e)
+	require.Equal(t, "pending", cw.svc.mediaCleanupStatus(ctx, *r).State)
+	cw.clock.Advance(time.Second)
+	require.Equal(t, "clear", cw.svc.mediaCleanupStatus(ctx, *r).State)
+	cw.clock.Advance(mediaSignalLeaseTTL)
+	require.Equal(t, "pending", cw.svc.mediaCleanupStatus(ctx, *r).State)
+}

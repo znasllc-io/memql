@@ -225,6 +225,9 @@ func (s *Service) startResource(ctx context.Context, h keyHolder, d *resourceRow
 			return s.finishResourceStart(ctx, d, i, room, *source)
 		}
 	}
+	if err := s.presentationResourceStartAllowed(ctx, room); err != nil {
+		return empty, err
+	}
 	for i := range d.State.Leases {
 		l := &d.State.Leases[i]
 		if !l.active() {

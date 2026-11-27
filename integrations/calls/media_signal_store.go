@@ -27,8 +27,8 @@ type mediaSignalJournal struct {
 
 // Status polling never takes write gates or performs provider I/O. A clear
 // projection requires a recent successful provider audit and still-current
-// native bindings. Family authority can perform guarded repairs, so a read-only
-// projection conservatively waits for the next audit instead of invoking it.
+// native bindings. Family authority can perform guarded repairs, so the recent
+// gated audit supplies that evidence while this read checks session/admission.
 func (s *Service) mediaCleanupStatus(ctx context.Context, r roomRow) callrules.MediaCleanupStatus {
 	out := callrules.MediaCleanupStatus{State: "pending", Reason: "media_cleanup_unverified"}
 	j, e := s.store.mediaSignals(ctx, r)
@@ -46,12 +46,12 @@ func (s *Service) mediaCleanupStatus(ctx context.Context, r roomRow) callrules.M
 			}
 			continue
 		}
-		if familyRoom(r) || s.checkMediaBinding(ctx, r, v.Binding) != nil {
+		if s.checkMediaBindingCurrent(ctx, r, v.Binding, false) != nil {
 			out.PendingSignals++
 			out.Reason = "native_authority_changed"
 		}
 	}
-	if out.PendingSignals == 0 && j.LastCleanupReason == "" && !j.LastVerifiedAt.IsZero() && s.now().Sub(j.LastVerifiedAt) < mediaSignalLeaseTTL {
+	if out.PendingSignals == 0 && j.LastCleanupReason == "" && !j.LastVerifiedAt.IsZero() && !s.now().Before(j.LastVerifiedAt) && s.now().Sub(j.LastVerifiedAt) < mediaSignalLeaseTTL {
 		out.State = "clear"
 		out.Reason = ""
 	}
@@ -60,6 +60,8 @@ func (s *Service) mediaCleanupStatus(ctx context.Context, r roomRow) callrules.M
 
 type mediaSignalIntent struct {
 	ID, State            string
+	GrantDigest          string
+	Grant                callrules.GrantSpec
 	Binding              mediaSignalBinding
 	CreatedAt, ExpiresAt time.Time
 }
@@ -102,6 +104,11 @@ func (s *Store) mediaSignals(ctx context.Context, r roomRow) (*mediaSignalJourna
 		}
 		if v.State != "pending" && v.State != "active" && v.State != "uncertain" && v.State != "draining" {
 			return nil, accountRefusal("media_barrier_unavailable")
+		}
+		if v.Grant.RoomJoin {
+			if _, e := nativeParticipantPermission(v.Grant); e != nil || mediaGrantDigest(v.Grant) != v.GrantDigest {
+				return nil, accountRefusal("media_barrier_unavailable")
+			}
 		}
 		seen[v.ID] = true
 	}
