@@ -391,8 +391,15 @@ func (s *Service) SessionCall(ctx context.Context, sess callrules.Session) (call
 		out.OpenedAt = room.OpenedAt
 		out.Identity = seat.Identity
 		out.LeaveToken = leaveToken(pepper, site.SiteID, *row, *seat)
+		resources, e := s.sessionResourceSeats(fresh, *room, v.seats)
+		if e != nil {
+			return none, e
+		}
 		for _, member := range v.seats {
 			if member.occupying() && member.Kind == string(callrules.KindAgent) {
+				if resources[member.ID] {
+					continue
+				}
 				agent := parseAgentPresentation(member.AgentData)
 				agent.Seat, agent.Identity, agent.Name = member.ID, member.Identity, member.DisplayName
 				out.Agents = append(out.Agents, agent)
@@ -442,6 +449,40 @@ func (s *Service) SessionCall(ctx context.Context, sess callrules.Session) (call
 		out.CountdownKind = "host_left"
 		if verdict.firm {
 			out.CountdownKind = callrules.LeaveWrapUp
+		}
+	}
+	return out, nil
+}
+
+// Managed publishers share KindAgent's admission accounting, but are not reviewed
+// agents. Classify only the opening owner's exact durable room/seat/identity lease;
+// status and expiry affect publishing authority, never this presentation type. This
+// keeps an expired or cleanup-pending source from breaking strict session restoration.
+// A delegated source may inherit its publisher's AgentData, so metadata presence
+// cannot classify it. Missing metadata without a matching lease is still projected
+// as invalid agent metadata, so callers continue to fail closed.
+func (s *Service) sessionResourceSeats(ctx context.Context, room roomRow, seats []seatRow) (map[string]bool, error) {
+	candidates := map[string]string{}
+	if room.KeyID != "" {
+		for _, seat := range seats {
+			if seat.occupying() && seat.RoomID == room.ID && seat.KeyID == room.KeyID && seat.Kind == string(callrules.KindAgent) {
+				candidates[seat.ID] = seat.Identity
+			}
+		}
+	}
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+	// Resource start requires the room's opening key; one bounded account journal
+	// covers every candidate, including completed receipts pending seat cleanup.
+	d, err := s.store.resourceState(ctx, room.OwnerUserID, room.SiteID, room.KeyID)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]bool{}
+	for _, lease := range d.State.Leases {
+		if identity, ok := candidates[lease.SeatID]; ok && lease.RoomID == room.ID && lease.Identity == identity {
+			out[lease.SeatID] = true
 		}
 	}
 	return out, nil
