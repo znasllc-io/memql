@@ -37,8 +37,8 @@ func (s *Service) workflowBookingAuthority(ctx context.Context, site callrules.S
 	}
 	return nil
 }
-func (s *Service) workflowBooking(ctx context.Context, site callrules.SiteRef, token string, req callrules.WorkflowRequest) (callrules.WorkflowResult, error) {
-	out := callrules.WorkflowResult{ServerNow: s.now()}
+func (s *Service) workflowBooking(ctx context.Context, site callrules.SiteRef, token string, req callrules.WorkflowRequest) (out callrules.WorkflowResult, resultErr error) {
+	out = callrules.WorkflowResult{ServerNow: s.now()}
 	if !callrules.ValidWorkflowID(req.BookingID) {
 		return out, callrules.ErrInvalid
 	}
@@ -46,7 +46,7 @@ func (s *Service) workflowBooking(ctx context.Context, site callrules.SiteRef, t
 	if err != nil {
 		return out, err
 	}
-	release, err := s.gates(ctx, bookingGate(req.BookingID))
+	release, err := s.gates(ctx, accountGate(h.row.KeyID), keyGate(h.row.KeyID), bookingGate(req.BookingID))
 	if err != nil {
 		return out, err
 	}
@@ -63,6 +63,7 @@ func (s *Service) workflowBooking(ctx context.Context, site callrules.SiteRef, t
 	if b == nil {
 		return out, callrules.ErrNotFound
 	}
+	defer func() { s.workflowResourceProjection(fresh, site, b.KeyID, h.row.KeyID, "", b.ID, &out) }()
 	if err = s.workflowBookingAuthority(fresh, site, h.row.KeyID, *b, req); err != nil {
 		return out, err
 	}
@@ -80,6 +81,14 @@ func (s *Service) workflowBooking(ctx context.Context, site callrules.SiteRef, t
 	valid := workflowBookingUsable(*b) && v.Binding != nil && v.BookingDigest == workflowBookingDigest(*b)
 	if valid {
 		out.Binding = v.Binding
+	}
+	approvedResources := map[string]callrules.WorkflowResourceRef(nil)
+	if out.Binding != nil {
+		approvedResources = out.Binding.ResourceBindings
+	}
+	out.ResourceOptions, err = s.workflowResourceOptions(fresh, site, b.KeyID, h.row.KeyID, "", b.ID, approvedResources, nil)
+	if err != nil {
+		return out, err
 	}
 	if req.Action == "snapshot_binding" {
 		return out, nil
@@ -115,6 +124,15 @@ func (s *Service) workflowBooking(ctx context.Context, site callrules.SiteRef, t
 	if err != nil {
 		return out, err
 	}
+	if err = s.workflowResourceAuthority(fresh, site, b.KeyID, h.row.KeyID, "", b.ID, req.ResourceBindings, approvedResources); err != nil {
+		return out, err
+	}
+	if err = s.workflowCheckResourceRefs(fresh, site, b.KeyID, d, req.ResourceBindings); err != nil {
+		return out, err
+	}
+	if len(req.ResourceBindings) > 0 && !cfg.Resources {
+		return out, accountRefusal("resource_tariff_required")
+	}
 	// Future seats do not yet exist. Only role names and bounded opaque hints are
 	// retained here; actual occupied seats are authorized again on explicit start.
 	if len(req.Bindings) > len(d.Roles) {
@@ -135,7 +153,7 @@ func (s *Service) workflowBooking(ctx context.Context, site callrules.SiteRef, t
 	if bindings == nil {
 		bindings = map[string]string{}
 	}
-	v.Binding = &callrules.WorkflowBinding{BookingID: b.ID, SkillID: d.ID, Version: d.Version, Revision: revision + 1, Bindings: bindings}
+	v.Binding = &callrules.WorkflowBinding{BookingID: b.ID, SkillID: d.ID, Version: d.Version, Revision: revision + 1, Bindings: bindings, ResourceBindings: req.ResourceBindings}
 	v.BookingDigest = workflowBookingDigest(*b)
 	workflowRecord(v, req, h.row.ID, v.Binding.Revision)
 	if err = s.workflowBookingAuthority(fresh, site, h.row.KeyID, *b, req); err != nil {

@@ -271,6 +271,9 @@ func (s *Service) workflowParallelCommand(ctx context.Context, site callrules.Si
 			if !region.Body[target] {
 				return accountRefusal("workflow_branch_required")
 			}
+			if err := s.workflowPinResourceLeases(ctx, site, room, r, target); err != nil {
+				return err
+			}
 			blockers, err := s.workflowRequirements(ctx, site, room, *r, target)
 			if err != nil {
 				return err

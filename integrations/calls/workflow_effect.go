@@ -136,7 +136,7 @@ func (s *Service) workflowPrepareMute(ctx context.Context, site callrules.SiteRe
 	if v.Mute != nil {
 		return accountRefusal("workflow_effect_pending")
 	}
-	if req.BranchID != "" || req.BranchVisitID != "" || req.Definition != nil || len(req.Bindings) != 0 || req.SkillID != "" || req.Version != 0 || req.Seconds != 0 || req.Acknowledged || req.BookingID != "" {
+	if req.ResourceBindings != nil || req.BranchID != "" || req.BranchVisitID != "" || req.Definition != nil || len(req.Bindings) != 0 || req.SkillID != "" || req.Version != 0 || req.Seconds != 0 || req.Acknowledged || req.BookingID != "" {
 		return callrules.ErrInvalid
 	}
 	r := v.Run
@@ -156,6 +156,9 @@ func (s *Service) workflowPrepareMute(ctx context.Context, site callrules.SiteRe
 		return accountRefusal("workflow_branch_required")
 	}
 	if err := s.workflowEntitlement(ctx, site, room); err != nil {
+		return err
+	}
+	if err := s.workflowPinResourceLeases(ctx, site, room, r, targetNode); err != nil {
 		return err
 	}
 	for _, id := range []string{r.NodeID, targetNode} {
@@ -303,6 +306,24 @@ func (s *Service) workflowMuteAuthority(ctx context.Context, site callrules.Site
 		}
 		if err = s.agentSeatAllowed(ctx, room, *actor); err != nil {
 			return err
+		}
+	}
+	if err = s.workflowResourceAuthority(ctx, site, room.KeyID, m.KeyID, room.ID, room.ScheduledCallID, workflowResourceRefs(v.Run.ResourceBindings), workflowResourceRefs(v.Run.ResourceBindings)); err != nil {
+		return err
+	}
+	// Lease validity is native authority, so it is checked again without provider
+	// I/O at reservation and each per-track dispatch claim. A source stop or
+	// delegated publisher revocation cannot authorize a later mute claim.
+	for _, nodeID := range []string{v.Run.NodeID, m.TargetNodeID} {
+		node, _ := callrules.WorkflowNodeByID(v.Run.Definition, nodeID)
+		blockers, checkErr := s.workflowResourceRequirements(ctx, site, room, *v.Run, node, nil, false)
+		if checkErr != nil {
+			return checkErr
+		}
+		for _, blocker := range blockers {
+			if blocker != "media_readiness_unavailable" {
+				return accountRefusal("workflow_requirements_unavailable")
+			}
 		}
 	}
 	return s.workflowEntitlement(ctx, site, room)

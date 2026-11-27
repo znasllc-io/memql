@@ -70,7 +70,7 @@ func (s *Service) workflowRequirements(ctx context.Context, site callrules.SiteR
 	}
 	var participants []MediaParticipant
 	available := true
-	if n.Requirements.Video || n.Requirements.ScreenShare || n.Requirements.SupervisorRoleID != "" {
+	if n.Requirements.Video || n.Requirements.ScreenShare || n.Requirements.SupervisorRoleID != "" || len(n.Requirements.ResourceIDs) > 0 {
 		var err error
 		participants, err = s.workflowMuteInventory(ctx, room)
 		available = err == nil
@@ -150,6 +150,11 @@ func (s *Service) workflowRequirementsObserved(ctx context.Context, site callrul
 			blockers = append(blockers, "presentation_source_required")
 		}
 	}
+	resources, err := s.workflowResourceRequirements(ctx, site, room, r, n, participants, available)
+	if err != nil {
+		return nil, err
+	}
+	blockers = append(blockers, resources...)
 	return blockers, nil
 }
 
@@ -209,6 +214,12 @@ func workflowProjection(run callrules.WorkflowRun, seat seatRow, agent bool, now
 		r.Readiness = &wait
 	}
 	if !seat.Host {
+		r.ResourceBindings = nil
+		r.Definition.Resources = slices.Clone(run.Definition.Resources)
+		for i := range r.Definition.Resources {
+			r.Definition.Resources[i].Label = "Required source"
+			r.Definition.Resources[i].Kind = ""
+		}
 		r.PreviousRunExit = nil
 	}
 	workflowParallelProjection(&r, run, seat, agent, now)
@@ -274,7 +285,7 @@ func workflowProjection(run callrules.WorkflowRun, seat seatRow, agent bool, now
 	}
 	if seat.Host {
 		r.AllowedActions = []string{"pause", "cancel", "change", "extend"}
-		if r.Status != "running" && len(r.Blockers) == 0 {
+		if r.Status != "running" && workflowResourceResumeCheckable(r.Blockers) {
 			r.AllowedActions = append(r.AllowedActions, "resume")
 		}
 		if !agent && r.Hold == "human" {
@@ -324,7 +335,7 @@ func workflowProjection(run callrules.WorkflowRun, seat seatRow, agent bool, now
 		})
 		if seat.Host && !slices.Contains(r.AllowedActions, "resume") {
 			for _, branch := range r.Parallel.Branches {
-				if branch.Status == "blocked" && len(branch.Blockers) == 0 {
+				if branch.Status == "blocked" && workflowResourceResumeCheckable(branch.Blockers) {
 					r.AllowedActions = append(r.AllowedActions, "resume")
 					break
 				}

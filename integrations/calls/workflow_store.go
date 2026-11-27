@@ -78,6 +78,9 @@ func (s *Store) workflowState(ctx context.Context, owner, id string) (*workflowS
 			return nil, accountRefusal("workflow_state_unavailable")
 		}
 	}
+	if !workflowValidResources(&v) {
+		return nil, accountRefusal("workflow_state_unavailable")
+	}
 	if !workflowValidReadiness(&v) {
 		return nil, accountRefusal("workflow_state_unavailable")
 	}

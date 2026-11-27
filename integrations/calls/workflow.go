@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"slices"
 	"time"
 
@@ -17,6 +18,9 @@ import (
 // and write is scoped to the authenticated account or an occupied seat's room.
 func (s *Service) Workflow(ctx context.Context, site callrules.SiteRef, token string, req callrules.WorkflowRequest) (callrules.WorkflowResult, error) {
 	out := callrules.WorkflowResult{ServerNow: s.now()}
+	if req.ResourceBindings != nil && !slices.Contains([]string{"start", "change", "bind_booking"}, req.Action) {
+		return out, callrules.ErrInvalid
+	}
 	if (req.BranchID == "") != (req.BranchVisitID == "") || req.BranchID != "" && (!callrules.ValidWorkflowID(req.BranchID) || !callrules.ValidWorkflowID(req.BranchVisitID) || !slices.Contains([]string{"next", "previous", "seek", "extend", "ack", "end_turn", "fallback"}, req.Action)) {
 		return out, callrules.ErrInvalid
 	}
@@ -414,8 +418,8 @@ func workflowAckReady(r *callrules.WorkflowRun) bool {
 	return len(r.AcknowledgedSeatIDs) > 0
 }
 
-func (s *Service) workflowRunCommand(ctx context.Context, site callrules.SiteRef, token string, req callrules.WorkflowRequest) (callrules.WorkflowResult, error) {
-	out := callrules.WorkflowResult{ServerNow: s.now()}
+func (s *Service) workflowRunCommand(ctx context.Context, site callrules.SiteRef, token string, req callrules.WorkflowRequest) (out callrules.WorkflowResult, resultErr error) {
+	out = callrules.WorkflowResult{ServerNow: s.now()}
 	held, _, err := s.session(ctx, site, token, s.now())
 	if err != nil {
 		return out, err
@@ -470,6 +474,13 @@ func (s *Service) workflowRunCommand(ctx context.Context, site callrules.SiteRef
 	if v != nil && (v.Kind != "run" || v.SiteID != site.SiteID || v.KeyID != room.KeyID || v.Run.RoomID != room.ID) {
 		return out, accountRefusal("workflow_state_unavailable")
 	}
+	defer func() {
+		var refs map[string]callrules.WorkflowResourceRef
+		if v != nil && v.Run != nil {
+			refs = workflowResourceRefs(v.Run.ResourceBindings)
+		}
+		s.workflowResourceProjection(ctx, site, room.KeyID, held.KeyID, room.ID, room.ScheduledCallID, &out, refs)
+	}()
 	agent := ctx.Value(agentCallContext{}) != nil
 	changed := false
 	if v != nil {
@@ -496,6 +507,20 @@ func (s *Service) workflowRunCommand(ctx context.Context, site callrules.SiteRef
 		}
 		out.Run = &projected
 		out.Presentation = s.presentationProjection(ctx, *room, v, *seat)
+	}
+	approvedResources := map[string]callrules.WorkflowResourceRef(nil)
+	var resourceSlots []callrules.WorkflowResourceSlot
+	if v != nil && v.Run != nil {
+		approvedResources = workflowResourceRefs(v.Run.ResourceBindings)
+		resourceSlots = v.Run.Definition.Resources
+	} else if out.Binding != nil {
+		approvedResources = out.Binding.ResourceBindings
+	}
+	if seat.Host {
+		out.ResourceOptions, err = s.workflowResourceOptions(ctx, site, room.KeyID, held.KeyID, room.ID, room.ScheduledCallID, approvedResources, resourceSlots)
+		if err != nil {
+			return out, err
+		}
 	}
 	if req.Action == "snapshot" {
 		return out, nil
@@ -549,6 +574,11 @@ func (s *Service) workflowRunCommand(ctx context.Context, site callrules.SiteRef
 	if err = s.workflowAgentVersionAllowed(ctx, site, held.KeyID, *room, req, v.Run); err != nil {
 		return out, err
 	}
+	if v.Run != nil && !slices.Contains([]string{"pause", "cancel", "start", "change"}, req.Action) {
+		if err = s.workflowResourceAuthority(ctx, site, room.KeyID, held.KeyID, room.ID, room.ScheduledCallID, workflowResourceRefs(v.Run.ResourceBindings), approvedResources); err != nil {
+			return out, err
+		}
+	}
 	if req.Action == "end_turn_mute" {
 		if err = s.workflowPrepareMute(ctx, site, token, *held, *seat, *room, v, req); err != nil {
 			return out, err
@@ -590,6 +620,26 @@ func (s *Service) workflowRunCommand(ctx context.Context, site callrules.SiteRef
 		if e != nil {
 			return out, e
 		}
+		resourceRefs := req.ResourceBindings
+		if req.Action == "start" && out.Binding != nil {
+			if resourceRefs == nil {
+				resourceRefs = out.Binding.ResourceBindings
+			}
+			if !reflect.DeepEqual(resourceRefs, out.Binding.ResourceBindings) && (len(resourceRefs) != 0 || len(out.Binding.ResourceBindings) != 0) {
+				return out, accountRefusal("workflow_booking_resources_required")
+			}
+		}
+		if err = s.workflowResourceAuthority(ctx, site, room.KeyID, held.KeyID, room.ID, room.ScheduledCallID, resourceRefs, approvedResources); err != nil {
+			return out, err
+		}
+		if err = s.workflowCheckResourceRefs(ctx, site, room.KeyID, d, resourceRefs); err != nil {
+			return out, err
+		}
+		if len(resourceRefs) > 0 {
+			if err = s.resourceBudgetAllowed(*room); err != nil {
+				return out, err
+			}
+		}
 		bindings := req.Bindings
 		if bindings == nil {
 			bindings = map[string]string{}
@@ -616,7 +666,11 @@ func (s *Service) workflowRunCommand(ctx context.Context, site callrules.SiteRef
 		if req.Action == "change" && v.Run != nil && !workflowTerminal(v.Run) {
 			r.PreviousRunExit = &callrules.WorkflowRunExit{RunID: v.Run.ID, NodeID: v.Run.NodeID, VisitID: v.Run.VisitID, Outcome: "abandoned", Action: "change", At: now}
 		}
+		r.ResourceBindings = workflowBoundResources(resourceRefs)
 		workflowEnter(r, d.EntryNodeID, now)
+		if err = s.workflowPinCurrentResources(ctx, site, *room, r); err != nil {
+			return out, err
+		}
 		blockers, e := s.workflowRequirements(ctx, site, *room, *r, r.NodeID)
 		if e != nil {
 			return out, e
@@ -678,6 +732,12 @@ func (s *Service) workflowRunCommand(ctx context.Context, site callrules.SiteRef
 				if err = s.workflowEntitlement(ctx, site, *room); err != nil {
 					return out, err
 				}
+				if err = s.workflowPinCurrentResources(ctx, site, *room, r, req.Action == "resume"); err != nil {
+					return out, err
+				}
+				if _, err = s.workflowParallelObserve(ctx, site, *room, r, now); err != nil {
+					return out, err
+				}
 				blockers, e := s.workflowRequirements(ctx, site, *room, *r, r.NodeID)
 				if e != nil {
 					return out, e
@@ -694,6 +754,7 @@ func (s *Service) workflowRunCommand(ctx context.Context, site callrules.SiteRef
 				}
 				r.Status = "running"
 				r.Blockers = []string{}
+				r.Readiness = nil
 				workflowParallelResume(r, now)
 				workflowEvent(r, req.Action, "Guidance resumed with current authority.", now)
 			case "extend":
@@ -725,6 +786,9 @@ func (s *Service) workflowRunCommand(ctx context.Context, site callrules.SiteRef
 				target, e := workflowFallbackTarget(r, now)
 				if e != nil {
 					return out, e
+				}
+				if err = s.workflowPinResourceLeases(ctx, site, *room, r, target); err != nil {
+					return out, err
 				}
 				blockers, e := s.workflowRequirements(ctx, site, *room, *r, target)
 				if e != nil {
@@ -776,6 +840,9 @@ func (s *Service) workflowRunCommand(ctx context.Context, site callrules.SiteRef
 						return out, accountRefusal("workflow_branch_required")
 					}
 				}
+				if err = s.workflowPinResourceLeases(ctx, site, *room, r, target); err != nil {
+					return out, err
+				}
 				blockers, e := s.workflowRequirements(ctx, site, *room, *r, target)
 				if e != nil {
 					return out, e
@@ -800,6 +867,11 @@ func (s *Service) workflowRunCommand(ctx context.Context, site callrules.SiteRef
 		r.Revision++
 	}
 	if v.Run.Parallel != nil {
+		if req.BranchID == "" && slices.Contains([]string{"start", "change", "resume", "handoff", "next", "previous", "seek", "end_turn", "fallback"}, req.Action) {
+			if err = s.workflowPinCurrentResources(ctx, site, *room, v.Run); err != nil {
+				return out, err
+			}
+		}
 		if _, err = s.workflowParallelObserve(ctx, site, *room, v.Run, now); err != nil {
 			return out, err
 		}
