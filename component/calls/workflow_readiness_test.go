@@ -63,6 +63,6 @@ func TestWorkflowReadinessFallbackDiscoveryIsClosedAndBranchPaired(t *testing.T)
 	require.Equal(t, false, workflow["additionalProperties"])
 	require.Len(t, workflow["properties"], 7)
 	require.ElementsMatch(t, []string{"action", "runId", "expectedRevision", "expectedEpoch", "idempotencyKey"}, workflow["required"])
-	require.Equal(t, map[string]any{"branchId": []string{"branchVisitId"}, "branchVisitId": []string{"branchId"}}, workflow["dependentRequired"])
+	require.Equal(t, map[string]any{"branchId": []string{"branchVisitId"}, "branchVisitId": []string{"branchId"}}, workflow["dependencies"])
 	require.Contains(t, found["description"], "never dispatches media effects")
 }

@@ -166,7 +166,7 @@ func workflowUTCPTools(endpoint string) []any {
 					for _, field := range []string{"branchId", "branchVisitId"} {
 						props[field] = map[string]any{"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$", "description": "Provide both branchId and its exact current branchVisitId for a parallel branch command, alongside the shared run revision/epoch. Omit both for outer guidance. Branch completion waits at join-all; it never advances a sibling."}
 					}
-					nested["dependentRequired"] = map[string]any{"branchId": []string{"branchVisitId"}, "branchVisitId": []string{"branchId"}}
+					nested["dependencies"] = map[string]any{"branchId": []string{"branchVisitId"}, "branchVisitId": []string{"branchId"}}
 				} else {
 					delete(props, "branchId")
 					delete(props, "branchVisitId")
@@ -176,7 +176,7 @@ func workflowUTCPTools(endpoint string) []any {
 			if action == "fallback" {
 				props = map[string]any{"action": map[string]any{"type": "string", "const": action}, "runId": map[string]any{"type": "string", "maxLength": 80}, "expectedRevision": map[string]any{"type": "integer", "minimum": 1}, "expectedEpoch": map[string]any{"type": "integer", "minimum": 1}, "idempotencyKey": map[string]any{"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$"}, "branchId": map[string]any{"type": "string", "maxLength": 80}, "branchVisitId": map[string]any{"type": "string", "maxLength": 80}}
 				nested["required"] = []string{"action", "runId", "expectedRevision", "expectedEpoch", "idempotencyKey"}
-				nested["dependentRequired"] = map[string]any{"branchId": []string{"branchVisitId"}, "branchVisitId": []string{"branchId"}}
+				nested["dependencies"] = map[string]any{"branchId": []string{"branchVisitId"}, "branchVisitId": []string{"branchId"}}
 			}
 			if action == "end_turn_mute" {
 				props = map[string]any{
