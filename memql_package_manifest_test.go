@@ -778,7 +778,9 @@ func TestEngineManifestGateStepRunsRepositoryGatePackages(t *testing.T) {
 // The 300s package bound and the 20m default step deadline failed memql#6325
 // twice on code that passes in 80-95s locally under the same flags. Memory is the
 // same story: the namespace's default 4Gi killed the step on memql#6394. The
-// measurements live on the step in memql-package.yaml; this holds the floor.
+// measurements live on the step in memql-package.yaml. Its 2026-11-27 outer
+// timeout now holds a 45-minute aggregate floor without changing per-package
+// timeouts or resources; passing the new native run remains required.
 func TestEngineManifestGateStepHasHeadroom(t *testing.T) {
 	step, ok := engineDeclaredStep(engineManifest(t).Pipeline, manifestStepGateInputs)
 	if !ok {
@@ -795,8 +797,8 @@ func TestEngineManifestGateStepHasHeadroom(t *testing.T) {
 		}
 		deadline = d
 	}
-	if deadline < 30*time.Minute {
-		t.Errorf("the %s step's deadline is %s; it needs at least 30m, as its sibling test steps have", manifestStepGateInputs, deadline)
+	if deadline < 45*time.Minute {
+		t.Errorf("the %s step's deadline is %s; it needs at least 45m for the aggregate compile and gate suite; per-package bounds remain separate", manifestStepGateInputs, deadline)
 	}
 	for _, line := range strings.Split(step.Run, "\n") {
 		fields := strings.Fields(line)
