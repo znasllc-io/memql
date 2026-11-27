@@ -34,8 +34,10 @@ import (
 const KindAttribute = "memql.calls.kind"
 
 // MaxPassTTL is the longest a pass may live. A pass is for joining, which takes
-// seconds, and a self-hosted server cannot revoke one, so a long pass is a long window
-// for one that leaked. The shipped policy mints for 120 seconds.
+// seconds. LiveKit does not revoke its JWT on participant removal; the native
+// signalling boundary independently checks its signed admission binding and
+// current authority. Short provider tokens remain defense in depth. The shipped
+// policy mints for 120 seconds.
 const MaxPassTTL = 15 * time.Minute
 
 // MintPass signs a pass for one seat of one room with the media server's API key pair.

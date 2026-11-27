@@ -102,6 +102,8 @@ var clientUnreadableConcepts = map[string]string{
 	"v1:calls:agentAdmissionState":  callsClientUnreadableReason,
 	"v1:calls:processingRate":       callsClientUnreadableReason,
 	"v1:calls:processingReceipt":    callsClientUnreadableReason,
+	"v1:calls:mediaSignalState":     callsClientUnreadableReason,
+	"v1:calls:observationState":     callsClientUnreadableReason,
 	"v1:calls:processingState":      callsClientUnreadableReason,
 	"v1:calls:reportCase":           callsClientUnreadableReason,
 	"v1:calls:reportAccessAudit":    callsClientUnreadableReason,

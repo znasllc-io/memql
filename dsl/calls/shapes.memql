@@ -544,3 +544,22 @@ shape workflowQuestion callsQuestionFull {
  stateData
  body
 }
+/// Private observation consent and replay metadata, never observation content.
+@row
+shape observationState callsObservationFull {
+ row.id
+ row.createdAt
+ siteId
+ roomId
+ stateData
+}
+
+
+@row
+shape mediaSignalState callsMediaSignalsFull {
+ row.id
+ row.createdAt
+ siteId
+ roomId
+ stateData
+}

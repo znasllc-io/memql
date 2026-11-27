@@ -1134,3 +1134,36 @@ query workflowQuestion callsQuestionPage {
  paginate 20
  shape callsQuestionFull
 }
+/// Private native consent metadata; actor.userId scoping is not the fix for a public read.
+@serverOnly
+@actor
+@cache(0)
+query observationState callsObservationById {
+ args { id string! }
+ filter row => row.id == args.id && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ paginate 1
+ shape callsObservationFull
+}
+
+
+/// Internal transport barriers; actor.userId scoping is not the fix.
+@serverOnly
+@actor
+@cache(0)
+query mediaSignalState callsMediaSignalsById {
+ args { id string! }
+ filter row => row.id == args.id && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ paginate 1
+ shape callsMediaSignalsFull
+}
+
+/// Exact native admission session; actor.userId scoping is not the fix.
+@serverOnly
+@actor
+@cache(0)
+query session callsMediaSessionsForSeat {
+ args { seatId string! }
+ filter row => row.seatId == canonicalId(args.seatId, seat) && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+ paginate 9
+ shape callsSessionFull
+}

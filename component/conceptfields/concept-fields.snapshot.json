@@ -1079,6 +1079,23 @@
       }
     },
     {
+      "concept": "v1:calls:mediaSignalState",
+      "file": "calls/concepts.memql",
+      "fields": [
+        "accountId",
+        "ownerUserId",
+        "roomId",
+        "siteId",
+        "stateData"
+      ],
+      "required": [
+        "ownerUserId",
+        "roomId",
+        "siteId",
+        "stateData"
+      ]
+    },
+    {
       "concept": "v1:calls:messageRate",
       "file": "calls/concepts.memql",
       "fields": [
@@ -1117,6 +1134,23 @@
         "roomId",
         "seatId",
         "siteId"
+      ]
+    },
+    {
+      "concept": "v1:calls:observationState",
+      "file": "calls/concepts.memql",
+      "fields": [
+        "accountId",
+        "ownerUserId",
+        "roomId",
+        "siteId",
+        "stateData"
+      ],
+      "required": [
+        "ownerUserId",
+        "roomId",
+        "siteId",
+        "stateData"
       ]
     },
     {

@@ -472,7 +472,11 @@ func (s *Service) admittedWithFunding(ctx context.Context, owner string, server 
 	if err := s.ensureMessageReceipt(ctx, *room, *current); err != nil {
 		return callrules.JoinResult{}, err
 	}
-	return admitted(server, credential, room.MediaRoom, seat, policy, room.MessageProtocol == callrules.MessageProtocol)
+	proof, err := s.mediaSeatProof(memql.ContextWithFreshRead(ctx), *room, *current)
+	if err != nil {
+		return callrules.JoinResult{}, err
+	}
+	return admitted(server, credential, room.MediaRoom, seat, policy, room.MessageProtocol == callrules.MessageProtocol, proof)
 }
 
 func fundedSeatKind(room roomRow, kind callrules.SeatKind) callrules.SeatKind {

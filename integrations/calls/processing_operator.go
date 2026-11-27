@@ -271,7 +271,11 @@ func (s *Service) processingLease(ctx context.Context, site callrules.SiteRef, r
 		tracks[n].ExpiresAt = j.Lease.ExpiresAt.Unix()
 	}
 	j.Lease.Tracks = tracks
-	token, e := MintPass(credential.Key, credential.Secret, callrules.KindSampler, room.MediaRoom, j.Lease.Identity, "Callkey processing", nil, processingTTL)
+	proof, e := s.mediaSamplerProof(fresh, *room, j)
+	if e != nil {
+		return processingBundle{}, e
+	}
+	token, e := MintPass(credential.Key, credential.Secret, callrules.KindSampler, room.MediaRoom, j.Lease.Identity, "Callkey processing", map[string]string{mediaAdmissionAttribute: proof}, processingTTL)
 	if e != nil {
 		return none, e
 	}

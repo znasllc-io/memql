@@ -1129,3 +1129,37 @@ mutation workflowQuestion saveCallsQuestion {
  stamp { id: args.questionId, ownerUserId: actor.userId, createdAt: args.versionTime }
  }
 }
+/// Fenced consent/replay metadata only; actor.userId scoping is not the fix.
+@serverOnly
+@actor
+mutation observationState saveCallsObservation {
+ args {
+ stateId string!
+ versionTime datetime!
+ siteId string!
+ roomId string!
+ stateData string!
+ }
+ insert {
+ accept { siteId, roomId, stateData }
+ stamp { id: args.stateId, ownerUserId: actor.userId, createdAt: args.versionTime }
+ }
+}
+
+
+/// Native gated/fenced metadata only. actor.userId scoping is not the fix.
+@serverOnly
+@actor
+mutation mediaSignalState saveCallsMediaSignals {
+ args {
+ stateId string!
+ versionTime datetime!
+ siteId string!
+ roomId string!
+ stateData string!
+ }
+ insert {
+ accept { siteId, roomId, stateData }
+ stamp { id: args.stateId, ownerUserId: actor.userId, createdAt: args.versionTime }
+ }
+}
