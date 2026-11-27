@@ -1092,10 +1092,11 @@ type callsSessionReply struct {
 	AllowanceEndsAt string `json:"allowanceEndsAt,omitempty"`
 	FundingMode     string `json:"fundingMode,omitempty"`
 	// Roster is there for a host seat in an open call and absent for every other session.
-	Roster        *callsRosterReply        `json:"roster,omitempty"`
-	Processing    *calls.ProcessingStatus  `json:"processing,omitempty"`
-	PendingAgents []calls.PendingAgent     `json:"pendingAgents,omitempty"`
-	Agents        []calls.AgentParticipant `json:"agents,omitempty"`
+	Roster        *callsRosterReply         `json:"roster,omitempty"`
+	Processing    *calls.ProcessingStatus   `json:"processing,omitempty"`
+	MediaCleanup  *calls.MediaCleanupStatus `json:"mediaCleanup,omitempty"`
+	PendingAgents []calls.PendingAgent      `json:"pendingAgents,omitempty"`
+	Agents        []calls.AgentParticipant  `json:"agents,omitempty"`
 }
 
 // callsRosterReply is a host's roster on the wire: whether the call is locked, the seat ids
@@ -1146,6 +1147,7 @@ func (h *callsHandler) sessionReply(sess calls.Session, call calls.SeatCall) cal
 		PendingAgents: call.PendingAgents,
 		Reports:       call.Reports,
 		Processing:    call.Processing,
+		MediaCleanup:  call.MediaCleanup,
 	}
 	if !call.CountdownEndsAt.IsZero() {
 		reply.CountdownEndsAt = call.CountdownEndsAt.UTC().Format(time.RFC3339Nano)

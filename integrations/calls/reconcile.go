@@ -2,6 +2,7 @@ package calls
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -219,7 +220,14 @@ type reconcilePlan struct {
 
 // reconcileRoom reconciles one call: its participant list read outside the gates, its
 // rows repaired under them, and the media calls their decisions need made after them.
-func (s *Service) reconcileRoom(ctx context.Context, server MediaServer, backend MediaBackend, hint roomRow, tally *reconcileTally) error {
+func (s *Service) reconcileRoom(ctx context.Context, server MediaServer, backend MediaBackend, hint roomRow, tally *reconcileTally) (resultErr error) {
+	// Lifecycle work completes its gates first. A final guarded provider audit
+	// also runs after early funding/family/end paths, so their authority changes
+	// cannot leave an old signalling intent looking like completed cleanup.
+	defer func() {
+		_, err := s.ReconcileMediaSignals(ctx, hint.MediaRoom)
+		resultErr = errors.Join(resultErr, err)
+	}()
 	if handled, err := s.reconcileFamily(ctx, hint); handled || err != nil {
 		return err
 	}

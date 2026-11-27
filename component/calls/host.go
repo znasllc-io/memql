@@ -78,6 +78,7 @@ type SeatCall struct {
 	Spotlight         *Spotlight
 	Reports           ReportCapabilities
 	Processing        *ProcessingStatus
+	MediaCleanup      *MediaCleanupStatus
 	PendingAgents     []PendingAgent
 	Agents            []AgentParticipant
 	ParticipationMode string

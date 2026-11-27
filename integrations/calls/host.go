@@ -413,6 +413,10 @@ func (s *Service) SessionCall(ctx context.Context, sess callrules.Session) (call
 		if err != nil {
 			return none, err
 		}
+		// This read reports the durable cleanup receipt; it never performs
+		// provider effects or infers disconnection from a committed revocation.
+		cleanup := s.mediaCleanupStatus(fresh, *room)
+		out.MediaCleanup = &cleanup
 	}
 	if seat.Host && seat.occupying() {
 		out.Host = true
