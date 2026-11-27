@@ -369,26 +369,30 @@ func (s *Service) mediaSignalGated(ctx context.Context, hint roomRow, b mediaSig
 		if e != nil {
 			return e
 		}
-		r, e := s.store.roomByID(fresh, hint.OwnerUserID, hint.ID)
-		if e != nil || r == nil {
-			release()
+		retry, e := func() (bool, error) {
+			// Provider/transport callbacks can panic. The HTTP recovery boundary
+			// must never retain account/room write gates after such a failure.
+			defer release()
+			r, e := s.store.roomByID(fresh, hint.OwnerUserID, hint.ID)
 			if e != nil {
-				return e
+				return false, e
 			}
-			return accountRefusal("media_admission_closed")
-		}
-		current, e := s.mediaSignalGateKeys(fresh, *r, b)
-		if e != nil {
-			release()
-			return e
-		}
-		if !slices.Equal(keys, current) {
-			release()
-			hint = *r
+			if r == nil {
+				return false, accountRefusal("media_admission_closed")
+			}
+			current, e := s.mediaSignalGateKeys(fresh, *r, b)
+			if e != nil {
+				return false, e
+			}
+			if !slices.Equal(keys, current) {
+				hint = *r
+				return true, nil
+			}
+			return false, fn(fresh, *r)
+		}()
+		if retry {
 			continue
 		}
-		e = fn(fresh, *r)
-		release()
 		return e
 	}
 	return accountRefusal("media_authority_changed")

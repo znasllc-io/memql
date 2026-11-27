@@ -369,6 +369,9 @@ func (s *Service) ReconcileMediaSignals(ctx context.Context, roomID string) (cal
 		// only through its exact current native lease, never an identity prefix.
 		inventory, cancel := context.WithTimeout(ctx, 3*time.Second)
 		backend, e := s.backendFor(inventory, r)
+		if e == nil && backend == nil {
+			e = accountRefusal("media_server_unavailable")
+		}
 		var present []MediaParticipant
 		if e == nil {
 			present, e = backend.Participants(inventory, r.MediaRoom)
@@ -423,6 +426,9 @@ func (s *Service) ReconcileMediaSignals(ctx context.Context, roomID string) (cal
 		for identity := range remove {
 			cleanup, cancel := context.WithTimeout(ctx, 3*time.Second)
 			backend, err := s.backendFor(cleanup, r)
+			if err == nil && backend == nil {
+				err = accountRefusal("media_server_unavailable")
+			}
 			if err == nil {
 				err = backend.RemoveParticipant(cleanup, r.MediaRoom, identity)
 			}
