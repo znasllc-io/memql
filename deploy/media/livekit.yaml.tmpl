@@ -103,7 +103,9 @@ limit:
   max_api_request_body_size: 1048576
   max_metadata_size: 4096
   max_attributes_size: 4096
-  max_participant_name_length: 128
+  # Callkey allows 64 Unicode code points: UTF-8 may require four bytes each.
+  # LiveKit counts bytes here, so the provider must admit all 256 bytes.
+  max_participant_name_length: 256
   max_participant_identity_length: 128
   max_room_name_length: 128
 

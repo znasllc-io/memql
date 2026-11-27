@@ -984,7 +984,7 @@ func TestMediaLocalUpRetainsExplicitProviderSignalLimits(t *testing.T) {
 		"max_api_request_body_size":       1048576,
 		"max_metadata_size":               4096,
 		"max_attributes_size":             4096,
-		"max_participant_name_length":     128,
+		"max_participant_name_length":     256,
 		"max_participant_identity_length": 128,
 		"max_room_name_length":            128,
 	} {
