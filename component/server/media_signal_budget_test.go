@@ -185,6 +185,15 @@ func TestMediaSignalBudgetFloodClosesBeforeForwardingExcessBytes(t *testing.T) {
 	defer provider.Close()
 	closed := make(chan bool, 1)
 	a := signalAdmission(provider.URL)
+	// The provider reader runs asynchronously and may not consume an admitted
+	// frame before the guard closes its socket. Count writes at the synchronous
+	// native boundary instead; the first operation is the initial provider dial.
+	var upstreamWrites atomic.Int32
+	forward := a.Forward
+	a.Forward = func(ctx context.Context, write func(context.Context) error) error {
+		upstreamWrites.Add(1)
+		return forward(ctx, write)
+	}
 	a.Close = func(_ context.Context, definitive bool) error { closed <- definitive; return nil }
 	h := httptest.NewServer(NewMediaSignalHandler(signalServiceFunc(func(context.Context, string) (*calls.MediaSignalAdmission, error) { return a, nil })))
 	defer h.Close()
@@ -219,8 +228,12 @@ func TestMediaSignalBudgetFloodClosesBeforeForwardingExcessBytes(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("native cleanup not invoked")
 	}
-	if n := frames.Load(); n < 1 || n > 4 {
-		t.Fatalf("forwarded %d large frames beyond bounded burst", n)
+	forwarded := upstreamWrites.Load() - 1 // exclude the initial dial
+	if forwarded < 1 || forwarded > 4 {
+		t.Fatalf("forwarded %d large frames beyond bounded burst", forwarded)
+	}
+	if received := frames.Load(); received > forwarded {
+		t.Fatalf("provider received %d frames but only %d passed the write gate", received, forwarded)
 	}
 }
 
