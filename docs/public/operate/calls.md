@@ -2123,7 +2123,7 @@ other routes. Neither the JSON schema nor a UTCP declaration grants authority.
 `skills_read`, `skills_write` and `skills_control` separate discovery/reading,
 authoring and running. Runs require the actual call's Insights entitlement and
 the approved immutable skill version. The original fourteen curated template
-versions stay immutable; newer Presentation, Office hours and Workshop versions
+versions stay immutable; newer Presentation, Office hours and Planning workshop versions
 and Training add bounded graph behavior. The graph vocabulary includes readiness,
 instruction, turn, discussion, presentation, acknowledgment, condition, handoff,
 repeat, parallel, effect and finish. Repeat permits one to eight rounds; parallel
@@ -2143,8 +2143,8 @@ round. Readiness can declare help, a one-to-3,600-second waiting deadline and a
 reviewed alternative edge. The deadline never advances guidance automatically:
 an authorized fallback rechecks acknowledgments and authority. Visit history
 distinguishes completion, skipping, revisiting and stopping. Extend cannot exceed
-remaining funded time; an unsuccessful authorized Change pauses the existing run
-under a human hold.
+remaining funded time; an unsuccessful authorized Change pauses the existing run.
+A human Change also places it under a human hold.
 
 Language, materials and typed input/output declarations describe the expected
 work without collecting answers, storing call content or fetching material URLs.
