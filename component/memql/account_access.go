@@ -699,7 +699,12 @@ func (e *MemQLEngine) changeAccountAccess(ctx context.Context, tx bun.Tx, s *acc
 			if op == "groupMembers" || (!remove && stringFromAny(args["role"]) == "" && current != "") {
 				memberNext = current
 			}
-			if uid == actor || !auth.MayManageAccountMember(role, current, memberNext) {
+			// A promotion to cluster staff can leave an older, lower client
+			// membership behind. Check the current cluster authority too, so
+			// that stale account role never lets one staff developer edit a
+			// peer's membership or custom groups. The cluster owner still may.
+			staffPeer := s.staff(actor) && !s.clusterOwner(actor) && s.staff(uid)
+			if uid == actor || staffPeer || !auth.MayManageAccountMember(role, current, memberNext) {
 				return nil, errors.New("account_member_refused: you can manage only roles below your own; transfer ownership separately")
 			}
 			if current == "" && !s.placesNewMembers(actor, uid) {

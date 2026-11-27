@@ -99,6 +99,108 @@ func TestAccountHierarchyStaffDoesNotPlacePeerStaff(t *testing.T) {
 	require.ErrorContains(t, err, "account_member_refused")
 }
 
+// A primary developer may already have a client membership from before their
+// promotion. That lower account role must not let a peer manage them.
+func TestAccountHierarchyStaffCannotManageAnAlreadyPlacedPeer(t *testing.T) {
+	for _, operation := range []string{"members", "groupMembers"} {
+		for _, remove := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/remove=%t", operation, remove), func(t *testing.T) {
+				e, account, revision := hierarchyFixture(t)
+				seedPrincipal(t, e, "staff-dev", auth.RoleDeveloper)
+				seedPrincipal(t, e, "developer-a", auth.RoleDeveloper)
+				seedGroup(t, e, "staff-team", "Staff team", "custom", account)
+				seedMembership(t, e, "staff-team", "developer-a", "active")
+				_, err := hierarchyCall(t, e, "staff-dev", auth.RoleDeveloper, account, map[string]any{
+					"revision": revision, "operation": operation, "groupId": "staff-team",
+					"userIds": []string{"developer-a"}, "role": "admin", "remove": remove,
+				})
+				require.ErrorContains(t, err, "account_member_refused")
+				_, err = hierarchyCall(t, e, "primary-owner", auth.RoleOwner, account, map[string]any{
+					"revision": revision, "operation": operation, "groupId": "staff-team",
+					"userIds": []string{"developer-a"}, "role": "admin", "remove": remove,
+				})
+				require.NoError(t, err, "the cluster owner retains authority over the membership")
+			})
+		}
+	}
+}
+
+func TestAccountHierarchyStaffRequiresActiveUnscopedRank(t *testing.T) {
+	for _, tc := range []struct {
+		name, role, scope string
+		active, deleted   bool
+		developerActive   bool
+	}{
+		{name: "inactive", role: "developer", developerActive: true},
+		{name: "deleted", role: "developer", active: true, deleted: true, developerActive: true},
+		{name: "scoped developer", role: "developer", active: true, scope: "client", developerActive: true},
+		{name: "missing developer rank", role: "unranked", active: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e, account, revision := hierarchyFixture(t)
+			seedAuthorityFixture(t, e, conceptIdentityUser, "not-staff", map[string]any{
+				"role": tc.role, "active": tc.active, "deleted": tc.deleted,
+			})
+			prior := auth.InstalledCapabilityCatalog()
+			auth.SetCapabilityCatalog(buildRbacCatalog(roleNodes(
+				roleRow{id: "owner", slug: "owner", rank: 400, active: true},
+				roleRow{id: "developer", slug: "developer", rank: 300, active: tc.developerActive, account: tc.scope},
+				roleRow{id: "unranked", slug: "unranked", rank: 0, active: true},
+			), nil))
+			t.Cleanup(func() { auth.SetCapabilityCatalog(prior) })
+			_, err := hierarchyCall(t, e, "not-staff", auth.Role(tc.role), account, nil)
+			require.ErrorContains(t, err, "account_access_refused")
+			_, err = hierarchyCall(t, e, "not-staff", auth.Role(tc.role), account, map[string]any{
+				"revision": revision, "operation": "apps", "apps": []string{"app:files"},
+			})
+			require.ErrorContains(t, err, "account_access_refused")
+		})
+	}
+}
+
+func TestAccountHierarchyStaffManagesGroupsWithinTheAccount(t *testing.T) {
+	e, account, revision := hierarchyFixture(t)
+	seedPrincipal(t, e, "staff-dev", auth.RoleDeveloper)
+	seedGroup(t, e, "other-team", "Other team", "custom", "other")
+	staff := func(args map[string]any) (map[string]any, error) {
+		t.Helper()
+		args["revision"] = revision
+		state, err := hierarchyCall(t, e, "staff-dev", auth.RoleDeveloper, account, args)
+		if err == nil {
+			revision = fmt.Sprint(state["revision"])
+		}
+		return state, err
+	}
+	_, err := staff(map[string]any{"operation": "members", "userIds": []string{"member"}, "role": "member"})
+	require.NoError(t, err)
+	state, err := staff(map[string]any{"operation": "createGroup", "name": "Reviewers"})
+	require.NoError(t, err)
+	groupID := fmt.Sprint(state["groupId"])
+	_, err = staff(map[string]any{"operation": "groupMembers", "groupId": groupID, "userIds": []string{"member"}})
+	require.NoError(t, err)
+	_, err = staff(map[string]any{"operation": "groupApps", "groupId": groupID, "apps": []string{"app:deployables"}})
+	require.NoError(t, err)
+	memberCtx := contextWithAccountScopeMemo(rankActorCtx("member", auth.Role("viewer")), e)
+	require.True(t, e.OrganizationCapable(memberCtx, account, auth.VerbRead, "app:deployables"))
+	require.False(t, e.OrganizationCapable(memberCtx, account, auth.VerbRead, "app:files"))
+	_, err = staff(map[string]any{"operation": "groupApps", "groupId": groupID, "apps": []string{"app:files"}})
+	require.ErrorContains(t, err, "account_apps_refused")
+	for _, target := range []string{"client-owner", "stranger"} {
+		_, err = staff(map[string]any{"operation": "groupMembers", "groupId": groupID, "userIds": []string{target}})
+		require.ErrorContains(t, err, "account_member_refused")
+	}
+	for _, operation := range []string{"groupMembers", "groupApps"} {
+		_, err = staff(map[string]any{"operation": operation, "groupId": "other-team", "userIds": []string{"member"}, "apps": []string{"app:deployables"}})
+		require.ErrorContains(t, err, "account_group_refused")
+	}
+	_, err = staff(map[string]any{"operation": "groupMembers", "groupId": groupID, "userIds": []string{"member"}, "remove": true})
+	require.NoError(t, err)
+	row, found, err := authorityRow(context.Background(), e.database(), conceptIdentityGroupMembership, groupID+"-member")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "removed", accountRowPayload(row)["status"])
+}
+
 // A client's app list (its ceiling) is cluster staff's to set: the cluster
 // owner's and, under D6, a cluster developer's. A client's own owner still
 // distributes only what that list holds. The roster says which, so the

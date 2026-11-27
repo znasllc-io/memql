@@ -812,10 +812,19 @@ carries their client's rows with no further work.
 
 Accounts marks the cluster's `self` account as **Primary account**. Every account
 has one owner and can have multiple Developers, Admins, Members and Viewers.
-The primary owner chooses which apps a client account receives. That client's
-owner and lower managers can invite people, organize custom groups and distribute
-only those apps. Managers may change only people below their own account role;
-ownership has a separate transfer action. Client roles grant no cluster role.
+The primary owner and primary developers choose which apps a client account
+receives. Active, unscoped cluster roles ranked Developer or above have standing
+management access to every client account without a membership row. A primary
+developer manages a client as its Developer, unless they own that account, and
+can add people below Developer. They cannot change the client's owner or another
+developer, including primary developers with an older, lower client membership.
+The primary account's role and membership rules remain unchanged.
+
+A client's own owner and lower managers can invite people, organize custom groups
+and distribute only the apps assigned to that account. Managers may change only
+people below their own account role; ownership has a separate transfer action.
+Client roles grant no cluster role. Cluster Admins, inactive users and
+account-scoped roles do not receive standing staff access.
 
 Account managers receive the account's app access. Members and Viewers receive
 apps assigned to them directly and through their custom groups. Explicit denials
