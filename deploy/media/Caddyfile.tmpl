@@ -56,7 +56,7 @@ http://:7880 {
 	}
 	@control {
 		method POST
-		path /twirp/livekit.RoomService/CreateRoom /twirp/livekit.RoomService/DeleteRoom /twirp/livekit.RoomService/ListRooms /twirp/livekit.RoomService/ListParticipants /twirp/livekit.RoomService/GetParticipant /twirp/livekit.RoomService/RemoveParticipant /twirp/livekit.RoomService/MutePublishedTrack /twirp/livekit.RoomService/UpdateParticipant /twirp/livekit.RoomService/SendData /twirp/livekit.IngressService/CreateIngress /twirp/livekit.IngressService/ListIngress /twirp/livekit.IngressService/DeleteIngress
+		path /twirp/livekit.RoomService/CreateRoom /twirp/livekit.RoomService/DeleteRoom /twirp/livekit.RoomService/ListRooms /twirp/livekit.RoomService/ListParticipants /twirp/livekit.RoomService/GetParticipant /twirp/livekit.RoomService/RemoveParticipant /twirp/livekit.RoomService/MutePublishedTrack /twirp/livekit.RoomService/UpdateParticipant /twirp/livekit.RoomService/SendData /twirp/livekit.Ingress/CreateIngress /twirp/livekit.Ingress/ListIngress /twirp/livekit.Ingress/DeleteIngress
 	}
 	handle @control {
 		reverse_proxy livekit:7880
