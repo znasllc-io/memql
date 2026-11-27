@@ -342,6 +342,37 @@ func workflowEnter(r *callrules.WorkflowRun, nodeID string, now time.Time) {
 	}
 	workflowEvent(r, "step_entered", n.Label, now)
 }
+
+// Previous revisits the most recently retained graph ancestor, not the last
+// journal entry. Every move appends a new visit, so using the journal tail would
+// make repeated Previous alternate between two steps. In the validated DAG an
+// ancestor always moves backward, including after a seek or a branch change.
+// The bounded journal is never rewritten: when an earlier visit has aged out,
+// Previous stops rather than inventing a visit or replaying its effects.
+func workflowPreviousNode(r *callrules.WorkflowRun) string {
+	parents := make(map[string][]string, len(r.Definition.Nodes))
+	for _, edge := range r.Definition.Edges {
+		parents[edge.Target] = append(parents[edge.Target], edge.Source)
+	}
+	ancestors := map[string]bool{}
+	var visit func(string)
+	visit = func(id string) {
+		for _, parent := range parents[id] {
+			if !ancestors[parent] {
+				ancestors[parent] = true
+				visit(parent)
+			}
+		}
+	}
+	visit(r.NodeID)
+	for i := len(r.History) - 1; i >= 0; i-- {
+		if ancestors[r.History[i].NodeID] {
+			return r.History[i].NodeID
+		}
+	}
+	return ""
+}
+
 func workflowAckReady(r *callrules.WorkflowRun) bool {
 	n, _ := callrules.WorkflowNodeByID(r.Definition, r.NodeID)
 	if n.Type != "acknowledgment" && !n.Requirements.Acknowledgment {
@@ -639,10 +670,10 @@ func (s *Service) workflowRunCommand(ctx context.Context, site callrules.SiteRef
 			}
 			target := req.NodeID
 			if req.Action == "previous" {
-				if len(r.History) == 0 {
+				target = workflowPreviousNode(r)
+				if target == "" {
 					return out, accountRefusal("workflow_no_previous")
 				}
-				target = r.History[len(r.History)-1].NodeID
 			} else if req.Action == "seek" {
 				allowed := target == r.NodeID
 				for _, v := range r.History {

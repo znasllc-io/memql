@@ -57,6 +57,61 @@ func TestWorkflowConditionRequiresExplicitBranchWithoutCycles(t *testing.T) {
 	require.Equal(t, []string{"done", "alternative"}, WorkflowNext(d, "turn"))
 }
 
+func TestWorkflowSimulationFollowsLongestLegalRouteRegardlessOfArrayOrder(t *testing.T) {
+	d := WorkflowDefinition{
+		ID: "routes", Title: "Choose a route", RequiresInsights: true, EntryNodeID: "choice",
+		Nodes: []WorkflowNode{
+			{ID: "finish", Type: "finish", Label: "Done", Visibility: "all", DurationSeconds: 100},
+			{ID: "join", Type: "instruction", Label: "Together", Visibility: "all", DurationSeconds: 5},
+			{ID: "short", Type: "instruction", Label: "Short", Visibility: "all", DurationSeconds: 10},
+			{ID: "choice", Type: "condition", Label: "Choose", Visibility: "all", DurationSeconds: 2},
+			{ID: "long", Type: "instruction", Label: "Long", Visibility: "all", DurationSeconds: 30},
+		},
+		Edges: []WorkflowEdge{
+			{ID: "join-finish", Source: "join", Target: "finish"},
+			{ID: "short-join", Source: "short", Target: "join"},
+			{ID: "choice-short", Source: "choice", Target: "short"},
+			{ID: "long-join", Source: "long", Target: "join"},
+			{ID: "choice-long", Source: "choice", Target: "long"},
+		},
+	}
+	require.Empty(t, ValidateWorkflow(d))
+	nodes, edges := append([]WorkflowNode(nil), d.Nodes...), append([]WorkflowEdge(nil), d.Edges...)
+	simulation := SimulateWorkflow(d)
+	require.Equal(t, []string{"choice", "long", "join", "finish"}, simulation.NodeIDs)
+	require.EqualValues(t, 37, simulation.MaximumSeconds, "alternative branches do not run together and finish has no running clock")
+	require.Equal(t, nodes, d.Nodes, "simulation must not rearrange the saved graph")
+	require.Equal(t, edges, d.Edges)
+
+	// A zero-duration shared suffix still has a cached result; ties are stable
+	// across arrays, so moving nodes or connections cannot change the example.
+	d.Nodes[1].DurationSeconds, d.Nodes[2].DurationSeconds = 0, 30
+	first := SimulateWorkflow(d)
+	for i, j := 0, len(d.Nodes)-1; i < j; i, j = i+1, j-1 {
+		d.Nodes[i], d.Nodes[j] = d.Nodes[j], d.Nodes[i]
+	}
+	for i, j := 0, len(d.Edges)-1; i < j; i, j = i+1, j-1 {
+		d.Edges[i], d.Edges[j] = d.Edges[j], d.Edges[i]
+	}
+	require.Equal(t, first, SimulateWorkflow(d))
+	require.Equal(t, []string{"choice", "long", "join", "finish"}, first.NodeIDs)
+	require.EqualValues(t, 32, first.MaximumSeconds)
+}
+
+func TestWorkflowSimulationRefusesInvalidGraphsAndHandlesImmediateFinish(t *testing.T) {
+	d := workflowTestDefinition()
+	d.Nodes[1].Type = "instruction"
+	d.Edges = append(d.Edges, WorkflowEdge{ID: "cycle", Source: "done", Target: "turn"})
+	invalid := SimulateWorkflow(d)
+	require.Empty(t, invalid.NodeIDs)
+	require.Zero(t, invalid.MaximumSeconds)
+
+	d = WorkflowDefinition{ID: "done", Title: "Already done", RequiresInsights: true, EntryNodeID: "finish", Nodes: []WorkflowNode{{ID: "finish", Type: "finish", Label: "Done", Visibility: "all", DurationSeconds: 100}}}
+	simulation := SimulateWorkflow(d)
+	require.Equal(t, []string{"finish"}, simulation.NodeIDs)
+	require.Zero(t, simulation.MaximumSeconds)
+}
+
 func TestWorkflowCombinedMuteDiscoveryHasOneExactBoundedOperation(t *testing.T) {
 	var found map[string]any
 	for _, value := range workflowUTCPTools("https://calls.example.test/agent") {

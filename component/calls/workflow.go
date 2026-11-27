@@ -296,10 +296,51 @@ func WorkflowNext(d WorkflowDefinition, id string) []string {
 }
 func SimulateWorkflow(d WorkflowDefinition) WorkflowSimulation {
 	out := WorkflowSimulation{NodeIDs: []string{}, Notes: []string{"Dry run only; no media actions, charges or participant acknowledgments are performed.", "Timers are advisory. Pausing guidance does not pause call billing."}}
-	for _, n := range d.Nodes {
-		out.NodeIDs = append(out.NodeIDs, n.ID)
-		out.MaximumSeconds += n.DurationSeconds
+	if len(ValidateWorkflow(d)) != 0 {
+		out.Notes = append(out.Notes, "Fix validation issues before simulating this workflow.")
+		return out
 	}
+	// A condition chooses one successor; summing all nodes would describe a route
+	// that cannot run. Memoize suffixes of the validated DAG and retain one longest
+	// route. Equal-duration branches choose the smaller target ID, independent of
+	// visual/node/edge ordering. This never makes a participant's actual choice.
+	nodes := make(map[string]WorkflowNode, len(d.Nodes))
+	for _, n := range d.Nodes {
+		nodes[n.ID] = n
+	}
+	next := make(map[string][]string, len(d.Nodes))
+	for _, e := range d.Edges {
+		next[e.Source] = append(next[e.Source], e.Target)
+	}
+	durations := make(map[string]int64, len(d.Nodes))
+	choices := make(map[string]string, len(d.Nodes))
+	var longest func(string) int64
+	longest = func(id string) int64 {
+		if duration, ok := durations[id]; ok {
+			return duration
+		}
+		node := nodes[id]
+		// Entering finish immediately completes the run; its configured timer never
+		// runs. The other durations are planned allowances, not hard time limits.
+		if node.Type == "finish" {
+			durations[id] = 0
+			return 0
+		}
+		var best int64
+		for _, target := range next[id] {
+			duration := longest(target)
+			if choices[id] == "" || duration > best || duration == best && target < choices[id] {
+				best, choices[id] = duration, target
+			}
+		}
+		durations[id] = node.DurationSeconds + best
+		return durations[id]
+	}
+	out.MaximumSeconds = longest(d.EntryNodeID)
+	for id := d.EntryNodeID; id != ""; id = choices[id] {
+		out.NodeIDs = append(out.NodeIDs, id)
+	}
+	out.Notes = append(out.Notes, "This example follows one longest planned route from the first step to finish. Conditions still require a choice during the session. Finish completes immediately and adds no planned time.")
 	return out
 }
 func WorkflowElapsed(r WorkflowRun, now time.Time) int64 {

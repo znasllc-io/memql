@@ -252,7 +252,10 @@ func workflowProjection(run callrules.WorkflowRun, seat seatRow, agent bool, now
 				r.AllowedActions = append(r.AllowedActions, "end_turn_mute")
 			}
 			if len(r.History) > 0 {
-				r.AllowedActions = append(r.AllowedActions, "previous", "seek")
+				r.AllowedActions = append(r.AllowedActions, "seek")
+			}
+			if workflowPreviousNode(&r) != "" {
+				r.AllowedActions = append(r.AllowedActions, "previous")
 			}
 		}
 	}
