@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
@@ -42,47 +44,48 @@ func rankActorCtx(userId string, role auth.Role) context.Context {
 	return auth.ContextWithToken(ctx, &auth.TokenInfo{Subject: userId})
 }
 
-// seedPrincipal writes a v1:identity:user row so the rank resolver can find
-// it. Raw insert under internal origin: this is test scaffolding standing in
-// for the identity service, not a path under test.
+// seedPrincipal installs persisted authorization evidence directly. These
+// legacy rank-matrix fixtures describe several independent hypothetical owners
+// in a shared database; identity writes are tested by the isolated hierarchy
+// suite. Each fixture version is removed when its test finishes.
 func seedPrincipal(t *testing.T, eng *MemQLEngine, userId string, role auth.Role) {
 	t.Helper()
-	payload, err := json.Marshal(map[string]any{
-		"displayName":  userId,
-		"primaryEmail": userId + "@example.test",
-		"role":         string(role),
-		"active":       true,
+	seedAuthorityFixture(t, eng, conceptIdentityUser, userId, map[string]any{
+		"displayName": userId, "primaryEmail": userId + "@example.test", "role": string(role), "active": true,
 	})
-	if err != nil {
-		t.Fatalf("marshal principal: %v", err)
-	}
-	q := fmt.Sprintf(`insert(%s, id=%s, payload=%s)`,
-		langparser.QuoteString(conceptIdentityUser),
-		langparser.QuoteString(userId),
-		string(payload))
-	// A cluster-owner actor plus internal origin: the raw-insert owner stamp
-	// refuses a write with no caller identity (memql#3175's finding-4
-	// refusal), and this is scaffolding standing in for the identity service.
-	seedCtx := auth.ContextWithInternalOrigin(
-		auth.ContextWithAccess(context.Background(), &auth.AccessContext{
-			UserId: "rank-db-seeder",
-			Role:   auth.RoleOwner,
-		}))
-	seedCtx = auth.ContextWithToken(seedCtx, &auth.TokenInfo{Subject: "rank-db-seeder"})
-	if _, err := eng.Execute(seedCtx, q); err != nil {
-		t.Fatalf("seed principal %s: %v", userId, err)
-	}
 }
 
-// seedAccountOwnedBy creates an account owned by one principal.
+func seedAuthorityFixture(t *testing.T, eng *MemQLEngine, concept, uid string, payload map[string]any) {
+	t.Helper()
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Now().UTC().Truncate(time.Microsecond)
+	row := memorynodes.MemoryNode{ID: concept + ":" + BareShortId(uid), Concept: concept, Type: memorynodes.NodeTypeObject, CreatedAt: at, CreatedBy: "test-fixture", Schema: json.RawMessage(`{}`), Payload: encoded}
+	if _, err := eng.database().NewInsert().Model(&row).Exec(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	eng.InvalidateCacheForConcept(concept)
+	t.Cleanup(func() {
+		_, err := eng.database().NewDelete().Model((*memorynodes.MemoryNode)(nil)).Where("id = ? AND concept = ? AND \"createdAt\" = ?", row.ID, concept, at).Exec(context.Background())
+		if err != nil {
+			t.Error(err)
+		}
+		eng.InvalidateCacheForConcept(concept)
+	})
+}
+
+// seedAccountOwnedBy installs the account metadata for read/write policy tests.
+// Account creation and ownership transitions have separate mutation tests.
 func seedAccountOwnedBy(t *testing.T, eng *MemQLEngine, owner string, role auth.Role, id, name string) {
 	t.Helper()
-	ctx := rankActorCtx(owner, role)
-	q := fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: %s)`,
-		langparser.QuoteString(id), langparser.QuoteString(name))
-	if _, err := eng.Execute(ctx, q); err != nil {
-		t.Fatalf("create account %s as %s (%s): %v", id, owner, role, err)
+	if _, found, err := authorityRow(context.Background(), eng.database(), conceptIdentityUser, owner); err != nil {
+		t.Fatal(err)
+	} else if !found {
+		seedPrincipal(t, eng, owner, role)
 	}
+	seedAuthorityFixture(t, eng, conceptAccount, id, map[string]any{"ownerUserId": owner, "name": name, "status": "active", "domainStatus": "unverified", "allowedApps": []string{"app:deployables", "app:pipelines", "app:email", "app:users", "app:accounts"}})
 }
 
 // accountsVisibleTo runs the real query and returns the ids that came back.

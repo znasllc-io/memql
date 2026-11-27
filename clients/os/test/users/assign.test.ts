@@ -93,7 +93,7 @@ describe("the invitation kind", () => {
   });
 
   it("still refuses owner to a developer -- the rank cap is untouched", () => {
-    expect(rungRefusal(role("owner"), ctx("developer", "invitation"))).toBe("aboveCaller");
+    expect(rungRefusal(role("owner"), ctx("developer", "invitation"))).toBe("ownershipTransfer");
   });
 
   it("still refuses a peer admin to an admin", () => {
@@ -101,7 +101,7 @@ describe("the invitation kind", () => {
   });
 
   it("offers everything below to an owner", () => {
-    for (const slug of ["owner", "developer", "admin", "user", "viewer"]) {
+    for (const slug of ["developer", "admin", "user", "viewer"]) {
       expect(rungRefusal(role(slug), ctx("owner", "invitation")), slug).toBe("");
     }
   });

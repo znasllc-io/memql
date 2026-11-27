@@ -67,6 +67,13 @@ func accountCtx(t *testing.T, userId string, scope *accountScope) context.Contex
 	})
 	memo := &accountScopeMemo{}
 	memo.once.Do(func() { memo.scope = scope })
+	for account := range scope.accounts {
+		entry := &accountAccessEntry{}
+		entry.once.Do(func() {
+			entry.state = &accountAccessState{account: memorynodes.MemoryNode{ID: conceptAccount + ":" + BareShortId(account), Payload: rowPayload(t, map[string]any{"allowedApps": []string{"app:deployables", "app:email", "app:users", "app:accounts"}})}}
+		})
+		memo.access.Store(BareShortId(account), entry)
+	}
 	return context.WithValue(ctx, accountScopeMemoKey{}, memo)
 }
 

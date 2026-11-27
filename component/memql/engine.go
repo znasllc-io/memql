@@ -1445,7 +1445,7 @@ func (e *MemQLEngine) planCacheSignature(ctx context.Context, plan *QueryPlan) s
 	// direction of showing too little. Appended only when the plan carries
 	// an account term, so every other read's key is byte-identical.
 	if treeHasAccountScope(plan.Root) {
-		signature = "account:" + e.accountScopeFor(ctx).fingerprint + "\x1f" + signature
+		signature = "account:" + e.accountScopeFor(ctx).fingerprint + ":" + e.accountAccessFingerprint(ctx) + "\x1f" + signature
 	}
 	if treeHasAccountScope(plan.Root) || planIsUnbound(plan) {
 		signature = "organization:" + e.organizationAuthorizationFingerprint(ctx) + "\x1f" + signature

@@ -117,15 +117,22 @@ func (e *MemQLEngine) resolveOrganizationDecisions(ctx context.Context, known []
 		accounts[BareShortId(account)] = true
 	}
 	pairs := map[auth.VerbResource]bool{
-		{Verb: auth.VerbRead, Resource: "app:email"}:         true,
-		{Verb: auth.VerbRead, Resource: "app:deployables"}:   true,
-		{Verb: auth.VerbRead, Resource: "app:pipelines"}:     true,
-		{Verb: auth.VerbRead, Resource: auth.ResourceData}:   true,
-		{Verb: auth.VerbCreate, Resource: auth.ResourceData}: true,
-		{Verb: auth.VerbUpdate, Resource: auth.ResourceData}: true,
+		{Verb: auth.VerbRead, Resource: "app:users"}:          true,
+		{Verb: auth.VerbRead, Resource: "app:accounts"}:       true,
+		{Verb: auth.VerbCreate, Resource: auth.ResourceGroup}: true,
+		{Verb: auth.VerbUpdate, Resource: auth.ResourceGroup}: true,
+		{Verb: auth.VerbRead, Resource: "app:email"}:          true,
+		{Verb: auth.VerbRead, Resource: "app:deployables"}:    true,
+		{Verb: auth.VerbRead, Resource: "app:pipelines"}:      true,
+		{Verb: auth.VerbRead, Resource: auth.ResourceData}:    true,
+		{Verb: auth.VerbCreate, Resource: auth.ResourceData}:  true,
+		{Verb: auth.VerbUpdate, Resource: auth.ResourceData}:  true,
 	}
 	for _, d := range known {
-		if d.Verb == auth.VerbExecute && organizationDeployableCapability(d.Resource) {
+		if strings.HasPrefix(d.Resource, "app:") {
+			if _, err := normalizeAccessApps([]string{d.Resource}); err != nil {
+				continue // Cluster/personal settings retain their global answer.
+			}
 			pairs[auth.VerbResource{Verb: d.Verb, Resource: d.Resource}] = true
 		}
 	}

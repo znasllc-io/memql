@@ -62,6 +62,7 @@ func TestAudienceRunsUseNormalWorkerAcrossReplicas(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	cleanupCampaignUser(t, user)
 	execute(system, fmt.Sprintf(`insert("v1:identity:user", id=%s, payload={"primaryEmail":%s,"displayName":"Operator","role":"owner","active":true})`, langparser.QuoteString(user), langparser.QuoteString(user+"@example.test")))
 	execute(owner, call("mutation", "createClientAccount", arg{"accountId", org}, arg{"name", "Testing client"}))
 	for _, audience := range []string{live, internal} {

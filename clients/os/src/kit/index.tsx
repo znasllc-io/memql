@@ -152,3 +152,6 @@ export { RecordList, RecordRow, listCount } from "./RecordRow";
 
 export { ContentSkeleton, InlineSkeleton } from "./ContentSkeleton";
 export { Dialog } from "./Dialog";
+
+export { MultiPicker, type PickerChoice } from "./MultiPicker";
+export { RoleSelect, accountRoleChoices, type RoleChoice } from "./RoleSelect";

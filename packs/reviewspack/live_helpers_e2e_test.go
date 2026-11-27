@@ -64,6 +64,11 @@ func seedOrganization(t *testing.T, eng *memql.MemQLEngine, account string) stri
 		langparser.QuoteString("v1:accounts:account"), langparser.QuoteString(account), string(payload))); err != nil {
 		t.Fatalf("seed organization: %v", err)
 	}
+	// The store's client has been assigned Deployables before enabling reviews.
+	if _, err := liveDB.ExecContext(context.Background(), `UPDATE "MemoryNodes" SET payload=jsonb_set(payload,'{allowedApps}','["app:deployables"]'::jsonb) WHERE concept='v1:accounts:account' AND id=?`, "v1:accounts:account:"+account); err != nil {
+		t.Fatal(err)
+	}
+	eng.InvalidateCacheForConcept("v1:accounts:account")
 	group := "acct-" + account
 	seedGroup(t, eng, group, "account", account)
 	return group

@@ -3,7 +3,6 @@ package memql
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"sort"
 	"strings"
 	"testing"
@@ -12,7 +11,6 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
-	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // account_self_cluster_address_db_test.go -- memql#5792.
@@ -110,20 +108,20 @@ func storedAccountPayload(t *testing.T, db *bun.DB, id string) map[string]any {
 // database has none yet, the way the boot seed does: no domain at all.
 func ensureSelfAccount(t *testing.T, eng *MemQLEngine, db *bun.DB) {
 	t.Helper()
-	n, err := db.NewSelect().Model((*memorynodes.MemoryNode)(nil)).
-		Where("concept = ?", conceptAccountsAccount).
-		Where("id = ?", selfAccountId).
-		Count(context.Background())
+	row, found, err := authorityRow(context.Background(), db, conceptAccountsAccount, "self")
 	if err != nil {
-		t.Fatalf("probe the self row: %v", err)
+		t.Fatal(err)
 	}
-	if n > 0 {
-		return
+	payload := accountRowPayload(row)
+	if !found {
+		payload = map[string]any{"name": "My company", "status": "active", "domainStatus": "unverified"}
 	}
-	seed := auth.ContextWithInternalOrigin(systemActorContext(context.Background()))
-	if _, err := eng.Execute(seed, fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "My company")`, langparser.QuoteString(selfAccountId))); err != nil {
-		t.Fatalf("seed the self row: %v", err)
-	}
+	// Shared domain fixtures outlive the owner versions from earlier tests.
+	// Re-establish this test's active owner without changing the domain history.
+	const owner = "self-address-fixture-owner"
+	seedPrincipal(t, eng, owner, auth.RoleOwner)
+	payload["ownerUserId"] = owner
+	seedAuthorityFixture(t, eng, conceptAccountsAccount, "self", payload)
 }
 
 // freshAccountEngine is a second engine over the same database, holding no

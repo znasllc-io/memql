@@ -164,7 +164,7 @@ function AccountsSurface({
       // managed on the group's own page, and a members list here would be a
       // second place to manage it. The intent is consumed by id on the far
       // side, so acting on a stale render cannot eat a newer instruction.
-      onOpenGroup={(groupId) => os?.actions.openApp("users", "groups", { groupId })}
+      onOpenGroup={(groupId, accountId) => os?.actions.openApp("users", "groups", { groupId, accountId })}
     />
   );
 }

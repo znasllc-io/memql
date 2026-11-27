@@ -21,7 +21,7 @@ func TestEmailBrowsePagesSearchAndOrganizationScopeDB(t *testing.T) {
 	member, peer := f.person("member", true), f.person("peer", true)
 	account, other := "acme-"+f.prefix, "other-"+f.prefix
 	for _, id := range []string{account, other} {
-		f.insert(conceptAccountsAccount, conceptAccountsAccount+":"+id, map[string]any{"name": id, "status": "active", "domainStatus": "unverified"})
+		f.insert(conceptAccountsAccount, conceptAccountsAccount+":"+id, map[string]any{"name": id, "status": "active", "domainStatus": "unverified", "allowedApps": []string{"app:email", "app:deployables", "app:pipelines"}})
 	}
 	seedGroup(t, engine, "g-"+account, account, "account", account)
 	seedMembership(t, engine, "g-"+account, BareShortId(member), "active")
@@ -85,7 +85,7 @@ func TestPlatformDirectorySourcesOrganizationScopeDB(t *testing.T) {
 	member, peer := f.person("member", true), f.person("peer", true)
 	account, other := "acme-"+f.prefix, "other-"+f.prefix
 	for _, id := range []string{account, other} {
-		f.insert(conceptAccountsAccount, conceptAccountsAccount+":"+id, map[string]any{"name": id, "status": "active", "domainStatus": "unverified"})
+		f.insert(conceptAccountsAccount, conceptAccountsAccount+":"+id, map[string]any{"name": id, "status": "active", "domainStatus": "unverified", "allowedApps": []string{"app:email", "app:deployables", "app:pipelines"}})
 	}
 	seedGroup(t, engine, "g-"+account, account, "account", account)
 	seedMembership(t, engine, "g-"+account, BareShortId(member), "active")

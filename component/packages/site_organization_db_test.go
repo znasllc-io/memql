@@ -70,6 +70,7 @@ func TestPackagePlacementRequiresTargetOrganizationActionBeforeSideEffects(t *te
 	ownerCtx, memberCtx := tieActorCtx(owner, auth.RoleOwner), tieActorCtx(user, auth.RoleWriter)
 	for _, org := range []string{a, b} {
 		mustExecute(t, eng, ownerCtx, fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Placement org")`, langparser.QuoteString(org)))
+		createTieAccount(t, eng, org)
 		seedTieGroup(t, eng, "placement-group-"+org, org)
 		seedTieMembership(t, eng, "placement-group-"+org, user)
 	}

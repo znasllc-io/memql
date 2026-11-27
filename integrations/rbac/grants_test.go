@@ -537,6 +537,7 @@ func accessCatalog(account string) *testCatalog {
 var accessEngineState struct {
 	once    sync.Once
 	eng     *memql.MemQLEngine
+	db      *bun.DB
 	dsn     string
 	pingErr error
 	bootErr error
@@ -548,6 +549,7 @@ func accessEngine(t *testing.T) *memql.MemQLEngine {
 	s.once.Do(func() {
 		s.dsn = dbtest.DSN()
 		db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(s.dsn))), pgdialect.New())
+		s.db = db
 		if err := db.PingContext(context.Background()); err != nil {
 			s.pingErr = err
 			_ = db.Close()
@@ -632,6 +634,12 @@ func (w *accessWorld) exec(q string) {
 // person writes an active user row holding `role`, and returns its bare id.
 func (w *accessWorld) person(name, role string) string {
 	id := w.id(name)
+	w.t.Cleanup(func() {
+		_, err := accessEngineState.db.NewDelete().Model((*memorynodes.MemoryNode)(nil)).Where("concept = ? AND id = ?", "v1:identity:user", "v1:identity:user:"+id).Exec(context.Background())
+		if err != nil {
+			w.t.Error(err)
+		}
+	})
 	payload, _ := json.Marshal(map[string]any{
 		"displayName": name, "primaryEmail": id + "@example.test", "role": role, "active": true,
 	})
@@ -642,10 +650,27 @@ func (w *accessWorld) person(name, role string) string {
 // organization writes an active account and its account group at the derived
 // id acct-<account>, and returns the group's id.
 func (w *accessWorld) organization(account string) string {
-	payload, _ := json.Marshal(map[string]any{"name": account, "status": "active", "domainStatus": "unverified"})
+	primaryOwner := w.person("owner", "owner")
+	owner := w.person(account+"-owner", "viewer")
+	payload, _ := json.Marshal(map[string]any{"name": account, "ownerUserId": owner, "status": "active", "domainStatus": "unverified"})
 	w.exec(fmt.Sprintf(`insert("v1:accounts:account", id=%s, payload=%s)`, langparser.QuoteString(account), payload))
 	group := "acct-" + account
 	w.group(group, "account", account)
+	// The primary owner supplies the ceiling; tests below exercise how role,
+	// group and person grants distribute those apps inside each organization.
+	ctx := accessCaller(primaryOwner, componentAuth.RoleOwner)
+	result, err := w.eng.Execute(ctx, fmt.Sprintf(`builtin accountAccess(accountId: %s)`, langparser.QuoteString(account)))
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	state := memql.MaterializeRows(result)[0]
+	if payload, ok := state["payload"].(map[string]any); ok {
+		state = payload
+	}
+	_, err = w.eng.Execute(ctx, fmt.Sprintf(`builtin accountAccessUpdate(accountId: %s, revision: %s, operation: "apps", apps: ["app:deployables", "app:email", "app:pipelines", "app:files"])`, langparser.QuoteString(account), langparser.QuoteString(fmt.Sprint(state["revision"]))))
+	if err != nil {
+		w.t.Fatal(err)
+	}
 	return group
 }
 
@@ -835,8 +860,9 @@ func TestEffectiveAccessIsPerOrganization(t *testing.T) {
 	expectAccess(t, rows, acme, "read", "app:email", true, "role", "writer")
 	expectAccess(t, rows, beta, "read", "app:email", true, "role", "writer")
 	expectNoMergedRow(t, rows, "read app:deployables", "execute app:deployables/reviews", "read app:email")
-	// A pair the engine does not decide per organization keeps one answer.
-	expectAccess(t, rows, "", "read", "app:files", true, "role", "writer")
+	// Every delegated app now carries the account whose ceiling admits it.
+	expectAccess(t, rows, acme, "read", "app:files", true, "role", "writer")
+	expectAccess(t, rows, beta, "read", "app:files", true, "role", "writer")
 }
 
 // TestEffectiveAccessAnswersThePipelinesDoorPerOrganization: opening Pipelines

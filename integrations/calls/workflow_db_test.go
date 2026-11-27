@@ -146,11 +146,17 @@ func TestWorkflowDatabaseInsightsAndContinuousMedia(t *testing.T) {
 	cw.clock.Advance(10 * time.Second)
 	frozen := workflowDo(t, cw, k, callrules.WorkflowRequest{Action: "snapshot"})
 	require.EqualValues(t, 3, frozen.Run.ElapsedSeconds)
+}
+
+// A separate world has its own primary owner and cleanup. It must not create
+// another cluster owner while the continuous-media fixture is still active.
+func TestWorkflowDatabaseRequiresInsights(t *testing.T) {
+	ctx := context.Background()
 	cw2, k2, _, _ := workflowFixture(t, "workflow-no-insights", false)
 	if cw2 == nil {
 		return
 	}
-	_, err = cw2.svc.Workflow(ctx, cw2.ref, k2.result.Session.Token, callrules.WorkflowRequest{Action: "start", SkillID: "working-session", Version: 1, IdempotencyKey: "no-insights"})
+	_, err := cw2.svc.Workflow(ctx, cw2.ref, k2.result.Session.Token, callrules.WorkflowRequest{Action: "start", SkillID: "working-session", Version: 1, IdempotencyKey: "no-insights"})
 	require.ErrorContains(t, err, "workflow_insights_required")
 }
 func workflowActiveRowCount(t *testing.T, cw *callWorld) int {

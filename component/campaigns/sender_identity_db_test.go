@@ -78,6 +78,7 @@ func TestUpdateSenderIdentityClearsAFieldSentEmpty(t *testing.T) {
 		mustRun(owner, call("mutation", "updateSenderIdentity", args...))
 	}
 
+	cleanupCampaignUser(t, user)
 	mustRun(system, fmt.Sprintf(`insert("v1:identity:user", id=%s, payload={"primaryEmail":%s,"displayName":"Sender tester","role":"owner","active":true})`,
 		langparser.QuoteString(user), langparser.QuoteString(user+"@example.test")))
 	mustRun(owner, call("mutation", "createClientAccount", arg{"accountId", org}, arg{"name", "Sender client"}))

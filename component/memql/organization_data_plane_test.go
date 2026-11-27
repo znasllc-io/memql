@@ -74,7 +74,7 @@ func TestOrganizationReadDataDenialAppliesToAccountRowsAndOperators(t *testing.T
 	t.Cleanup(func() { auth.SetGrantSource(oldGrant); auth.SetMembershipSource(oldMembership) })
 	suffix := uniqueSuffix("data-read")
 	account, user := "account-"+suffix, "user-"+suffix
-	if err := organizationInsert(t, engine, groupSeedCtx(), conceptAccountsAccount, account, map[string]any{"name": account, "status": "active", "domainStatus": "unverified"}); err != nil {
+	if err := seedOrganizationAccount(t, engine, account, map[string]any{"name": account, "status": "active", "domainStatus": "unverified"}); err != nil {
 		t.Fatal(err)
 	}
 	seedPrincipal(t, engine, user, auth.RoleOwner)

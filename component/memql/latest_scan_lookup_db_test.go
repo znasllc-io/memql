@@ -190,8 +190,8 @@ func TestLatestScanLookupKeepsRowAuthzAndOrganizationScoping(t *testing.T) {
 	query := fmt.Sprintf(`query consentEventsBySubscriber(emailDigest: %s)`, langparser.QuoteString(digest))
 	ids := func(result *ExecuteResult) []string {
 		out := []string{}
-		for _, n := range result.Bundle.GetNodes() {
-			out = append(out, BareShortId(n.GetId()))
+		for _, id := range result.Bundle.GetRootIds() {
+			out = append(out, BareShortId(id))
 		}
 		return out
 	}

@@ -104,7 +104,7 @@ func forgetWhenDone(t *testing.T, db *bun.DB, since time.Time, suffix string) {
 }
 
 func digestOwner(user string) context.Context {
-	return auth.ContextWithToken(auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: user, Role: auth.RoleOwner}), &auth.TokenInfo{Subject: user})
+	return auth.ContextWithToken(auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: user, Role: auth.RoleDeveloper}), &auth.TokenInfo{Subject: user})
 }
 
 // digestTenant is one owner, the organization their recipients belong to (a
@@ -140,8 +140,11 @@ func newDigestTenantOn(t *testing.T, eng *memql.MemQLEngine, db *bun.DB, name st
 		system: auth.ContextWithInternalOrigin(auth.ContextWithToken(auth.ContextWithAccess(context.Background(), auth.SystemActor("digest-test")), &auth.TokenInfo{Subject: "digest-test"})),
 	}
 	d.owner = digestOwner(d.user)
-	d.execute(t, d.system, fmt.Sprintf(`insert("v1:identity:user", id=%s, payload={"primaryEmail":%s,"displayName":"Sender","role":"owner","active":true})`, langparser.QuoteString(d.user), langparser.QuoteString(d.user+"@example.test")))
+	cleanupCampaignUser(t, d.user)
+	d.execute(t, d.system, fmt.Sprintf(`insert("v1:identity:user", id=%s, payload={"primaryEmail":%s,"displayName":"Sender","role":"developer","active":true})`, langparser.QuoteString(d.user), langparser.QuoteString(d.user+"@example.test")))
 	d.execute(t, d.owner, call("mutation", "createClientAccount", arg{"accountId", d.org}, arg{"name", "Digest client"}))
+	campaignAccountApps(t, db.DB, d.org)
+	eng.InvalidateCacheForConcept("v1:accounts:account")
 	d.execute(t, d.owner, call("mutation", "createAudience", arg{"audienceId", d.audience}, arg{"accountId", d.org}, arg{"name", "Newsletter"}))
 	return d
 }

@@ -42,17 +42,17 @@ func TestAssignmentCrossProduct(t *testing.T) {
 	want := map[AssignKind]map[Role]map[string]AssignRefusal{
 		AssignOnInvitation: {
 			RoleOwner: {
-				"owner": AssignAllowed, "developer": AssignAllowed, "admin": AssignAllowed,
+				"owner": AssignOwnershipTransfer, "developer": AssignAllowed, "admin": AssignAllowed,
 				"user": AssignAllowed, "viewer": AssignAllowed,
 			},
 			// THE ROW THIS ISSUE CHANGED. `admin` was AssignAuthorityBeyond.
 			RoleDeveloper: {
-				"owner": AssignAboveCaller, "developer": AssignAboveCaller, "admin": AssignAllowed,
+				"owner": AssignOwnershipTransfer, "developer": AssignAboveCaller, "admin": AssignAllowed,
 				"user": AssignAllowed, "viewer": AssignAllowed,
 			},
 			// D4's peer rule, untouched: an admin cannot mint a peer admin.
 			RoleAdmin: {
-				"owner": AssignAboveCaller, "developer": AssignAboveCaller, "admin": AssignAboveCaller,
+				"owner": AssignOwnershipTransfer, "developer": AssignAboveCaller, "admin": AssignAboveCaller,
 				"user": AssignAllowed, "viewer": AssignAllowed,
 			},
 			"user":         allCells(granted, AssignNotAUserManager),
@@ -61,7 +61,7 @@ func TestAssignmentCrossProduct(t *testing.T) {
 		},
 		AssignOnReRole: {
 			RoleOwner: {
-				"owner": AssignAllowed, "developer": AssignAllowed, "admin": AssignAllowed,
+				"owner": AssignOwnershipTransfer, "developer": AssignAllowed, "admin": AssignAllowed,
 				"user": AssignAllowed, "viewer": AssignAllowed,
 			},
 			// UNCHANGED BY THIS ISSUE, and the reason the split is safe: a
@@ -70,7 +70,7 @@ func TestAssignmentCrossProduct(t *testing.T) {
 			// It may open a door; it may not move somebody through one.
 			RoleDeveloper: allCells(granted, AssignNotAUserManager),
 			RoleAdmin: {
-				"owner": AssignAboveCaller, "developer": AssignAboveCaller, "admin": AssignAboveCaller,
+				"owner": AssignOwnershipTransfer, "developer": AssignAboveCaller, "admin": AssignAboveCaller,
 				"user": AssignAllowed, "viewer": AssignAllowed,
 			},
 			"user":         allCells(granted, AssignNotAUserManager),

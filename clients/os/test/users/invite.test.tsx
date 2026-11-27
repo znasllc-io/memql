@@ -1,3 +1,4 @@
+import { openSelect } from "../selectControl";
 import { readTheBar } from "../readTheBar";
 import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
@@ -141,8 +142,8 @@ describe("the Invite rail", () => {
     expect(within(bar()).queryByRole("button", { name: "Send invitation" })).toBeNull();
 
     await reachRoles();
-    const ladder = screen.getByRole("list", { name: /The role this invitation grants/ });
-    await click(within(ladder).getByRole("button", { name: /Member/ }));
+    const ladder = openSelect(screen.getByRole("combobox", { name: /The role this invitation grants/ }));
+    await click(within(ladder).getByRole("option", { name: /^Member/ }));
 
     await waitFor(() =>
       expect(within(bar()).getByRole("button", { name: "Send invitation" })).toBeTruthy(),
@@ -164,8 +165,8 @@ describe("the Invite rail", () => {
     const view = await openInvite(connection);
     await type("Email address", "kit@acme.com");
     await reachRoles();
-    const ladder = screen.getByRole("list", { name: /The role this invitation grants/ });
-    await click(within(ladder).getByRole("button", { name: /Member/ }));
+    const ladder = openSelect(screen.getByRole("combobox", { name: /The role this invitation grants/ }));
+    await click(within(ladder).getByRole("option", { name: /^Member/ }));
     await readTheBar(); await click(screen.getByRole("button", { name: "Send invitation" }));
 
     await waitFor(() =>
@@ -196,8 +197,8 @@ describe("the Invite rail", () => {
     const view = await openInvite(connection);
     await type("Email address", "kit@example.com");
     await reachRoles();
-    const ladder = screen.getByRole("list", { name: /The role this invitation grants/ });
-    await click(within(ladder).getByRole("button", { name: /Member/ }));
+    const ladder = openSelect(screen.getByRole("combobox", { name: /The role this invitation grants/ }));
+    await click(within(ladder).getByRole("option", { name: /^Member/ }));
     await readTheBar(); await click(screen.getByRole("button", { name: "Send invitation" }));
 
     // The Role stop is where the refused value was entered; a refusal at the
@@ -272,24 +273,16 @@ describe("the rungs a developer is offered", () => {
   // (clients/os/src/kit/RankMark.tsx), so `getByRole("button", {name:/Admin/})`
   // matches every rung on the ladder when an admin is looking at it. The slug
   // span is the one text unique to its own rung.
-  function rung(slug: string): HTMLButtonElement {
-    const ladder = screen.getByRole("list", { name: /The role this invitation grants/ });
-    for (const line of Array.from(ladder.querySelectorAll("li.os-role-rung"))) {
-      const badge = line.querySelector(".os-role-slug");
-      if ((badge?.textContent ?? "").trim() === slug) {
-        const button = line.querySelector("button");
-        if (button === null) throw new Error(`rung ${slug} has no button`);
-        return button as HTMLButtonElement;
-      }
-    }
-    throw new Error(`no rung with slug ${slug} on the ladder`);
+  function rung(slug: string): HTMLElement {
+    const labels: Record<string, string> = { owner: "Owner", admin: "Admin", developer: "Developer", user: "Member", viewer: "Viewer" };
+    return within(openSelect(screen.getByRole("combobox", { name: /The role this invitation grants/ }))).getByRole("option", { name: new RegExp(`^${labels[slug]}`) });
   }
 
   it("offers admin to a developer, and the button is clickable", async () => {
     await openInvite(rungSeed(), "developer");
     await reachRoles();
     const admin = rung("admin");
-    expect(admin.disabled, "the admin rung must be clickable for a developer").toBe(false);
+    expect(admin.getAttribute("aria-disabled") === "true", "the admin rung must be clickable for a developer").toBe(false);
     expect(admin.title ?? "", "an offered rung carries no refusal sentence").toBe("");
   });
 
@@ -297,14 +290,14 @@ describe("the rungs a developer is offered", () => {
     await openInvite(rungSeed(), "developer");
     await reachRoles();
     const owner = rung("owner");
-    expect(owner.disabled).toBe(true);
-    expect(owner.title).toContain("at or above your own");
+    expect(owner.getAttribute("aria-disabled") === "true").toBe(true);
+    expect(owner.textContent).toMatch(/Transfer ownership/i);
   });
 
   it("still refuses a peer admin to an admin", async () => {
     await openInvite(rungSeed(), "admin");
     await reachRoles();
-    expect(rung("admin").disabled).toBe(true);
+    expect(rung("admin").getAttribute("aria-disabled")).toBe("true");
   });
 
   it("a developer picking admin can send the invitation", async () => {

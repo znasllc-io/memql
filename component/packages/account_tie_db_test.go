@@ -66,6 +66,12 @@ func tieActorCtx(userId string, role auth.Role) context.Context {
 // identity service.
 func seedTiePrincipal(t *testing.T, eng *memql.MemQLEngine, userId string, role auth.Role) {
 	t.Helper()
+	_, db := dbEngine(t)
+	t.Cleanup(func() {
+		if _, err := db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE concept='v1:identity:user' AND id IN (?,?)`, userId, "v1:identity:user:"+memql.BareShortId(userId)); err != nil {
+			t.Errorf("remove fixture principal: %v", err)
+		}
+	})
 	payload, err := json.Marshal(map[string]any{
 		"displayName":  userId,
 		"primaryEmail": userId + "@example.test",
@@ -104,6 +110,57 @@ func seedTieMembership(t *testing.T, eng *memql.MemQLEngine, groupId, userId str
 	}
 }
 
+// createTieAccount supplies the independent owner and preassigned app ceiling
+// needed by source-policy fixtures; it does not grant access to the tested actor.
+func createTieAccount(t *testing.T, eng *memql.MemQLEngine, account string) {
+	t.Helper()
+	_, db := dbEngine(t)
+	exists, err := db.NewSelect().Model((*concept.MemoryNode)(nil)).Where("concept = ?", "v1:accounts:account").Where("id = ?", "v1:accounts:account:"+account).Exists(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !exists {
+		owner, role := account+"-account-owner", auth.RoleDeveloper
+		if account == "self" {
+			var rows []concept.MemoryNode
+			if err := db.NewSelect().Model(&rows).DistinctOn("id").Where("concept = ?", "v1:identity:user").OrderExpr(`id ASC, "createdAt" DESC`).Scan(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			owner = ""
+			for _, row := range rows {
+				var p map[string]any
+				if err := json.Unmarshal(row.Payload, &p); err != nil {
+					t.Fatal(err)
+				}
+				if p["role"] == "owner" && p["active"] == true {
+					owner = memql.BareShortId(row.ID)
+				}
+			}
+			if owner == "" {
+				t.Fatal("the primary account fixture requires its cluster owner")
+			}
+			role = auth.RoleOwner
+		} else {
+			seedTiePrincipal(t, eng, owner, role)
+		}
+		ctx := auth.ContextWithInternalOrigin(tieActorCtx(owner, role))
+		if _, err := eng.Execute(ctx, fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Package test organization")`, langparser.QuoteString(account))); err != nil {
+			t.Fatal(err)
+		}
+		if account != "self" {
+			t.Cleanup(func() {
+				if _, err := db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE concept='v1:accounts:account' AND id=?`, "v1:accounts:account:"+account); err != nil {
+					t.Errorf("remove account fixture: %v", err)
+				}
+			})
+		}
+	}
+	if _, err := db.ExecContext(context.Background(), `UPDATE "MemoryNodes" SET payload=jsonb_set(payload,'{allowedApps}','["app:deployables","app:pipelines"]'::jsonb) WHERE concept='v1:accounts:account' AND id=?`, "v1:accounts:account:"+account); err != nil {
+		t.Fatal(err)
+	}
+	eng.InvalidateCacheForConcept("v1:accounts:account")
+}
+
 // createTiedPackage registers a package the way the compose flow does: the
 // ordinary caller-scoped createPackage under the OWNER's actor, naming the
 // account (or not).
@@ -120,9 +177,7 @@ func createTiedPackage(t *testing.T, eng *memql.MemQLEngine, owner context.Conte
 		}
 		return
 	}
-	if _, err := eng.Execute(tieSeederCtx(), fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Package test organization")`, langparser.QuoteString(accountId))); err != nil {
-		t.Fatal(err)
-	}
+	createTieAccount(t, eng, accountId)
 	q := fmt.Sprintf(
 		`mutation createPackage(packageId: %s, name: %s, sourceKind: "repo", repoUrl: %s`,
 		langparser.QuoteString(packageId), langparser.QuoteString(name),

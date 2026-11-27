@@ -90,7 +90,7 @@ func TestSetUserRoleAppliesTheAssignmentRule(t *testing.T) {
 		{
 			name: "admin cannot promote anybody to owner", caller: auth.RoleAdmin,
 			targetNow: "writer", newRole: "owner", refused: true,
-			auditieson: "role_above_caller",
+			auditieson: "ownership_transfer_required",
 		},
 		{
 			// THE ESCALATION THIS CLOSES, spelled out: developer outranks admin

@@ -633,7 +633,14 @@ func siteFor(t *testing.T, storeID string, over map[string]any) string {
 // group's id.
 func seedOrganization(t *testing.T, account string) string {
 	t.Helper()
-	seedRow(t, "v1:accounts:account", account, map[string]any{"name": account, "status": "active", "domainStatus": "unverified"})
+	owner := account + "-owner"
+	seedRow(t, "v1:identity:user", owner, map[string]any{"displayName": "Account owner", "primaryEmail": owner + "@example.test", "role": "viewer", "active": true})
+	seedRow(t, "v1:accounts:account", account, map[string]any{"name": account, "ownerUserId": owner, "status": "active", "domainStatus": "unverified"})
+	eng, db := statsEngine(t)
+	if _, err := db.ExecContext(context.Background(), `UPDATE "MemoryNodes" SET payload=jsonb_set(payload,'{allowedApps}','["app:deployables"]'::jsonb) WHERE concept='v1:accounts:account' AND id=?`, "v1:accounts:account:"+account); err != nil {
+		t.Fatal(err)
+	}
+	eng.InvalidateCacheForConcept("v1:accounts:account")
 	group := "acct-" + account
 	seedGroup(t, group, "account", account)
 	return group

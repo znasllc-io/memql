@@ -38,7 +38,7 @@ func TestQualificationBuiltinsKeepAuthorityAndReceiptsAcrossEngines(t *testing.T
 	quote := langparser.QuoteString
 	_, err := base.Execute(seederCtx(), fmt.Sprintf(`mutation createUser(userId: %s, displayName: "Wire owner", primaryEmail: %s, role: "developer")`, quote(owner), quote(owner+"@example.test")))
 	require.NoError(t, err)
-	_, err = base.Execute(seederCtx(), fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Wire fixture")`, quote(account)))
+	_, err = base.Execute(accountSeeder(t, base, owner), fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Wire fixture")`, quote(account)))
 	require.NoError(t, err)
 	_, err = base.Execute(signedIn(owner), fmt.Sprintf(`mutation createPackage(accountId: %s, packageId: %s, name: "shop", sourceKind: "repo", repoUrl: %s, credentialId: %s)`, quote(account), quote(pkg), quote("https://github.com/"+repo), quote(credential)))
 	require.NoError(t, err)

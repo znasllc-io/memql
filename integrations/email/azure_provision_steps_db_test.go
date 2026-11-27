@@ -55,6 +55,7 @@ func newProvisionHarness(t *testing.T, existing func(p azurePlan) []string) *pro
 	suffix := fmt.Sprintf("steps-%d", time.Now().UnixNano())
 	account := suffix + "-client"
 	owner := auth.ContextWithToken(auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: suffix + "-owner", Role: auth.RoleOwner}), &auth.TokenInfo{Subject: suffix + "-owner"})
+	seedEmailOwner(t, NewConfigWriter(e), suffix+"-owner")
 	if _, err = e.Execute(owner, renderConfigCall("createClientAccount", map[string]string{"accountId": account, "name": account})); err != nil {
 		t.Fatal(err)
 	}

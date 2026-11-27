@@ -222,6 +222,15 @@ func TestAnEmailRuleArmedOnOneReplicaFiresOnAnother(t *testing.T) {
 	// Canonical, as the identity resolver stamps every real caller: the
 	// activation compares it with the bundle's stored ownerUserId.
 	owner := "v1:identity:user:" + short
+	// Each replica fixture owns its primary owner; the next test cannot
+	// introduce a second one into the same database.
+	t.Cleanup(func() {
+		db := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
+		defer db.Close()
+		if _, err := db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE (concept='v1:identity:user' AND id=$1) OR (concept='v1:accounts:account' AND id=$2)`, owner, "v1:accounts:account:"+org); err != nil {
+			t.Errorf("remove replica fixture authority: %v", err)
+		}
+	})
 	q := langparser.QuoteString
 
 	system := auth.ContextWithInternalOrigin(auth.ContextWithAccess(ctx, auth.SystemActor("email-rule-arming-test")))

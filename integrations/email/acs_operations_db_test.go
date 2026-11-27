@@ -67,6 +67,7 @@ func TestACSSendReceiptReconcilesOnAnotherReplicaWithoutReposting(t *testing.T) 
 		instances[n] = NewIntegration(NewLogSender(nil), nil)
 		instances[n].azure = a
 	}
+	seedEmailOwner(t, NewConfigWriter(engines[0]), account+"-owner")
 	if _, err := engines[0].Execute(owner, renderConfigCall("createClientAccount", map[string]string{"accountId": account, "name": "Receipt client"})); err != nil {
 		t.Fatal(err)
 	}

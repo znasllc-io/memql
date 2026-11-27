@@ -389,6 +389,7 @@ func joinOrganization(t *testing.T, eng *memql.MemQLEngine, account, userId stri
 	membership := group + "-" + userId
 	written := map[string]string{
 		"v1:accounts:account":         account,
+		"v1:identity:user":            account + "-owner",
 		"v1:identity:group":           group,
 		"v1:identity:groupMembership": membership,
 	}
@@ -410,7 +411,8 @@ func joinOrganization(t *testing.T, eng *memql.MemQLEngine, account, userId stri
 	})
 	seed := auth.ContextWithInternalOrigin(callerCtx("email-statistics-seeder", auth.RoleOwner))
 	for _, q := range []string{
-		fmt.Sprintf(`insert("v1:accounts:account", id=%s, payload={"name": "Statistics organization", "status": "active", "domainStatus": "unverified"})`, langparser.QuoteString(account)),
+		fmt.Sprintf(`insert("v1:identity:user", id=%s, payload={"displayName":"Account owner","primaryEmail":%s,"role":"viewer","active":true})`, langparser.QuoteString(account+"-owner"), langparser.QuoteString(account+"@example.test")),
+		fmt.Sprintf(`insert("v1:accounts:account", id=%s, payload={"name":"Statistics organization","status":"active","domainStatus":"unverified","ownerUserId":%s})`, langparser.QuoteString(account), langparser.QuoteString(account+"-owner")),
 		fmt.Sprintf(`mutation writeGroup(groupId: %s, name: "Statistics organization", kind: "account", accountId: %s, status: "active")`, langparser.QuoteString(group), langparser.QuoteString(account)),
 		fmt.Sprintf(`mutation writeGroupMembership(membershipId: %s, groupId: %s, userId: %s, accountId: %s, origin: "added", status: "active")`,
 			langparser.QuoteString(membership), langparser.QuoteString(group), langparser.QuoteString(userId), langparser.QuoteString(account)),
@@ -419,6 +421,11 @@ func joinOrganization(t *testing.T, eng *memql.MemQLEngine, account, userId stri
 			t.Fatalf("put %s in %s: %v", userId, account, err)
 		}
 	}
+	// The fixture represents a client already given the Email app.
+	if _, err := db.ExecContext(context.Background(), `UPDATE "MemoryNodes" SET payload=jsonb_set(payload,'{allowedApps}','["app:email"]'::jsonb) WHERE concept='v1:accounts:account' AND id=?`, "v1:accounts:account:"+account); err != nil {
+		t.Fatal(err)
+	}
+	eng.InvalidateCacheForConcept("v1:accounts:account")
 	// The rows are there under the ids the removal names, or it would remove
 	// nothing and say so only by leaving them.
 	for concept, id := range written {

@@ -38,7 +38,7 @@ export function AccountsSection({
   update: UpdateAccountState;
   archive: ArchiveAccountState;
   /** Opens the Users app on one of this client's groups, by intent. */
-  onOpenGroup?: (groupId: string) => void;
+  onOpenGroup?: (groupId: string, accountId: string) => void;
 }) {
   const [searchText, setSearchText] = useState("");
   const search = useDebouncedValue(searchText.trim(), TEXT_DEBOUNCE_MS);
@@ -157,7 +157,7 @@ function AccountLine({
       )}
       {accountIsSelf(account) ? (
         <Chip tone="accent" title="The company this instance belongs to">
-          you
+          Primary account
         </Chip>
       ) : null}
     </RecordRow>

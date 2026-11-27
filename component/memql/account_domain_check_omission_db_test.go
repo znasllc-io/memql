@@ -50,6 +50,7 @@ import (
 // with MEMQL_REQUIRE_DB=1, so a skip there is a failure rather than a green.
 func TestAnOmittedStampArgumentLeavesTheFieldAlone(t *testing.T) {
 	eng, _, ctx := sharedReadMergeEngine(t)
+	seedPrincipal(t, eng, "stamp-omission-probe", auth.RoleOwner)
 	owner := auth.ContextWithInternalOrigin(auth.ContextWithAccess(ctx, &auth.AccessContext{
 		UserId: "v1:identity:user:stamp-omission-probe",
 		Role:   auth.RoleOwner,

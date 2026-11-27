@@ -102,8 +102,10 @@ func TestSeedSelfAccountThenConfigureWithRealEngine(t *testing.T) {
 	require.Equal(t, "completed", run.Status)
 	require.Equal(t, claimed, readSelf())
 	_, err = eng.Execute(internal, `insert("v1:identity:user", id="seed-other-owner", payload={"displayName":"Other owner", "primaryEmail":"seed-other@example.test", "role":"owner", "active":true})`)
+	require.ErrorContains(t, err, "account_single_owner")
+	_, err = eng.Execute(internal, `insert("v1:identity:user", id="seed-other-owner", payload={"displayName":"Other person", "primaryEmail":"seed-other@example.test", "role":"viewer", "active":true})`)
 	require.NoError(t, err)
-	require.ErrorContains(t, integration.ConfigureSelfAccount(internal, "Forbidden", "seed-other-owner"), "different owner")
+	require.ErrorContains(t, integration.ConfigureSelfAccount(internal, "Forbidden", "seed-other-owner"), "verified claim owner")
 	require.Equal(t, claimed, readSelf())
 	// The client domain policy must still refuse a reservation under the
 	// installation hostname; the seed fix does not introduce a DNS exemption.

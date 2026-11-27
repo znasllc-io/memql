@@ -74,14 +74,9 @@ func TestMayAssignRole(t *testing.T) {
 			newRole: "developer", want: AssignAllowed,
 		},
 		{
-			// THE OWNER CARVE-OUT. The bare rank rule (`new < caller`) refuses
-			// 400 < 400 and would make a second owner unmakeable through every
-			// path in the product -- a cluster with one owner and no way to
-			// name another. GovernPrincipal already carries the same carve-out
-			// on the target half, for the identical reason.
-			name:       "owner may name another owner",
+			name:       "owner must transfer the single ownership slot",
 			callerRole: RoleOwner, callerId: "u-owner", targetId: "u-b", targetCurrent: "user",
-			newRole: "owner", want: AssignAllowed,
+			newRole: "owner", want: AssignOwnershipTransfer,
 		},
 		{
 			name:       "admin may not mint a developer -- 300 is not below 200",

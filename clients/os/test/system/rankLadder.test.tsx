@@ -162,52 +162,30 @@ describe("each seeded role's desktop is the one the floors used to draw", () => 
   });
 });
 
-describe("the rung mark", () => {
-  it("draws one tick per rung and lights the viewer's", () => {
+describe("role labels", () => {
+  it("shows the role name without numeric levels or tick graphics", () => {
     const { container } = render(<RankMark actorRole="developer" />);
-    const ticks = container.querySelectorAll(".os-rank-tick");
-    expect(ticks.length).toBe(SEEDED_LADDER.length);
-    expect(container.querySelectorAll("[data-actor]").length).toBe(1);
-    expect(container.querySelector("[role=img]")?.getAttribute("aria-label")).toContain("Developer");
+    expect(screen.getByText("Developer")).toBeTruthy();
+    expect(container.querySelector(".os-rank-tick")).toBeNull();
+    expect(container.textContent).not.toMatch(/300/);
   });
-
-  // The mark grows with the cluster. A five-tick literal would have been the
-  // easy version and could not draw this.
-  it("draws a seventh tick for a cluster with seven rungs", () => {
-    setRoleLadder([
-      ...SEEDED_LADDER,
-      { slug: "lead", name: "Lead", rank: 250, aliases: [] },
-      { slug: "auditor", name: "Auditor", rank: 75, aliases: [] },
-    ]);
-    const { container } = render(<RankMark actorRole="lead" />);
-    expect(container.querySelectorAll(".os-rank-tick").length).toBe(7);
+  it("uses the custom role's human name", () => {
+    setRoleLadder([...SEEDED_LADDER, { slug: "lead", name: "Team lead", rank: 250, aliases: [] }]);
+    render(<RoleTag role="lead" />);
+    expect(screen.getByText("Team lead")).toBeTruthy();
   });
-
-  // Two rungs lit is the whole reason the mark exists: it is what makes a
-  // read-only peer row explain itself without prose.
-  it("lights the owner's rung as well as the viewer's", () => {
-    const { container } = render(<RankMark actorRole="developer" ownerRole="admin" />);
-    expect(container.querySelectorAll("[data-actor]").length).toBe(1);
-    expect(container.querySelectorAll("[data-owner]").length).toBe(1);
+  it("names a row owner's role and explains the viewer's in its title", () => {
+    render(<RankMark actorRole="developer" ownerRole="admin" />);
+    expect(screen.getByText("Admin").title).toContain("Your role: Developer");
   });
-
-  // NOTHING is drawn before the ladder lands. A mark drawn from no rungs would
-  // be a confident picture of nothing.
-  it("renders nothing before the ladder loads", () => {
+  it("retains standard role names while the catalog loads", () => {
     setRoleLadder([]);
-    const { container } = render(<RankMark actorRole="owner" />);
-    expect(container.querySelector(".os-rank-mark")).toBeNull();
+    render(<RoleTag role="owner" />);
+    expect(screen.getByText("Owner")).toBeTruthy();
   });
-
-  it("sets a role slug in the data voice", () => {
-    const { container } = render(<RoleTag role="developer" />);
-    expect(container.querySelector(".os-role-slug")?.textContent).toBe("developer");
-  });
-
-  // A legacy slug resolves through its rung's aliases and renders as the rung.
-  it("renders a legacy slug as the rung it aliases", () => {
-    const { container } = render(<RoleTag role="writer" />);
-    expect(container.querySelector(".os-role-slug")?.textContent).toBe("user");
+  it("resolves legacy role aliases to their display names", () => {
+    render(<RoleTag role="writer" />);
+    expect(screen.getByText("Member")).toBeTruthy();
   });
 });
 
@@ -217,7 +195,7 @@ describe("the refused surface", () => {
     expect(screen.getByRole("heading", { name: /Accounts is not open to you/ })).toBeTruthy();
     const body = screen.getByText(/Opening it takes/);
     expect(within(body).getByText("read on app:accounts")).toBeTruthy();
-    expect(within(body).getByText("viewer")).toBeTruthy();
+    expect(within(body).getByText("Viewer")).toBeTruthy();
     // NEVER "and above": what opens a surface is a capability, which a role,
     // a group or a grant to this person by name may hold, so no rung is the
     // answer and none is named.
@@ -249,9 +227,9 @@ describe("the read-only peer row", () => {
     expect(screen.queryByText(/contact your admin/i)).toBeNull();
   });
 
-  it("says peers are level when the owner's rung is known", () => {
+  it("identifies the owner without implying developer peers can read private rows", () => {
     render(<PeerRowReadOnly actorRole="developer" ownerRole="developer" ownerName="Ada" />);
-    expect(screen.getByText(/the same rank as you/)).toBeTruthy();
+    expect(screen.getByText(/Only its owner or an authorized account manager/)).toBeTruthy();
     expect(screen.getByText(/Ada owns this/)).toBeTruthy();
   });
 });

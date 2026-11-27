@@ -63,6 +63,7 @@ func newAzureFeedbackWorld(t *testing.T) *azureFeedbackWorld {
 		w.instances[index] = NewIntegration(NewLogSender(nil), nil)
 		w.instances[index].azure = &azureSetup{store: &connectionStore{engine: feedbackTestStore{ConfigWriter: NewConfigWriter(engine), prefix: w.account}, gateDB: replicaGatePool(t)}, protocol: newAzureProtocol("12345678-1234-1234-1234-123456789012"), now: func() time.Time { return w.now }}
 	}
+	seedEmailOwner(t, w.instances[0].azure.store.engine, w.account+"-owner")
 	config := acsFixture(t).cfg
 	config.AccountID = w.account
 	plan := azurePlan{ClusterID: w.account, SubscriptionID: "12345678-1234-1234-1234-123456789012", ResourceGroup: "feedback-tests", CommunicationService: w.account, EmailService: "test", Domain: "example.test", DataLocation: "United States"}

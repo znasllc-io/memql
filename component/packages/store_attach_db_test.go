@@ -88,9 +88,7 @@ func TestAStorefrontDeployAttachesOnlyAStoreTheCallerMayAttach(t *testing.T) {
 		langparser.QuoteString(memqlengine.StorefrontTokenSecretName(storeId))))
 	// A new deployable names the organization it belongs to; both callers
 	// below may deploy into it, so the store is the only thing that differs.
-	mustExecute(t, eng, tieSeederCtx(), fmt.Sprintf(
-		`mutation createClientAccount(accountId: %s, name: "Store attach organization")`,
-		langparser.QuoteString(accountId)))
+	createTieAccount(t, eng, accountId)
 	mustExecute(t, eng, tieSeederCtx(), fmt.Sprintf(
 		`mutation writeGrant(grantId: %s, subjectKind: "user", subjectId: %s, verb: "execute", resourceType: "app:deployables/store", effect: "deny", grantedBy: "store-attach-seeder")`,
 		langparser.QuoteString(grantId), langparser.QuoteString(developer)))

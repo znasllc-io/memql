@@ -115,9 +115,8 @@ func seedPartGateTargets(t *testing.T, eng *MemQLEngine, member, packageID, site
 	t.Helper()
 	account := "part-org-" + BareShortId(member)
 	seedPrincipal(t, eng, member, auth.RoleWriter)
-	if err := organizationInsert(t, eng, groupSeedCtx(), conceptAccountsAccount, account, map[string]any{"name": account, "status": "active", "domainStatus": "unverified"}); err != nil {
-		t.Fatal(err)
-	}
+	seedPrincipal(t, eng, "fixture-owner-"+account, auth.Role("viewer"))
+	seedAccountOwnedBy(t, eng, "fixture-owner-"+account, auth.RoleWriter, account, account)
 	seedGroup(t, eng, "g-"+account, account, "account", account)
 	seedMembership(t, eng, "g-"+account, BareShortId(member), "active")
 	if err := organizationInsert(t, eng, groupSeedCtx(), "v1:platform:package", packageID, map[string]any{"name": "Part gate package", "sourceKind": "repo", "status": "active", "ownerUserId": member, "accountId": account}); err != nil {

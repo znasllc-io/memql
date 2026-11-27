@@ -41,12 +41,18 @@ import (
 )
 
 func TestAcceptAgainstARealEngineHandsOffToEnrolment(t *testing.T) {
-	eng, _ := realEngine(t)
+	eng, db := realEngine(t)
 	store := &identity.Store{Engine: eng, Logger: discardLogger()}
 	enrolments := &enrolment.Store{Engine: eng, Logger: discardLogger()}
 
 	stamp := time.Now().UTC().Format("20060102T150405.000000000")
 	inviterId := "v1:identity:user:inviter-" + stamp
+	t.Cleanup(func() {
+		_, err := db.NewDelete().Model((*concept.MemoryNode)(nil)).Where("id = ?", inviterId).Exec(context.Background())
+		if err != nil {
+			t.Error(err)
+		}
+	})
 	// Lower-case, because the issue path lower-cases the invited address and
 	// the account is provisioned from the row, not from what the test typed.
 	inviterEmail := strings.ToLower("inviter-" + stamp + "@example.test")

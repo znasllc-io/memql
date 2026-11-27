@@ -8,7 +8,7 @@ import { IconButton } from "./IconButton";
 export function CardCollectionSearch({ label, mode, query, onQueryChange, inputRef, inputProps, disabled = false, add, clearLabel, picks }: {
   label: string;
   /** The menu before the box: flat `options`, or `<option>`/`<optgroup>` `children` with an optional trigger `display`. */
-  mode: { label: string; value: string; options?: readonly (readonly [string, string])[]; children?: ReactNode; display?: string; onChange: (value: string) => void };
+  mode?: { label: string; value: string; options?: readonly (readonly [string, string])[]; children?: ReactNode; display?: string; onChange: (value: string) => void };
   query: string;
   onQueryChange: (query: string) => void;
   inputRef: RefObject<HTMLInputElement | null>;
@@ -28,11 +28,11 @@ export function CardCollectionSearch({ label, mode, query, onQueryChange, inputR
   const boxed = picks !== undefined && picks.length > 0;
   return <fieldset className="os-card-search" disabled={disabled}>
     <legend className="os-sr-only">{label}</legend>
-    <div className="os-card-search-mode">
+    {mode ? <div className="os-card-search-mode">
       <Select id={`${id}-mode`} label={mode.label} value={mode.value} display={mode.display} onChange={mode.onChange}>
         {mode.children ?? mode.options?.map(([value, name]) => <option key={value} value={value}>{name}</option>)}
       </Select>
-    </div>
+    </div> : null}
     <div className="os-card-search-input" data-picker-field={boxed || undefined}>
       <Search size={14} aria-hidden />
       {boxed ? picks.map(pick => <span key={pick.key} className="os-chip os-chip-editable" data-tone="accent">

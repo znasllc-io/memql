@@ -92,6 +92,7 @@ func TestAssignRefusalVocabularyMatchesTheClient(t *testing.T) {
 		{AssignNotAUserManager, "notAUserManager"},
 		{AssignTargetOutranks, "targetOutranks"},
 		{AssignAboveCaller, "aboveCaller"},
+		{AssignOwnershipTransfer, "ownershipTransfer"},
 		{AssignAuthorityBeyond, "authorityBeyond"},
 		{AssignNotAMember, "notAMember"},
 	} {
@@ -117,7 +118,7 @@ func TestAssignRefusalVocabularyMatchesTheClient(t *testing.T) {
 	member := regexp.MustCompile(`"([a-zA-Z]+)"`)
 	known := map[string]bool{
 		"inactive": true, "notAUserManager": true, "targetOutranks": true,
-		"aboveCaller": true, "authorityBeyond": true, "notAMember": true,
+		"ownershipTransfer": true, "aboveCaller": true, "authorityBeyond": true, "notAMember": true,
 	}
 	for _, m := range member.FindAllStringSubmatch(union[1], -1) {
 		if !known[m[1]] {

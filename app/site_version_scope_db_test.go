@@ -73,7 +73,10 @@ func bootVersionScopeRig(t *testing.T) *versionScopeRig {
 			_, _ = db.NewDelete().TableExpr(`"MemoryNodes"`).Where("id = ?", row).Exec(context.Background())
 		}
 	})
-	rig.seed("v1:accounts:account", rig.account, map[string]any{"name": rig.account, "status": "active", "domainStatus": "unverified"})
+	owner := "account-owner-" + rig.account
+	rig.seed("v1:identity:user", owner, map[string]any{"displayName": owner, "primaryEmail": owner + "@example.test", "role": "viewer", "active": true})
+	rig.seed("v1:accounts:account", rig.account, map[string]any{"name": rig.account, "ownerUserId": owner, "status": "active", "domainStatus": "unverified"})
+	seedAccountApps(t, eng, db, rig.account, "app:deployables", "app:pipelines")
 	// A TTL too short to hide a row flip: every claim here is about the row's current value.
 	rig.handler = edge.NewHandler(edge.Options{
 		Resolver: edge.NewResolver(edge.NewEngineExecutor(&EdgeEngineAdapter{Engine: eng}), time.Nanosecond),

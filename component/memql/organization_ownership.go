@@ -308,7 +308,7 @@ func (e *MemQLEngine) organizationCapabilityDecision(ctx context.Context, accoun
 			}
 		}
 	}
-	return auth.DecideFor(ctx, subject, verb, resource)
+	return e.accountHierarchyDecision(ctx, account, subject, auth.DecideFor(ctx, subject, verb, resource))
 }
 
 func organizationAppAllowsRow(ctx context.Context, account, resource string) bool {

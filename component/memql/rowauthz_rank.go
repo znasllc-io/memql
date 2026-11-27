@@ -8,7 +8,7 @@ package memql
 // express at all: "does this row belong to somebody this caller
 // OUTRANKS?".
 //
-//	reads  (D2)  rank(roleOf(row.owner)) <= rank(actor)   peers included
+//	reads  (D2)  rank(roleOf(row.owner)) <= rank(actor), excluding developer peers
 //	writes (D3)  rank(roleOf(row.owner)) <  rank(actor)   peers read-only,
 //	                                                      plus "your own
 //	                                                      row", always
@@ -295,12 +295,14 @@ func (e *MemQLEngine) resolveRankScope(ctx context.Context) *rankScope {
 	addOwnerSpellings(scope.readOwners, ac.UserId)
 	addOwnerSpellings(scope.writeOwners, ac.UserId)
 
+	peers, privateValid := e.developerPeerOwners(ctx)
 	for id, roleSlug := range e.principalRoles(ctx) {
 		rank := ladder.rankOf(roleSlug)
-		if rank <= scope.actorRank {
+		_, peer := peers[BareShortId(id)]
+		if rank <= scope.actorRank && !peer && privateValid {
 			addOwnerSpellings(scope.readOwners, id)
 		}
-		if rank < scope.actorRank {
+		if rank < scope.actorRank && !peer && privateValid {
 			addOwnerSpellings(scope.writeOwners, id)
 		}
 	}

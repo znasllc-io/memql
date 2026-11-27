@@ -747,6 +747,7 @@ concept enrolmentToken {
 @rowAuthz(owner="ownerUserId", rankVisible, unowned="admin", clusterOwner, account="accountId")
 @belongsTo(account, stated)
 concept group {
+  allowedApps []string @description("Apps distributed to this custom group, bounded by its account app ceiling.")
   ownerUserId  string   @description("ALWAYS EMPTY: this is the deployment's row, not a principal's (D2). Present so the owned tier reads at all -- an ABSENT owner key is denied at every rank, and only a PRESENT-and-empty one is the deliberate statement of cluster ownership that `unowned=\"admin\"` then makes readable. Nothing writes a value here, and a row that carried one would be readable by that principal alone.")
   name         string!  @description("Display name of the group, as a person would say it. For the group the automation makes per account this is the account's own name; for a custom group it is whatever the operator called it.")
   description  string   @description("Short description of the group's purpose. Optional, unlike the field it replaces: the account-kind group is created by an automation that has nothing meaningful to say here, and a required field would have forced it to invent one.")
@@ -792,6 +793,8 @@ concept group {
 @rowAuthz(owner="ownerUserId", rankVisible, unowned="admin", clusterOwner, account="accountId")
 @belongsTo(account, stated)
 concept groupMembership {
+  organizationRole enum("developer", "admin", "member", "viewer") @description("Role in the canonical account group. The single Owner is derived from account.ownerUserId. No client role conveys cluster administration.")
+  allowedApps []string @description("Apps distributed to this person, bounded by the account app ceiling.")
   accountId    string   @description("Organization inherited from the membership group. Absent on historic rows until repaired from their group; empty for a custom group with no organization. Never supplied by a client.")
   ownerUserId  string   @description("ALWAYS EMPTY (D2). See v1:identity:group.ownerUserId for why the field is present and never written.")
   groupId      string!  @description("The v1:identity:group this membership is in.")

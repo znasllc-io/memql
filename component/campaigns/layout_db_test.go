@@ -191,6 +191,10 @@ func (w *layoutWorld) seedUser(t *testing.T, user, role string) {
 func (w *layoutWorld) createOrganization(t *testing.T, account, name string) {
 	t.Helper()
 	w.run(t, w.owner, call("mutation", "createClientAccount", arg{"accountId", account}, arg{"name", name}))
+	campaignAccountApps(t, w.db.DB, account)
+	for _, engine := range w.engines {
+		engine.InvalidateCacheForConcept("v1:accounts:account")
+	}
 }
 
 // seedMember makes user a member of the organization through the group the

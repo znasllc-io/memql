@@ -293,6 +293,7 @@ func newAccessWorld(t *testing.T, rig *accessSurfaceRig) *accessWorld {
 	w.principal(w.member, auth.RoleWriter)
 	w.principal(w.stranger, auth.RoleWriter)
 	w.insert("v1:accounts:account", w.account, map[string]any{"name": w.account, "status": "active", "domainStatus": "unverified"})
+	seedAccountApps(t, rig.eng, rig.db, w.account, "app:deployables", "app:pipelines", "app:email")
 	w.mutate(accessSeedContext(), "writeGroup", map[string]any{
 		"groupId": w.group, "name": w.group, "kind": "account", "accountId": w.account, "status": "active",
 	})

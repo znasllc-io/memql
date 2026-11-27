@@ -38,7 +38,7 @@ func TestQualificationAuthoritySurvivesRealRowsAndReplacementDriver(t *testing.T
 	if _, err := eng.Execute(seederCtx(), fmt.Sprintf(`mutation createUser(userId: %s, displayName: "Qualification owner", primaryEmail: %s, role: "developer")`, langparser.QuoteString(owner), langparser.QuoteString(owner+"@example.test"))); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := eng.Execute(seederCtx(), fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Qualification test")`, langparser.QuoteString(account))); err != nil {
+	if _, err := eng.Execute(accountSeeder(t, eng, owner), fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Qualification test")`, langparser.QuoteString(account))); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := eng.Execute(signedIn(owner), fmt.Sprintf(`mutation createPackage(accountId: %s, packageId: %s, name: "shop", sourceKind: "repo", repoUrl: %s, credentialId: %s)`, langparser.QuoteString(account), langparser.QuoteString(pkg), langparser.QuoteString("https://github.com/"+repo), langparser.QuoteString(credential))); err != nil {

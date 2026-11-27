@@ -174,9 +174,7 @@ func TestASiteOwnerReadsTheDomainsOfThePackageTheyOwn(t *testing.T) {
 		}
 	})
 	account := "dd-read-acct-" + suffix
-	if _, err := eng.Execute(tieSeederCtx(), fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "dd read")`, langparser.QuoteString(account))); err != nil {
-		t.Fatal(err)
-	}
+	createTieAccount(t, eng, account)
 
 	// seed writes a package owned by a user of the given role. Raw, with the
 	// list in the payload, because the question is the READ: a row the pipeline
@@ -311,9 +309,7 @@ func TestNoClientWriteCanNameTheDomainsAPackageShips(t *testing.T) {
 		}
 	})
 	account := "dd-guard-acct-" + suffix
-	if _, err := eng.Execute(tieSeederCtx(), fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "dd guard")`, langparser.QuoteString(account))); err != nil {
-		t.Fatal(err)
-	}
+	createTieAccount(t, eng, account)
 	group := "dd-guard-group-" + suffix
 	seedTieGroup(t, eng, group, account)
 	ids = append(ids, group)
@@ -415,6 +411,16 @@ func TestNoClientWriteCanNameTheDomainsAPackageShips(t *testing.T) {
 				if !eng.OrganizationCapable(ctx, account, auth.VerbExecute, "app:pipelines/repositories") {
 					t.Fatal("fixture lacks the granted source-policy capability")
 				}
+				if role == auth.RoleDeveloper && owner == colleague {
+					before := storedPayload(t, pkg)
+					if err := raw(ctx, pkg, `{"repoRef":"release-control"}`); err == nil {
+						t.Fatal("a developer changed a peer's private source")
+					}
+					if !reflect.DeepEqual(before, storedPayload(t, pkg)) {
+						t.Fatal("the refused peer edit changed the source")
+					}
+					return
+				}
 				if err := raw(ctx, pkg, `{"repoRef":"release-control"}`); err != nil {
 					t.Fatalf("an authorized source-policy write was refused: %v", err)
 				}
@@ -515,6 +521,12 @@ func TestARollbackRestoresTheDomainsFromTheReportItsDeploymentRecordedOnRealRows
 	ownerCtx := tieActorCtx(owner, auth.RoleDeveloper)
 	developerCtx := tieActorCtx(developer, auth.RoleDeveloper)
 	createTiedPackage(t, eng, ownerCtx, pkg, "dd-rb-"+suffix, account)
+	// This rollback operator owns the account. Equal developer rank alone no
+	// longer admits another developer's private deployment rows.
+	if _, err := db.ExecContext(context.Background(), `UPDATE "MemoryNodes" SET payload=jsonb_set(payload,'{ownerUserId}',to_jsonb(?::text)) WHERE concept='v1:accounts:account' AND id=?`, developer, "v1:accounts:account:"+account); err != nil {
+		t.Fatal(err)
+	}
+	eng.InvalidateCacheForConcept("v1:accounts:account")
 	s := &store{engine: eng, logger: discardLogger(), directDB: func() *sql.DB { return db.DB }}
 
 	// A pinned directory, because the spelling is the point: the pin is what
@@ -627,9 +639,7 @@ func TestNoClientCanWriteADeploymentRowSoARollbackCannotReturnToAForgedOne(t *te
 			}
 		}
 	})
-	if _, err := eng.Execute(tieSeederCtx(), fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "dd fd")`, langparser.QuoteString(account))); err != nil {
-		t.Fatal(err)
-	}
+	createTieAccount(t, eng, account)
 	group := "dd-fd-group-" + suffix
 	seedTieGroup(t, eng, group, account)
 	ids = append(ids, group)
@@ -647,6 +657,12 @@ func TestNoClientCanWriteADeploymentRowSoARollbackCannotReturnToAForgedOne(t *te
 	_, writerCtx := person("writer", auth.RoleWriter)
 	_, clusterOwnerCtx := person("cluster", auth.RoleOwner)
 	createTiedPackage(t, eng, ownerCtx, pkg, "dd-fd-"+suffix, account)
+	// The rollback operator is responsible for the account, which explicitly
+	// admits this peer's deployment; equal developer rank alone would not.
+	if _, err := db.ExecContext(context.Background(), `UPDATE "MemoryNodes" SET payload=jsonb_set(payload,'{ownerUserId}',to_jsonb(?::text)) WHERE concept='v1:accounts:account' AND id=?`, developer, "v1:accounts:account:"+account); err != nil {
+		t.Fatal(err)
+	}
+	eng.InvalidateCacheForConcept("v1:accounts:account")
 	s := &store{engine: eng, logger: discardLogger(), directDB: func() *sql.DB { return db.DB }}
 
 	// The deployment as the person rolling back to it reads it.

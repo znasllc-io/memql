@@ -23,6 +23,23 @@ func organizationInsert(t *testing.T, e *MemQLEngine, ctx context.Context, conce
 	return err
 }
 
+// Fixtures for organization policy carry an active owner and an explicit app
+// ceiling. Keep this separate from organizationInsert: that helper exercises
+// the real raw-write guards, including the account domain invariant.
+func seedOrganizationAccount(t *testing.T, e *MemQLEngine, id string, payload map[string]any) error {
+	t.Helper()
+	owner := "fixture-owner-" + BareShortId(id)
+	role := auth.Role("viewer")
+	if BareShortId(id) == "self" {
+		role = auth.RoleOwner
+	}
+	seedPrincipal(t, e, owner, role)
+	payload["ownerUserId"] = owner
+	payload["allowedApps"] = []string{"app:deployables", "app:pipelines", "app:email", "app:users", "app:accounts"}
+	seedAuthorityFixture(t, e, conceptAccountsAccount, id, payload)
+	return nil
+}
+
 func TestOrganizationPersistedAttributionAndCrossReplicaMembership(t *testing.T) {
 	engine, db, _ := sharedReadMergeEngine(t)
 	previousGrants, previousMembers := auth.InstalledGrantSource(), auth.InstalledMembershipSource()
@@ -35,7 +52,7 @@ func TestOrganizationPersistedAttributionAndCrossReplicaMembership(t *testing.T)
 	seedPrincipal(t, engine, multi, auth.RoleWriter)
 	seedPrincipal(t, engine, operator, auth.RoleOwner)
 	for _, account := range []string{acme, beta, "self"} {
-		if err := organizationInsert(t, engine, groupSeedCtx(), conceptAccountsAccount, account, map[string]any{"name": account, "status": "active", "domainStatus": "unverified"}); err != nil {
+		if err := seedOrganizationAccount(t, engine, account, map[string]any{"name": account, "status": "active", "domainStatus": "unverified"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -495,7 +512,7 @@ func TestALaneLedgerRowIsExemptFromTheRecipientReferenceAndFromNothingElse(t *te
 	seedPrincipal(t, engine, merchant, auth.RoleWriter)
 	seedPrincipal(t, engine, other, auth.RoleWriter)
 	for _, account := range []string{acme, beta} {
-		if err := organizationInsert(t, engine, groupSeedCtx(), conceptAccountsAccount, account, map[string]any{"name": account, "status": "active", "domainStatus": "unverified"}); err != nil {
+		if err := seedOrganizationAccount(t, engine, account, map[string]any{"name": account, "status": "active", "domainStatus": "unverified"}); err != nil {
 			t.Fatal(err)
 		}
 		seedGroup(t, engine, "g-"+account, account, "account", account)

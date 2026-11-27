@@ -59,6 +59,7 @@ func TestOrganizationUnsubscribeIsVisibleOnAnotherReplica(t *testing.T) {
 		}
 	}
 	quote := langparser.QuoteString
+	cleanupCampaignUser(t, user)
 	run(system, fmt.Sprintf(`insert("v1:identity:user", id=%s, payload={"displayName":"Opt-out owner","primaryEmail":%s,"role":"owner","active":true})`, quote(user), quote(address)))
 	for _, account := range []string{accountA, accountB} {
 		run(owner, call("mutation", "createClientAccount", arg{"accountId", account}, arg{"name", account}))

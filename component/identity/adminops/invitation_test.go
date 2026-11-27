@@ -151,7 +151,7 @@ func TestAnInviterCannotGrantAboveTheirOwnRole(t *testing.T) {
 		// The owner carve-out survives: `newRank < actorRank` would refuse
 		// owner -> owner and leave a cluster with one owner unable to name a
 		// second, which is a cluster nobody can hand on.
-		{"owner may grant owner", auth.RoleOwner, "owner", false},
+		{"owner transfers ownership instead of inviting another owner", auth.RoleOwner, "owner", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			svc, _, audit := newTestService(t)
@@ -185,8 +185,12 @@ func TestAnInviterCannotGrantAboveTheirOwnRole(t *testing.T) {
 			// or the people-authority clause refused this" since the /admin
 			// routes wrote it, and an audit trail whose reasons change meaning
 			// under a refactor is one nobody can read backwards.
-			if got := audit.events[0].FailureReason; got != "role_above_inviter" {
-				t.Errorf("audit failure reason = %q, want role_above_inviter", got)
+			expected := "role_above_inviter"
+			if tc.grant == "owner" {
+				expected = string(auth.AssignOwnershipTransfer)
+			}
+			if got := audit.events[0].FailureReason; got != expected {
+				t.Errorf("audit failure reason = %q, want %q", got, expected)
 			}
 		})
 	}

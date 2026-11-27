@@ -125,7 +125,7 @@ describe("the registry list", () => {
     });
     mount(conn);
     await screen.findByText("Our Studio");
-    expect(screen.getByText("you")).toBeTruthy();
+    expect(screen.getByText("Primary account")).toBeTruthy();
   });
 });
 
@@ -268,23 +268,22 @@ describe("the People tab", () => {
   it("A REFUSAL IS NOT A ZERO -- the gated band says so verbatim", async () => {
     const conn = fakeConnection({
       clientAccountsAll: [accountRow({ id: "a1" })],
-      invitationsForAccount: new Error("reading invitations is owner and admin only"),
+      accountAccess: new Error("reading invitations is owner and admin only"),
     });
     const ledger = await openDetail(conn);
     await waitFor(() =>
       expect(within(ledger).getByText("reading invitations is owner and admin only")).toBeTruthy(),
     );
-    expect(within(ledger).getAllByText("Not yours to read").length).toBeGreaterThan(0);
+    expect(within(ledger).getByText("Account access could not be loaded.")).toBeTruthy();
   });
 
   it("re-reads on demand and says when it read", async () => {
     const conn = fakeConnection({ clientAccountsAll: [accountRow({ id: "a1" })] });
     const people = await openDetail(conn);
     await waitFor(() => expect(within(people).getByText(/^Read at /)).toBeTruthy());
-    expect(conn.query.groupsForAccount).toHaveBeenCalledTimes(1);
-    fireEvent.click(within(people).getByRole("button", { name: "Re-read" }));
-    await waitFor(() => expect(conn.query.groupsForAccount).toHaveBeenCalledTimes(2));
-    expect(conn.query.invitationsForAccount).toHaveBeenCalledTimes(2);
+    expect(conn.query.executeNamed.mock.calls.filter(call => call[0] === "accountAccess")).toHaveLength(1);
+    fireEvent.click(within(people).getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(conn.query.executeNamed.mock.calls.filter(call => call[0] === "accountAccess")).toHaveLength(2));
   });
 
   it("no longer reads the four retired bands", async () => {
@@ -350,11 +349,11 @@ describe("the account page", () => {
     expect(screen.queryByRole("region", { name: "Inventory" })).toBeNull();
   });
 
-  it("People holds the People and Guests bands, and nothing another tab holds", async () => {
+  it("People holds members and invitations, and nothing another tab holds", async () => {
     await openAcme();
     const people = await openAccountTab("People");
     expect(await within(people).findByText("guest@acme.com")).toBeTruthy();
-    expect(within(people).getAllByText("Guests").length).toBeGreaterThan(0);
+    expect(within(people).getAllByText("Invited").length).toBeGreaterThan(0);
     expect(screen.queryByRole("region", { name: "Details" })).toBeNull();
     expect(screen.queryByRole("region", { name: "Inventory" })).toBeNull();
     expect(screen.queryByText("Archive this client")).toBeNull();

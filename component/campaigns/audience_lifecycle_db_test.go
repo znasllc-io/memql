@@ -94,6 +94,7 @@ func TestAudienceRestoreAndSubscriberCount(t *testing.T) {
 	archive := call("mutation", "archiveAudience", arg{"audienceId", audience})
 	restore := call("mutation", "restoreAudience", arg{"audienceId", audience})
 
+	cleanupCampaignUser(t, user)
 	for _, person := range []struct{ id, role string }{{user, "owner"}, {stranger, "writer"}} {
 		mustRun(system, fmt.Sprintf(`insert("v1:identity:user", id=%s, payload={"primaryEmail":%s,"displayName":"Audience tester","role":%s,"active":true})`,
 			langparser.QuoteString(person.id), langparser.QuoteString(person.id+"@example.test"), langparser.QuoteString(person.role)))

@@ -1,3 +1,4 @@
+import { accountAccessFixture } from "../accountAccessFixture";
 import { parseCall } from "../callArgs";
 import type { ReactNode } from "react";
 import { vi } from "vitest";
@@ -135,6 +136,7 @@ export interface FakeConnection {
 }
 
 export interface FakeSeed {
+  accountAccess?: Row | Error;
   searchUsers?: Row[];
   pendingUserInvitations?: Row[];
   sessionsForSubjectAdmin?: Row[];
@@ -287,6 +289,12 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         return rowsResult([{ ok: false, code: "grant_not_found", message: "no such grant" } as Row]);
       }),
       executeNamed: vi.fn(async (name: string, call: string, options?: { cursor?: string }) => {
+        if (name === "accountAccess" || name === "accountAccessUpdate") {
+          if (seed.accountAccess instanceof Error) throw seed.accountAccess;
+          const id = /accountId:\s*"([^"]*)"/.exec(call)?.[1] ?? "a1";
+          return rowsResult([seed.accountAccess ?? accountAccessFixture({ accountId: id }) as unknown as Row]);
+        }
+
         if (call.startsWith("paginate(query ") && (name === "searchUsers" || name === "pendingUserInvitations")) {
           const args = parseCall(call.slice(call.indexOf("query "))).args;
           return name === "searchUsers" ? connection.query.peopleBrowse(args, options) : connection.query.pendingUserInvitationsBrowse(args, options);
