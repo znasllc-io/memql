@@ -1,3 +1,12 @@
+---
+title: Bounded structured Callkey workflows
+audience: ops
+status: draft
+area: ops
+sinceVersion: unreleased
+owner: znas
+---
+
 # Bounded structured Callkey workflows
 
 UTCP 2.8 uses the same native Workflow requests for human and delegated controls.
@@ -27,7 +36,10 @@ are rejected inside a branch until their concurrent authority can be arbitrated.
 
 Entering the controller creates all branch visits. The outer node/visit remains
 at that controller until every branch joins and an authorized outer Next enters
-the common successor. Branch requests carry both `branchId` and the exact
+the common successor. An authorized outer Previous or Seek can explicitly leave
+the current parallel activation; it archives its visits and never resumes that
+activation implicitly. Seek cannot enter a branch body directly. Re-entering the
+controller starts new branch visits and acknowledgments. Branch requests carry both `branchId` and the exact
 `branchVisitId`, as well as the shared run revision, control epoch and idempotency
 key. One branch cannot enter a sibling, reuse its acknowledgments, or advance the
 outer run. The server projects each branch's current allowed actions and visited

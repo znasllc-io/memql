@@ -1,3 +1,12 @@
+---
+title: Callkey media signalling admission
+audience: ops
+status: draft
+area: ops
+sinceVersion: unreleased
+owner: znas
+---
+
 # Callkey media signalling admission
 
 The fixed signalling relay admits `/rtc`, `/rtc/validate`, `/rtc/v1` and
