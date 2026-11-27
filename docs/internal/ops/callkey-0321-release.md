@@ -10,7 +10,8 @@ owner: znas
 # Callkey 0.32.1 release preparation
 
 This patch fixes creation of a pending media signalling intent after slow native
-admission. It is release preparation, not a publication or deployment receipt.
+admission and adds bounded diagnostics for the remaining production connection
+failure. It is release preparation, not a publication or deployment receipt.
 Cut and publish the exact verified source through the
 [native release workflow](../../public/operate/release-cutting.md), then verify
 the signed artifacts before selecting the installation update.
@@ -38,8 +39,34 @@ suite passed all 16 top-level tests (23 named cases) against an isolated local
 database with a fake media provider. These checks do not prove a production
 media connection or successful TURN allocation.
 
+The existing IPv4 TURN setup now explicitly requires A-only DNS for its separate
+TURN hostname. Production's advertised IPv6 path completed TLS but its
+credential-bearing allocation received an unsigned 508; IPv4 allocation and its authenticated deletion
+succeeded. Removing only the TURN AAAA record preserved the other three DNS
+records. Authoritative and recursive readbacks passed after its TTL. The next
+browser attempt acquired a relay candidate and initially connected the host, but
+the guest still failed during signalling. This establishes progress, not a
+completed media journey. Its native journal had no invalid intent epochs, so the
+epoch repair does not explain that later failure.
+
+The connection diagnostics retain one bounded terminal receipt with fixed phase
+names, counts, durations and closed failure classes. They record the first failure
+separately from later cleanup errors. They never include identities, tokens, URLs,
+queries, SDP, frame bodies or raw error text. Passive socket waits and ordinary
+socket closure do not become slow-operation or failure reports. No diagnostic
+endpoint is added, and neither authority checks nor media deadlines change.
+The actual source must pass its privacy and delayed-read/gate tests before release;
+the metadata is for distinguishing a gate/read delay, protocol refusal and
+transport failure, not for declaring an unobserved cause.
+
+The native repository-gate step also has a 45-minute aggregate bound. The earlier
+identical gate passed in 851 seconds, while a later run hit its 30-minute outer
+deadline after several packages passed. Its incomplete output establishes neither
+CPU contention nor a hung test. Each package retains its 600-second bound, and
+the step's command, memory and CPU settings are unchanged. The final native run
+must succeed; a larger bound alone is not verification.
+
 No database migration, public API shape, UTCP version or SDK version changes are
-required by this repair. The separate production TURN allocation failure must
-be diagnosed and qualified independently; this epoch defect alone does not
-establish the cause of that failure. If provisioning changes join the release,
-record their own validation and review the final source delta before cutting it.
+required by these changes. Review the final source delta, preserve every failed
+acceptance attempt, and qualify the deployed engine and media host together before
+announcing readiness.
