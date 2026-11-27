@@ -157,6 +157,16 @@ parsed manifest with that fixture; any intentional pipeline change must update
 both through review. The Cockpit release regression exercises the active
 manifest's platform, isolation and retained-artifact requirements.
 
+The 2026-11-27 gate deadline review changed the aggregate bound from 30 to 45
+minutes while retaining the command, resources and 600-second package limits.
+Its first native source failed this complete-contract assertion in both
+`tests.go-tests#4` and `gates.gate-inputs`: the retained fixture still said 30
+minutes. Updating that one reviewed fixture field preserves the full comparison;
+it does not waive either failed check or establish native qualification. Run the
+complete-contract test together with `TestEngineManifestGateStepHasHeadroom`
+when changing the deadline. The existing manifest compilation and Cockpit
+isolation/artifact tests remain required; no comparison field is excluded.
+
 The agent-tagged suite still requires its own pinned PostgreSQL service and
 `MEMQL_REQUIRE_DB=1`. Its app test budget remains 900 seconds, each of the four
 other packages retains 300 seconds, and the outer 45-minute limit covers the

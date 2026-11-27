@@ -874,7 +874,7 @@ pipeline:
         - name: gate-inputs
           placement: pool
           when: { bucket: gates }
-          # Its siblings' 30m and twice ci.yml's 300s package bound. ci.yml set
+          # Separate aggregate and per-package bounds. ci.yml set
           # RUN_GATES=true here, which skips component/architecture's call
           # graph; this step runs on every pull request, Go changes included,
           # and keeps that check, so it costs more. On the build pool that
@@ -884,7 +884,9 @@ pipeline:
           # timeout, then the 20m default step deadline) on code whose
           # architecture test passes in 80s-95s locally under these flags.
           # TestEngineManifestGateStepHasHeadroom holds the floor.
-          timeout: 30m
+          # Reviewed with memql-package.yaml on 2026-11-27: only this outer
+          # deadline changes; commands, 600s package bounds and resources stay.
+          timeout: 45m
           # The namespace's default 4Gi killed this step on memql#6394 (exit 137,
           # 2026-10-30) partway through its packages, though other runs of it
           # fit, so it sits at the edge. The same test holds this floor too.
