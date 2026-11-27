@@ -50,7 +50,7 @@ func (h *mediaSignalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	// Route mounts are exact; reconstruct the provider suffix without accepting
 	// caller-supplied destinations, encoded separators or body/form credentials.
-	if r.Method != http.MethodGet || path == "" || r.URL.RawPath != "" || len(r.URL.RawQuery) > mediaSignalLimit || r.ContentLength > 0 || h.service == nil {
+	if r.Method != http.MethodGet || path == "" || r.URL.RawPath != "" || len(r.URL.RawQuery) > mediaSignalLimit || r.ContentLength != 0 || h.service == nil {
 		http.NotFound(w, r)
 		return
 	}
@@ -74,6 +74,18 @@ func (h *mediaSignalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	validate := strings.HasSuffix(path, "/validate")
 	if !validate && !websocket.IsWebSocketUpgrade(r) {
 		http.NotFound(w, r)
+		return
+	}
+	if validate {
+		// SDK validation is an authority check, not a join. In particular, it
+		// must never replace or drain an existing native signalling lease.
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		if h.service.CheckMediaSignal(ctx, token) != nil {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = io.WriteString(w, "success")
 		return
 	}
 	admission, err := h.service.BeginMediaSignal(r.Context(), token)
@@ -105,28 +117,6 @@ func (h *mediaSignalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithDeadline(r.Context(), deadline)
 	defer cancel()
-	if validate {
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
-		req.Header = headers
-		client := &http.Client{Transport: mediaSignalHTTPTransport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-		var response *http.Response
-		err = admission.Forward(ctx, func(forward context.Context) error {
-			definitive = false
-			var requestErr error
-			response, requestErr = client.Do(req.WithContext(forward))
-			return requestErr
-		})
-		if response != nil {
-			definitive = true
-			response.Body.Close()
-		}
-		if err != nil || response == nil || response.StatusCode != http.StatusOK {
-			http.NotFound(w, r)
-			return
-		}
-		_, _ = io.WriteString(w, "success")
-		return
-	}
 	if u.Scheme == "http" {
 		u.Scheme = "ws"
 	} else {
@@ -195,8 +185,6 @@ func (h *mediaSignalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	mediaSignalRelay(r.Context(), admission, downstream, upstream)
 }
-
-var mediaSignalHTTPTransport = &http.Transport{Proxy: nil, MaxIdleConns: 16, IdleConnTimeout: 30 * time.Second, ResponseHeaderTimeout: 20 * time.Second}
 
 func mediaSignalInitial(kind int, data []byte, room, identity string) bool {
 	var response livekit.SignalResponse

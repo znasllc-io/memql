@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -22,6 +21,20 @@ type signalServiceFunc func(context.Context, string) (*calls.MediaSignalAdmissio
 
 func (f signalServiceFunc) BeginMediaSignal(ctx context.Context, token string) (*calls.MediaSignalAdmission, error) {
 	return f(ctx, token)
+}
+
+func (f signalServiceFunc) CheckMediaSignal(ctx context.Context, token string) error {
+	_, err := f(ctx, token)
+	return err
+}
+
+type signalReadOnlyCheck struct {
+	signalServiceFunc
+	check func(context.Context, string) error
+}
+
+func (f signalReadOnlyCheck) CheckMediaSignal(ctx context.Context, token string) error {
+	return f.check(ctx, token)
 }
 
 func signalJoin(t *testing.T, json bool) (int, []byte) {
@@ -59,43 +72,41 @@ func TestMediaSignalRefusesUncredentialedAndUnknownRoutesUnread(t *testing.T) {
 			t.Fatalf("%s returned %d", path, w.Code)
 		}
 	}
+	streamed := httptest.NewRequest("GET", "/media/rtc/validate?access_token=issued", nil)
+	streamed.ContentLength = -1
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, streamed)
+	if w.Code != 404 {
+		t.Fatal("streamed GET body accepted")
+	}
 	if begins.Load() != 0 {
 		t.Fatal("refusal reached native service")
 	}
 }
 
-func TestMediaSignalValidationUsesNativeDestinationTokenAndGuard(t *testing.T) {
+func TestMediaSignalValidationNeverBeginsOrRetiresConnection(t *testing.T) {
 	for _, path := range []string{"/media/rtc/validate", "/media/rtc/v1/validate"} {
 		t.Run(path, func(t *testing.T) {
-			var forwarded, closed atomic.Bool
-			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if !forwarded.Load() {
-					t.Error("network operation outside authority gate")
-				}
-				if r.URL.Path != strings.TrimPrefix(path, "/media") || r.Header.Get("Authorization") != "Bearer native-upstream" || r.Header.Get(mediaSignalGuardHeader) != "native-guard" || r.URL.Query().Has("access_token") || r.URL.Query().Has("publish") {
-					t.Error("request escaped native boundary")
-				}
-				io.WriteString(w, "success")
-			}))
-			defer provider.Close()
-			a := signalAdmission(provider.URL)
-			a.Forward = func(ctx context.Context, run func(context.Context) error) error {
-				forwarded.Store(true)
-				return run(ctx)
-			}
-			a.Close = func(_ context.Context, definitive bool) error { closed.Store(definitive); return nil }
-			h := NewMediaSignalHandler(signalServiceFunc(func(_ context.Context, token string) (*calls.MediaSignalAdmission, error) {
-				if token != "issued" {
-					t.Error("wrong credential")
-				}
-				return a, nil
-			}))
+			var checked atomic.Bool
+			h := NewMediaSignalHandler(signalReadOnlyCheck{
+				signalServiceFunc: func(context.Context, string) (*calls.MediaSignalAdmission, error) {
+					t.Error("validation began a participant admission")
+					return nil, errors.New("unexpected join")
+				},
+				check: func(_ context.Context, token string) error {
+					if token != "issued" {
+						t.Error("wrong validation credential")
+					}
+					checked.Store(true)
+					return nil
+				},
+			})
 			r := httptest.NewRequest("GET", path+"?access_token=issued&publish=other&url=http://untrusted.invalid", nil)
 			r.Header.Set(mediaSignalGuardHeader, "caller-guard")
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, r)
-			if w.Code != 200 || w.Body.String() != "success" || !closed.Load() {
-				t.Fatalf("validation failed: %d, settled %v", w.Code, closed.Load())
+			if w.Code != 200 || w.Body.String() != "success" || !checked.Load() {
+				t.Fatalf("validation failed: %d, checked %v", w.Code, checked.Load())
 			}
 		})
 	}
@@ -107,6 +118,9 @@ func TestMediaSignalBuffersBothProtocolsUntilNativeConfirmation(t *testing.T) {
 			t.Run(path+map[bool]string{true: "/json", false: "/protobuf"}[json], func(t *testing.T) {
 				kind, first := signalJoin(t, json)
 				provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path != strings.TrimPrefix(path, "/media") || r.Header.Get("Authorization") != "Bearer native-upstream" || r.Header.Get(mediaSignalGuardHeader) != "native-guard" || r.URL.Query().Has("access_token") || r.URL.Query().Has("publish") {
+						t.Error("request escaped fixed native destination/token/guard")
+					}
 					conn, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
 					if err != nil {
 						return
