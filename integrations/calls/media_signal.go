@@ -166,7 +166,7 @@ func (c *mediaSignalConnection) forward(ctx context.Context, fn func(context.Con
 		return accountRefusal("media_connection_closed")
 	}
 	s := c.service
-	return s.mediaSignalGated(ctx, c.room, c.binding, func(ctx context.Context, r roomRow) error {
+	return s.mediaSignalGatedSeats(ctx, c.room, c.binding, func(ctx context.Context, r roomRow, seats []seatRow) error {
 		readAt := time.Now()
 		j, e := s.store.mediaSignals(ctx, r)
 		c.trace.record("journal_read", time.Since(readAt), e)
@@ -177,7 +177,7 @@ func (c *mediaSignalConnection) forward(ctx context.Context, fn func(context.Con
 		if v == nil || (v.State != "pending" && v.State != "active") || !s.now().Before(v.ExpiresAt) {
 			return accountRefusal("media_connection_expired")
 		}
-		if e := mediaSignalMeasure(ctx, "authority", func() error { return s.checkMediaBinding(ctx, r, c.binding) }); e != nil {
+		if e := mediaSignalMeasure(ctx, "authority", func() error { return s.checkMediaBindingSeats(ctx, r, c.binding, true, &seats) }); e != nil {
 			return e
 		}
 		grantAt := time.Now()
@@ -362,7 +362,7 @@ func (s *Service) ReconcileMediaSignals(ctx context.Context, roomID string) (cal
 	if r == nil {
 		return out, callrules.ErrNotFound
 	}
-	e = s.mediaSignalGated(ctx, *r, mediaSignalBinding{}, func(ctx context.Context, r roomRow) error {
+	e = s.mediaSignalGatedSeats(ctx, *r, mediaSignalBinding{}, func(ctx context.Context, r roomRow, seats []seatRow) error {
 		j, e := s.store.mediaSignals(ctx, r)
 		if e != nil {
 			return e
@@ -384,7 +384,7 @@ func (s *Service) ReconcileMediaSignals(ctx context.Context, roomID string) (cal
 				unknown[v.Binding.Identity] = true
 				continue
 			}
-			if v.State == "draining" || !s.now().Before(v.ExpiresAt) || s.checkMediaBinding(ctx, r, v.Binding) != nil {
+			if v.State == "draining" || !s.now().Before(v.ExpiresAt) || s.checkMediaBindingSeats(ctx, r, v.Binding, true, &seats) != nil {
 				v.State = "draining"
 				remove[v.Binding.Identity] = true
 				changed = true
@@ -417,7 +417,7 @@ func (s *Service) ReconcileMediaSignals(ctx context.Context, roomID string) (cal
 		for _, p := range present {
 			known := false
 			for _, v := range j.Intents {
-				if v.Binding.Identity == p.Identity && (v.State == "active" || v.State == "pending") && s.now().Before(v.ExpiresAt) && s.checkMediaBinding(ctx, r, v.Binding) == nil {
+				if v.Binding.Identity == p.Identity && (v.State == "active" || v.State == "pending") && s.now().Before(v.ExpiresAt) && s.checkMediaBindingSeats(ctx, r, v.Binding, true, &seats) == nil {
 					known = true
 					break
 				}
@@ -439,7 +439,7 @@ func (s *Service) ReconcileMediaSignals(ctx context.Context, roomID string) (cal
 				}
 				if seat != nil && seat.occupying() {
 					binding, e := s.mediaSeatBinding(ctx, r, *seat)
-					if e == nil && s.checkMediaBinding(ctx, r, binding) == nil {
+					if e == nil && s.checkMediaBindingSeats(ctx, r, binding, true, &seats) == nil {
 						known = true
 						out.State = "pending"
 						out.Reason = "legacy_media_unverified"

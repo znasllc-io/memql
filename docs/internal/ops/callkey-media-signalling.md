@@ -30,6 +30,25 @@ bounded writes with the same gates used by revocation. No gate spans a socket's
 lifetime. Callbacks are in-process capabilities, not public authorization RPCs.
 An upstream write has a five-second bound; the transport must honour its context.
 
+Each gated attempt reads room seats and agent admissions concurrently, at most two
+named queries at a time, on ordinary request connections. Both reads finish before
+the gate can be released, including on cancellation or panic. The sorted gate set
+is still read before and after acquisition; a membership change retries under the
+new set. Only the full post-acquisition seat rows enter the callback. Forward and
+reconciliation can use those rows for departure and exact-seat predicates while
+the same room/member gates stay held: neither callback writes seats. They must not
+reuse them after a seat mutation or in another callback/frame. Session, credential,
+family, delegation and time predicates remain fresh, including after provider I/O;
+no allowed verdict is cached. This removes duplicate serialized reads without
+extending the frame deadline or weakening revocation ordering.
+
+`media_signal_authority_db_test.go` exercises real named DB reads with injected
+latency, same-room Forward contention and reconciliation contention. It also
+checks a departure committed while Forward waits for its gate, later-frame leave
+denial, and session expiry during provider inventory. These controlled regressions
+do not establish production transport capacity; served initial/rejoin and actual
+production media acceptance remain separate qualification steps.
+
 Before forwarding, Begin persists a pending intent in `mediaSignalState`. A
 definitive upstream success must be confirmed before its initial response is
 released to the client. The pending handshake has 20 seconds from intent creation,

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	lkauth "github.com/livekit/protocol/auth"
@@ -212,15 +213,34 @@ func (s *Service) checkMediaBinding(ctx context.Context, r roomRow, b mediaSigna
 	return s.checkMediaBindingCurrent(ctx, r, b, true)
 }
 func (s *Service) checkMediaBindingCurrent(ctx context.Context, r roomRow, b mediaSignalBinding, checkFamily bool) error {
+	return s.checkMediaBindingSeats(ctx, r, b, checkFamily, nil)
+}
+
+// seats is usable only within the gated callback that just read it. It is input
+// to current predicates, never a cached admission verdict. Ordinary callers
+// retain their fresh reads. Forward and reconciliation supply the post-acquisition
+// membership input while holding every room/member gate and never writing seats.
+// Even after provider I/O, time/session/credential predicates run again; only the
+// unchanged full seat rows are reused for departure and seat identity.
+func (s *Service) checkMediaBindingSeats(ctx context.Context, r roomRow, b mediaSignalBinding, checkFamily bool, seats *[]seatRow) error {
 	if !b.valid() || b.RoomID != r.ID || !r.open() {
 		return accountRefusal("media_admission_closed")
 	}
 	if e := fundingRoomAllowed(r, s.now()); e != nil {
 		return e
 	}
-	deadline, e := s.departureDeadline(ctx, r, s.now())
-	if e != nil {
-		return e
+	var deadline time.Time
+	if seats == nil {
+		var err error
+		deadline, err = s.departureDeadline(ctx, r, s.now())
+		if err != nil {
+			return err
+		}
+	} else {
+		_, deadline = departurePolicy(r, *seats)
+		if !deadline.IsZero() && !s.now().Before(deadline) {
+			return callrules.Refuse(callrules.ErrEnded, "wrap_up", "the host's firm wrap-up deadline has arrived")
+		}
 	}
 	if !deadline.IsZero() && !s.now().Before(deadline) {
 		return accountRefusal("media_admission_closed")
@@ -242,9 +262,20 @@ func (s *Service) checkMediaBindingCurrent(ctx context.Context, r roomRow, b med
 		}
 		return nil
 	}
-	seat, e := s.store.seatByID(ctx, r.OwnerUserID, b.SeatID)
-	if e != nil {
-		return e
+	var seat *seatRow
+	if seats == nil {
+		var err error
+		seat, err = s.store.seatByID(ctx, r.OwnerUserID, b.SeatID)
+		if err != nil {
+			return err
+		}
+	} else {
+		for _, current := range *seats {
+			if current.ID == b.SeatID {
+				seat = &current
+				break
+			}
+		}
 	}
 	if seat == nil || !seat.occupying() || seat.RoomID != r.ID || seat.Identity != b.Identity || seat.Kind != b.Kind || seat.KeyID != b.KeyID || seat.CredentialID != b.CredentialID || !seat.JoinedAt.Equal(b.JoinedAt) {
 		return accountRefusal("media_admission_closed")
@@ -324,10 +355,29 @@ func (s *Service) checkMediaBindingCurrent(ctx context.Context, r roomRow, b med
 // their consent and credentials, and a guest agent also depends on its reviewer.
 // Re-read this set after acquiring it to avoid locking a stale room membership.
 func (s *Service) mediaSignalGateKeys(ctx context.Context, r roomRow, b mediaSignalBinding) ([]string, error) {
+	keys, _, err := s.mediaSignalMembership(ctx, r, b)
+	return keys, err
+}
+
+func (s *Service) mediaSignalMembership(ctx context.Context, r roomRow, b mediaSignalBinding) ([]string, []seatRow, error) {
 	keys := []string{roomGate(r.ID), accountGate(r.KeyID), keyGate(r.KeyID)}
-	seats, e := s.store.seatsForRoom(ctx, r.OwnerUserID, r.ID)
-	if e != nil {
-		return nil, e
+	// Independent fresh reads on request connections, never the gate's
+	// transaction. Join both before returning, including on cancellation; no
+	// goroutine can outlive the gate. The two-query bound does not grow with
+	// participants, and pre-acquisition results never enter the callback.
+	var seats []seatRow
+	var journal *agentAdmissionJournal
+	var seatErr, journalErr error
+	mediaSignalReadPair(func() {
+		seats, seatErr = s.store.seatsForRoom(ctx, r.OwnerUserID, r.ID)
+	}, func() {
+		journal, journalErr = s.store.agentAdmissions(ctx, r.OwnerUserID, r.ID)
+	})
+	if seatErr != nil {
+		return nil, nil, seatErr
+	}
+	if journalErr != nil {
+		return nil, nil, journalErr
 	}
 	for _, seat := range seats {
 		if seat.KeyID != "" {
@@ -344,21 +394,44 @@ func (s *Service) mediaSignalGateKeys(ctx context.Context, r roomRow, b mediaSig
 	if b.GrantID != "" {
 		keys = append(keys, delegationGate(b.GrantID))
 	}
-	j, e := s.store.agentAdmissions(ctx, r.OwnerUserID, r.ID)
-	if e != nil {
-		return nil, e
-	}
-	if j != nil {
-		for _, a := range j.Requests {
+	if journal != nil {
+		for _, a := range journal.Requests {
 			if a.ReviewerKeyID != "" {
 				keys = append(keys, accountGate(a.ReviewerKeyID), keyGate(a.ReviewerKeyID))
 			}
 		}
 	}
 	slices.Sort(keys)
-	return slices.Compact(keys), nil
+	return slices.Compact(keys), seats, nil
 }
+
+// Both reads finish before the caller can release its gates, even on panic.
+// Re-panic on the calling goroutine to preserve its existing recovery boundary;
+// a child read must not turn a recoverable request panic into a process crash.
+func mediaSignalReadPair(first, second func()) {
+	var reads sync.WaitGroup
+	var childPanic any
+	reads.Add(1)
+	go func() {
+		defer reads.Done()
+		defer func() { childPanic = recover() }()
+		second()
+	}()
+	defer reads.Wait()
+	first()
+	reads.Wait()
+	if childPanic != nil {
+		panic(childPanic)
+	}
+}
+
 func (s *Service) mediaSignalGated(ctx context.Context, hint roomRow, b mediaSignalBinding, fn func(context.Context, roomRow) error) error {
+	return s.mediaSignalGatedSeats(ctx, hint, b, func(ctx context.Context, r roomRow, _ []seatRow) error {
+		return fn(ctx, r)
+	})
+}
+
+func (s *Service) mediaSignalGatedSeats(ctx context.Context, hint roomRow, b mediaSignalBinding, fn func(context.Context, roomRow, []seatRow) error) error {
 	for attempt := 0; attempt < 3; attempt++ {
 		fresh := memql.ContextWithFreshRead(ctx)
 		trace := mediaSignalTraceFrom(ctx)
@@ -388,7 +461,7 @@ func (s *Service) mediaSignalGated(ctx context.Context, hint roomRow, b mediaSig
 				return false, accountRefusal("media_admission_closed")
 			}
 			phaseAt = time.Now()
-			current, e := s.mediaSignalGateKeys(fresh, *r, b)
+			current, seats, e := s.mediaSignalMembership(fresh, *r, b)
 			trace.record("gate_keys_after", time.Since(phaseAt), e)
 			if e != nil {
 				return false, e
@@ -397,7 +470,7 @@ func (s *Service) mediaSignalGated(ctx context.Context, hint roomRow, b mediaSig
 				hint = *r
 				return true, nil
 			}
-			return false, fn(fresh, *r)
+			return false, fn(fresh, *r, seats)
 		}()
 		if retry {
 			continue
