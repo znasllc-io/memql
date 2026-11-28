@@ -48,6 +48,9 @@ checks a departure committed while Forward waits for its gate, later-frame leave
 denial, and session expiry during provider inventory. These controlled regressions
 do not establish production transport capacity; served initial/rejoin and actual
 production media acceptance remain separate qualification steps.
+`media_signal_gate_transport_db_test.go` adds two Forward streams with concurrent
+Skills snapshots and provider audits under delayed gate transport and named reads,
+while preserving the five-second Forward limit.
 
 Before forwarding, Begin persists a pending intent in `mediaSignalState`. A
 definitive upstream success must be confirmed before its initial response is
@@ -113,6 +116,18 @@ requires both `skills_control` and `control`, the approved skill version and roo
 and no human control hold. Set requires an active presentation step and Insights;
 clear can restore this workflow's restrictions after the run or entitlement ends.
 Family/children's Skills remain explicitly unavailable.
+
+An idle Skills snapshot checks fresh durable workflow state before attempting
+presentation reconciliation's room/member gates. Only an absent presentation can
+skip that reconciliation pass; an unavailable or malformed read still refuses.
+Existing policies, including inactive policies awaiting restoration, retain the
+complete gate set and a second fresh state read under it. The absence result is
+not cached, grants no media authority, and cannot overwrite a policy created on
+another replica. Normal snapshot caller checks and every signalling authority
+check remain required. `presentation_idle_db_test.go` covers no-op gate avoidance,
+concurrent policy creation/change and credential revocation, and read failures.
+These controlled tests do not identify the holder of a production gate wait or
+establish production media acceptance.
 
 The policy binds its presenter and optional temporary speaker to the exact native
 seat identity and joined-at generation. The audience has independent microphone,

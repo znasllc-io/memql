@@ -265,12 +265,14 @@ func AcquireGateHold(ctx context.Context, db *sql.DB, wait time.Duration, keys .
 			hold.Release()
 			return nil, fmt.Errorf("%w: the wait for the lock of %q was over", ErrWriteGateBusy, key)
 		}
-		// The server enforces what is left of the wait (see the header).
-		if _, err = tx.ExecContext(lockCtx, "SELECT set_config('lock_timeout', $1, true)", strconv.FormatInt(max(1, remaining.Milliseconds()), 10)); err != nil {
-			hold.Release()
-			return nil, gateWaitError(err, lockCtx, waitCtx)
-		}
-		if _, err = tx.ExecContext(lockCtx, "SELECT pg_advisory_xact_lock(1296387409, hashtext($1))", key); err != nil {
+		// The materialized input must set the transaction-local timeout before
+		// the lock expression can consume its row. This saves one round trip
+		// per key, without combining or reordering keys or restarting the wait.
+		// A plain SELECT list of the two functions would not establish order.
+		if _, err = tx.ExecContext(lockCtx, `WITH gate_wait AS MATERIALIZED (
+			SELECT set_config('lock_timeout', $2, true) AS configured
+		) SELECT pg_advisory_xact_lock(1296387409, hashtext($1))
+		FROM gate_wait WHERE configured IS NOT NULL`, key, strconv.FormatInt(max(1, remaining.Milliseconds()), 10)); err != nil {
 			hold.Release()
 			return nil, gateWaitError(err, lockCtx, waitCtx)
 		}

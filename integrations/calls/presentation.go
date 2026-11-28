@@ -236,6 +236,16 @@ func (s *Service) presentationProjection(ctx context.Context, room roomRow, v *w
 }
 
 func (s *Service) reconcilePresentation(ctx context.Context, hint roomRow) error {
+	// Idle Skills snapshots must not take every room/member gate merely to
+	// discover that no presentation exists. This fresh read can authorize only
+	// a no-op, never a grant or a write. A concurrently created policy owns its
+	// enforcement and each media operation still reads it under its gates.
+	// Any existing policy (including inactive/pending restoration) takes the
+	// original path and is read again after acquiring the complete gate set.
+	prior, err := s.store.workflowState(memql.ContextWithFreshRead(ctx), hint.OwnerUserID, workflowStateID(hint.SiteID, "run", hint.ID))
+	if err != nil || prior == nil || prior.Presentation == nil {
+		return err
+	}
 	return s.mediaSignalGated(ctx, hint, mediaSignalBinding{}, func(ctx context.Context, room roomRow) error {
 		v, e := s.store.workflowState(ctx, room.OwnerUserID, workflowStateID(room.SiteID, "run", room.ID))
 		if e != nil {

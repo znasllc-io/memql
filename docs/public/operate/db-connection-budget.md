@@ -112,6 +112,15 @@ REQUIRE:  peak_connections  ≤  max_connections − reserved_connections
   a connection and then answers that coordination is busy, which every caller
   treats as "nothing attempted, try later". Raise the size only if the budget
   above has the room.
+  Each key uses one SQL round trip: a materialized input sets the remaining
+  transaction-local `lock_timeout` before the advisory-lock expression runs.
+  The next key still gets only the time left from the original wait, in the
+  caller's original order. This removes a transport round trip per key without
+  changing lock authority, the separate pool, cancellation or rollback. The
+  real-database cases in `component/memql/write_gate_roundtrip_db_test.go`
+  exercise transport delay, a previously longer timeout, partial acquisition
+  and borrowed transactions. Reduced SQL overhead alone does not establish
+  headroom for a workload that holds these locks for other work.
 - **The memory index job holds one gate connection for most of every
   minute** on the agent replica that runs it
   ([memory search](memory-search.md#re-indexing)). Every minute a tick takes
