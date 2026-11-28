@@ -259,9 +259,12 @@ describe("a kind's rows", () => {
     await screen.findByText("Brief.pdf");
     fireEvent.click(screen.getByRole("button", { name: "Search rows of artifact" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Name or ID" }), { target: { value: "con" } });
-    await waitFor(() => expect(screen.queryByText("Brief.pdf")).toBeNull());
-    expect(screen.getByText("Contract.docx")).toBeTruthy();
-    expect(callsTo(conn, "accountRows").at(-1)).toBe('builtin accountRows(accountId: "a1", concept: "v1:library:artifact", limit: 50, search: "con")');
+    // A new search clears the old rows before its answer arrives.
+    await waitFor(() => {
+      expect(screen.queryByText("Brief.pdf")).toBeNull();
+      expect(screen.getByText("Contract.docx")).toBeTruthy();
+      expect(callsTo(conn, "accountRows").at(-1)).toBe('builtin accountRows(accountId: "a1", concept: "v1:library:artifact", limit: 50, search: "con")');
+    });
   });
 
   it("shows a refusal in the engine's words, and retries in place", async () => {
