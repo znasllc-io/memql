@@ -113,9 +113,8 @@ func (r *firingReplica) read(counter map[string]int, key string) int {
 	return counter[key]
 }
 
-// Claim records counters for the named automation. Reconciliation may arm other
-// tests' active bundles from the shared database; their claims must not affect
-// this rule's once-per-event assertion.
+// Claim records counters for the named automation. Reconciliation reads every
+// active bundle in the graph; assertions select this rule's claims.
 func (r *firingReplica) Claim(ctx context.Context, name, key string) bool {
 	claimed := r.guard.Claim(ctx, name, key)
 	if claimed {
@@ -294,7 +293,7 @@ func readBundleRow(t *testing.T, db *bun.DB, bundleID string) (status, reason st
 }
 
 func TestAnEmailRuleFiresOnceWhereItsWriteHappened(t *testing.T) {
-	dsn := armingDSN(t)
+	dsn := emailReplicaDSN(t)
 	if _, err := memql.LoadUnifiedConcepts(nil); err != nil {
 		t.Fatal(err)
 	}
@@ -310,15 +309,6 @@ func TestAnEmailRuleFiresOnceWhereItsWriteHappened(t *testing.T) {
 	suffix := strconv.FormatInt(time.Now().UnixNano(), 36)
 	short, org, template, rule := "fire-user-"+suffix, "fire-org-"+suffix, "fire-tpl-"+suffix, "fire-rule-"+suffix
 	owner := "v1:identity:user:" + short
-	// Each replica fixture owns its primary owner; the next test cannot
-	// introduce a second one into the same database.
-	t.Cleanup(func() {
-		db := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
-		defer db.Close()
-		if _, err := db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE (concept='v1:identity:user' AND id=$1) OR (concept='v1:accounts:account' AND id=$2)`, owner, "v1:accounts:account:"+org); err != nil {
-			t.Errorf("remove replica fixture authority: %v", err)
-		}
-	})
 	ownerEmail := short + "@example.test"
 	subject := "Todo added " + suffix
 	q := langparser.QuoteString

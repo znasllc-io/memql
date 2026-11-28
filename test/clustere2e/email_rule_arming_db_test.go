@@ -61,6 +61,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -99,15 +100,69 @@ func armingDSN(t *testing.T) string {
 	return ""
 }
 
+// emailReplicaDSN gives each two-replica fixture one private graph. The DB
+// shard runs unrelated packages against the same database; unique IDs alone
+// cannot isolate the cluster-wide single-owner invariant. Keep the real owner
+// role and recipient routing, and never read or delete another fixture's rows.
+func emailReplicaDSN(t *testing.T) string {
+	t.Helper()
+	dsn := armingDSN(t)
+	ctx := context.Background()
+	admin := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn))), pgdialect.New())
+	t.Cleanup(func() { _ = admin.Close() })
+	schema := fmt.Sprintf("email_replicas_%d", time.Now().UnixNano())
+	if _, err := admin.ExecContext(ctx, `CREATE SCHEMA ?`, bun.Ident(schema)); err != nil {
+		t.Fatal(err)
+	}
+	// Registered before replica setup: retire/stop/close run first, then only
+	// this schema is dropped. A setup failure follows the same cleanup path.
+	t.Cleanup(func() {
+		if _, err := admin.ExecContext(context.Background(), `DROP SCHEMA ? CASCADE`, bun.Ident(schema)); err != nil {
+			t.Errorf("remove email replica graph: %v", err)
+		}
+	})
+	u, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	params := u.Query()
+	params.Set("search_path", schema) // No public fallback for graph tables.
+	u.RawQuery = params.Encode()
+	privateDSN := u.String()
+	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(privateDSN))), pgdialect.New())
+	defer db.Close()
+	// Match the engine's isolated liveness fixtures, including actual schema
+	// and observation triggers. Both pools and the gate pool use this DSN.
+	for _, table := range []string{"MemoryNodes", "SecretMemoryNodes"} {
+		if _, err := db.ExecContext(ctx, `CREATE TABLE ? (LIKE public.? INCLUDING ALL)`, bun.Ident(table), bun.Ident(table)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ExecContext(ctx, `SELECT public.create_hypertable(?::regclass, 'createdAt', chunk_time_interval=>interval '1 day')`, `"`+table+`"`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"20261013020000_shared_row_schemas.up.sql", "20261013050000_liveness.up.sql"} {
+		raw, err := os.ReadFile("../../component/database/memory-nodes/migrations/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ExecContext(ctx, string(raw)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `CREATE TABLE automation_execution_claims (LIKE public.automation_execution_claims INCLUDING ALL)`); err != nil {
+		t.Fatal(err)
+	}
+	return privateDSN
+}
+
 // armingReplica is one node: its own pool, engine, bus, authored registry and
 // authored scheduler. The scheduler's Run hook counts firings rather than
 // executing the rule's step, because the claim under test is WHERE the rule
 // fires, not what the fire builtin then sends.
 //
 // Every counter is keyed by automation name or owner. A reconcile pass arms
-// EVERY active bundle in the database, and the db-tests lane shares one
-// database between packages, so a node here may hold another test's
-// automations too.
+// EVERY active bundle in its graph, so assertions select the named rule.
 type armingReplica struct {
 	bus       *events.Bus
 	eng       *memql.MemQLEngine
@@ -204,7 +259,7 @@ func armingEventually(timeout time.Duration, cond func() bool) bool {
 }
 
 func TestAnEmailRuleArmedOnOneReplicaFiresOnAnother(t *testing.T) {
-	dsn := armingDSN(t)
+	dsn := emailReplicaDSN(t)
 	if _, err := memql.LoadUnifiedConcepts(nil); err != nil {
 		t.Fatal(err)
 	}
@@ -222,15 +277,6 @@ func TestAnEmailRuleArmedOnOneReplicaFiresOnAnother(t *testing.T) {
 	// Canonical, as the identity resolver stamps every real caller: the
 	// activation compares it with the bundle's stored ownerUserId.
 	owner := "v1:identity:user:" + short
-	// Each replica fixture owns its primary owner; the next test cannot
-	// introduce a second one into the same database.
-	t.Cleanup(func() {
-		db := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
-		defer db.Close()
-		if _, err := db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE (concept='v1:identity:user' AND id=$1) OR (concept='v1:accounts:account' AND id=$2)`, owner, "v1:accounts:account:"+org); err != nil {
-			t.Errorf("remove replica fixture authority: %v", err)
-		}
-	})
 	q := langparser.QuoteString
 
 	system := auth.ContextWithInternalOrigin(auth.ContextWithAccess(ctx, auth.SystemActor("email-rule-arming-test")))
@@ -263,9 +309,8 @@ func TestAnEmailRuleArmedOnOneReplicaFiresOnAnother(t *testing.T) {
 	if err != nil {
 		t.Fatalf("activate the rule on node A: %v", err)
 	}
-	// Whatever happens below, the rule does not outlive the test: the db-tests
-	// lane shares this database, and every other package's reconcile pass
-	// would arm an active bundle it finds there.
+	// Retire before stopping the replicas and dropping their private graph,
+	// including when an assertion below fails.
 	t.Cleanup(func() { _, _ = activator.Retire(ownerCtx, owner, rule) })
 	if first.Status != "active" {
 		t.Fatalf("the rule activated as %q, want active (%+v)", first.Status, first)

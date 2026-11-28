@@ -59,6 +59,17 @@ requiring every CLI change to publish all engine images.
    the receiving installation. Use existing named secret references. A missing
    receiver or provider connection must produce a setup/refusal state.
 
+The two email-rule replica regressions in
+[`email_rule_arming_db_test.go`](../../../test/clustere2e/email_rule_arming_db_test.go)
+and [`email_rule_firing_db_test.go`](../../../test/clustere2e/email_rule_firing_db_test.go)
+share a private schema per replica pair within the explicitly named test
+fixture. DB-shard packages may seed unrelated owners in the shared graph;
+unique record IDs cannot isolate the single-owner invariant. The fixtures keep
+the owner author and default owner-recipient route, use the migrated table
+shapes and shared-schema/liveness triggers, and drop only their private schema
+after retiring the rule and stopping its replicas. They must pass with an
+unrelated owner present in the parent graph, leaving that owner unchanged.
+
 Do not use the active installation's database as a test fixture. A local
 development image is useful for UI and integration qualification but is not a
 signed release candidate. Installation qualification additionally requires an
