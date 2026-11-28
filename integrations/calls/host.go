@@ -746,6 +746,19 @@ func (s *Service) end(ctx context.Context, h acting) error {
 	if familyRoom(h.room) {
 		return s.closeFamily(ctx, h.room, "family_host_ended")
 	}
+	// A bound room needs a durable close fence before provider I/O, including
+	// before its first ingress exists. Reconciliation may finish this exact
+	// already-authorized end after caller expiry or a partial native write.
+	closing, err := s.prepareResourceRoomEnd(ctx, h)
+	if errors.Is(err, callrules.ErrEnded) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if closing != nil {
+		return s.resumeResourceRoomEnd(ctx, *closing)
+	}
 	if err := s.deleteMediaRoom(ctx, h.room); err != nil {
 		return err
 	}

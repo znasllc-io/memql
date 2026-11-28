@@ -19,6 +19,14 @@ type resourceLease struct {
 	CreatedAt, ExpiresAt                                                            time.Time
 	Status                                                                          string
 	StoppedReason                                                                   string
+	// An authorized room end outlives the initiating HTTP session. It only
+	// narrows this exact room's resource authority, and survives provider errors.
+	RoomClosing *resourceRoomClose `json:",omitempty"`
+}
+
+type resourceRoomClose struct {
+	OwnerUserID, SiteID, KeyID, RoomID, MediaServerID, MediaRoom string
+	RequestedAt                                                  time.Time
 }
 
 func (l resourceLease) active() bool { return l.Status != "stopped" }
@@ -27,6 +35,8 @@ type resourceState struct {
 	OwnerUserID string
 	Sources     []callrules.ResourceInfo
 	Leases      []resourceLease
+	// A room end fences first-time starts even when no resource lease exists.
+	ClosingRooms []resourceRoomClose `json:",omitempty"`
 	// Registration retries are keyed without retaining credentials or device addresses.
 	Registrations map[string]string
 }
@@ -43,8 +53,15 @@ func resourceStateID(site, key string) string {
 func resourceFromRow(r map[string]any) (*resourceRow, error) {
 	d := &resourceRow{ID: memql.BareShortId(rowString(r, "id")), SiteID: memql.BareShortId(rowString(r, "siteId")), KeyID: memql.BareShortId(rowString(r, "keyId")), Version: rowTime(r, "createdAt")}
 	data := rowString(r, "stateData")
-	if len(data) > 1<<20 || json.Unmarshal([]byte(data), &d.State) != nil || d.ID != resourceStateID(d.SiteID, d.KeyID) || d.State.OwnerUserID == "" || len(d.State.Sources) > callrules.MaxResources || len(d.State.Leases) > callrules.MaxResourceLeases || len(d.State.Registrations) > 128 {
+	if len(data) > 1<<20 || json.Unmarshal([]byte(data), &d.State) != nil || d.ID != resourceStateID(d.SiteID, d.KeyID) || d.State.OwnerUserID == "" || len(d.State.Sources) > callrules.MaxResources || len(d.State.Leases) > callrules.MaxResourceLeases || len(d.State.Registrations) > 128 || len(d.State.ClosingRooms) > callrules.MaxResourceLeases {
 		return nil, resourceRefusal("resource_state_unavailable")
+	}
+	closingRooms := map[string]bool{}
+	for _, c := range d.State.ClosingRooms {
+		if c.OwnerUserID != d.State.OwnerUserID || c.SiteID != d.SiteID || c.KeyID != d.KeyID || c.KeyID == "" || c.RoomID == "" || c.MediaServerID == "" || c.MediaRoom == "" || c.RequestedAt.IsZero() || closingRooms[c.RoomID] {
+			return nil, resourceRefusal("resource_state_unavailable")
+		}
+		closingRooms[c.RoomID] = true
 	}
 	for _, v := range d.State.Sources {
 		if v.ID == "" || v.Revision < 1 || !callrules.ValidResourceOutputBounds(v.ResourceSpec) {
@@ -59,6 +76,26 @@ func resourceFromRow(r map[string]any) (*resourceRow, error) {
 		case "preparing", "awaiting_source", "publishing", "revoking", "stopped":
 		default:
 			return nil, resourceRefusal("resource_state_unavailable")
+		}
+		if c := l.RoomClosing; c != nil &&
+			((l.Status != "revoking" && l.Status != "stopped") || c.RequestedAt.IsZero() || c.RequestedAt.Before(l.CreatedAt) ||
+				c.OwnerUserID != d.State.OwnerUserID || c.SiteID != d.SiteID || c.KeyID != d.KeyID || c.RoomID != l.RoomID ||
+				c.KeyID == "" || c.MediaServerID == "" || c.MediaRoom == "") {
+			return nil, resourceRefusal("resource_state_unavailable")
+		}
+		if l.active() {
+			matched := false
+			for _, c := range d.State.ClosingRooms {
+				if c.RoomID == l.RoomID {
+					if !sameResourceClose(&c, l.RoomClosing) {
+						return nil, resourceRefusal("resource_state_unavailable")
+					}
+					matched = true
+				}
+			}
+			if l.RoomClosing != nil && !matched {
+				return nil, resourceRefusal("resource_state_unavailable")
+			}
 		}
 	}
 	if d.State.Registrations == nil {
@@ -148,6 +185,9 @@ func (s *Store) saveResourceState(ctx context.Context, d *resourceRow, now time.
 }
 
 func resourceStateActive(d *resourceRow) bool {
+	if len(d.State.ClosingRooms) != 0 {
+		return true
+	}
 	for _, l := range d.State.Leases {
 		if l.active() {
 			return true

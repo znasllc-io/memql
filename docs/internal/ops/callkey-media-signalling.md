@@ -170,6 +170,33 @@ confirmed, including leases whose seats already departed. A live policy refuses
 new competing resource starts/switches. Existing selected-lease retries remain
 idempotent. This release does not provide an atomic combined stop-and-handoff.
 
+Resource stop commits `revoking` under the account/key/room/server gates, then
+releases them before the existing ten-second ingress deletion and participant
+removal protocol. Unknown outcomes retain the active lease and paid seat. A
+fresh gated finalizer checks the exact owner, site, key, room, source revision,
+lease, seat, identity and ingress before changing only that lease in the latest
+registry. A late provider reply cannot overwrite a newer source or replacement
+lease. A switch must reacquire current caller, policy and capacity authority;
+an intervening registry change refuses its replacement continuation.
+
+Host End records a bounded exact-room closing intent, including when no ingress
+exists yet. It refuses first starts and replacements while provider deletion is
+pending. The registry retains at most `MaxResourceLeases` such intents, counts
+them in its active recovery projection, and removes each only after the exact
+native room end and resource finalization. The lease and intent state must agree;
+malformed or foreign tuples refuse recovery. Internal reconciliation may finish
+this already-authorized end after the initiating credential expires or a native
+write fails partway through `endRows`. It cannot reopen the room or use provider
+absence alone to release a commitment. No ingress operation is needed for an
+end with no resource lease. Other room-ending paths commit native end before
+their resource cleanup; family room closure retains its existing protocol.
+
+`resource_revocation_db_test.go` covers blocked deletion alongside both human
+Forward streams, retained commitments, late replies, fresh switch authority,
+concurrent End/first-start and End/switch, and replica recovery after caller
+revocation or a partial native end. These native tests do not establish WHIP
+transport, decoded tracks or browser media acceptance.
+
 Regression evidence is in `media_signal_test.go`, `media_signal_db_test.go` and
 `media_signal_epoch_db_test.go`: delayed admission preserves a readable pending
 journal and the exact 20-second forwarding bound; signed binding tampering, stale

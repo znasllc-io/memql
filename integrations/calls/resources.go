@@ -162,17 +162,63 @@ func (s *Service) Resource(ctx context.Context, site callrules.SiteRef, token st
 				return empty, err
 			}
 		}
+		var plans []resourceRevocation
 		for i := range d.State.Leases {
 			l := &d.State.Leases[i]
 			if l.RoomID == host.room.ID && l.ResourceID == req.ResourceID && l.active() {
 				l.StoppedReason = "host_stopped"
-				if err = s.revokeResource(fresh, d, i, host.room); err != nil {
-					return empty, err
+				plan, e := s.prepareResourceRevocation(fresh, d, i, host.room)
+				if e != nil {
+					return empty, e
 				}
+				plans = append(plans, plan)
 			}
 		}
-		return resourceAnswer(d), nil
+		release()
+		for _, plan := range plans {
+			if err = s.completeResourceRevocation(ctx, plan); err != nil {
+				return empty, err
+			}
+		}
+		return s.resourceAnswerAfterRevocation(ctx, sess, req, h.row.KeyID)
 	case "start", "switch":
+		if req.Action == "switch" {
+			selected, prior, e := s.resourceStartChecks(fresh, h, d, host.room, req)
+			if e != nil {
+				return empty, e
+			}
+			if prior >= 0 {
+				return s.finishResourceStart(fresh, d, prior, host.room, *selected)
+			}
+			// Inspect every lease before committing a switch. Another pending
+			// revocation (especially room end) never becomes a replacement grant.
+			for _, l := range d.State.Leases {
+				if !l.active() {
+					continue
+				}
+				if l.ResourceID == selected.ID && l.RoomID != host.room.ID {
+					return empty, resourceRefusal("resource_in_use")
+				}
+				if l.RoomID == host.room.ID && (l.Status == "revoking" || l.RoomClosing != nil) {
+					return empty, resourceRefusal("resource_revocation_pending")
+				}
+			}
+			var plans []resourceRevocation
+			for i, l := range d.State.Leases {
+				if l.RoomID == host.room.ID && l.active() {
+					plan, e := s.prepareResourceRevocation(fresh, d, i, host.room)
+					if e != nil {
+						return empty, e
+					}
+					plans = append(plans, plan)
+				}
+			}
+			if len(plans) > 0 {
+				version := d.Version
+				release()
+				return s.continueResourceSwitch(ctx, sess, req, version, plans)
+			}
+		}
 		return s.startResource(fresh, h, d, host.room, req)
 	}
 	if err = s.store.saveResourceState(fresh, d, s.now()); err != nil {
@@ -181,53 +227,71 @@ func (s *Service) Resource(ctx context.Context, site callrules.SiteRef, token st
 	return resourceAnswer(d), nil
 }
 
-func (s *Service) startResource(ctx context.Context, h keyHolder, d *resourceRow, room roomRow, req callrules.ResourceRequest) (callrules.ResourceResult, error) {
-	var empty callrules.ResourceResult
+func (s *Service) resourceStartChecks(ctx context.Context, h keyHolder, d *resourceRow, room roomRow, req callrules.ResourceRequest) (*callrules.ResourceInfo, int, error) {
+	for _, closing := range d.State.ClosingRooms {
+		if closing.RoomID == room.ID {
+			return nil, -1, resourceRefusal("resource_room_closing")
+		}
+	}
 	source := resourceSource(d, req.ResourceID)
 	if source == nil {
-		return empty, callrules.ErrNotFound
+		return nil, -1, callrules.ErrNotFound
 	}
 	if !callrules.ValidResourceSpec(source.ResourceSpec) {
-		return empty, resourceRefusal("unsupported_track_isolation")
+		return nil, -1, resourceRefusal("unsupported_track_isolation")
 	}
 	if source.Revision != req.ExpectedRevision {
-		return empty, resourceRefusal("resource_revision_conflict")
+		return nil, -1, resourceRefusal("resource_revision_conflict")
 	}
 	if source.HumanHold && ctx.Value(agentCallContext{}) != nil {
-		return empty, resourceRefusal("resource_human_hold")
+		return nil, -1, resourceRefusal("resource_human_hold")
 	}
 	if !fundingOperationID.MatchString(req.RequestID) {
-		return empty, callrules.ErrInvalid
+		return nil, -1, callrules.ErrInvalid
 	}
 	now := s.now()
 	if err := fundingRoomAllowed(room, now); err != nil {
-		return empty, err
+		return nil, -1, err
 	}
 	if err := s.resourceBudgetAllowed(room); err != nil {
-		return empty, err
+		return nil, -1, err
 	}
 	if err := s.delegatedEffectAllowed(ctx, h.site, h.row.KeyID); err != nil {
-		return empty, err
+		return nil, -1, err
 	}
 	if err := s.commerceAdultAllowed(ctx, h.site, h.row.KeyID); err != nil {
-		return empty, err
+		return nil, -1, err
 	}
 	digest := resourceDigest(req)
 	for i := range d.State.Leases {
 		l := &d.State.Leases[i]
 		if l.RequestID == req.RequestID {
 			if l.Digest != digest {
-				return empty, resourceRefusal("resource_request_conflict")
+				return nil, -1, resourceRefusal("resource_request_conflict")
 			}
 			if !l.active() || l.Status == "revoking" || !now.Before(l.ExpiresAt) {
-				return empty, resourceRefusal("resource_lease_ended")
+				return nil, -1, resourceRefusal("resource_lease_ended")
 			}
-			return s.finishResourceStart(ctx, d, i, room, *source)
+			return source, i, nil
 		}
 	}
 	if err := s.presentationResourceStartAllowed(ctx, room); err != nil {
+		return nil, -1, err
+	}
+	return source, -1, nil
+}
+
+func (s *Service) startResource(ctx context.Context, h keyHolder, d *resourceRow, room roomRow, req callrules.ResourceRequest) (callrules.ResourceResult, error) {
+	var empty callrules.ResourceResult
+	source, prior, err := s.resourceStartChecks(ctx, h, d, room, req)
+	if err != nil {
 		return empty, err
 	}
+	if prior >= 0 {
+		return s.finishResourceStart(ctx, d, prior, room, *source)
+	}
+	now := s.now()
+	digest := resourceDigest(req)
 	for i := range d.State.Leases {
 		l := &d.State.Leases[i]
 		if !l.active() {
@@ -237,12 +301,7 @@ func (s *Service) startResource(ctx context.Context, h keyHolder, d *resourceRow
 			return empty, resourceRefusal("resource_in_use")
 		}
 		if l.RoomID == room.ID {
-			if req.Action != "switch" {
-				return empty, resourceRefusal("presenter_in_use")
-			}
-			if err := s.revokeResource(ctx, d, i, room); err != nil {
-				return empty, err
-			}
+			return empty, resourceRefusal("presenter_in_use")
 		}
 	}
 	all, err := s.store.resourceStates(ctx)
@@ -375,83 +434,49 @@ func (s *Service) finishResourceStart(ctx context.Context, d *resourceRow, index
 	return out, nil
 }
 
-// revokeResource commits refusal before contacting the provider and retains its
-// commitment on every uncertain result. A stop never relies on JWT expiry.
-func (s *Service) revokeResource(ctx context.Context, d *resourceRow, index int, room roomRow) error {
-	l := &d.State.Leases[index]
-	if !l.active() {
-		return nil
-	}
-	l.Status = "revoking"
-	if err := s.store.saveResourceState(ctx, d, s.now()); err != nil {
-		return err
-	}
-	backend, err := s.resourceMediaFor(ctx, room)
-	if err != nil {
-		return err
-	}
-	bounded, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	ingress, err := backend.FindResourceIngress(bounded, room.MediaRoom, l.ID)
-	if err != nil {
-		return err
-	}
-	if ingress != nil {
-		if err = backend.DeleteResourceIngress(bounded, ingress.ID); err != nil {
-			return err
-		}
-	}
-	remaining, err := backend.FindResourceIngress(bounded, room.MediaRoom, l.ID)
-	if err != nil {
-		return err
-	}
-	if remaining != nil {
-		return resourceRefusal("resource_revocation_pending")
-	}
-	media, err := s.backendFor(bounded, room)
-	if err != nil {
-		return err
-	}
-	if media == nil {
-		return resourceRefusal("resource_gateway_unavailable")
-	}
-	if err = media.RemoveParticipant(bounded, room.MediaRoom, l.Identity); err != nil {
-		return err
-	}
-	seat, err := s.store.seatByID(ctx, d.State.OwnerUserID, l.SeatID)
-	if err != nil {
-		return err
-	}
-	if seat != nil && seat.occupying() {
-		if err = s.store.updateSeat(ctx, d.State.OwnerUserID, *seat, map[string]any{"status": seatLeft, "leftAt": s.now()}, memql.VersionTimeAfter(seat.Version, s.now())); err != nil {
-			return err
-		}
-	}
-	l.Status = "stopped"
-	return s.store.saveResourceState(ctx, d, s.now())
-}
-
 // StopRoomResources must be called outside room/end gates before deleting its
 // media room. Ingress definitions otherwise outlive a deleted LiveKit room.
 func (s *Service) StopRoomResources(ctx context.Context, room roomRow) error {
 	if room.KeyID == "" {
 		return nil
 	}
-	release, err := s.gates(ctx, accountGate(room.KeyID), keyGate(room.KeyID), commerceGlobalGate, roomGate(room.ID), serverGate(room.MediaServerID))
+	release, err := s.gates(ctx, resourceGates(room)...)
 	if err != nil {
 		return err
 	}
 	defer release()
 	fresh := memql.ContextWithFreshRead(ctx)
+	current, err := s.store.roomByID(fresh, room.OwnerUserID, room.ID)
+	if err != nil {
+		return err
+	}
+	if current == nil || !sameResourceRoom(*current, room) {
+		return resourceRefusal("resource_state_changed")
+	}
+	room = *current
 	d, err := s.store.resourceState(fresh, room.OwnerUserID, room.SiteID, room.KeyID)
 	if err != nil {
 		return err
 	}
+	var plans []resourceRevocation
 	for i, l := range d.State.Leases {
 		if l.RoomID == room.ID && l.active() {
-			if err = s.revokeResource(fresh, d, i, room); err != nil {
-				return err
+			// Open-room end requires the host-authorized durable intent. This
+			// helper cannot manufacture that authority from a room-ID argument.
+			if room.open() && l.RoomClosing == nil {
+				return resourceRefusal("resource_room_close_required")
 			}
+			plan, e := s.prepareResourceRevocation(fresh, d, i, room)
+			if e != nil {
+				return e
+			}
+			plans = append(plans, plan)
+		}
+	}
+	release()
+	for _, plan := range plans {
+		if err = s.completeResourceRevocation(ctx, plan); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -497,11 +522,26 @@ func (s *Service) ReconcileResources(ctx context.Context) error {
 
 func (s *Service) reconcileResourceLeases(ctx context.Context, snapshot *resourceRow) error {
 	var first error
+	closing := map[string]bool{}
+	for _, intent := range snapshot.State.ClosingRooms {
+		closing[intent.RoomID] = true
+		room, err := s.store.roomByID(ctx, snapshot.State.OwnerUserID, intent.RoomID)
+		if err == nil {
+			if room == nil || !intent.matches(*room) {
+				err = resourceRefusal("resource_state_changed")
+			} else {
+				err = s.resumeResourceRoomEnd(ctx, resourceRoomEnd{Room: *room, Close: intent})
+			}
+		}
+		if err != nil && first == nil {
+			first = err
+		}
+	}
 	for _, prior := range snapshot.State.Leases {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if prior.active() {
+		if prior.active() && !closing[prior.RoomID] {
 			if err := s.reconcileResource(ctx, snapshot, prior); err != nil && first == nil {
 				first = err
 			}
@@ -534,120 +574,138 @@ func (s *Service) reconcileResource(ctx context.Context, snapshot *resourceRow, 
 	if room == nil {
 		return resourceRefusal("resource_room_unavailable")
 	}
-	release, err := s.gates(ctx, accountGate(snapshot.KeyID), keyGate(snapshot.KeyID), commerceGlobalGate, roomGate(room.ID), serverGate(room.MediaServerID))
-	if err != nil {
-		return err
-	}
-	defer release()
-	fresh := memql.ContextWithFreshRead(ctx)
-	d, err := s.store.resourceState(fresh, snapshot.State.OwnerUserID, snapshot.SiteID, snapshot.KeyID)
-	if err != nil {
-		return err
-	}
-	room, err = s.store.roomByID(fresh, snapshot.State.OwnerUserID, prior.RoomID)
-	if err != nil {
-		return err
-	}
-	if room == nil {
-		return resourceRefusal("resource_room_unavailable")
-	}
-	for i, l := range d.State.Leases {
-		if l.ID != prior.ID || !l.active() {
-			continue
+	var plan *resourceRevocation
+	err = func() error {
+		release, err := s.gates(ctx, accountGate(snapshot.KeyID), keyGate(snapshot.KeyID), commerceGlobalGate, roomGate(room.ID), serverGate(room.MediaServerID))
+		if err != nil {
+			return err
 		}
-		now := s.now()
-		stop := !room.open() || !now.Before(l.ExpiresAt) || l.Status == "revoking" || (l.Status == "preparing" && now.Sub(l.CreatedAt) > time.Minute)
-		if source := resourceSource(d, l.ResourceID); source == nil || !callrules.ValidResourceSpec(source.ResourceSpec) {
-			stop = true
-			d.State.Leases[i].StoppedReason = "unsupported_track_isolation"
+		defer release()
+		fresh := memql.ContextWithFreshRead(ctx)
+		d, err := s.store.resourceState(fresh, snapshot.State.OwnerUserID, snapshot.SiteID, snapshot.KeyID)
+		if err != nil {
+			return err
 		}
-		seat, e := s.store.seatByID(fresh, d.State.OwnerUserID, l.SeatID)
-		if e != nil {
-			return e
+		room, err = s.store.roomByID(fresh, snapshot.State.OwnerUserID, prior.RoomID)
+		if err != nil {
+			return err
 		}
-		if seat == nil || !seat.occupying() {
-			stop = true
+		if room == nil {
+			return resourceRefusal("resource_room_unavailable")
 		}
-		if seat != nil && seat.CredentialID != "" {
-			credential, e := s.store.credentialByID(fresh, d.State.OwnerUserID, seat.CredentialID)
+		for i, l := range d.State.Leases {
+			if l.ID != prior.ID || !l.active() {
+				continue
+			}
+			now := s.now()
+			stop := !room.open() || !now.Before(l.ExpiresAt) || l.Status == "revoking" || (l.Status == "preparing" && now.Sub(l.CreatedAt) > time.Minute)
+			if source := resourceSource(d, l.ResourceID); source == nil || !callrules.ValidResourceSpec(source.ResourceSpec) {
+				stop = true
+				d.State.Leases[i].StoppedReason = "unsupported_track_isolation"
+			}
+			seat, e := s.store.seatByID(fresh, d.State.OwnerUserID, l.SeatID)
 			if e != nil {
 				return e
 			}
-			if credential == nil || !credential.RevokedAt.IsZero() {
+			if seat == nil || !seat.occupying() {
 				stop = true
 			}
-		}
-		if l.GrantID != "" {
-			grant, e := s.store.delegation(fresh, d.State.OwnerUserID, l.GrantID)
-			if e != nil {
-				return e
-			}
-			if grant == nil || !grant.State.RevokedAt.IsZero() || !now.Before(grant.State.Request.ExpiresAt) || !resourceGrantAllows(grant, l.ResourceID, *room) {
-				stop = true
-			}
-		}
-		if fundingRoomAllowed(*room, now) != nil {
-			stop = true
-		}
-		if stop {
-			return s.revokeResource(fresh, d, i, *room)
-		}
-		if l.Status == "awaiting_source" || l.Status == "publishing" {
-			backend, e := s.backendFor(fresh, *room)
-			if e != nil {
-				return e
-			}
-			if backend == nil {
-				return resourceRefusal("resource_gateway_unavailable")
-			}
-			bounded, cancel := context.WithTimeout(fresh, 5*time.Second)
-			present, e := backend.Participants(bounded, room.MediaRoom)
-			cancel()
-			if e != nil {
-				return e
-			}
-			status := "awaiting_source"
-			for _, participant := range present {
-				if participant.Identity == l.Identity {
-					for _, track := range participant.Tracks {
-						if !track.Muted {
-							status = "publishing"
-							break
-						}
-					}
-				}
-			}
-			// A human's later screen-share ownership is a durable override of an
-			// automated source, not only a mute that its next start may undo.
-			if room.ShareSeatID != "" && room.ShareSeatID != l.SeatID {
-				presenter, e := s.store.seatByID(fresh, d.State.OwnerUserID, room.ShareSeatID)
+			if seat != nil && seat.CredentialID != "" {
+				credential, e := s.store.credentialByID(fresh, d.State.OwnerUserID, seat.CredentialID)
 				if e != nil {
 					return e
 				}
-				if presenter != nil && presenter.occupying() {
-					for _, participant := range present {
-						if participant.Identity != presenter.Identity {
-							continue
-						}
+				if credential == nil || !credential.RevokedAt.IsZero() {
+					stop = true
+				}
+			}
+			if l.GrantID != "" {
+				grant, e := s.store.delegation(fresh, d.State.OwnerUserID, l.GrantID)
+				if e != nil {
+					return e
+				}
+				if grant == nil || !grant.State.RevokedAt.IsZero() || !now.Before(grant.State.Request.ExpiresAt) || !resourceGrantAllows(grant, l.ResourceID, *room) {
+					stop = true
+				}
+			}
+			if fundingRoomAllowed(*room, now) != nil {
+				stop = true
+			}
+			if stop {
+				p, e := s.prepareResourceRevocation(fresh, d, i, *room)
+				if e == nil {
+					plan = &p
+				}
+				return e
+			}
+			if l.Status == "awaiting_source" || l.Status == "publishing" {
+				backend, e := s.backendFor(fresh, *room)
+				if e != nil {
+					return e
+				}
+				if backend == nil {
+					return resourceRefusal("resource_gateway_unavailable")
+				}
+				bounded, cancel := context.WithTimeout(fresh, 5*time.Second)
+				present, e := backend.Participants(bounded, room.MediaRoom)
+				cancel()
+				if e != nil {
+					return e
+				}
+				status := "awaiting_source"
+				for _, participant := range present {
+					if participant.Identity == l.Identity {
 						for _, track := range participant.Tracks {
-							if !track.Muted && track.Source == "screen_share" {
-								d.State.Leases[i].StoppedReason = "presenter_handoff"
-								if presenter.Kind == string(callrules.KindPerson) {
-									if source := resourceSource(d, l.ResourceID); source != nil {
-										source.HumanHold = true
-									}
-								}
-								return s.revokeResource(fresh, d, i, *room)
+							if !track.Muted {
+								status = "publishing"
+								break
 							}
 						}
 					}
 				}
-			}
-			if l.Status != status {
-				d.State.Leases[i].Status = status
-				return s.store.saveResourceState(fresh, d, now)
+				// A human's later screen-share ownership is a durable override of an
+				// automated source, not only a mute that its next start may undo.
+				if room.ShareSeatID != "" && room.ShareSeatID != l.SeatID {
+					presenter, e := s.store.seatByID(fresh, d.State.OwnerUserID, room.ShareSeatID)
+					if e != nil {
+						return e
+					}
+					if presenter != nil && presenter.occupying() {
+						for _, participant := range present {
+							if participant.Identity != presenter.Identity {
+								continue
+							}
+							for _, track := range participant.Tracks {
+								if !track.Muted && track.Source == "screen_share" {
+									d.State.Leases[i].StoppedReason = "presenter_handoff"
+									if presenter.Kind == string(callrules.KindPerson) {
+										if source := resourceSource(d, l.ResourceID); source != nil {
+											source.HumanHold = true
+										}
+									}
+									p, e := s.prepareResourceRevocation(fresh, d, i, *room)
+									if e == nil {
+										plan = &p
+									}
+									return e
+								}
+							}
+						}
+					}
+				}
+				if l.Status != status {
+					d.State.Leases[i].Status = status
+					return s.store.saveResourceState(fresh, d, now)
+				}
 			}
 		}
+		return nil
+	}()
+	if err != nil {
+		return err
+	}
+	if plan != nil {
+		return s.completeResourceRevocation(ctx, *plan)
 	}
 	return nil
 }
@@ -723,7 +781,12 @@ func (s *Service) stopHostedResource(ctx context.Context, sess callrules.Session
 			}
 		}
 		d.State.Leases[i].StoppedReason = "host_stopped"
-		return true, s.revokeResource(fresh, d, i, room)
+		plan, e := s.prepareResourceRevocation(fresh, d, i, room)
+		if e != nil {
+			return true, e
+		}
+		release()
+		return true, s.completeResourceRevocation(ctx, plan)
 	}
 	return false, nil
 }
